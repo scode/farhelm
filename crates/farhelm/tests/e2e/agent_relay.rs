@@ -30,7 +30,7 @@ use farhelm_proto::{AgentOutcome, AgentReply, AgentVerb, SessionAuth};
 /// once and finish them in an order of its choosing: it announces every
 /// call on `entered` and then waits for a permit. Without that, a test
 /// about two concurrent upcalls could only ever observe them one at a time.
-struct ScriptedHandler {
+pub(crate) struct ScriptedHandler {
     reply: Option<AgentReply>,
     asked: std::sync::Mutex<Vec<(String, AgentVerb)>>,
     entered: Option<tokio::sync::mpsc::Sender<String>>,
@@ -41,7 +41,7 @@ struct ScriptedHandler {
 
 impl ScriptedHandler {
     /// A handler that answers with `reply`.
-    fn answering(reply: AgentReply) -> Arc<ScriptedHandler> {
+    pub(crate) fn answering(reply: AgentReply) -> Arc<ScriptedHandler> {
         Arc::new(ScriptedHandler {
             reply: Some(reply),
             asked: std::sync::Mutex::new(Vec::new()),
@@ -141,7 +141,7 @@ impl AgentRequestHandler for ScriptedHandler {
 /// it. Registry id 1 is arbitrary: the supervisor never inspects it, and
 /// the helm-side meaning of the id (which host is `current`) is tested
 /// where that projection lives.
-async fn connect_helm(
+pub(crate) async fn connect_helm(
     sup: &Arc<Supervisor>,
     handler: Arc<dyn AgentRequestHandler>,
 ) -> Arc<SupervisorClient> {
@@ -224,13 +224,21 @@ async fn connect_helm_tapping_request_ids(
 /// narrow admission a session credential buys. Driving frames directly is
 /// also what lets a test send a `session_id` that does not match its
 /// credential, which no typed client would let it construct.
-struct SessionPeer {
+/// A session-authenticated protocol peer for e2e modules that need to prove
+/// the restricted spawn boundary. The helper intentionally exposes only the
+/// raw control exchange: callers still choose the exact request shape whose
+/// admission they are testing.
+pub(crate) struct SessionPeer {
     reader: FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
     writer: FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
 }
 
 impl SessionPeer {
-    async fn connect(sup: &Arc<Supervisor>, session_id: &str, token: &str) -> SessionPeer {
+    pub(crate) async fn connect(
+        sup: &Arc<Supervisor>,
+        session_id: &str,
+        token: &str,
+    ) -> SessionPeer {
         let (client_side, server_side) = tokio::io::duplex(1 << 20);
         let sup = Arc::clone(sup);
         tokio::spawn(async move {
@@ -294,7 +302,7 @@ impl SessionPeer {
     /// Spawn uses `CreateSession` directly rather than the `AgentRequest`
     /// envelope used by `farhelm agent`. Keeping this seam raw is what lets
     /// the forgery regression submit provenance the typed CLI never emits.
-    async fn control(&mut self, request: ControlMsg) -> ControlMsg {
+    pub(crate) async fn control(&mut self, request: ControlMsg) -> ControlMsg {
         self.writer
             .write_control(&request)
             .await
@@ -316,7 +324,12 @@ fn outcome_of(reply: ControlMsg) -> AgentOutcome {
 /// The token the supervisor minted for `session`, read out of its own
 /// database — the credential a real `farhelm agent` finds in its
 /// environment.
-async fn credential_for(h: &Harness, session: &str) -> String {
+/// Read the ephemeral credential minted for an owned fixture session.
+///
+/// Production agents receive this value through their launch environment;
+/// e2e tests read the same durable source so they can exercise the restricted
+/// connection without copying or weakening the authentication protocol.
+pub(crate) async fn credential_for(h: &Harness, session: &str) -> String {
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
         .expect("open the supervisor's store");
@@ -808,6 +821,7 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
             intent_key: Some("resolved-spawn".to_string()),
             agent_kind: None,
             resume_template: None,
+            launch: None,
             source_profile: None,
         })
         .await;
@@ -876,6 +890,7 @@ async fn a_restricted_create_cannot_supply_source_profile() {
             intent_key: Some("forged-provenance".to_string()),
             agent_kind: Some(farhelm_proto::AgentKind::Generic),
             resume_template: None,
+            launch: None,
             source_profile: Some(farhelm_proto::ProfileSnapshot {
                 id: "starter-codex".to_string(),
                 name: "codex".to_string(),

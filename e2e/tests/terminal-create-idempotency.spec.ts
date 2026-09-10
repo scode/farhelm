@@ -198,7 +198,7 @@ test("editing the title after a failed create mints a new intent key", async ({
     await form.locator('button[type="submit"]').click();
     await expect(form.locator(".create-session-error")).toBeVisible();
 
-    await form.locator('input[type="text"]').nth(2).fill(`${title}-renamed`);
+    await form.getByLabel("title (optional)").fill(`${title}-renamed`);
     await form.locator('input[type="text"]').nth(0).fill("/tmp");
     await form.locator('button[type="submit"]').click();
     const id = await sessionIdFor(rowByTitle(page, `${title}-renamed`));

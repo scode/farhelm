@@ -49,6 +49,34 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- Investigate `provisioning::tests::local_provisioning_and_update_preserve_a_running_session` in
+  `crates/farhelm-helm/src/provisioning.rs`. A recorded workspace run reached the provisioning attach step and timed out
+  waiting for the supervisor. It passed in an earlier full run and an exact rerun, then failed again in the next full
+  run. The failure has not been reproduced on a pre-composer baseline, so its cause and provenance remain unresolved.
+  Retain supervisor startup and service-lifecycle evidence before changing the attach deadline. Failed run IDs:
+  `a723e80f-5dbe-4ed2-bd7a-686f50aae672`, `de55db2b-7b22-475a-9465-35212dd8de5a`.
+
+- Investigate intermittent recovery assertions in
+  `rotation logs out an open client and drops its feed and terminal
+  sockets`, in `e2e/tests/auth.spec.ts`. Chromium
+  observed an aborted recovery detail read in a broad run and a missing sidebar row after a successful detail read in an
+  exact run. Both a prior composer build and a later exact candidate run passed. The test refreshes shared credential
+  storage only after those assertions; failure leaves subsequent tests unauthenticated and turns one failure into a
+  large cascade. Keep the original failure distinct from that cleanup consequence, and establish its provenance before
+  changing authentication behavior or recovery assertions.
+
+- Investigate the remaining initial profile focus failures in `e2e/tests/profiles.spec.ts`. WebKit failed the editor
+  focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus in
+  `a profile edited in another browser reaches this one over the real feed`. The latter occurs before the separately
+  corrected second-client terminal-readiness boundary. Preserve both tests' focus and feed assertions; the new
+  observation does not establish a regression in saving profiles or delivering their updates.
+
+- Make interrupted browser-run cleanup account for the detached `start-stack.sh` fixture servers. Three deliberately
+  canceled recorder-backed Playwright shards returned after their runner was terminated while their owned fixture
+  servers still held their ports and state directories. Explicit cleanup of the owned fixture shells released both.
+  Establish which layer owns these detached children and verify cleanup on cancellation without touching other stacks.
+  This is an observed harness limitation; the exact cleanup mechanism responsible has not been established.
+
 - Correct the editor-focus fixture in `a popup-created profile is offered on every host`, in
   `e2e/tests/profiles.spec.ts`. In the final Chromium run at `6903cf90`, on the worker shape and pin documented under
   "Difficult deflake" without extra load, invocation was filled while an editor handoff was still pending. The trace

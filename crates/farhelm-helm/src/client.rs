@@ -713,6 +713,12 @@ pub struct CreateExtras {
     /// The helm-resolved profile identity. This travels with the invocation
     /// so the supervisor can persist provenance without owning a catalog.
     pub source_profile: Option<ProfileSnapshot>,
+    /// Explicit launch-composer choices compiled into the resolved invocation.
+    ///
+    /// Legacy raw/profile callers leave this absent. The supervisor persists
+    /// it beside the immutable resolved bundle rather than recovering it from
+    /// the command later.
+    pub launch: Option<farhelm_proto::LaunchSelection>,
 }
 
 /// A live connection to one supervisor, shared by every request in flight.
@@ -2500,6 +2506,7 @@ impl SupervisorClient {
                     agent_kind: extras.agent_kind,
                     resume_template: extras.resume_template,
                     source_profile: extras.source_profile,
+                    launch: extras.launch,
                 },
             )
             .await?
@@ -2538,6 +2545,36 @@ impl SupervisorClient {
                 truncated,
             }),
             other => bail!("unexpected reply to list_sessions: {other:?}"),
+        }
+    }
+
+    /// Ask the connected supervisor to browse one directory on its own host.
+    ///
+    /// The returned paths are supervisor-validated values; this client does
+    /// not expand `~` or inspect the local filesystem.
+    pub async fn browse_directory(
+        &self,
+        cwd: &str,
+    ) -> anyhow::Result<(String, Option<String>, Vec<String>, bool)> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::BrowseDirectory {
+                    req_id,
+                    cwd: cwd.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::DirectoryListing {
+                cwd,
+                parent,
+                children,
+                truncated,
+                ..
+            } => Ok((cwd, parent, children, truncated)),
+            other => Err(wrong_reply("BrowseDirectory", &other)),
         }
     }
 
@@ -3605,7 +3642,10 @@ mod tests {
             last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: format!("/{id}"),
+            canonical_cwd: None,
             invocation: "agent".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Running,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),

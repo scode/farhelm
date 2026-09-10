@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 
 use crate::api::{self, CreateAgent, ProfileCatalog, create_session, mint_intent_key};
+use crate::feed::use_feed_reader;
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
@@ -13,7 +14,10 @@ use crate::profiles::{
     submitted_field,
 };
 use crate::reader::Trigger;
-use crate::{ApiBase, HostId, ProfileExistence, Session};
+use crate::{
+    ApiBase, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+    ProfileExistence, Session,
+};
 
 use super::shared::{
     HostOption, OpenHost, effective_create_host, enrich_created_session, matching_host_option,
@@ -27,6 +31,10 @@ use super::shared::{
 /// create anybody is waiting on. Bounded rather than a bare loop because
 /// spinning is a worse answer than saying so.
 const MINT_ATTEMPTS: usize = 3;
+
+/// Shared by visible invalidation and both submission checks so an explicit
+/// destination correction can retire only this refusal, not an unrelated error.
+const REMEMBERED_DESTINATION_CHANGED: &str = "the remembered folder belongs to a different installation; choose the host or folder again before launching";
 
 /// The host installation a create intent is bound to.
 ///
@@ -62,6 +70,180 @@ enum LaunchIntent {
     Command(String),
     /// A profile from the helm catalog, by id.
     Profile(String),
+    /// Declarative structured intent compiled only by the helm.
+    Structured(LaunchSelection),
+}
+
+/// The active creation surface. Legacy profiles/commands and structured
+/// harnesses are separate modes because values from one cannot safely become
+/// hidden inputs to the other's idempotency key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreationSurface {
+    Legacy,
+    Structured,
+}
+
+/// The stable HTML value for one effort choice.
+///
+/// The enum crosses HTTP as snake case, so the controls use the same literal
+/// spelling instead of deriving a second display protocol from `Debug`.
+fn effort_value(effort: LaunchEffort) -> &'static str {
+    match effort {
+        LaunchEffort::Low => "low",
+        LaunchEffort::Medium => "medium",
+        LaunchEffort::High => "high",
+        LaunchEffort::Xhigh => "xhigh",
+        LaunchEffort::Max => "max",
+        LaunchEffort::Ultra => "ultra",
+    }
+}
+
+/// Apply a clicked or keyboard-selected search result without launching.
+///
+/// Search is only a picker. Keeping its result application in one helper
+/// makes Enter and pointer activation replace the same fields and clear the
+/// same idempotency binding. A returned path means this was the explicit
+/// browse action; the caller starts the shared guarded request after closing
+/// the search surface.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the signals are independent reactive ownership handles; bundling them would obscure which draft fields a search action may replace"
+)]
+fn apply_composer_search_result(
+    result: crate::launch_composer::ComposerSearchResult,
+    history_target: Option<CreateTarget>,
+    live_destination: Signal<Option<CreateTarget>>,
+    mut remembered_destination: Signal<Option<CreateTarget>>,
+    history_activation_attempts: Signal<u64>,
+    mut cwd: Signal<String>,
+    mut cwd_raw_seed: Signal<Option<String>>,
+    mut cwd_edited: Signal<bool>,
+    mut structured_harness: Signal<Option<LaunchHarness>>,
+    mut structured_model: Signal<Option<String>>,
+    mut structured_model_raw_seed: Signal<Option<String>>,
+    mut structured_model_edited: Signal<bool>,
+    mut custom_model_harness: Signal<Option<LaunchHarness>>,
+    mut structured_effort: Signal<Option<LaunchEffort>>,
+    mut structured_permissions: Signal<Option<LaunchPermission>>,
+    mut composer_reset_reason: Signal<Option<String>>,
+    catalog: &[crate::api::LaunchCatalogModel],
+    mut intent_key: Signal<Option<(String, IntentBinding)>>,
+) -> Option<String> {
+    use crate::launch_composer::ComposerSearchResult;
+    if matches!(
+        &result,
+        ComposerSearchResult::Folder(_) | ComposerSearchResult::Recent(_)
+    ) && !admit_history_destination(
+        history_target,
+        live_destination,
+        remembered_destination,
+        history_activation_attempts,
+    ) {
+        return None;
+    }
+    if matches!(
+        &result,
+        ComposerSearchResult::UsePath(_) | ComposerSearchResult::BrowsePath(_)
+    ) {
+        // An explicit path action replaces the remembered destination, even
+        // when the person deliberately chooses the same spelling again.
+        remembered_destination.set(None);
+    }
+    match result {
+        crate::launch_composer::ComposerSearchResult::UsePath(folder)
+        | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
+            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
+        }
+        crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
+            // Query-path actions are treated like other relayed path choices:
+            // the escaped field remains reviewable, while the browse request
+            // and an untouched later create retain the exact requested bytes.
+            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
+            intent_key.set(None);
+            return Some(folder);
+        }
+        crate::launch_composer::ComposerSearchResult::Harness(harness) => {
+            let before = LaunchSelection {
+                harness: structured_harness().unwrap_or(harness),
+                model: structured_model(),
+                effort: structured_effort(),
+                permissions: structured_permissions(),
+            };
+            let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
+                before.clone(),
+                *custom_model_harness.peek(),
+                harness,
+                catalog,
+            );
+            composer_reset_reason.set(crate::launch_composer::reconciliation_reset_reason(
+                &before, &selection,
+            ));
+            structured_harness.set(Some(selection.harness));
+            structured_model_raw_seed.set(selection.model.clone());
+            structured_model_edited.set(false);
+            structured_model.set(selection.model);
+            structured_effort.set(selection.effort);
+            custom_model_harness.set(owner);
+        }
+        crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
+            let before = LaunchSelection {
+                harness: structured_harness().unwrap_or(harness),
+                model: structured_model(),
+                effort: structured_effort(),
+                permissions: structured_permissions(),
+            };
+            let selection = LaunchSelection {
+                harness,
+                model: Some(id),
+                effort: structured_effort(),
+                permissions: structured_permissions(),
+            };
+            let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
+                selection,
+                Some(harness),
+                harness,
+                catalog,
+            );
+            composer_reset_reason.set(crate::launch_composer::reconciliation_reset_reason(
+                &before, &selection,
+            ));
+            structured_harness.set(Some(selection.harness));
+            structured_model_raw_seed.set(selection.model.clone());
+            structured_model_edited.set(false);
+            structured_model.set(selection.model);
+            structured_effort.set(selection.effort);
+            custom_model_harness.set(owner);
+        }
+        crate::launch_composer::ComposerSearchResult::Recent(entry) => {
+            composer_reset_reason.set(None);
+            let selection = crate::launch_composer::select_recent(&entry);
+            let owner = selection.model.as_ref().and_then(|model| {
+                (!catalog.iter().any(|candidate| candidate.id == *model))
+                    .then_some(selection.harness)
+            });
+            structured_harness.set(Some(selection.harness));
+            structured_model_raw_seed.set(selection.model.clone());
+            structured_model_edited.set(false);
+            structured_model.set(selection.model);
+            structured_effort.set(selection.effort);
+            structured_permissions.set(selection.permissions);
+            custom_model_harness.set(owner);
+            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &entry.cwd);
+        }
+    }
+    intent_key.set(None);
+    None
+}
+
+/// Refuse a draft transition once the shared operation token is held.
+///
+/// HTML's disabled state is rendered asynchronously, while a create claims
+/// the token synchronously before its key-mint await. Every handler that can
+/// alter the intent must consult this live predicate itself; otherwise an
+/// already queued click could clear the key or change the selection the
+/// accepted request is still resolving.
+fn draft_transition_allowed(ops: OpLock) -> bool {
+    !ops.busy_now()
 }
 
 /// Everything one intended create IS — the exact thing an idempotency key
@@ -167,6 +349,287 @@ fn connection_claim(hosts: &[HostOption], host: HostId) -> Option<u64> {
         .and_then(|option| (option.connection != 0).then_some(option.connection))
 }
 
+/// Snapshot the installation a history reply is allowed to describe.
+///
+/// History is stored per installation, while a host selector keeps a stable
+/// registry id across retargeting. Pairing the async response with this
+/// target stops an old installation's suggestions from surviving into a
+/// dialog that now names its successor.
+fn history_target(hosts: &[HostOption], selected: Option<HostId>) -> Option<CreateTarget> {
+    selected.and_then(|id| {
+        hosts
+            .iter()
+            .find(|host| host.id == id)
+            .map(|host| CreateTarget::new(host.id, host.incarnation.clone()))
+    })
+}
+
+/// A remembered folder remains usable only on the installation it described.
+///
+/// Explicit host/text overrides carry no earlier remembered authority.
+/// Reconnect tokens are deliberately absent from CreateTarget: reconnecting
+/// to the same install must not revoke a path that still belongs to it.
+fn remembered_destination_matches(
+    remembered: Option<&CreateTarget>,
+    current: Option<&CreateTarget>,
+) -> bool {
+    remembered.is_none() || remembered == current
+}
+
+/// Bind a historical selection before copying any of its fields into the draft.
+///
+/// A captured callback can outlive its offered DOM result. Check the current
+/// rendered registry here, rather than letting withdrawal of suggestions stand
+/// in for handler-time authority. The counter distinguishes refusal from a
+/// callback that never ran in the mounted race regression.
+fn admit_history_destination(
+    expected: Option<CreateTarget>,
+    live: Signal<Option<CreateTarget>>,
+    mut remembered: Signal<Option<CreateTarget>>,
+    mut attempts: Signal<u64>,
+) -> bool {
+    attempts.with_mut(|count| *count = count.wrapping_add(1));
+    if expected.is_none() || expected.as_ref() != live.peek().as_ref() {
+        return false;
+    }
+    remembered.set(expected);
+    true
+}
+
+/// The full, live destination a directory reply is allowed to describe.
+///
+/// `CreateTarget` intentionally excludes a reconnect token because create
+/// idempotency is bound to an installation, not one supervisor connection.
+/// Browsing is different: a directory listing is a live observation, so its
+/// authority also expires when that connection is replaced under the same
+/// registry row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowseAuthority {
+    target: CreateTarget,
+    connection: Option<u64>,
+    cwd: String,
+    generation: u64,
+}
+
+/// Clear every trace of a directory observation before changing destination.
+///
+/// Every host or folder transition takes this route. Incrementing generation
+/// as well as dropping the request makes an old A listing in an A→B→A trip
+/// ineligible even if a queued handler still holds its rendered result.
+fn invalidate_directory_browse(
+    mut browse_generation: Signal<u64>,
+    mut browse_request: Signal<Option<BrowseAuthority>>,
+    mut browse_result: Signal<Option<(BrowseAuthority, api::DirectoryBrowse)>>,
+    mut browse_error: Signal<Option<String>>,
+) {
+    browse_generation.with_mut(|generation| *generation = generation.wrapping_add(1));
+    browse_request.set(None);
+    browse_result.set(None);
+    browse_error.set(None);
+}
+
+/// Make the latest fetched suggestions visible after an intentional choice.
+///
+/// A picker action is the contract boundary where refreshed ranking may
+/// appear. The target check keeps a late predecessor history response from
+/// becoming the first set of suggestions for a newly selected host.
+fn promote_history_snapshot(
+    mut offered: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+    current_target: Option<CreateTarget>,
+    fetched: Option<(CreateTarget, api::LaunchHistory)>,
+) {
+    if let Some((target, history)) = fetched
+        && Some(&target) == current_target.as_ref()
+    {
+        offered.set(Some((target, history)));
+    }
+}
+
+/// Promote the most recently fetched history only when a person chooses.
+///
+/// The fetched signal is updated by the resource path, but never rendered
+/// directly. Keeping that handoff separate makes a feed update available to
+/// every deliberate ordinary choice without turning the update itself into a
+/// surprise reorder of an open composer.
+fn promote_fetched_history_snapshot(
+    offered: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+    current_target: Signal<Option<CreateTarget>>,
+    fetched: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+) {
+    promote_history_snapshot(offered, current_target(), fetched());
+}
+
+/// Decide whether an asynchronous directory reply still belongs to this form.
+///
+/// The request must still be the current generation, and the live form must
+/// still name the same installation, connection, and raw path. Callers use
+/// this exact predicate at completion, rendering, and activation so a queued
+/// click cannot apply a result that disappeared between those phases.
+fn browse_reply_is_current(
+    current: &Option<BrowseAuthority>,
+    candidate: &BrowseAuthority,
+    live_target: Option<CreateTarget>,
+    live_connection: Option<u64>,
+    live_cwd: &str,
+) -> bool {
+    current.as_ref() == Some(candidate)
+        && live_target.as_ref() == Some(&candidate.target)
+        && live_connection == candidate.connection
+        && live_cwd == candidate.cwd
+}
+
+/// Recheck browse authority from an event handler, after its node rendered.
+fn browse_activation_is_current(
+    request: Signal<Option<BrowseAuthority>>,
+    candidate: &BrowseAuthority,
+    target: Signal<Option<CreateTarget>>,
+    connection: Signal<Option<u64>>,
+    cwd: Signal<String>,
+    raw_seed: Signal<Option<String>>,
+    edited: Signal<bool>,
+) -> bool {
+    browse_reply_is_current(
+        &request(),
+        candidate,
+        target(),
+        connection(),
+        &submitted_field(&cwd(), edited(), raw_seed.peek().as_deref()),
+    )
+}
+
+/// Start one directory listing bound to the current create destination.
+///
+/// Both the ordinary Browse button and search's Browse-this-path action use
+/// this entry point so neither can accidentally weaken the target,
+/// connection, path, or generation guard. The request is explicit: callers
+/// choose when to invoke it; merely updating the search query never reaches
+/// the remote filesystem.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the browse authority intentionally receives separate live signals so its completion guard cannot retain a stale aggregate draft"
+)]
+fn request_directory_browse(
+    base: String,
+    selected: Option<HostId>,
+    hosts: &[HostOption],
+    browse_target: Signal<Option<CreateTarget>>,
+    requested_cwd: String,
+    mut browse_generation: Signal<u64>,
+    mut browse_request: Signal<Option<BrowseAuthority>>,
+    mut browse_result: Signal<Option<(BrowseAuthority, api::DirectoryBrowse)>>,
+    mut browse_error: Signal<Option<String>>,
+    mut reply_completions: Signal<u64>,
+    live_connection: Signal<Option<u64>>,
+    live_cwd: Signal<String>,
+    live_cwd_raw_seed: Signal<Option<String>>,
+    live_cwd_edited: Signal<bool>,
+) {
+    let Some(host) = selected else { return };
+    let Some(target) = history_target(hosts, Some(host)) else {
+        return;
+    };
+    let generation = browse_generation().wrapping_add(1);
+    browse_generation.set(generation);
+    let authority = BrowseAuthority {
+        target,
+        connection: connection_claim(hosts, host),
+        cwd: requested_cwd.clone(),
+        generation,
+    };
+    browse_request.set(Some(authority.clone()));
+    browse_result.set(None);
+    browse_error.set(None);
+    spawn(async move {
+        let result = api::browse_directory(&base, host, &requested_cwd, authority.connection).await;
+        reply_completions.with_mut(|completions| *completions = completions.wrapping_add(1));
+        let current = browse_request.peek().clone();
+        if !browse_reply_is_current(
+            &current,
+            &authority,
+            browse_target(),
+            live_connection(),
+            &submitted_field(
+                &live_cwd(),
+                live_cwd_edited(),
+                live_cwd_raw_seed.peek().as_deref(),
+            ),
+        ) {
+            return;
+        }
+        match result {
+            Ok(result) => browse_result.set(Some((authority, result))),
+            Err(reason) => browse_error.set(Some(reason)),
+        }
+    });
+}
+
+/// Install the dialog-local Tab loop after the browser owns the mounted form.
+///
+/// The composer is rendered inside the sidebar rather than in a portal, so
+/// `aria-modal` alone cannot stop native Tab navigation from reaching the
+/// still-mounted page behind it. Keeping the listener on this particular DOM
+/// node makes its lifetime exactly the dialog's lifetime; no global handler
+/// can survive a close and interfere with the next open.
+fn install_composer_focus_trap() {
+    document::eval(
+        r#"(() => {
+            const dialog = document.querySelector('.create-session-form[role="dialog"]');
+            if (!dialog || dialog.__farhelmComposerFocusTrap) return;
+            dialog.__farhelmComposerFocusTrap = true;
+            const focusable = () => [...dialog.querySelectorAll(
+                'button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+            )].filter((node) => !node.hidden && node.getClientRects().length);
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key !== 'Tab') return;
+                const nodes = focusable();
+                if (!nodes.length) return;
+                const first = nodes[0];
+                const last = nodes[nodes.length - 1];
+                if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
+                    event.preventDefault();
+                    const target = event.shiftKey ? last : first;
+                    // A trapped dialog is also its own scroll viewport. A
+                    // boundary wrap that leaves the new focus above or below
+                    // that viewport is technically contained but unusable:
+                    // the focus ring and the control it names have vanished.
+                    // Native focus scrolling is intentionally retained here.
+                    target.focus();
+                }
+            });
+        })();"#,
+    );
+}
+
+/// Give each composer surface an explicit first focus target.
+///
+/// A structured dialog starts at its searchable chooser. Legacy clones do
+/// not render that control, so they start at the agent selector instead of
+/// leaving focus on the page beneath the modal. This runs on a deliberate
+/// surface transition too, which keeps the same contract when Other and Back
+/// swap the controls after the dialog has mounted.
+fn focus_composer_surface() {
+    document::eval(
+        r#"(() => {
+            const dialog = document.querySelector('.create-session-form[role="dialog"]');
+            if (!dialog) return;
+            const target = dialog.querySelector(
+                '.launch-composer-search input:not([disabled]), .create-session-agent:not([disabled])'
+            );
+            target?.focus({ preventScroll: true });
+        })()"#,
+    );
+}
+
+/// Keep keyboard selection visible while a long combobox result list scrolls.
+///
+/// The input retains browser focus for combobox semantics, so this explicitly
+/// scrolls the active option rather than moving focus into a transient button.
+fn scroll_composer_search_result(index: usize) {
+    document::eval(&format!(
+        r#"document.getElementById('launch-composer-search-option-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
+    ));
+}
+
 /// Which of the two creation modes a "clone" click's snapshot TRUSTS —
 /// deliberately not carrying its own payload; see [`CreatePrefill::invocation`]
 /// for where that lives and why.
@@ -267,6 +730,11 @@ pub(super) struct CreatePrefill {
     /// retaining the raw value here keeps switching to custom mode faithful to
     /// the cloned row without making the profile-mode display look executable.
     pub(super) invocation: String,
+    /// Declarative provenance for a structured source session.
+    ///
+    /// This remains absent for legacy rows. Clone must preserve that absence
+    /// rather than reverse-engineering a harness from an arbitrary command.
+    pub(super) launch: Option<LaunchSelection>,
     pub(super) agent: PrefillAgent,
 }
 
@@ -291,6 +759,7 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         cwd: session.cwd.clone(),
         title: session.title.clone(),
         invocation: session.invocation.clone(),
+        launch: session.launch.clone(),
         agent,
     }
 }
@@ -523,10 +992,12 @@ fn reseed_cloned_field(
     edited.set(false);
 }
 
-/// Inline create form (PLAN_M2.md step 8's "not a modal library" design
-/// choice): working directory and agent command are required, title is
-/// optional. Lives entirely inside `ListView` — there is no route or
-/// signal for it beyond the `show_create` toggle that mounts/unmounts it.
+/// The session-launch dialog, including the structured composer and the
+/// explicit legacy fallback.
+///
+/// A new dialog opens on the structured surface with no harness selected.
+/// Profiles and arbitrary commands remain available through the legacy
+/// surface, but cannot contribute hidden values to a structured request.
 ///
 /// `submitting` is owned by the CALLER (`ListView`), not this component:
 /// `ListView`'s own "new session" toggle button needs to see it too, so it
@@ -692,9 +1163,9 @@ fn reseed_cloned_field(
 #[component]
 pub(super) fn CreateSessionForm(
     hosts: Vec<HostOption>,
-    /// See `ListView`'s parameter of the same name: the selected session's
-    /// host and its reported install identity, SPEC.md's first
-    /// create-default clause.
+    /// The selected session's host and reported installation identity,
+    /// carried by `ListView`'s `open_destination` snapshot. This supplies
+    /// SPEC.md's first create-default clause independently of sidebar filtering.
     open_host: Option<OpenHost>,
     /// Whether the hosts read has EVER succeeded. Distinguishes "there are
     /// no hosts" (impossible for a live helm, which always has its local
@@ -718,15 +1189,25 @@ pub(super) fn CreateSessionForm(
     /// request completes — the exclusion against every host mutation, and
     /// against a second submit of this form (see `ops`).
     mut ops: OpLock,
+    /// Directory copied from the currently selected session for an ordinary
+    /// New action. `None` preserves the portable target-home default.
+    initial_cwd: Option<String>,
     /// A "clone" click's seed, or `None` for the ordinary blank-form open.
     /// `ListView` owns the signal this reads and bumps `generation` on
     /// every clone (see `CreatePrefill`); this component's own reseed
     /// effect (below `chosen_profile`'s declaration) is what turns a new
     /// generation into field values.
     prefill: Option<CreatePrefill>,
+    /// Discard this draft without creating a session.
+    on_cancel: EventHandler<()>,
     on_created: EventHandler<Session>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let launch_catalog_base = base.clone();
+    let launch_catalog = use_resource(move || {
+        let base = launch_catalog_base.clone();
+        async move { api::fetch_launch_catalog(&base).await }
+    });
     // Prefilled rather than empty-with-a-placeholder, deliberately: what
     // gets sent is always exactly what the field shows, and the common
     // "just give me a session in my home directory" create needs no typing
@@ -734,9 +1215,32 @@ pub(super) fn CreateSessionForm(
     // expands it at create time (SPEC.md's working-directory rule), which
     // is what makes a host-independent default possible here at all: this
     // form cannot know a remote host's home path.
-    let mut cwd = use_signal(|| "~".to_string());
+    let cwd_initial_seed = initial_cwd.clone();
+    let mut cwd = use_signal(move || {
+        cwd_initial_seed
+            .as_deref()
+            .map(display_peer)
+            .unwrap_or_else(|| "~".to_string())
+    });
     let mut invocation = use_signal(String::new);
     let mut title = use_signal(String::new);
+    let mut creation_surface = use_signal(|| CreationSurface::Structured);
+    let mut structured_harness = use_signal(|| None::<LaunchHarness>);
+    let mut structured_model = use_signal(|| None::<String>);
+    // A restored custom id is peer text even though it is stored in a launch
+    // selection. Keep its raw bytes for submission while showing an escaped
+    // spelling until the person deliberately edits the field.
+    let mut structured_model_raw_seed = use_signal(|| None::<String>);
+    let mut structured_model_edited = use_signal(|| false);
+    let mut custom_model_harness = use_signal(|| None::<LaunchHarness>);
+    let mut structured_effort = use_signal(|| None::<LaunchEffort>);
+    let mut structured_permissions = use_signal(|| None::<LaunchPermission>);
+    // Compatibility clears are intentional, but defaults must never make an
+    // earlier explicit choice vanish without telling the person what changed.
+    let mut composer_reset_reason = use_signal(|| None::<String>);
+    let mut composer_search = use_signal(String::new);
+    let mut composer_search_open = use_signal(|| false);
+    let mut composer_search_index = use_signal(|| 0_usize);
     // What each of the three text fields above was SEEDED from, raw, and
     // whether the user has typed in it since — `profiles::ProfileDraft`'s
     // escaped-display / raw-seed / edited-flag model, reused rather than
@@ -750,7 +1254,8 @@ pub(super) fn CreateSessionForm(
     // are fed into at submit time). `None` seeds mean "never clone-seeded",
     // which is the ordinary blank-create case: there the field's own text
     // already IS the value to submit, since nothing relayed it from a peer.
-    let mut cwd_raw_seed = use_signal(|| None::<String>);
+    let cwd_initial_raw_seed = initial_cwd.clone();
+    let mut cwd_raw_seed = use_signal(move || cwd_initial_raw_seed);
     let mut cwd_edited = use_signal(|| false);
     let mut invocation_raw_seed = use_signal(|| None::<String>);
     let mut invocation_edited = use_signal(|| false);
@@ -801,12 +1306,144 @@ pub(super) fn CreateSessionForm(
             CloneHostState::Waiting | CloneHostState::Bound | CloneHostState::UserTookOver => None,
         });
     let selected = effective_create_host(&hosts, chosen_host(), open_host.as_ref());
+    let destination_now = history_target(&hosts, selected);
+    // Store the latest render's registry claim synchronously. Parent-derived
+    // create_target has an intentional effect lag, while an old history
+    // callback must already refuse a replacement visible in this render.
+    let mut live_destination = use_signal(|| None::<CreateTarget>);
+    if *live_destination.peek() != destination_now {
+        live_destination.set(destination_now.clone());
+    }
+    let inherited_destination = initial_cwd.as_ref().and(destination_now.clone());
+    let mut remembered_destination = use_signal(move || inherited_destination);
+    let history_activation_attempts = use_signal(|| 0_u64);
+    let remembered_destination_valid = remembered_destination_matches(
+        remembered_destination.read().as_ref(),
+        destination_now.as_ref(),
+    );
+    if remembered_destination_valid
+        && error.peek().as_deref() == Some(REMEMBERED_DESTINATION_CHANGED)
+    {
+        error.set(None);
+    }
+    // Capture the immutable local id once for the reset chip. Moving the
+    // whole host list into that event handler would steal it from submit.
+    let local_host_id = hosts.iter().find(|host| host.local).map(|host| host.id);
+    let local_destination = history_target(&hosts, local_host_id);
+    let browse_generation = use_signal(|| 0_u64);
+    // A reply is useful only for the exact host connection and path that
+    // asked for it. The generation rejects an older request; this tuple also
+    // rejects a host or path edit that happened while one request was live.
+    let browse_request = use_signal(|| None::<BrowseAuthority>);
+    // Keep the reply's authority alongside its directory data. A browse is
+    // a statement about one installation and one draft path, not a generic
+    // folder picker result: a host retarget or a later folder choice must
+    // make an already-arrived listing ineligible as well as rejecting a
+    // listing that is still in flight.
+    let browse_result = use_signal(|| None::<(BrowseAuthority, api::DirectoryBrowse)>);
+    let browse_error = use_signal(|| None::<String>);
+    // Count handler entry separately from successful activation. A result can
+    // be removed by the next render, so the mounted browser regression needs
+    // to distinguish "the stale click was refused" from "no callback ran".
+    let mut browse_activation_attempts = use_signal(|| 0_u64);
+    // Completion is distinct from rendering: rejected stale replies must not
+    // become visible, but race tests still need to know the async task read
+    // and checked the released response before continuing to another leg.
+    let browse_reply_completions = use_signal(|| 0_u64);
+    // The component receives a new host snapshot on each registry update,
+    // but the async browse task outlives that render. This signal gives its
+    // completion check the connection the form sees *now*, rather than the
+    // token copied into the request it is trying to validate.
+    let mut live_browse_connection = use_signal(|| None::<u64>);
+    use_effect(use_reactive(
+        &(hosts.clone(), selected),
+        move |(hosts, selected)| {
+            live_browse_connection.set(selected.and_then(|host| connection_claim(&hosts, host)));
+        },
+    ));
+    // History is shared helm state. Its revision may change because another
+    // browser launched a session, so its resource must react both to the
+    // live destination and to the feed rather than to this render's host
+    // snapshot.
+    let history_revision = use_signal(|| 0_u64);
+    let mut history_feed = history_revision;
+    use_feed_reader(move || {
+        history_feed.with_mut(|revision| *revision = revision.wrapping_add(1));
+    });
+    let history_base = base.clone();
+    let history_target_signal = create_target;
+    let launch_history = use_resource(move || {
+        let base = history_base.clone();
+        // This read is intentionally a dependency even though its numeric
+        // value is not sent to the helm: it fetches a successful create in a
+        // different client without disturbing the offered snapshot or this
+        // dialog's draft. A later deliberate choice decides whether to
+        // promote that fetched history.
+        let _revision = history_revision();
+        let target = history_target_signal();
+        async move {
+            let answer = match target.as_ref() {
+                Some(target) => api::fetch_launch_history(&base, target.host).await,
+                None => Ok(api::LaunchHistory::default()),
+            };
+            (target, answer)
+        }
+    });
+    // A feed update is fetched immediately, but it is not allowed to rewrite
+    // the suggestion surface beneath an open draft. The offered snapshot is
+    // promoted only by a deliberate picker/search transition below. A new
+    // destination is the exception: its old suggestions lose authority at
+    // once and remain blank until a reply for the new installation arrives.
+    let mut offered_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
+    let history_for_offer = launch_history
+        .read()
+        .as_ref()
+        .and_then(|(target, result)| target.clone().zip(result.as_ref().ok().cloned()));
+    // Feed replies update this handoff immediately, while `offered_history`
+    // remains stable until a deliberate choice calls the shared promoter.
+    let mut fetched_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
+    // This revision is deliberately exposed on the mounted dialog for the
+    // browser contract tests. Offered history must remain unchanged when this
+    // advances; the attribute lets those tests prove the component consumed a
+    // particular fresh reply before they inspect that frozen offer.
+    let mut fetched_history_revision = use_signal(|| 0_u64);
+    if *fetched_history.peek() != history_for_offer {
+        fetched_history.set(history_for_offer.clone());
+        fetched_history_revision.with_mut(|revision| *revision = revision.wrapping_add(1));
+    }
+    // Event handlers are independently owned `FnMut` closures. Give each
+    // deliberate-promotion boundary its own snapshot handle rather than
+    // letting a search handler consume the value an ordinary recent needs.
+    let history_for_search = history_for_offer.clone();
+    let history_for_recents = history_for_offer.clone();
+    let offer_target = create_target();
+    if offered_history
+        .peek()
+        .as_ref()
+        .is_some_and(|(target, _)| Some(target) != offer_target.as_ref())
+    {
+        offered_history.set(None);
+    }
+    if offered_history.peek().is_none()
+        && let Some((target, history)) = history_for_offer.as_ref()
+        && Some(target) == offer_target.as_ref()
+    {
+        offered_history.set(Some((target.clone(), history.clone())));
+    }
     // This form's current intended create, if one has been submitted yet
     // (PLAN_M3.md item 6), together with the BINDING it was minted for.
     // Minted at first submit, reused by every later submit of the same
     // intent, and superseded the moment any part of that binding changes.
     let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     let busy = ops.busy();
+
+    // The mount and every structured/legacy surface change need the same
+    // focus handoff. Reading only the surface means ordinary rerenders never
+    // steal focus while someone is editing a field.
+    use_effect(move || {
+        let _surface = creation_surface();
+        focus_composer_surface();
+    });
 
     // Mounting this component is the create surface's closed-to-open
     // transition. An explicit request is allowed through a latched build skew
@@ -852,7 +1489,20 @@ pub(super) fn CreateSessionForm(
                 .filter(|prefill| Some(prefill.generation) != *prefill_applied.peek())
             {
                 prefill_applied.set(Some(prefill.generation));
+                // A clone generation replaces the destination as a unit.
+                // Invalidate before reseeding so an A→B→A clone sequence
+                // cannot make an old A listing current again by restoring
+                // matching host and folder text later in this effect.
+                invalidate_directory_browse(
+                    browse_generation,
+                    browse_request,
+                    browse_result,
+                    browse_error,
+                );
                 reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &prefill.cwd);
+                // Clone owns a separate installation-reconciliation contract;
+                // a new clone generation replaces any earlier history choice.
+                remembered_destination.set(None);
                 reseed_cloned_field(
                     &mut title,
                     &mut title_raw_seed,
@@ -869,6 +1519,32 @@ pub(super) fn CreateSessionForm(
                     &mut invocation_edited,
                     &prefill.invocation,
                 );
+                if let Some(launch) = &prefill.launch {
+                    // A structured snapshot is the source's explicit
+                    // request, whereas its invocation is only the compiler's
+                    // result. Preserve the former exactly for clone.
+                    creation_surface.set(CreationSurface::Structured);
+                    structured_harness.set(Some(launch.harness));
+                    structured_model_raw_seed.set(launch.model.clone());
+                    structured_model_edited.set(false);
+                    structured_model.set(launch.model.clone());
+                    // A restored model must establish ownership just like a
+                    // freshly typed one. Known catalog ids override this
+                    // fallback during harness reconciliation; an unknown id
+                    // needs the source harness so it cannot leak across one.
+                    custom_model_harness.set(launch.model.as_ref().map(|_| launch.harness));
+                    structured_effort.set(launch.effort);
+                    structured_permissions.set(launch.permissions);
+                } else {
+                    creation_surface.set(CreationSurface::Legacy);
+                    structured_harness.set(None);
+                    structured_model_raw_seed.set(None);
+                    structured_model_edited.set(false);
+                    structured_model.set(None);
+                    custom_model_harness.set(None);
+                    structured_effort.set(None);
+                    structured_permissions.set(None);
+                }
                 // A prefill is as fresh an intent as any manual edit —
                 // see the field `oninput` handlers below for both edges
                 // of the "the key describes what was submitted" rule
@@ -878,6 +1554,10 @@ pub(super) fn CreateSessionForm(
                 // the form held then, which this prefill has just
                 // replaced wholesale.
                 error.set(None);
+                // Compatibility prose belongs to the previous whole draft
+                // too. A mounted second clone must not inherit a warning
+                // about values this generation has already replaced.
+                composer_reset_reason.set(None);
 
                 // item2-review2.md F2: every new generation starts its OWN
                 // host and agent decisions from a clean slate, cleared BEFORE any
@@ -1024,9 +1704,159 @@ pub(super) fn CreateSessionForm(
         resolve_agent(chosen_profile.peek().as_ref(), offered, seeded).choice
     };
 
+    let catalog_models = launch_catalog
+        .read()
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .cloned()
+        .unwrap_or_default();
+    let current_history_target = create_target();
+    let recent_history = offered_history
+        .read()
+        .as_ref()
+        .and_then(|(target, history)| {
+            (Some(target) == current_history_target.as_ref()
+                && Some(target) == destination_now.as_ref())
+            .then_some(history)
+        })
+        .cloned()
+        .unwrap_or_default();
+    // Rank only combinations compatible with every explicit choice. Activating
+    // one still replaces the whole draft; filtering decides which historical
+    // combinations are offered, not which fields activation may write.
+    let recent_filter = crate::launch_composer::ComposerFilter {
+        harness: structured_harness(),
+        model: structured_model(),
+        effort: structured_effort(),
+        permissions: structured_permissions(),
+    };
+    let recent_launches =
+        crate::launch_composer::matching_recents(&recent_history, &recent_filter, Some(&cwd()))
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+    let selected_host_label = selected
+        .and_then(|id| hosts.iter().find(|host| host.id == id))
+        .map(HostOption::label)
+        .unwrap_or_else(|| "unavailable host".to_string());
+    // The host selector still shows unavailable destinations so a user can
+    // see what changed, but an agent choice must not make Launch look ready
+    // when the helm already knows that destination cannot accept it.
+    let selected_host_available = selected.is_some_and(|id| {
+        hosts
+            .iter()
+            .find(|host| host.id == id)
+            .is_some_and(|host| host.phase.is_none())
+    });
+    let structured_efforts = structured_harness()
+        .map(|harness| {
+            crate::launch_composer::compatible_efforts(
+                harness,
+                structured_model().as_deref(),
+                &catalog_models,
+            )
+        })
+        .unwrap_or_default();
+    // A stored structured snapshot is provenance, rather than a promise that
+    // a later release still supports every combination it named. Keep it
+    // visible for clone, but refuse to turn an incompatible known choice into
+    // a different launch by guessing a replacement.
+    let structured_choice_error = structured_harness().and_then(|harness| {
+        let selection = LaunchSelection {
+            harness,
+            model: structured_model(),
+            effort: structured_effort(),
+            permissions: structured_permissions(),
+        };
+        (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
+            "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
+        )
+    });
+    // Peer-owned values remain separate directional runs. A single formatted
+    // summary lets a strong RTL host, folder, or model reorder neighboring
+    // punctuation and make a destination read as something it is not.
+    let summary_harness = structured_harness()
+        .map(|harness| format!("{harness:?}"))
+        .unwrap_or_else(|| "choose a harness".to_string());
+    let summary_folder = display_peer(&cwd());
+    let summary_model = structured_model()
+        .map(|model| display_peer(&model))
+        .unwrap_or_else(|| "default".to_string());
+    let summary_effort = structured_effort().map(effort_value).unwrap_or("default");
+    let summary_permissions = structured_permissions()
+        .map(|permission| format!("{permission:?}"))
+        .unwrap_or_else(|| "default".to_string());
+    let catalog_for_submit = catalog_models.clone();
+    let catalog_for_harness = catalog_models.clone();
+    let catalog_for_search = catalog_models.clone();
+    let catalog_for_custom_model = catalog_models.clone();
+    let search_result_groups =
+        crate::launch_composer::grouped_search_results(crate::launch_composer::search_results(
+            &recent_history,
+            &catalog_models,
+            &composer_search(),
+        ));
+    let search_results_for_keys = search_result_groups
+        .iter()
+        .flat_map(|(_, results)| results.iter().cloned())
+        .collect::<Vec<_>>();
+    let browse_base = base.clone();
+    // This snapshot is used only to construct the outbound request. The
+    // reply is checked against `browse_target`, which stays live while the
+    // request is in flight.
+    let browse_hosts = hosts.clone();
+    let browse_target = create_target;
+    let browse_cwd = cwd;
+    let browse_cwd_raw_seed = cwd_raw_seed;
+    let browse_cwd_edited = cwd_edited;
+    let browse_base_for_folder = browse_base.clone();
+    let browse_hosts_for_folder = browse_hosts.clone();
+    let hosts_for_destination_choice = hosts.clone();
     rsx! {
+        div {
+            class: "launch-composer-backdrop",
+            role: "presentation",
+            onclick: move |_| {
+                // This is a handler-time decision. The rendered `busy` value
+                // can be one turn stale immediately after submit, when
+                // unmounting would cancel the create future and strand its
+                // page-operation claim.
+                if !ops.busy_now() {
+                    on_cancel.call(());
+                }
+            },
         form {
             class: "create-session-form",
+            // These are diagnostic state, not an authority channel. Keeping
+            // the live connection and activation count on the mounted form
+            // gives browser tests a synchronous observation point for races
+            // that deliberately keep the visible result unchanged.
+            "data-history-fetched-revision": "{fetched_history_revision}",
+            "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
+            "data-browse-activation-attempts": "{browse_activation_attempts}",
+            "data-browse-reply-completions": "{browse_reply_completions}",
+            "data-history-activation-attempts": "{history_activation_attempts}",
+            "data-remembered-destination-valid": "{remembered_destination_valid}",
+            role: "dialog",
+            aria_modal: "true",
+            aria_label: "launch a session",
+            onmounted: move |_| {
+                install_composer_focus_trap();
+                focus_composer_surface();
+            },
+            onclick: move |evt| {
+                // A click that leaves the search surface must make its
+                // hidden results ineligible before another control handles
+                // a following Enter. The search wrapper stops its own
+                // events, so typing and choosing inside it keep the listbox.
+                composer_search_open.set(false);
+                evt.stop_propagation();
+            },
+            onkeydown: move |evt| {
+                if evt.key() == Key::Escape && !ops.busy_now() {
+                    on_cancel.call(());
+                }
+            },
             onsubmit: move |evt| {
                 evt.prevent_default();
                 // The claim is the guard, and it is synchronous: it covers a
@@ -1041,9 +1871,9 @@ pub(super) fn CreateSessionForm(
                 // the server knows whether the lost reply belonged to a
                 // session that actually exists. This handler's job is merely
                 // to send the SAME key for every retry of one intent.
-                if !ops.claim() {
+                let Some(op_guard) = ops.claim_guard() else {
                     return;
-                }
+                };
                 // No agent, no create. "Nothing is selected" is a real state
                 // rather than a gap to be filled — a profile that was chosen
                 // or remembered and has since been deleted leaves the dialog
@@ -1051,22 +1881,42 @@ pub(super) fn CreateSessionForm(
                 // otherwise fall back to still holds whatever was typed into
                 // it earlier. Launching that would run something nobody
                 // picked while the note beside it said nothing was selected.
-                let Some(choice) = resolve_now() else {
-                    error.set(Some(
-                        "no agent is selected for this create — choose a profile, or choose \
-                         \"custom command\" to run the command below"
-                            .to_string(),
-                    ));
-                    ops.release();
-                    return;
-                };
                 // Frozen HERE, from what was just resolved, and not touched
                 // again: the minting await below can span a deletion or
                 // another client's remembered-default write, and re-resolving
                 // across it would let the request's MODE differ from the one
                 // the button was pressed on. A profile that goes away in that
                 // window is refused by the supervisor, by name.
-                let launch = match choice {
+                let launch = if *creation_surface.peek() == CreationSurface::Structured {
+                    let Some(harness) = *structured_harness.peek() else {
+                        error.set(Some("choose a structured harness before launching".to_string()));
+                        ops.release();
+                        return;
+                    };
+                    let selection = LaunchSelection {
+                        harness,
+                        model: structured_model.peek().clone(),
+                        effort: *structured_effort.peek(),
+                        permissions: *structured_permissions.peek(),
+                    };
+                    if !crate::launch_composer::selection_is_compatible(
+                        &selection,
+                        &catalog_for_submit,
+                    ) {
+                        error.set(Some(
+                            "this saved choice is no longer supported by the current catalog; choose a compatible model or effort".to_string(),
+                        ));
+                        ops.release();
+                        return;
+                    }
+                    LaunchIntent::Structured(selection)
+                } else {
+                    let Some(choice) = resolve_now() else {
+                        error.set(Some("no agent is selected for this create — choose a profile, or choose \"custom command\" to run the command below".to_string()));
+                        ops.release();
+                        return;
+                    };
+                    match choice {
                     // The RAW bytes while untouched, not the escaped display
                     // the field shows — `profiles::submitted_field` is the
                     // same read-back rule the profile editor uses for its
@@ -1076,7 +1926,8 @@ pub(super) fn CreateSessionForm(
                         *invocation_edited.peek(),
                         invocation_raw_seed.peek().as_deref(),
                     )),
-                    AgentChoice::Profile(id) => LaunchIntent::Profile(id),
+                        AgentChoice::Profile(id) => LaunchIntent::Profile(id),
+                    }
                 };
                 // The HOST is derived here too, from the live signal — never
                 // from what the last render computed. The same one-turn window
@@ -1087,11 +1938,31 @@ pub(super) fn CreateSessionForm(
                 let target_now = create_target.peek().clone();
                 let selected_now =
                     effective_create_host(&hosts, chosen_host.peek().to_owned(), open_host.as_ref());
+                if !remembered_destination_matches(
+                    remembered_destination.peek().as_ref(),
+                    live_destination.peek().as_ref(),
+                ) {
+                    error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
+                    return;
+                }
                 // The host target must have caught up with the selector before
                 // the request can bind its idempotency and connection claims.
                 if !target_matches_selection(selected_now, &hosts, target_now.as_ref()) {
                     error.set(Some(
                         "the target host changed while this create was being submitted, so                          nothing was sent — check the agent and press create again"
+                            .to_string(),
+                    ));
+                    ops.release();
+                    return;
+                }
+                if !selected_now.is_some_and(|id| {
+                    hosts
+                        .iter()
+                        .find(|host| host.id == id)
+                        .is_some_and(|host| host.phase.is_none())
+                }) {
+                    error.set(Some(
+                        "the selected host is unavailable, so this create was not sent — choose a connected host"
                             .to_string(),
                     ));
                     ops.release();
@@ -1145,7 +2016,12 @@ pub(super) fn CreateSessionForm(
                 // never connected — means no claim (see `connection_claim`).
                 let expected_incarnation = connection_claim(&hosts, binding.host);
                 error.set(None);
+                let catalog_for_recheck = catalog_for_submit.clone();
                 spawn(async move {
+                    // Own the release through every await. If navigation or a
+                    // parent state change drops this component, dropping this
+                    // future releases the shared mutation gate as well.
+                    let _op_guard = op_guard;
                     // Mint until the key and the binding agree.
                     //
                     // Minting is an `await` (the wasm renderer asks the
@@ -1205,16 +2081,42 @@ pub(super) fn CreateSessionForm(
                         // ordinary path; different exactly when a queued edit
                         // landed during the mint.
                         //
-                        // The agent is deliberately NOT re-read here. It was
-                        // frozen when the button was pressed, and re-resolving
-                        // it would let a deletion or another client's
-                        // remembered-default write — either of which can land
-                        // during this await — change which creation MODE the
-                        // request carries. A key that names one intent and a
-                        // body that carries another is the exact failure the
-                        // key exists to prevent, so the press wins and a
-                        // profile that has since gone is refused by the
-                        // supervisor, by name.
+                        // Profile/default changes are intentionally frozen at
+                        // the press: a catalog refresh is not a new user
+                        // choice. Structured controls are different. Every
+                        // visible harness/model/effort/permission click is a
+                        // deliberate edit, and it may have been queued ahead
+                        // of the render that disables controls. Re-read that
+                        // complete declarative intent so the next key binds
+                        // exactly what the person now sees.
+                        if matches!(binding.agent, LaunchIntent::Structured(_)) {
+                            let Some(harness) = *structured_harness.peek() else {
+                                error.set(Some(
+                                    "the structured launch choice changed while its idempotency key was being generated; choose a harness and press launch again".to_string(),
+                                ));
+                                ops.release();
+                                return;
+                            };
+                            let selection = LaunchSelection {
+                                harness,
+                                model: structured_model.peek().clone(),
+                                effort: *structured_effort.peek(),
+                                permissions: *structured_permissions.peek(),
+                            };
+                            if *creation_surface.peek() != CreationSurface::Structured
+                                || !crate::launch_composer::selection_is_compatible(
+                                    &selection,
+                                    &catalog_for_recheck,
+                                )
+                            {
+                                error.set(Some(
+                                    "the structured launch choice changed while its idempotency key was being generated; review it and press launch again".to_string(),
+                                ));
+                                ops.release();
+                                return;
+                            }
+                            binding.agent = LaunchIntent::Structured(selection);
+                        }
                         binding = IntentBinding {
                             cwd: submitted_field(
                                 &cwd.peek(),
@@ -1235,9 +2137,20 @@ pub(super) fn CreateSessionForm(
                     // key claims — including the mode itself, which the
                     // supervisor folds into its own idempotency fingerprint
                     // precisely so a retried create cannot flip it.
+                    // Recheck after key minting, including retries that already
+                    // had a key. A new target must not legitimize an old path.
+                    if !remembered_destination_matches(
+                        remembered_destination.peek().as_ref(),
+                        live_destination.peek().as_ref(),
+                    ) {
+                        error.set(Some(REMEMBERED_DESTINATION_CHANGED.to_string()));
+                        intent_key.set(None);
+                        return;
+                    }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
                         LaunchIntent::Profile(id) => CreateAgent::Profile(id),
+                        LaunchIntent::Structured(selection) => CreateAgent::Structured(selection),
                     };
                     match create_session(
                         &base,
@@ -1309,6 +2222,461 @@ pub(super) fn CreateSessionForm(
                     }
                 });
             },
+            if *creation_surface.read() == CreationSurface::Structured {
+                div { class: "launch-composer-header",
+                    h2 { "New session" }
+                    button {
+                        r#type: "button",
+                        class: "launch-composer-reset",
+                        disabled: busy,
+                        onclick: move |_| {
+                            if !draft_transition_allowed(ops) {
+                                return;
+                            }
+                            // Reset only the declarative launch choices. The
+                            // host and folder are launch context, often
+                            // supplied by the selected session, and clearing
+                            // them would turn a quick correction into a new
+                            // destination decision.
+                            structured_harness.set(None);
+                            structured_model_raw_seed.set(None);
+                            structured_model_edited.set(false);
+                            structured_model.set(None);
+                            custom_model_harness.set(None);
+                            structured_effort.set(None);
+                            structured_permissions.set(None);
+                            composer_reset_reason.set(None);
+                            promote_fetched_history_snapshot(
+                                offered_history, create_target, fetched_history,
+                            );
+                            composer_search.set(String::new());
+                            composer_search_open.set(false);
+                            intent_key.set(None);
+                        },
+                        "reset choices"
+                    }
+                }
+                div {
+                    class: "launch-composer-search",
+                    onclick: move |evt| evt.stop_propagation(),
+                    input {
+                        r#type: "search",
+                        role: "combobox",
+                        aria_label: "search folders, harnesses, and models",
+                        aria_expanded: composer_search_open(),
+                        aria_controls: "launch-composer-search-results",
+                        aria_activedescendant: (composer_search_open() && !search_results_for_keys.is_empty())
+                            .then(|| format!("launch-composer-search-option-{}", composer_search_index())),
+                        placeholder: "search folders, harnesses, models…",
+                        autocomplete: "off",
+                        // Search includes literal host paths and model IDs;
+                        // browser text correction would change the query's meaning.
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        // The dialog opens in structured mode, so its
+                        // searchable chooser is the first meaningful focus
+                        // target rather than leaving keyboard users behind
+                        // the newly mounted modal.
+                        autofocus: true,
+                        // Dioxus can retain an already-created browser node
+                        // across the render that makes this dialog visible,
+                        // and HTML only applies `autofocus` while inserting a
+                        // node. Ask the mounted renderer as well so the
+                        // keyboard handoff is real in WebKit and Chromium,
+                        // not merely present in the serialized markup.
+                        onmounted: move |element| {
+                            let input = element.data();
+                            spawn(async move {
+                                let _ = input.set_focus(true).await;
+                            });
+                        },
+                        value: "{composer_search}",
+                        disabled: busy,
+                        oninput: move |evt| {
+                            promote_history_snapshot(
+                                offered_history, create_target(), history_for_search.clone(),
+                            );
+                            composer_search.set(evt.value());
+                            composer_search_open.set(true);
+                            composer_search_index.set(0);
+                        },
+                        onkeydown: {
+                            let catalog = catalog_for_search.clone();
+                            let browse_base = browse_base.clone();
+                            let browse_hosts = browse_hosts.clone();
+                            let history_target = current_history_target.clone();
+                            move |evt| {
+                            match evt.key() {
+                                // Escape belongs to search only while its
+                                // result surface is open. Once that surface
+                                // is already gone, let the dialog's handler
+                                // receive the same key and dismiss the draft.
+                                // Consuming both states strands keyboard
+                                // users on an otherwise closed combobox.
+                                Key::Escape if composer_search_open() => {
+                                    evt.prevent_default();
+                                    evt.stop_propagation();
+                                    composer_search_open.set(false);
+                                }
+                                Key::ArrowDown if composer_search_open() && !search_results_for_keys.is_empty() => {
+                                    evt.prevent_default();
+                                    composer_search_index.set(
+                                        (composer_search_index() + 1)
+                                            % search_results_for_keys.len(),
+                                    );
+                                    scroll_composer_search_result(composer_search_index());
+                                }
+                                Key::ArrowUp if composer_search_open() && !search_results_for_keys.is_empty() => {
+                                    evt.prevent_default();
+                                    composer_search_index.set(
+                                        (composer_search_index() + search_results_for_keys.len() - 1)
+                                            % search_results_for_keys.len(),
+                                    );
+                                    scroll_composer_search_result(composer_search_index());
+                                }
+                                // While the combobox owns focus, Enter belongs to search even
+                                // when the query has no matches. Otherwise a no-result query
+                                // bubbles to the form and launches whatever stale selection the
+                                // composer happened to hold.
+                                Key::Enter if !evt.is_composing() => {
+                                    evt.prevent_default();
+                                    if !draft_transition_allowed(ops) {
+                                        return;
+                                    }
+                                    if composer_search_open() && let Some(result) =
+                                        search_results_for_keys.get(composer_search_index()).cloned()
+                                    {
+                                        // Every selection invalidates an old directory listing
+                                        // before it changes the draft. BrowsePath installs its
+                                        // replacement request below, so a predecessor cannot
+                                        // win the race between these two UI transitions.
+                                        invalidate_directory_browse(
+                                            browse_generation, browse_request, browse_result, browse_error,
+                                        );
+                                        // Keep `result` as the action this key accepted. Promotion
+                                        // changes later suggestions only; it must not substitute a
+                                        // fresh matching result between key handling and draft apply.
+                                        promote_fetched_history_snapshot(
+                                            offered_history, create_target, fetched_history,
+                                        );
+                                        let browse_path = apply_composer_search_result(
+                                            result,
+                                            history_target.clone(),
+                                            live_destination,
+                                            remembered_destination,
+                                            history_activation_attempts,
+                                            cwd,
+                                            cwd_raw_seed,
+                                            cwd_edited,
+                                            structured_harness,
+                                            structured_model,
+                                            structured_model_raw_seed,
+                                            structured_model_edited,
+                                            custom_model_harness,
+                                            structured_effort,
+                                            structured_permissions,
+                                            composer_reset_reason,
+                                            &catalog,
+                                            intent_key,
+                                        );
+                                        if let Some(path) = browse_path {
+                                            request_directory_browse(
+                                                browse_base.clone(),
+                                                selected,
+                                                &browse_hosts,
+                                                browse_target,
+                                                path,
+                                                browse_generation,
+                                                browse_request, browse_result, browse_error, browse_reply_completions,
+                                                live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                            );
+                                        }
+                                        composer_search.set(String::new());
+                                        composer_search_open.set(false);
+                                        focus_composer_surface();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        },
+                    }
+                    if composer_search_open() && !search_result_groups.is_empty() {
+                        div {
+                            id: "launch-composer-search-results",
+                            role: "listbox",
+                            class: "launch-composer-search-results",
+                            for (group_index, (group, results)) in search_result_groups.iter().cloned().enumerate() {
+                                div {
+                                    role: "group",
+                                    aria_label: group.label(),
+                                    class: if group == crate::launch_composer::ComposerSearchGroup::RecentSetups { "launch-composer-search-group launch-composer-search-recents" } else { "launch-composer-search-group" },
+                                    div { class: "launch-composer-search-group-heading", "{group.label()}" }
+                                    for (result_index, result) in results.into_iter().enumerate() {
+                                        {
+                                            let index = search_result_groups[..group_index]
+                                                .iter()
+                                                .map(|(_, prior)| prior.len())
+                                                .sum::<usize>() + result_index;
+                                            rsx! {
+                                                button {
+                                                    id: "launch-composer-search-option-{index}",
+                                                    r#type: "button",
+                                                    role: "option",
+                                                    dir: "ltr",
+                                                    aria_selected: composer_search_index() == index,
+                                                    class: if matches!(result, crate::launch_composer::ComposerSearchResult::Recent(_)) {
+                                                        if composer_search_index() == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
+                                                    } else if composer_search_index() == index { "selected" } else { "" },
+                                                    title: match &result {
+                                                        crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
+                                                            "{} · {} · {}",
+                                                            display_peer(&entry.cwd), selected_host_label,
+                                                            display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
+                                                        ),
+                                                        _ => String::new(),
+                                                    },
+                                                    // Search recents use two visual spans as ordinary
+                                                    // recents do. Their accessible label repeats the
+                                                    // complete title with the result kind, instead of
+                                                    // losing the separator where those spans meet.
+                                                    aria_label: match &result {
+                                                        crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
+                                                            "Recent setup: {} · {} · {}",
+                                                            display_peer(&entry.cwd), selected_host_label,
+                                                            display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
+                                                        ),
+                                                        _ => String::new(),
+                                                    },
+                                                    onclick: {
+                                                        let result = result.clone();
+                                                        let catalog = catalog_for_search.clone();
+                                                        let browse_base = browse_base.clone();
+                                                        let browse_hosts = browse_hosts.clone();
+                                                        let history_target = current_history_target.clone();
+                                                        move |_| {
+                                                            if !draft_transition_allowed(ops) {
+                                                                return;
+                                                            }
+                                                            invalidate_directory_browse(
+                                                                browse_generation, browse_request, browse_result, browse_error,
+                                                            );
+                                                            // The click owns the captured result. A
+                                                            // newer history may refresh suggestions,
+                                                            // never the result this click applies.
+                                                            promote_fetched_history_snapshot(
+                                                                offered_history, create_target, fetched_history,
+                                                            );
+                                                            let browse_path = apply_composer_search_result(
+                                                                result.clone(), history_target.clone(),
+                                                                live_destination, remembered_destination,
+                                                                history_activation_attempts, cwd, cwd_raw_seed, cwd_edited,
+                                                                structured_harness, structured_model,
+                                                                structured_model_raw_seed, structured_model_edited,
+                                                                custom_model_harness, structured_effort,
+                                                                structured_permissions, composer_reset_reason,
+                                                                &catalog, intent_key,
+                                                            );
+                                                            if let Some(path) = browse_path {
+                                                                request_directory_browse(
+                                                                    browse_base.clone(), selected, &browse_hosts,
+                                                                    browse_target, path, browse_generation,
+                                                                    browse_request, browse_result, browse_error, browse_reply_completions,
+                                                                    live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                                                );
+                                                            }
+                                                            composer_search.set(String::new());
+                                                            composer_search_open.set(false);
+                                                            focus_composer_surface();
+                                                        }
+                                                    },
+                                                    match &result {
+                                                        // Folder actions alter only cwd; a recent
+                                                        // setup visibly names every choice it owns.
+                                                        crate::launch_composer::ComposerSearchResult::UsePath(folder)
+                                                        | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! { "Use this path: {display_peer(folder)}" },
+                                                        crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
+                                                        crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {harness:?}" },
+                                                        crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
+                                                        crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
+                                                            span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&entry.cwd)} · {selected_host_label}" }
+                                                            span { class: "launch-composer-search-recent-selection", "{display_peer(&crate::launch_composer::selection_summary(&entry.selection))}" }
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+                div { class: "launch-composer-selections", aria_label: "selected launch choices",
+                    button { r#type: "button", class: "launch-composer-chip", disabled: busy,
+                        aria_label: "reset destination to local home",
+                        onclick: move |_| {
+                            if !draft_transition_allowed(ops) { return; }
+                            // The ordinary default may follow an open remote
+                            // session. This action instead makes the stated
+                            // local destination an explicit user choice.
+                            chosen_host.set(local_host_id);
+                            live_destination.set(local_destination.clone());
+                            remembered_destination.set(None);
+                            promote_fetched_history_snapshot(
+                                offered_history, create_target, fetched_history,
+                            );
+                            clone_host_state.set(CloneHostState::UserTookOver);
+                            invalidate_directory_browse(
+                                browse_generation, browse_request, browse_result, browse_error,
+                            );
+                            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
+                            intent_key.set(None);
+                        },
+                        "Host: {selected_host_label} ×"
+                    }
+                    button { r#type: "button", class: "launch-composer-chip", dir: "ltr", disabled: busy,
+                        aria_label: "reset folder to home",
+                        onclick: move |_| {
+                            if !draft_transition_allowed(ops) { return; }
+                            remembered_destination.set(None);
+                            promote_fetched_history_snapshot(
+                                offered_history, create_target, fetched_history,
+                            );
+                            invalidate_directory_browse(
+                                browse_generation, browse_request, browse_result, browse_error,
+                            );
+                            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
+                            intent_key.set(None);
+                        },
+                        "Folder: {display_peer(&cwd())} ×"
+                    }
+                    if let Some(harness) = structured_harness() {
+                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
+                            aria_label: "remove harness {harness:?}",
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_harness.set(None); structured_model_raw_seed.set(None); structured_model_edited.set(false); structured_model.set(None);
+                                custom_model_harness.set(None); structured_effort.set(None);
+                                intent_key.set(None);
+                            },
+                            "{harness:?} ×"
+                        }
+                    }
+                    if let Some(model) = structured_model() {
+                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
+                            aria_label: "remove model {display_peer(&model)}",
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_model_raw_seed.set(None); structured_model_edited.set(false); structured_model.set(None); custom_model_harness.set(None); intent_key.set(None);
+                            },
+                            "Model: {display_peer(&model)} ×"
+                        }
+                    }
+                    if let Some(effort) = structured_effort() {
+                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
+                            aria_label: "remove effort {effort_value(effort)}",
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_effort.set(None); intent_key.set(None);
+                            },
+                            "Effort: {effort_value(effort)} ×"
+                        }
+                    }
+                    if let Some(permissions) = structured_permissions() {
+                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
+                            aria_label: "remove permissions {permissions:?}",
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_permissions.set(None); intent_key.set(None);
+                            },
+                            "Permissions: {permissions:?} ×"
+                        }
+                    }
+                }
+                div { class: "launch-composer-recents",
+                        div { class: "launch-composer-recents-heading", "recent setups" }
+                        div { class: "launch-composer-recent-slots",
+                        for (entry, summary) in recent_launches.iter().take(3).map(|entry| (
+                            entry,
+                            crate::launch_composer::selection_summary(&entry.selection),
+                        )) {
+                            button {
+                                r#type: "button",
+                                dir: "ltr",
+                                disabled: busy,
+                                title: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
+                                // Visual lines are intentionally separate so a
+                                // long destination cannot consume the launch
+                                // selection. Give assistive technology the
+                                // same complete, punctuated label as `title`;
+                                // concatenating the two spans would lose the
+                                // delimiter at their DOM boundary.
+                                aria_label: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
+                                onclick: {
+                                    let entry = entry.clone();
+                                    let catalog = catalog_models.clone();
+                                    let history = history_for_recents.clone();
+                                    let history_target = current_history_target.clone();
+                                    move |_| {
+                                        if !draft_transition_allowed(ops) {
+                                            return;
+                                        }
+                                        if !admit_history_destination(
+                                            history_target.clone(), live_destination,
+                                            remembered_destination, history_activation_attempts,
+                                        ) { return; }
+                                        promote_history_snapshot(
+                                            offered_history,
+                                            create_target(),
+                                            history.clone(),
+                                        );
+                                        let selection = crate::launch_composer::select_recent(&entry);
+                                        structured_harness.set(Some(selection.harness));
+                                        structured_model_raw_seed.set(selection.model.clone());
+                                        structured_model_edited.set(false);
+                                        structured_model.set(selection.model);
+                                        custom_model_harness.set(
+                                            entry.selection.model.as_ref().and_then(|model| {
+                                                (!catalog.iter().any(|candidate| candidate.id == *model))
+                                                    .then_some(entry.selection.harness)
+                                            }),
+                                        );
+                                        structured_effort.set(selection.effort);
+                                        structured_permissions.set(selection.permissions);
+                                        invalidate_directory_browse(
+                                            browse_generation, browse_request, browse_result, browse_error,
+                                        );
+                                        reseed_cloned_field(
+                                            &mut cwd,
+                                            &mut cwd_raw_seed,
+                                            &mut cwd_edited,
+                                            &entry.cwd,
+                                        );
+                                        composer_reset_reason.set(None);
+                                        intent_key.set(None);
+                                    }
+                                },
+                                span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&entry.cwd)} · {selected_host_label}" }
+                                span { class: "launch-composer-recent-selection", "{display_peer(&summary)}" }
+                            }
+                        }
+                        }
+                }
             // Working directory and agent command are literal text that
             // gets EXECUTED, never prose — OS-level text mangling has no
             // way to tell the difference and "corrects" them anyway
@@ -1328,7 +2696,7 @@ pub(super) fn CreateSessionForm(
             // First, because it decides what everything below it means: a
             // working directory and an agent command are only meaningful
             // relative to the machine they will run on.
-            label {
+            label { class: "launch-composer-host",
                 "host"
                 select {
                     class: "create-session-host",
@@ -1343,7 +2711,18 @@ pub(super) fn CreateSessionForm(
                     // create.
                     value: selected.map(|id| id.to_string()).unwrap_or_default(),
                     onchange: move |evt| {
-                        chosen_host.set(evt.value().parse::<HostId>().ok());
+                        if !draft_transition_allowed(ops) {
+                            return;
+                        }
+                        let next_host = evt.value().parse::<HostId>().ok();
+                        chosen_host.set(next_host);
+                        // A queued history callback can run before rerender.
+                        // Revoke the old destination in this same event turn.
+                        live_destination.set(history_target(&hosts_for_destination_choice, next_host));
+                        remembered_destination.set(None);
+                        invalidate_directory_browse(
+                            browse_generation, browse_request, browse_result, browse_error,
+                        );
                         // The agent choice deliberately survives: every host
                         // consumes the same helm catalog.
                         // And it takes this generation's clone-derived
@@ -1388,6 +2767,16 @@ pub(super) fn CreateSessionForm(
                      one selected now"
                 }
             }
+            if selected.is_some() && !selected_host_available {
+                div { class: "create-session-host-note",
+                    "the selected host is unavailable; choose a connected host before launching"
+                }
+            }
+            if !remembered_destination_valid {
+                div { class: "create-session-host-note",
+                    "{REMEMBERED_DESTINATION_CHANGED}"
+                }
+            }
             // The clone-specific reconciliation, in the same voice and the
             // same slot: the row this form was cloned from could not be
             // confirmed as the install it was cloned from (mismatched, or
@@ -1399,24 +2788,449 @@ pub(super) fn CreateSessionForm(
             if let Some(note) = clone_host_note {
                 div { class: "create-session-host-note", "{note}" }
             }
+            if *creation_surface.read() == CreationSurface::Structured {
+                // Folder is deliberately adjacent to Host in the ordinary
+                // composer. A destination is a pair, and separating the two
+                // makes a familiar launch read like an agent choice rather
+                // than a place to run it.
+                label { class: "launch-composer-folder",
+                    "folder"
+                    input {
+                        r#type: "text",
+                        required: true,
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        dir: "ltr",
+                        value: "{cwd}",
+                        disabled: busy,
+                        aria_label: "folder",
+                        oninput: move |evt| {
+                            if !draft_transition_allowed(ops) { return; }
+                            promote_fetched_history_snapshot(
+                                offered_history, create_target, fetched_history,
+                            );
+                            cwd.set(evt.value());
+                            cwd_edited.set(true);
+                            remembered_destination.set(None);
+                            invalidate_directory_browse(
+                                browse_generation, browse_request, browse_result, browse_error,
+                            );
+                            intent_key.set(None);
+                        },
+                    }
+                    div { class: "launch-composer-folder-options", aria_label: "recent folders",
+                        for folder in recent_history.folders.iter().take(3) {
+                            button {
+                                r#type: "button",
+                                class: if submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd { "selected" } else { "" },
+                                aria_pressed: submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd,
+                                disabled: busy,
+                                onclick: {
+                                    let folder = folder.display_cwd.clone();
+                                    let history_target = current_history_target.clone();
+                                    move |_| {
+                                        if !draft_transition_allowed(ops) { return; }
+                                        if !admit_history_destination(
+                                            history_target.clone(), live_destination,
+                                            remembered_destination, history_activation_attempts,
+                                        ) { return; }
+                                        promote_fetched_history_snapshot(
+                                            offered_history, create_target, fetched_history,
+                                        );
+                                        invalidate_directory_browse(
+                                            browse_generation, browse_request, browse_result, browse_error,
+                                        );
+                                        reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
+                                        intent_key.set(None);
+                                    }
+                                },
+                                // Every option owns this slot, including an
+                                // unselected one. Selection must not change a
+                                // sibling's measured position while a reader
+                                // compares folder history.
+                                span {
+                                    class: "launch-composer-option-check",
+                                    aria_hidden: "true",
+                                    "✓"
+                                }
+                                "{display_peer(&folder.display_cwd)}"
+                            }
+                        }
+                    }
+                    button {
+                        r#type: "button",
+                        disabled: busy || selected.is_none(),
+                        onclick: move |_| {
+                            if !draft_transition_allowed(ops) { return; }
+                            request_directory_browse(
+                                browse_base_for_folder.clone(), selected, &browse_hosts_for_folder, browse_target,
+                                submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
+                                browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
+                                live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                            );
+                        },
+                        "browse this path"
+                    }
+                }
+                div { class: "launch-composer-choice launch-composer-harness-choice",
+                    span { "harness" }
+                    div { class: "launch-composer-options",
+                        for (harness, label) in [
+                            (LaunchHarness::Codex, "Codex"),
+                            (LaunchHarness::Claude, "Claude"),
+                            (LaunchHarness::Muse, "Muse"),
+                        ] {
+                            button {
+                                r#type: "button",
+                                class: if *structured_harness.read() == Some(harness) { "selected" } else { "" },
+                                aria_pressed: *structured_harness.read() == Some(harness),
+                                disabled: busy,
+                                onclick: {
+                                    let catalog = catalog_for_harness.clone();
+                                    move |_| {
+                                    if !draft_transition_allowed(ops) {
+                                        return;
+                                    }
+                                    promote_fetched_history_snapshot(
+                                        offered_history, create_target, fetched_history,
+                                    );
+                                    let selection = LaunchSelection {
+                                        harness: structured_harness().unwrap_or(harness),
+                                        model: structured_model(),
+                                        effort: structured_effort(),
+                                        permissions: structured_permissions(),
+                                    };
+                                    let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
+                                        selection, *custom_model_harness.peek(), harness, &catalog,
+                                    );
+                                    composer_reset_reason.set(
+                                        crate::launch_composer::reconciliation_reset_reason(
+                                            &LaunchSelection {
+                                                harness: structured_harness().unwrap_or(harness),
+                                                model: structured_model(),
+                                                effort: structured_effort(),
+                                                permissions: structured_permissions(),
+                                            },
+                                            &selection,
+                                        ),
+                                    );
+                                    structured_harness.set(Some(selection.harness));
+                                    structured_model_raw_seed.set(selection.model.clone());
+                                    structured_model_edited.set(false);
+                                    structured_model.set(selection.model);
+                                    structured_effort.set(selection.effort);
+                                    custom_model_harness.set(owner);
+                                    intent_key.set(None);
+                                    }
+                                },
+                                // Keep the checkmark's text advance in every
+                                // button. CSS only chooses whether it is
+                                // visible, so a selected harness cannot move
+                                // its unchanged peers.
+                                span {
+                                    class: "launch-composer-option-check",
+                                    aria_hidden: "true",
+                                    "✓"
+                                }
+                                "{label}"
+                            }
+                        }
+                        button {
+                            r#type: "button",
+                            disabled: busy,
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) {
+                                    return;
+                                }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                creation_surface.set(CreationSurface::Legacy);
+                                // This is an explicit escape from the
+                                // structured composer, not merely a change
+                                // in which controls are visible. Leaving a
+                                // remembered profile selected would make a
+                                // later Launch run that profile instead of
+                                // the command path the button promised.
+                                chosen_profile.set(Some(AgentChoice::Command));
+                                clone_agent_state.set(CloneAgentState::UserTookOver);
+                                intent_key.set(None);
+                            },
+                            "other / command"
+                        }
+                    }
+                }
+                div { class: "launch-composer-choice launch-composer-model-choice",
+                    span { "model" }
+                    div { class: "launch-composer-options",
+                        button {
+                            r#type: "button",
+                            class: if structured_model.read().is_none() { "selected" } else { "" },
+                            aria_pressed: structured_model.read().is_none(),
+                            disabled: busy,
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) {
+                                    return;
+                                }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_model.set(None);
+                                structured_model_raw_seed.set(None);
+                                structured_model_edited.set(false);
+                                custom_model_harness.set(None);
+                                intent_key.set(None);
+                            },
+                            span {
+                                class: "launch-composer-option-check",
+                                aria_hidden: "true",
+                                "✓"
+                            }
+                            "harness default"
+                        }
+                        // Before choosing a harness, ownership remains in
+                        // the label. Once chosen, narrow this stable catalog
+                        // order to compatible models instead of leaving
+                        // unrelated buttons that would replace the choice.
+                        for model in catalog_models.iter().filter(|model| {
+                            structured_harness().is_none_or(|harness| harness == model.harness)
+                        }) {
+                            button {
+                                key: "{model.id}",
+                                r#type: "button",
+                                class: if structured_model.read().as_deref() == Some(model.id.as_str()) { "selected" } else { "" },
+                                aria_pressed: structured_model.read().as_deref() == Some(model.id.as_str()),
+                                disabled: busy,
+                                onclick: {
+                                    let model = model.clone();
+                                    move |_| {
+                                        if !draft_transition_allowed(ops) {
+                                            return;
+                                        }
+                                        promote_fetched_history_snapshot(
+                                            offered_history, create_target, fetched_history,
+                                        );
+                                        structured_harness.set(Some(model.harness));
+                                        structured_model_raw_seed.set(None);
+                                        structured_model_edited.set(true);
+                                        structured_model.set(Some(model.id.clone()));
+                                        custom_model_harness.set(None);
+                                        let chosen_effort = *structured_effort.peek();
+                                        if let Some(effort) = chosen_effort
+                                            && !model.efforts.contains(&effort)
+                                        {
+                                            structured_effort.set(None);
+                                            composer_reset_reason.set(Some(
+                                                "the selected effort is not in Farhelm's offering for that model, so it was cleared".to_string(),
+                                            ));
+                                        } else {
+                                            composer_reset_reason.set(None);
+                                        }
+                                        intent_key.set(None);
+                                    }
+                                },
+                                span {
+                                    class: "launch-composer-option-check",
+                                    aria_hidden: "true",
+                                    "✓"
+                                }
+                                "{display_peer(&model.id)}"
+                                if structured_harness().is_none() {
+                                    " ({model.harness:?})"
+                                }
+                            }
+                        }
+                    }
+                    details { class: "launch-composer-more",
+                        summary { "more / custom model id" }
+                        input {
+                        r#type: "text",
+                        placeholder: "custom model id",
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        value: if structured_model_edited() {
+                            structured_model.read().as_deref().unwrap_or("").to_string()
+                        } else {
+                            structured_model_raw_seed().as_deref()
+                                .map(display_peer)
+                                .unwrap_or_else(|| structured_model.read().as_deref().unwrap_or("").to_string())
+                        },
+                        disabled: busy || structured_harness.read().is_none(),
+                        oninput: move |evt| {
+                            if !draft_transition_allowed(ops) {
+                                return;
+                            }
+                            promote_fetched_history_snapshot(
+                                offered_history, create_target, fetched_history,
+                            );
+                            let model = (!evt.value().trim().is_empty()).then(|| evt.value());
+                            structured_model_raw_seed.set(None);
+                            structured_model_edited.set(true);
+                            structured_model.set(model.clone());
+                                            custom_model_harness.set(model.as_ref().and_then(|_| *structured_harness.peek()));
+                            if let Some(harness) = *structured_harness.peek() {
+                                let selection = LaunchSelection {
+                                    harness,
+                                    model,
+                                    effort: *structured_effort.peek(),
+                                    permissions: *structured_permissions.peek(),
+                                };
+                                let before = selection.clone();
+                                if !crate::launch_composer::selection_is_compatible(
+                                    &selection,
+                                    &catalog_for_custom_model,
+                                ) {
+                                    structured_effort.set(None);
+                                    composer_reset_reason.set(
+                                        crate::launch_composer::reconciliation_reset_reason(
+                                            &before,
+                                            &LaunchSelection { effort: None, ..selection },
+                                        ),
+                                    );
+                                } else {
+                                    composer_reset_reason.set(None);
+                                }
+                            }
+                            intent_key.set(None);
+                        },
+                        }
+                    }
+                }
+                div { class: "launch-composer-choice launch-composer-effort-choice",
+                    span { "effort" }
+                    div { class: "launch-composer-options",
+                        button {
+                            r#type: "button", class: if structured_effort.read().is_none() { "selected" } else { "" },
+                            aria_pressed: structured_effort.read().is_none(), disabled: busy,
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_effort.set(None); intent_key.set(None);
+                            },
+                            span {
+                                class: "launch-composer-option-check",
+                                aria_hidden: "true",
+                                "✓"
+                            }
+                            "harness default"
+                        }
+                        for effort in structured_efforts {
+                            button {
+                                key: "{effort_value(effort)}", r#type: "button",
+                                class: if *structured_effort.read() == Some(effort) { "selected" } else { "" },
+                                aria_pressed: *structured_effort.read() == Some(effort), disabled: busy,
+                                onclick: move |_| {
+                                    if !draft_transition_allowed(ops) { return; }
+                                    promote_fetched_history_snapshot(
+                                        offered_history, create_target, fetched_history,
+                                    );
+                                    structured_effort.set(Some(effort)); intent_key.set(None);
+                                },
+                                span {
+                                    class: "launch-composer-option-check",
+                                    aria_hidden: "true",
+                                    "✓"
+                                }
+                                "{effort_value(effort)}"
+                            }
+                        }
+                    }
+                }
+                div { class: "launch-composer-choice launch-composer-permissions-choice",
+                    span { "permissions" }
+                    div { class: "launch-composer-options",
+                        button {
+                            r#type: "button", class: if structured_permissions.read().is_none() { "selected" } else { "" },
+                            aria_pressed: structured_permissions.read().is_none(), disabled: busy,
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_permissions.set(None); intent_key.set(None);
+                            },
+                            span {
+                                class: "launch-composer-option-check",
+                                aria_hidden: "true",
+                                "✓"
+                            }
+                            "harness default"
+                        }
+                        button {
+                            r#type: "button", class: if *structured_permissions.read() == Some(LaunchPermission::Yolo) { "selected" } else { "" },
+                            aria_pressed: *structured_permissions.read() == Some(LaunchPermission::Yolo), disabled: busy,
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                structured_permissions.set(Some(LaunchPermission::Yolo)); intent_key.set(None);
+                            },
+                            span {
+                                class: "launch-composer-option-check",
+                                aria_hidden: "true",
+                                "✓"
+                            }
+                            "YOLO"
+                        }
+                    }
+                }
+                if let Some(reason) = structured_choice_error {
+                    div { class: "launch-composer-choice-error", "{reason}" }
+                }
+                if let Some(reason) = composer_reset_reason() {
+                    div { class: "launch-composer-choice-error", role: "status", "{reason}" }
+                }
+            } else {
+                // Legacy profiles and arbitrary commands remain available for
+                // compatibility, but they are an explicit alternate surface
+                // rather than a disabled row mixed into the ordinary launch
+                // choices. Returning here preserves the draft fields users
+                // already entered while making the selected mode visible.
+                div { class: "launch-composer-legacy-action",
+                    button {
+                        r#type: "button",
+                        disabled: busy,
+                        onclick: move |_| {
+                            if !draft_transition_allowed(ops) {
+                                return;
+                            }
+                            creation_surface.set(CreationSurface::Structured);
+                            intent_key.set(None);
+                            error.set(None);
+                        },
+                        "back to harnesses"
+                    }
+                }
+            }
             // The agent, offered from the helm catalog and defaulting
             // to what a session was last created from on this helm (SPEC.md's
             // creation rule; `profiles::resolve_agent`). The empty option is
             // the raw command path below rather than "no agent" — a create
             // always launches something, and this select is which of the two
             // mutually exclusive modes it uses.
-            label {
+            label { class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
                 "agent"
                 select {
+                    class: "create-session-agent",
                     class: "create-session-profile",
                     // Inert for the whole round trip, exactly like the host
                     // selector and for the same reason: the idempotency key
                     // is bound to what is launched, so a selection that moved
                     // between minting and sending would publish a key
                     // belonging to a different create.
-                    disabled: busy,
+                    disabled: busy || *creation_surface.read() == CreationSurface::Structured,
                     value: "{chosen_agent}",
                     onchange: move |evt| {
+                        if !draft_transition_allowed(ops) {
+                            return;
+                        }
                         chosen_profile.set(AgentChoice::from_value(&evt.value()));
                         clone_agent_state.set(CloneAgentState::UserTookOver);
                         // A different agent is a different intended create,
@@ -1512,7 +3326,7 @@ pub(super) fn CreateSessionForm(
                     ],
                 }
             }
-            label {
+            label { class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
                 "working directory"
                 input {
                     r#type: "text",
@@ -1537,7 +3351,14 @@ pub(super) fn CreateSessionForm(
                     value: "{cwd}",
                     disabled: busy,
                     oninput: move |evt| {
+                        if !draft_transition_allowed(ops) {
+                            return;
+                        }
                         cwd.set(evt.value());
+                        remembered_destination.set(None);
+                        invalidate_directory_browse(
+                            browse_generation, browse_request, browse_result, browse_error,
+                        );
                         // The user is now typing their OWN text, not
                         // reviewing a clone's — a submit from here on sends
                         // exactly what this field shows, not the raw seed
@@ -1551,13 +3372,151 @@ pub(super) fn CreateSessionForm(
                     },
                 }
             }
+            button {
+                r#type: "button",
+                class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
+                disabled: busy || selected.is_none(),
+                onclick: move |_| {
+                    if !draft_transition_allowed(ops) {
+                        return;
+                    }
+                    request_directory_browse(
+                        browse_base.clone(),
+                        selected,
+                        &browse_hosts,
+                        browse_target,
+                        submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
+                        browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
+                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                    );
+                },
+                "browse this path"
+            }
+            if let Some(reason) = browse_error.read().clone() {
+                PeerLine {
+                    class: "create-session-error".to_string(),
+                    parts: vec![DetailPart::Peer(reason)],
+                }
+            }
+            if let Some((result_authority, result)) = browse_result.read().clone()
+                // A completed reply must continue to pass the same test at
+                // render and activation time. This covers a path chosen via
+                // search or recents, whose handler can run before an effect
+                // has had a chance to clear the old browser state.
+                && browse_reply_is_current(
+                    &browse_request(),
+                    &result_authority,
+                    browse_target(),
+                    live_browse_connection(),
+                    &submitted_field(
+                        &browse_cwd(),
+                        browse_cwd_edited(),
+                        browse_cwd_raw_seed.peek().as_deref(),
+                    ),
+                )
+            {
+                div { class: "launch-composer-browser",
+                    button {
+                        r#type: "button",
+                        dir: "ltr",
+                        onclick: {
+                            let selected_cwd = result.cwd.clone();
+                            let authority = result_authority.clone();
+                            move |_| {
+                                browse_activation_attempts.with_mut(|attempts| *attempts = attempts.wrapping_add(1));
+                                if !draft_transition_allowed(ops)
+                                    || !browse_activation_is_current(
+                                        browse_request, &authority, browse_target,
+                                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                    )
+                                {
+                                    return;
+                                }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &selected_cwd);
+                                remembered_destination.set(None);
+                                invalidate_directory_browse(
+                                    browse_generation, browse_request, browse_result, browse_error,
+                                );
+                                intent_key.set(None);
+                            }
+                        },
+                        "use {display_peer(&result.cwd)}"
+                    }
+                    if let Some(parent) = result.parent.clone() {
+                        button {
+                            r#type: "button",
+                            dir: "ltr",
+                            onclick: {
+                                let authority = result_authority.clone();
+                                move |_| {
+                                browse_activation_attempts.with_mut(|attempts| *attempts = attempts.wrapping_add(1));
+                                if !draft_transition_allowed(ops)
+                                    || !browse_activation_is_current(
+                                        browse_request, &authority, browse_target,
+                                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                    )
+                                {
+                                    return;
+                                }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &parent);
+                                remembered_destination.set(None);
+                                invalidate_directory_browse(
+                                    browse_generation, browse_request, browse_result, browse_error,
+                                );
+                                intent_key.set(None);
+                            }
+                            },
+                            "parent: {display_peer(&parent)}"
+                        }
+                    }
+                    if result.truncated {
+                        div { class: "launch-composer-browser-truncated", "more directories exist; refine the path and browse again" }
+                    }
+                    for child in result.children {
+                        button {
+                            r#type: "button",
+                            dir: "ltr",
+                            onclick: {
+                                let authority = result_authority.clone();
+                                move |_| {
+                                browse_activation_attempts.with_mut(|attempts| *attempts = attempts.wrapping_add(1));
+                                if !draft_transition_allowed(ops)
+                                    || !browse_activation_is_current(
+                                        browse_request, &authority, browse_target,
+                                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                    )
+                                {
+                                    return;
+                                }
+                                promote_fetched_history_snapshot(
+                                    offered_history, create_target, fetched_history,
+                                );
+                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &child);
+                                remembered_destination.set(None);
+                                invalidate_directory_browse(
+                                    browse_generation, browse_request, browse_result, browse_error,
+                                );
+                                intent_key.set(None);
+                            }
+                            },
+                            "{display_peer(&child)}"
+                        }
+                    }
+                }
+            }
             // Present in both modes and INERT in one: a profile already says
             // what to run, the wire refuses a create naming both, and the
             // profile's own invocation is the only honest value to show while
             // the field cannot be edited. `required` follows the mode for the
             // same reason — an empty command is exactly right when a profile
             // supplies it.
-            label {
+            label { class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
                 if by_profile {
                     "agent command (the selected profile's own; choose \"custom command\" above to edit)"
                 } else {
@@ -1577,8 +3536,11 @@ pub(super) fn CreateSessionForm(
                     // below, never this profile-mode presentation.
                     dir: "ltr",
                     value: "{displayed_invocation}",
-                    disabled: busy || by_profile,
+                    disabled: busy || by_profile || *creation_surface.read() == CreationSurface::Structured,
                     oninput: move |evt| {
+                        if !draft_transition_allowed(ops) {
+                            return;
+                        }
                         invocation.set(evt.value());
                         invocation_edited.set(true);
                         // Typing a command IS choosing the command path, and
@@ -1598,9 +3560,11 @@ pub(super) fn CreateSessionForm(
                     },
                 }
             }
-            label {
-                "title (optional)"
-                input {
+            details { class: "launch-composer-advanced",
+                summary { "advanced launch configuration" }
+                label {
+                    "title (optional)"
+                    input {
                     r#type: "text",
                     autocomplete: "off",
                     autocorrect: "off",
@@ -1613,6 +3577,9 @@ pub(super) fn CreateSessionForm(
                     value: "{title}",
                     disabled: busy,
                     oninput: move |evt| {
+                        if !draft_transition_allowed(ops) {
+                            return;
+                        }
                         title.set(evt.value());
                         title_edited.set(true);
                         // An edit makes the next submit a DIFFERENT
@@ -1621,11 +3588,39 @@ pub(super) fn CreateSessionForm(
                         // full argument for both edges of that rule).
                         intent_key.set(None);
                     },
+                    }
                 }
             }
-            button {
-                r#type: "submit",
-                class: "btn btn-primary create-session-submit",
+            div { class: "launch-composer-actions",
+                if *creation_surface.read() == CreationSurface::Structured {
+                    div { class: "launch-composer-summary", aria_live: "polite",
+                        "{summary_harness} · "
+                        span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                        " · folder: "
+                        span { class: "peer-value", dir: "ltr", "{summary_folder}" }
+                        " · model: "
+                        span { class: "peer-value", dir: "ltr", "{summary_model}" }
+                        " · effort: {summary_effort} · permissions: {summary_permissions}"
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "launch-composer-cancel",
+                    disabled: busy,
+                    onclick: move |_| {
+                        // The disabled attribute updates after this event's
+                        // synchronous submit claim. Recheck the shared lock
+                        // here so a queued Cancel cannot unmount the future
+                        // that owns an already accepted create.
+                        if !ops.busy_now() {
+                            on_cancel.call(());
+                        }
+                    },
+                    "cancel"
+                }
+                button {
+                    r#type: "submit",
+                    class: "btn btn-primary create-session-submit",
                 // `blocked` as well as this form's own flag: a create must
                 // not overlap a host mutation (see `ListView`'s operation
                 // gate), and a control that is inert for that window says so
@@ -1635,8 +3630,15 @@ pub(super) fn CreateSessionForm(
                 // is nothing to launch, and the handler refuses in words
                 // anyway (a `disabled` attribute is one render behind, so it
                 // is the visible half of that rule rather than the guard).
-                disabled: busy || agent.choice.is_none(),
-                "create"
+                disabled: busy
+                    || !selected_host_available
+                    || !remembered_destination_valid
+                    || (*creation_surface.read() == CreationSurface::Structured
+                        && (structured_harness.read().is_none()
+                            || structured_choice_error.is_some()))
+                    || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
+                    "launch"
+                }
             }
             if let Some(err) = error.read().clone() {
                 // The helm's own words, which for a create refused by a
@@ -1648,6 +3650,7 @@ pub(super) fn CreateSessionForm(
                     parts: vec![DetailPart::Peer(err)],
                 }
             }
+        }
         }
     }
 }
@@ -1720,6 +3723,15 @@ mod tests {
             // this side can compare against a typed command.
             IntentBinding {
                 agent: LaunchIntent::Profile("p-1".to_string()),
+                ..base.clone()
+            },
+            IntentBinding {
+                agent: LaunchIntent::Structured(LaunchSelection {
+                    harness: LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                }),
                 ..base.clone()
             },
             IntentBinding {
@@ -1809,6 +3821,113 @@ mod tests {
             "the sentinel is the absence of a claim, not a claim of zero"
         );
         assert_eq!(connection_claim(&hosts, 3), None);
+    }
+
+    /// Suggestions may stay visible only while they belong to the host
+    /// installation the dialog still targets.
+    ///
+    /// A retarget retains a numeric host id, so comparing only that id would
+    /// show the predecessor's recent launches after the successor arrives.
+    #[farhelm_testtrace::test]
+    fn history_target_changes_when_a_selected_host_is_retargeted() {
+        let before = vec![option(1, "remote", false)];
+        let mut after = before.clone();
+        after[0].incarnation = "incarnation-after-retarget".to_string();
+
+        assert_ne!(
+            history_target(&before, Some(1)),
+            history_target(&after, Some(1)),
+            "a late history response for the predecessor must not match the successor"
+        );
+        assert_eq!(history_target(&after, None), None);
+    }
+
+    /// Remembered paths survive a connection replacement within one install,
+    /// but never follow its registry row onto a different installation. Losing
+    /// the row is also a refusal; only an explicit destination choice removes
+    /// the historical claim and lets ordinary host validation take over.
+    #[farhelm_testtrace::test]
+    fn remembered_destination_survives_only_same_install_reconnections() {
+        let mut hosts = vec![option(7, "remote", false)];
+        hosts[0].connection = 31;
+        let remembered = history_target(&hosts, Some(7)).unwrap();
+        hosts[0].connection = 32;
+        let reconnected = history_target(&hosts, Some(7)).unwrap();
+        assert!(remembered_destination_matches(
+            Some(&remembered),
+            Some(&reconnected),
+        ));
+
+        hosts[0].incarnation = "replacement-install".to_string();
+        let replacement = history_target(&hosts, Some(7)).unwrap();
+        assert!(!remembered_destination_matches(
+            Some(&remembered),
+            Some(&replacement),
+        ));
+        assert!(!remembered_destination_matches(Some(&remembered), None));
+        assert!(remembered_destination_matches(None, Some(&replacement)));
+    }
+
+    /// Browse authority expires on retarget, reconnect, path change, or a
+    /// newer generation, even when a stale result is already rendered.
+    ///
+    /// These are independent changes in the real UI: a registry row can keep
+    /// its id through a reconnect; raw-path inequality is a direct mismatch;
+    /// and A→B→A matters because its restored text still has a newer
+    /// generation. Keeping them together pins the single predicate all three
+    /// runtime phases use rather than testing a weaker completion-only guard.
+    #[farhelm_testtrace::test]
+    fn browse_reply_requires_the_same_live_destination_and_generation() {
+        let before = history_target(&[option(1, "remote", false)], Some(1)).unwrap();
+        let mut after_hosts = vec![option(1, "remote", false)];
+        after_hosts[0].incarnation = "incarnation-after-retarget".to_string();
+        let after = history_target(&after_hosts, Some(1));
+        let request = BrowseAuthority {
+            target: before.clone(),
+            connection: Some(4),
+            cwd: "/work".to_string(),
+            generation: 9,
+        };
+
+        assert!(browse_reply_is_current(
+            &Some(request.clone()),
+            &request,
+            Some(before.clone()),
+            Some(4),
+            "/work",
+        ));
+        assert!(
+            !browse_reply_is_current(&Some(request.clone()), &request, after, Some(4), "/work"),
+            "the same registry id cannot make a predecessor directory listing current"
+        );
+        assert!(
+            !browse_reply_is_current(
+                &Some(request.clone()),
+                &request,
+                Some(before.clone()),
+                Some(5),
+                "/work",
+            ),
+            "a same-id reconnect must be checked against the live connection, not the request"
+        );
+        assert!(
+            !browse_reply_is_current(
+                &Some(request.clone()),
+                &request,
+                Some(before.clone()),
+                Some(4),
+                "/other",
+            ),
+            "a changed raw path must not re-authorize an old directory result"
+        );
+        let newer = BrowseAuthority {
+            generation: 10,
+            ..request.clone()
+        };
+        assert!(
+            !browse_reply_is_current(&Some(newer), &request, Some(before), Some(4), "/work",),
+            "a newer request generation must not authorize an older result"
+        );
     }
 
     #[farhelm_testtrace::test]
@@ -1961,6 +4080,26 @@ mod tests {
             ..row_specimen("s1")
         };
         assert_eq!(prefill_from(&session, 1).invocation, "claude --resume abc");
+    }
+
+    /// A structured session has durable declarative provenance. Clone uses
+    /// that snapshot, including omitted defaults, rather than guessing from
+    /// the compiled command that happened to launch the original.
+    #[farhelm_testtrace::test]
+    fn prefill_from_carries_a_structured_launch_snapshot_verbatim() {
+        let launch = LaunchSelection {
+            harness: LaunchHarness::Muse,
+            model: Some("muse-spark-1.3-contributor".to_string()),
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+        };
+        let session = Session {
+            invocation: "muse --model muse-spark-1.3-contributor --yolo".to_string(),
+            launch: Some(launch.clone()),
+            ..row_specimen("structured")
+        };
+
+        assert_eq!(prefill_from(&session, 1).launch, Some(launch));
     }
 
     /// Everything else on a prefill travels off the row unmodified — no

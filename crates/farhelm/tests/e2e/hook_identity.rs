@@ -354,45 +354,37 @@ fn sole_hook_log_outcome(state: &std::path::Path, session_id: &str) -> String {
 
 /// The value of every `--settings` flag in an argv marker line, in order.
 ///
-/// Splitting on whitespace is safe for this specific purpose because the
-/// injected JSON is `serde_json`'s compact form and the values these tests
-/// pass are single tokens; [`injected_settings`] is what handles the
-/// general case. What this exists for is COUNTING and IDENTITY together: a
+/// Decode the fixture's shell-word serialization before looking for flags:
+/// JSON values can contain spaces and their quoting is not part of argv.
+/// What this exists for is COUNTING and IDENTITY together: a
 /// count alone cannot tell "the user's own flag survived" from "ours
 /// replaced theirs", and those are opposite outcomes.
 fn settings_values(argv: &str) -> Vec<String> {
-    let words: Vec<&str> = argv.split_whitespace().collect();
+    let words = shell_words::split(argv).expect("fake agent printed shell-safe argv");
     words
         .iter()
         .enumerate()
         .filter(|(_, word)| **word == "--settings")
-        .map(|(i, _)| words.get(i + 1).copied().unwrap_or("<nothing>").to_string())
+        .map(|(i, _)| words.get(i + 1).expect("--settings has a value").clone())
         .collect()
 }
 
 /// The injected `--settings` JSON, parsed out of an argv marker line.
 ///
-/// Parsed with a streaming deserializer rather than by taking the rest of
-/// the line: the marker joins the process's real argv with single spaces,
-/// so everything after the JSON is another argv element, and the JSON's own
-/// closing brace is the only reliable terminator. (A `--settings` value is
-/// also not guaranteed space-free — the command inside it is a
-/// shell-quoted path.)
+/// The marker preserves real argv boundaries with shell-word quoting.
+/// Decode those boundaries first, then parse the entire settings argument;
+/// trailing malformed bytes must not be accepted as a valid hook document.
 ///
 /// Asserting on the parsed value rather than on the flag's presence is what
 /// makes an injection test mean something: a launch carrying `--settings`
 /// with a value Claude cannot read as a hook block is indistinguishable
 /// from no injection at all, and fails the same silent way.
 fn injected_settings(argv: &str) -> serde_json::Value {
-    const FLAG: &str = "--settings ";
-    let start = argv
-        .find(FLAG)
-        .unwrap_or_else(|| panic!("no injected --settings in: {argv}"))
-        + FLAG.len();
-    serde_json::Deserializer::from_str(&argv[start..])
-        .into_iter::<serde_json::Value>()
-        .next()
-        .unwrap_or_else(|| panic!("--settings carried no value at all in: {argv}"))
+    let values = settings_values(argv);
+    let value = values
+        .first()
+        .unwrap_or_else(|| panic!("no injected --settings in: {argv}"));
+    serde_json::from_str(value)
         .unwrap_or_else(|e| panic!("the injected --settings value must be JSON ({e}): {argv}"))
 }
 

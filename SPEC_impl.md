@@ -803,24 +803,33 @@ the connection it arrived on belongs to that session's host, without re-verifica
 there is nothing on its side to check against. That is sound because a full-authority supervisor connection is the
 helm's own provisioned install, holding complete authority over every session on its host: a helm that could not trust
 it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
-connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. So 13 is
-the current protocol version, and the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
-`Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added
-additively within the version rather than as version bumps of their own — which was possible ONLY because 13 itself had
-not yet shipped when they landed, still being developed on this branch with no released build speaking it yet. That is a
-one-time allowance for a version still in flight, not a standing license to keep adding to 13 after it ships; once a
-protocol version has shipped, a wire-shape addition needs a version of its own, same as any other. The same allowance
-covers the one thing in 13 that is not an addition at all: `AgentSession::host` became `Option<String>`, so a reply
-carrying a row the helm just mutated or created can say "there is a session here but no host name I can vouch for"
-instead of encoding that as an empty string indistinguishable from a real value. A decoder built against 13 EARLIER IN
-ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not stretch to cover it under any
-reading — so it is allowed here only because nothing released speaks 13 yet. It must not be carried forward the same way
-once 13 ships: the identical edit made afterwards needs a version of its own. Each verb is routed and recorded through
-the exact same `sessions.rs` functions the corresponding REST route uses — `route_session`, the client call and
-`record_session` for the lifecycle three, and `do_create_session` (the shared internal function `POST /api/sessions` was
-refactored onto) for the creating two. So a refusal that comes out of the SHARED operation — an unknown session, a
-disconnected host, a title the owning supervisor rejects — is the identical sentence the UI would have shown, and a
-session an agent creates is seeded into the helm's cache and published exactly as one the create dialog made.
+connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. The
+historical paragraph below describes why 13 was current at the time; later released additions took the wire to 18.
+Version 16 introduced the durable optional structured launch snapshot carried with a create and `SessionInfo`. The
+snapshot is declarative provenance beside the resolved invocation, never a browser-owned compiler input; old sessions
+remain absent rather than being reconstructed from a command. Version 17 adds `BrowseDirectory` and `DirectoryListing`:
+the helm routes one authenticated, connection-incarnation-guarded request to the chosen supervisor, which expands `~`
+from its own recorded home, canonicalizes the requested directory, and returns only a sorted bounded immediate
+child-directory listing plus parent and truncation state. Neither the helm nor the client reads the target filesystem.
+Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder history to the destination the
+target supervisor actually accepted. The following 13 paragraph is historical context, not the current protocol version;
+the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/ `Archive` and the two creating
+verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added additively within the version rather
+than as version bumps of their own — which was possible ONLY because 13 itself had not yet shipped when they landed,
+still being developed on this branch with no released build speaking it yet. That is a one-time allowance for a version
+still in flight, not a standing license to keep adding to 13 after it ships; once a protocol version has shipped, a
+wire-shape addition needs a version of its own, same as any other. The same allowance covers the one thing in 13 that is
+not an addition at all: `AgentSession::host` became `Option<String>`, so a reply carrying a row the helm just mutated or
+created can say "there is a session here but no host name I can vouch for" instead of encoding that as an empty string
+indistinguishable from a real value. A decoder built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null`
+outright — the running additive rule does not stretch to cover it under any reading — so it is allowed here only because
+nothing released speaks 13 yet. It must not be carried forward the same way once 13 ships: the identical edit made
+afterwards needs a version of its own. Each verb is routed and recorded through the exact same `sessions.rs` functions
+the corresponding REST route uses — `route_session`, the client call and `record_session` for the lifecycle three, and
+`do_create_session` (the shared internal function `POST /api/sessions` was refactored onto) for the creating two. So a
+refusal that comes out of the SHARED operation — an unknown session, a disconnected host, a title the owning supervisor
+rejects — is the identical sentence the UI would have shown, and a session an agent creates is seeded into the helm's
+cache and published exactly as one the create dialog made.
 
 The equivalence covers that shared path and stops there, deliberately, in two places. The relay adds a doorway check of
 its own (`validate_agent_verb`) that the REST surface has no counterpart for, since only the relay puts an
@@ -1099,6 +1108,52 @@ reports a failed listing rather than a silently shortened one.
   safety is load-bearing anyway, launch-spec creation, uses `O_EXCL` and is safe.)
 
 ## Helm internals
+
+### Composer history
+
+Composer history is one 100-record, per-host-installation unique-create window. Each accepted supervisor session id
+enters it once, whether the request was structured, raw, or profile-backed. Structured suggestions are projections of
+the surviving admission rows, so 100 later raw creates evict an earlier structured setup and remove its frequency
+weight. Folder suggestions are separately bounded at 100 canonical destinations because they answer a different
+question: folders remain useful after several sessions in the same place have left the create window.
+
+The admission order is durable. A record with `creation_seq` sorts by its sequence until a sequence-less record enters
+the partition. That accepted legacy record switches the whole retained partition and its cutoff to the protocol fallback
+`(created_at, session_id)`, where an equal timestamp sorts the lexically smaller session id newer. The switch avoids a
+pairwise "sequence when available" comparator that could be non-transitive when clocks and sequence order disagree. The
+eviction cutoff stores the complete active key and creation time. While sequence order is active it also keeps a
+separate timestamp/ID frontier for every eviction, because sequence order and wall-clock order can disagree; a later
+legacy switch uses that monotonic fallback frontier rather than reinterpreting the timestamp on the latest sequence
+cutoff. This frontier is deliberately conservative: after a clock-ahead row has been evicted, a newly observed legacy
+create that sorts behind it is refused even if it might otherwise fit among the currently retained rows. That refusal is
+the price of guaranteeing that an evicted identity cannot reappear when the partition changes order. A replay remains
+rejected after its row has been evicted and after the helm reopens. No arrival counter or zero-valued synthetic sequence
+is used.
+
+Schema 24 drops schema-23 composer history during upgrade. Schema 23 did not retain the cutoff timestamp needed for a
+truthful fallback switch, or whether a folder canonical path came from an accepted create rather than later browsing.
+The history is convenience data, so an empty, coherent window is safer than inventing either fact. Adoption also purges
+all history partitions for its host that do not match the new recorded identity in the same transaction as the identity
+change. Each structured launch stores its accepted canonical destination beside the submitted display spelling. Folder
+history remains a bounded suggestion projection: browse may refine legacy unknown paths but never changes an
+accepted-create destination.
+
+Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
+sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order
+disagree. Schema 25 records both frontiers from the start; resetting bounded suggestion data is the only honest upgrade
+because the missing eviction history cannot be reconstructed.
+
+Ordinary recents and search-result recents group a complete selection by the same per-launch canonical destination.
+Legacy launch rows without that fact keep their own spelling distinct instead of consulting a mutable folder projection
+or guessing aliases. Frequency sorts descending and the newest retained occurrence breaks ties. An omitted model,
+effort, or permission remains the saved harness default and is part of the complete selection identity, not a wildcard
+that merges explicit choices.
+
+The composer retains the installation claim when a recent setup or saved folder is applied, not only while offering the
+suggestion. A replacement under the same registry row disables Launch and requires an explicit host or folder choice.
+The same installation reconnecting keeps the claim valid. Captured history callbacks check the current destination
+before changing the draft; submission checks it before and after key minting. New carries the selected session's folder
+beside its installation snapshot from AppBody, independently of the filtered sidebar projection.
 
 - State in SQLite at `~/.local/state/farhelm/helm.db`: host registry (SSH destinations, host identities, and optional
   aliases), last-known session cache (survives helm restarts per SPEC.md), the helm-wide profile catalog and its one

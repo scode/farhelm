@@ -763,6 +763,7 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let home = farhelm_teststate::tempdir().expect("home");
     std::fs::create_dir(home.path().join("ws")).expect("workdir");
+    let accepted = home.path().join("ws").to_string_lossy().into_owned();
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
@@ -786,7 +787,12 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
         )
         .await
         .expect("a ~ create with a usable home");
-    assert_eq!(first.cwd, home.path().join("ws").to_string_lossy());
+    assert_eq!(first.cwd, accepted);
+    assert_eq!(
+        first.canonical_cwd.as_deref(),
+        Some(accepted.as_str()),
+        "the accepted expanded display path still carries its separately recorded identity"
+    );
 
     let sup2 = handoff_to_new_supervisor_with_seams(
         state.path(),
@@ -824,6 +830,14 @@ async fn a_settled_tilde_create_replays_after_home_becomes_unusable() {
     assert_eq!(
         replay.id, first.id,
         "the replay must return the session the first attempt created"
+    );
+    assert_eq!(
+        replay.cwd, first.cwd,
+        "replay keeps the accepted display spelling"
+    );
+    assert_eq!(
+        replay.canonical_cwd, first.canonical_cwd,
+        "replay returns the original accepted identity without consulting the new home"
     );
     drop(slot);
 }

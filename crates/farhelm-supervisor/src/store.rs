@@ -119,7 +119,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 15;
+const SCHEMA_VERSION: i64 = 16;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1185,6 +1185,10 @@ pub struct StoredSession {
     pub creation_seq: u64,
     pub cwd: String,
     pub invocation: String,
+    /// The structured choice that produced `invocation`, when this row came
+    /// from the launch composer. Legacy raw and profile rows leave it empty;
+    /// this field is never reconstructed by parsing their command lines.
+    pub launch: Option<farhelm_proto::LaunchSelection>,
     pub tmux_name: String,
     /// The tmux pane, or EMPTY for a row still in [`LastOutcome::Launching`]
     /// — the pane id does not exist until tmux has created the session,
@@ -1555,7 +1559,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  creation_seq          INTEGER,
                  archived              INTEGER NOT NULL DEFAULT 0,
                  last_activity_at      INTEGER NOT NULL DEFAULT 0,
-                 conversation_source   TEXT
+                 conversation_source   TEXT,
+                 launch                TEXT
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1576,7 +1581,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             PRAGMA user_version = 15;
+             PRAGMA user_version = 16;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -1974,6 +1979,20 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 14 to 15")?;
         version = 15;
     }
+    if version == 15 {
+        // Old rows have no structured origin. NULL preserves that fact;
+        // parsing an old raw invocation would invent metadata the user did
+        // not submit and would make later lifecycle behavior depend on a
+        // heuristic.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN launch TEXT;
+             PRAGMA user_version = 16;
+             COMMIT;",
+        )
+        .context("migrating schema from version 15 to 16")?;
+        version = 16;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2110,9 +2129,9 @@ fn insert_session_row(
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
           source_profile_id, source_profile_name, parent, session_token, archived, \
-          last_activity_at, conversation_source) \
+          last_activity_at, conversation_source, launch) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2145,6 +2164,11 @@ fn insert_session_row(
             i64::from(row.archived),
             row.last_activity_at,
             row.conversation_source,
+            row.launch
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .context("serializing structured launch selection")?,
         ],
     )
     .context("inserting session row")?;
@@ -2174,7 +2198,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
-                               archived, last_activity_at, conversation_source";
+                               archived, last_activity_at, conversation_source, launch";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2191,6 +2215,7 @@ type SessionColumns = (
     Option<String>,
     (Option<String>, Option<String>),
     i64,
+    Option<String>,
 );
 
 /// Read one row's columns positionally, matching [`SESSION_COLUMNS`].
@@ -2208,6 +2233,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             title: r.get(1)?,
             cwd: r.get(2)?,
             invocation: r.get(3)?,
+            launch: None,
             tmux_name: r.get(4)?,
             pane: r.get(5)?,
             outcome: LastOutcome::Launching,
@@ -2232,6 +2258,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
         r.get(11)?,
         (r.get(20)?, r.get(21)?),
         r.get::<_, i64>(23)?,
+        r.get(27)?,
     ))
 }
 
@@ -2271,6 +2298,7 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
         template,
         source_profile,
         creation_seq,
+        launch,
     ) = columns;
     row.creation_seq = u64::try_from(creation_seq)
         .with_context(|| format!("session {} has a negative creation sequence", row.id))?;
@@ -2291,6 +2319,36 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
         agent_kind_from_column(&kind).with_context(|| format!("session {}", row.id))?;
     row.resume_template =
         resume_template_from_column(template).with_context(|| format!("session {}", row.id))?;
+    row.launch = launch
+        .map(|json| serde_json::from_str(&json))
+        .transpose()
+        .with_context(|| {
+            format!(
+                "session {} has an invalid structured launch selection",
+                row.id
+            )
+        })?;
+    if let Some(selection) = &row.launch {
+        let expected_kind = match selection.harness {
+            farhelm_proto::LaunchHarness::Codex => farhelm_proto::AgentKind::Codex,
+            farhelm_proto::LaunchHarness::Claude => farhelm_proto::AgentKind::Claude,
+            farhelm_proto::LaunchHarness::Muse => farhelm_proto::AgentKind::Generic,
+        };
+        if row.agent_kind != expected_kind {
+            anyhow::bail!(
+                "session {} records structured harness {:?} with incompatible agent kind {}",
+                row.id,
+                selection.harness,
+                agent_kind_column(row.agent_kind)
+            );
+        }
+        if row.source_profile.is_some() {
+            anyhow::bail!(
+                "session {} records both a structured launch and profile provenance",
+                row.id
+            );
+        }
+    }
     // The stored template is an argv a RESTART will hand to `execvp`, so
     // the shapes that could never be one are refused at the trust boundary
     // rather than at the restart that needed them. A session's own
@@ -4448,6 +4506,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -5335,6 +5394,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -5386,6 +5446,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -5991,6 +6052,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent --flag".to_string(),
+                    launch: None,
                     tmux_name: "fh-abc".to_string(),
                     pane: "%3".to_string(),
                     outcome: LastOutcome::Running,
@@ -6321,6 +6383,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -6383,6 +6446,7 @@ mod tests {
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
+            launch: None,
             tmux_name: format!("fh-{id}"),
             pane: String::new(),
             outcome: LastOutcome::Launching,
@@ -7376,6 +7440,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-s1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -7911,6 +7976,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER),
+                    launch: None,
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -8092,7 +8158,7 @@ mod tests {
 
     /// Restore the profiles table that every schema from v8 through v14 had.
     ///
-    /// These downgrade fixtures start from a current v15 database, where the
+    /// These downgrade fixtures start from a current database, where the
     /// table is deliberately absent. Recreating the historical table is what
     /// makes their claimed old `user_version` truthful and exercises v15's
     /// unconditional drop rather than weakening that migration for malformed
@@ -8133,6 +8199,7 @@ mod tests {
             "ALTER TABLE sessions DROP COLUMN archived;
              ALTER TABLE sessions DROP COLUMN last_activity_at;
              ALTER TABLE sessions DROP COLUMN conversation_source;
+             ALTER TABLE sessions DROP COLUMN launch;
              PRAGMA user_version = 11;",
         )
         .expect("downgrade the fixture to the pre-archive schema");
@@ -8145,6 +8212,85 @@ mod tests {
         assert!(!row.archived);
         assert_eq!(row.title, "s1");
         assert_eq!(row.pane, "%0");
+    }
+
+    /// Version 16 adds only the structured-origin snapshot. A real v15 row
+    /// has no such fact to preserve, so migration must retain its launch
+    /// bundle and leave the snapshot absent instead of trying to parse a raw
+    /// command into newly invented composer choices.
+    #[farhelm_testtrace::test]
+    async fn schema_15_rows_gain_an_empty_structured_launch_snapshot() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        {
+            let conn = Connection::open(&db_path).expect("create v15 db");
+            conn.execute_batch(V6_SCHEMA).expect("v6 schema");
+            conn.execute_batch(
+                "ALTER TABLE supervisor_meta ADD COLUMN host_identity TEXT;
+                 ALTER TABLE sessions ADD COLUMN source_profile_id TEXT;
+                 ALTER TABLE sessions ADD COLUMN source_profile_name TEXT;
+                 CREATE TABLE profiles (
+                     id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     invocation TEXT NOT NULL,
+                     agent_kind TEXT NOT NULL,
+                     resume_template TEXT
+                 ) STRICT;
+                 ALTER TABLE create_reservations
+                     ADD COLUMN dedup_scope TEXT NOT NULL DEFAULT 'permanent';
+                 ALTER TABLE sessions ADD COLUMN parent TEXT;
+                 ALTER TABLE sessions ADD COLUMN session_token TEXT;
+                 ALTER TABLE sessions ADD COLUMN creation_seq INTEGER;
+                 ALTER TABLE supervisor_meta
+                     ADD COLUMN last_creation_seq INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions
+                     ADD COLUMN last_activity_at INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN conversation_source TEXT;
+                 DROP TABLE profiles;",
+            )
+            .expect("bring fixture to the v15 table shape");
+            conn.execute(
+                "INSERT INTO sessions (
+                     id, title, cwd, invocation, tmux_name, pane, created_at,
+                     outcome_state, agent_kind, session_token, creation_seq,
+                     last_activity_at
+                 ) VALUES (
+                     'old', 'old', '/work', 'agent --legacy', 'fh-old', '%0',
+                     1700000000, 'running', 'generic', 'token', 1, 1700000000
+                 )",
+                [],
+            )
+            .expect("insert a v15 raw session");
+            conn.pragma_update(None, "user_version", 15)
+                .expect("stamp v15");
+        }
+
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v15");
+        let row = store
+            .session("old")
+            .await
+            .expect("read")
+            .expect("row survives");
+        assert_eq!(row.invocation, "agent --legacy");
+        assert_eq!(row.launch, None);
+        drop(store);
+
+        let reopened = SessionStore::open(&db_path, true)
+            .await
+            .expect("reopen v16");
+        assert_eq!(
+            reopened
+                .session("old")
+                .await
+                .expect("read")
+                .expect("row")
+                .launch,
+            None,
+            "reopening must retain the honest absence rather than filling it later"
+        );
     }
 
     /// The v12-to-v13 migration gives every preexisting row a
@@ -8199,11 +8345,12 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open fixture");
         restore_pre_v15_profiles_table(&conn);
         // Same "every later column has to come off" requirement
-        // `schema_11_rows_migrate_as_unarchived` documents — `conversation_
-        // source` postdates this migration too.
+        // `schema_11_rows_migrate_as_unarchived` documents — conversation
+        // provenance and structured launch metadata postdate this migration too.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN last_activity_at;
              ALTER TABLE sessions DROP COLUMN conversation_source;
+             ALTER TABLE sessions DROP COLUMN launch;
              PRAGMA user_version = 12;",
         )
         .expect("downgrade the fixture to the pre-activity schema");
@@ -8279,6 +8426,7 @@ mod tests {
         restore_pre_v15_profiles_table(&conn);
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
+             ALTER TABLE sessions DROP COLUMN launch;
              PRAGMA user_version = 13;",
         )
         .expect("downgrade the fixture to the pre-report schema");
@@ -8932,6 +9080,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "claude".to_string(),
+                    launch: None,
                     tmux_name: "fh-s1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -9136,6 +9285,7 @@ mod tests {
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
+            launch: None,
             tmux_name: "fh-s1".to_string(),
             pane: String::new(),
             outcome: LastOutcome::Launching,

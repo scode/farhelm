@@ -738,18 +738,18 @@ async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attach
 /// was captured before the reboot, so the relaunched agent picks up the
 /// same conversation.
 ///
-/// Both halves are asserted from the fixture's own behavior rather than an
-/// argv line rendered through tmux: it reports adopting the existing record
-/// and then appends to that same record on disk. Those are the observable
-/// facts that distinguish a resume from a fresh launch; the template's
-/// wrapper consumes the substituted id before the fixture's argv is formed.
+/// The unstructured branch proves record adoption and append behavior. The
+/// structured branch instead isolates integration-derived resume argv and
+/// frozen launch metadata: its admission template is deliberately absent, so
+/// the test must not claim the wrapper-supplied record behavior it does not
+/// exercise.
 ///
 /// Shared by both agent kinds ([`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`]
 /// and [`an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal`]):
 /// the resume path is kind-agnostic once `fixture_resume_template` has
 /// filled in the placeholder, and the only kind-specific step left is
 /// finding where the record landed on disk ([`resumed_record_file`]).
-async fn interrupted_session_resumes_its_conversation(kind: &str) {
+async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bool) {
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
     std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
@@ -769,7 +769,32 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
     };
 
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let resume_template = fixture_resume_template(&bin.path().join(kind), kind, home.path());
+    let resume_template =
+        (!structured).then(|| fixture_resume_template(&bin.path().join(kind), kind, home.path()));
+    let selection = structured.then(|| farhelm_proto::LaunchSelection {
+        harness: if kind == "codex" {
+            farhelm_proto::LaunchHarness::Codex
+        } else {
+            farhelm_proto::LaunchHarness::Claude
+        },
+        model: Some(
+            if kind == "codex" {
+                "gpt-6-astra"
+            } else {
+                "claude-fable-5"
+            }
+            .to_string(),
+        ),
+        effort: Some(farhelm_proto::LaunchEffort::High),
+        permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+    });
+    let structured_options = structured.then(|| {
+        if kind == "codex" {
+            "-m gpt-6-astra -c model_reasoning_effort=high --yolo".to_string()
+        } else {
+            "--model claude-fable-5 --effort high --dangerously-skip-permissions".to_string()
+        }
+    });
     let conversation = {
         let sup = Supervisor::new_with_seams(
             state.path(),
@@ -787,15 +812,24 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
             .create_session_with_extras(
                 &work.path().to_string_lossy(),
                 &format!(
-                    "{} internal fake-agent --script {kind}-record --record-home {}",
+                    "{} internal fake-agent --script {kind}-record --record-home {} {}",
                     shell_words::quote(&bin.path().join(kind).to_string_lossy()),
-                    shell_words::quote(&home.path().to_string_lossy())
+                    shell_words::quote(&home.path().to_string_lossy()),
+                    structured_options.as_deref().unwrap_or("")
                 ),
                 None,
                 80,
                 24,
                 farhelm_helm::CreateExtras {
-                    resume_template: Some(resume_template.clone()),
+                    agent_kind: structured.then(|| {
+                        if kind == "codex" {
+                            farhelm_proto::AgentKind::Codex
+                        } else {
+                            farhelm_proto::AgentKind::Claude
+                        }
+                    }),
+                    launch: selection.clone(),
+                    resume_template: resume_template.clone(),
                     ..farhelm_helm::CreateExtras::default()
                 },
             )
@@ -808,6 +842,18 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
             .expect("attach");
         let mut seen = initial_replay;
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+        if let Some(options) = &structured_options {
+            wait_for(&mut rx, &mut seen, ARGV_MARKER, 20).await;
+            let argv = argv_marker(&seen);
+            // The fixture shell-quotes its argv; decode it before comparing
+            // adjacent flag/value pairs, including values that require quotes.
+            let words = shell_words::split(&argv).expect("structured boot-A argv");
+            let options = shell_words::split(options).expect("structured boot-A options");
+            assert!(
+                words.windows(options.len()).any(|window| window == options),
+                "boot-A {kind} argv lost selected options {options:?}: {argv}"
+            );
+        }
         client.send_input(chan, b"first prompt\r".to_vec()).await;
         wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
         let conversation = marker_value(&seen, "RECORD-WRITTEN:");
@@ -820,11 +866,39 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         // from these same two columns whenever a snapshot is constructed.
         let snapshot =
             wait_for_durable_resume_capture(&sup, &client, &session.id, &conversation).await;
-        assert_eq!(
-            snapshot.resume_template.as_deref(),
-            Some(resume_template.as_slice()),
-            "the resume template stored at creation must survive until capture"
-        );
+        if let Some(template) = &resume_template {
+            assert_eq!(
+                snapshot.resume_template.as_deref(),
+                Some(template.as_slice()),
+                "the resume template stored at creation must survive until capture"
+            );
+        } else {
+            let template = snapshot
+                .resume_template
+                .as_ref()
+                .expect("structured restart stores its integration default");
+            let expected_flag = if kind == "codex" {
+                "resume"
+            } else {
+                "--resume"
+            };
+            assert!(
+                template.iter().any(|word| word == expected_flag)
+                    && template.iter().any(|word| word == "{conversation}"),
+                "structured restart stores the {kind} integration default, not a catalog-derived template: {template:?}"
+            );
+            let stored = SessionStore::open(&state.path().join("supervisor.db"), false)
+                .await
+                .expect("open durable store")
+                .session(&session.id)
+                .await
+                .expect("read structured session")
+                .expect("structured session stored");
+            assert_eq!(
+                stored.launch, selection,
+                "the nondefault structured selection is durable before reconstruction"
+            );
+        }
         drop(client);
         wait_for_resume_connections_to_drain(&sup).await;
         drop(sup);
@@ -864,12 +938,63 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
         farhelm_proto::RestartOffer::Resume,
         "the identity is the conversation's, not the run's — it survives the relaunch too"
     );
+    assert_eq!(
+        restarted.launch, selection,
+        "restart response retains the frozen structured selection"
+    );
 
     let (chan, initial_replay, mut rx) = client
         .attach_live(&session.id, 80, 24)
         .await
         .expect("the relaunch built a fresh terminal to attach to");
     let mut seen = initial_replay;
+    if structured {
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT ARGV:", 30).await;
+        let argv = crate::harness::argv_marker(&seen);
+        let expected = if kind == "codex" {
+            format!("resume {conversation}")
+        } else {
+            format!("--resume {conversation}")
+        };
+        assert!(
+            argv.contains(&expected),
+            "the reconstructed {kind} successor must use its own default resume form: {argv}"
+        );
+        let words = shell_words::split(&argv).expect("structured successor argv");
+        let options =
+            shell_words::split(structured_options.as_deref().expect("structured options"))
+                .expect("structured successor options");
+        assert!(
+            words.windows(options.len()).any(|window| window == options),
+            "reconstructed {kind} argv lost selected options {options:?}: {argv}"
+        );
+        wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
+        crate::structured_launches::assert_live_exchange(
+            &client,
+            chan,
+            &mut rx,
+            state.path(),
+            &session.id,
+        )
+        .await;
+        let live = listed(&client, &session.id).await;
+        assert_eq!(
+            live.launch, selection,
+            "live reconstruction projection retains the selected structured fields"
+        );
+        let stored = SessionStore::open(&state.path().join("supervisor.db"), false)
+            .await
+            .expect("open reconstructed durable store")
+            .session(&session.id)
+            .await
+            .expect("read reconstructed session")
+            .expect("session stored");
+        assert_eq!(
+            stored.launch, selection,
+            "stored reconstruction projection retains the selected structured fields"
+        );
+        return;
+    }
     wait_for(
         &mut rx,
         &mut seen,
@@ -918,7 +1043,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str) {
 /// test binary's output.
 #[farhelm_testtrace::test]
 async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
-    interrupted_session_resumes_its_conversation("claude").await;
+    interrupted_session_resumes_its_conversation("claude", false).await;
 }
 
 /// The Codex half of PLAN_M3.md acceptance 8: until this test existed, the
@@ -934,7 +1059,15 @@ async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
 /// kind-agnostic-looking code path.
 #[farhelm_testtrace::test]
 async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal() {
-    interrupted_session_resumes_its_conversation("codex").await;
+    interrupted_session_resumes_its_conversation("codex", false).await;
+}
+
+/// Structured selections survive boot-A/boot-B reconstruction without asking
+/// today's catalog how an already accepted session should resume.
+#[farhelm_testtrace::test]
+async fn structured_codex_and_claude_resume_after_supervisor_reconstruction() {
+    interrupted_session_resumes_its_conversation("codex", true).await;
+    interrupted_session_resumes_its_conversation("claude", true).await;
 }
 
 /// The same interrupted-then-resumed journey as

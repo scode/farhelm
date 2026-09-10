@@ -40,7 +40,11 @@
 //! makes it answerable in production.
 
 use crate::harness::*;
-use farhelm_proto::{STOP_ANNOTATION, SessionInfo, SessionStatus};
+use crate::structured_launches::{fake_harness, observed_argv_in_state};
+use farhelm_proto::{
+    LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, STOP_ANNOTATION, SessionInfo,
+    SessionStatus,
+};
 
 /// Open the helm's terminal WebSocket for `session`, and hold it.
 ///
@@ -842,4 +846,135 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     // `helm`, `supervisor` and `work` deliberately outlive this test's last
     // assertion — see the read-only test above for why an explicit drop
     // would only invite someone to reorder them.
+}
+
+/// An authenticated agent clone preserves a structured parent's frozen bundle.
+///
+/// This starts the shipped supervisor and helm, attaches the asking session,
+/// then runs the shipped agent CLI. The fake harness directory is present only
+/// through the supervisor child's fixture-owned login home; the test process
+/// neither finds nor runs a vendor executable. Reading the successor's terminal, live HTTP row, and
+/// durable row distinguishes a real inherited launch from a plausible JSON
+/// reply assembled before the supervisor starts its process.
+#[farhelm_testtrace::test]
+async fn an_authenticated_agent_clone_starts_a_structured_successor() {
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let fixture = fake_harness();
+    let supervisor = supervisor_process_with_env([
+        ("HOME", fixture.login_home_with_fake_path()),
+        ("SHELL", fixture.bash_shell()),
+    ])
+    .await;
+    let helm = helm_process(supervisor.state.path(), None).await;
+    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let client = client_with_secret(&secret);
+    await_local_host(&client, &helm.base).await;
+
+    let work = farhelm_teststate::tempdir().expect("structured clone workdir");
+    let selection = LaunchSelection {
+        harness: LaunchHarness::Codex,
+        model: Some("gpt-6-astra".to_string()),
+        effort: Some(LaunchEffort::High),
+        permissions: Some(LaunchPermission::Yolo),
+    };
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/sessions", helm.base),
+        serde_json::json!({
+            "cwd": work.path(),
+            "title": "structured asking session",
+            "launch": selection,
+            "cols": WIDE_COLS,
+            "rows": ROWS,
+        }),
+    )
+    .await;
+    assert!(
+        status.is_success(),
+        "creating structured parent failed: {body}"
+    );
+    let parent: SessionInfo = serde_json::from_str(&body).expect("structured create JSON");
+    assert_eq!(parent.launch, Some(selection.clone()));
+    let parent_argv = observed_argv_in_state(supervisor.state.path(), &parent.id, 1).await;
+    assert!(
+        parent_argv.contains("gpt-6-astra"),
+        "the structured parent must reach the owned fake executable: {parent_argv}"
+    );
+
+    let _terminal = attach_terminal(&helm, &secret, &parent.id).await;
+    let token = session_token(supervisor.state.path(), &parent.id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+    hosts_until_attached(&parent.id, &token, &socket).await;
+    let output = spawn_agent_command_args(&["clone"], &parent.id, &token, &socket).await;
+    assert!(
+        output.status.success(),
+        "structured agent clone failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let child_id = String::from_utf8(output.stdout)
+        .expect("clone stdout is UTF-8")
+        .trim()
+        .to_string();
+    assert_ne!(child_id, parent.id, "clone must create a new session");
+    let child = get_json(&client, &format!("{}/api/sessions/{child_id}", helm.base)).await;
+    assert_eq!(child["launch"], serde_json::json!(selection));
+    let argv = observed_argv_in_state(supervisor.state.path(), &child_id, 2).await;
+    assert!(
+        argv.contains("gpt-6-astra"),
+        "clone argv lost model: {argv}"
+    );
+    assert!(
+        argv.contains("model_reasoning_effort=high"),
+        "clone argv lost effort: {argv}"
+    );
+    assert!(
+        argv.contains("--yolo"),
+        "clone argv lost permission: {argv}"
+    );
+    let stored = SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open supervisor store")
+        .session(&child_id)
+        .await
+        .expect("read structured child")
+        .expect("agent clone remains stored");
+    assert_eq!(stored.launch, Some(selection));
+
+    // Replace is not restart: the helm derives a fresh session from the
+    // child's frozen structured bundle and only then removes that child.
+    // Reading the successor independently makes a copied HTTP response
+    // insufficient evidence that the replacement process inherited it.
+    let (status, body) = post(
+        &client,
+        &format!("{}/api/sessions/{child_id}/replace", helm.base),
+        serde_json::json!({}),
+    )
+    .await;
+    assert!(status.is_success(), "structured replace failed: {body}");
+    let replacement: SessionInfo = serde_json::from_str(&body).expect("replace JSON");
+    assert_ne!(replacement.id, child_id, "replace must mint a new session");
+    assert_eq!(replacement.launch, stored.launch);
+    let replacement_argv =
+        observed_argv_in_state(supervisor.state.path(), &replacement.id, 3).await;
+    assert!(
+        replacement_argv.contains("gpt-6-astra")
+            && replacement_argv.contains("model_reasoning_effort=high")
+            && replacement_argv.contains("--yolo"),
+        "replacement argv lost structured choices: {replacement_argv}"
+    );
+    let live = get_json(
+        &client,
+        &format!("{}/api/sessions/{}", helm.base, replacement.id),
+    )
+    .await;
+    assert_eq!(live["launch"], serde_json::json!(replacement.launch));
+    let replacement_stored =
+        SessionStore::open(&supervisor.state.path().join("supervisor.db"), false)
+            .await
+            .expect("reopen replacement store")
+            .session(&replacement.id)
+            .await
+            .expect("read replacement")
+            .expect("replacement remains stored");
+    assert_eq!(replacement_stored.launch, replacement.launch);
 }

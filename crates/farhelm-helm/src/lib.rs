@@ -142,6 +142,9 @@ mod feed;
 /// renders a host chip from.
 mod hosts;
 
+/// Release-owned structured launch catalog and argv compiler.
+mod launches;
+
 /// The per-host connection actors, their reconnect state machine, and the
 /// cache refresh that rides them (PLAN_M6.md item 4).
 ///
@@ -514,6 +517,12 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/sessions",
             get(sessions::list_sessions).post(sessions::create_session),
+        )
+        .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route("/api/launch-history", get(sessions::launch_history))
+        .route(
+            "/api/browse-directory",
+            axum::routing::post(sessions::browse_directory),
         )
         .route(
             "/api/sessions/{id}/stop",

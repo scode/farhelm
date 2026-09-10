@@ -40,6 +40,77 @@ async fn raw_only_profile_resolution_ignores_a_corrupt_catalog_row() {
     assert_eq!(sessions[0].source_profile, None);
 }
 
+/// The composer reads its release-owned catalog and its successful-create
+/// suggestions through HTTP, rather than deriving either from a session list
+/// or browser-owned command rules.
+///
+/// This test keeps both routes on the real router. It proves the catalog is
+/// available without a create request and that history is scoped through the
+/// connected host identity before it becomes browser-visible.
+#[farhelm_testtrace::test]
+async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
+    let harness = rest_harness::idle_helm().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let created = farhelm_proto::SessionInfo {
+        creation_seq: Some(9),
+        launch: Some(farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: Some("gpt-6-astra".to_string()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+        }),
+        ..rest_harness::session("composer-history", 100)
+    };
+    assert!(
+        harness
+            .store
+            .record_create_history(local, "local-identity", &created)
+            .await
+            .expect("record successful structured create")
+    );
+
+    let (catalog_status, catalog) = get_json(&harness, "/api/launch-catalog").await;
+    assert_eq!(catalog_status, axum::http::StatusCode::OK);
+    assert!(
+        catalog
+            .as_array()
+            .expect("catalog array")
+            .iter()
+            .any(|model| {
+                model["id"] == "gpt-6-astra"
+                    && model["harness"] == "codex"
+                    && model["efforts"] == serde_json::json!(["high"])
+            }),
+        "the endpoint must expose the same constrained known model the helm compiles"
+    );
+
+    let (history_status, history) =
+        get_json(&harness, &format!("/api/launch-history?host={local}")).await;
+    assert_eq!(history_status, axum::http::StatusCode::OK);
+    assert_eq!(
+        history["launches"],
+        serde_json::json!([{
+            "host": local,
+            "cwd": "/composer-history",
+            "canonical_cwd": null,
+            "selection": {
+                "harness": "codex",
+                "model": "gpt-6-astra",
+                "effort": "high",
+                "permissions": "yolo",
+            },
+            "created_at": 100,
+            "creation_seq": 9,
+        }]),
+        "history returns the saved declarative selection, never a reparsed invocation"
+    );
+    assert_eq!(
+        history["folders"].as_array().expect("folder array").len(),
+        1,
+        "every successful create also supplies one folder suggestion"
+    );
+}
+
 /// `POST /api/sessions` end to end through the real axum handler and
 /// middleware stack, with a scripted supervisor peer standing in for
 /// `farhelm-supervisor`.
@@ -115,7 +186,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         // reach the supervisor at all — axum rejects a body missing
         // non-optional fields during deserialization.)
         assert_eq!((cols, rows), (80, 24), "serde defaults must be 80x24");
-        assert_eq!(cwd, "/some/dir");
+        assert_eq!(cwd, "~/project");
         // The raw mode has no source snapshot. Profile-backed creates are
         // resolved by the helm and carry both an invocation and snapshot.
         assert_eq!(invocation, Some("some-agent".to_string()));
@@ -137,8 +208,14 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
                     creation_seq: None,
-                    cwd: "/some/dir".into(),
+                    // This fixture covers a legacy supervisor reply that
+                    // supplies an accepted expanded directory but no
+                    // separately proven canonical identity.
+                    cwd: "/canonical/home/project".into(),
+                    canonical_cwd: None,
                     invocation: "some-agent".into(),
+                    resume_template: None,
+                    launch: None,
                     // Matches real `create_session` output: `Unknown`,
                     // not a live status (creation does not establish the
                     // agent's later exec succeeded).
@@ -162,7 +239,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
-            serde_json::json!({"cwd": "/some/dir", "invocation": "some-agent"}).to_string(),
+            serde_json::json!({"cwd": "~/project", "invocation": "some-agent"}).to_string(),
         ))
         .unwrap();
 
@@ -173,9 +250,149 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
         .unwrap();
     let session: SessionInfo = serde_json::from_slice(&body).unwrap();
     assert_eq!(session.id, "sess-1");
-    assert_eq!(session.cwd, "/some/dir");
+    assert_eq!(session.cwd, "/canonical/home/project");
+
+    let local = rest_harness::local_id(&harness.store).await;
+    let (history_status, history) =
+        get_json(&harness, &format!("/api/launch-history?host={local}")).await;
+    assert_eq!(history_status, axum::http::StatusCode::OK);
+    assert_eq!(
+        history["folders"],
+        serde_json::json!([{
+            "host": local,
+            "canonical_cwd": "/canonical/home/project",
+            "canonical_proven": false,
+            "display_cwd": "~/project",
+            "created_at": 1_700_000_000_i64,
+            "creation_seq": null,
+        }]),
+        "history must search the submitted spelling while deduplicating the verified target path"
+    );
 
     peer.await.unwrap();
+}
+
+/// A structured launch keeps the submitted home-relative spelling for history
+/// search while the session itself carries the supervisor's accepted path and
+/// its separately verified canonical destination. Replaying an intent key is
+/// deliberately included: it is where a second history observation could
+/// silently inflate the setup's frequency or replace its display spelling.
+#[farhelm_testtrace::test]
+async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .expect("complete supervisor handshake");
+        for _ in 0..2 {
+            let request = parse_control(
+                &reader
+                    .read_frame()
+                    .await
+                    .expect("read create frame")
+                    .expect("create frame present"),
+            )
+            .expect("decode create frame");
+            let ControlMsg::CreateSession {
+                req_id,
+                cwd,
+                intent_key,
+                ..
+            } = request
+            else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            assert_eq!(cwd, "~/work/project");
+            assert_eq!(intent_key.as_deref(), Some("same-intent"));
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        parent: None,
+                        archived: false,
+                        id: "structured-tilde".into(),
+                        title: "structured tilde".into(),
+                        created_at: 1_700_000_001,
+                        last_activity_at: 1_700_000_001,
+                        creation_seq: Some(77),
+                        cwd: "/home/person/work/project".into(),
+                        canonical_cwd: Some("/srv/repo/project".into()),
+                        invocation: "codex --model gpt-6-astra".into(),
+                        resume_template: None,
+                        launch: Some(farhelm_proto::LaunchSelection {
+                            harness: farhelm_proto::LaunchHarness::Codex,
+                            model: Some("gpt-6-astra".into()),
+                            effort: Some(farhelm_proto::LaunchEffort::High),
+                            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                        }),
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
+                        source_profile: None,
+                    },
+                }))
+                .await
+                .expect("reply to structured create");
+        }
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let app = harness.router();
+    let body = serde_json::json!({
+        "cwd": "~/work/project",
+        "intent_key": "same-intent",
+        "launch": {
+            "harness": "codex",
+            "model": "gpt-6-astra",
+            "effort": "high",
+            "permissions": "yolo"
+        }
+    })
+    .to_string();
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/sessions")
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body.clone()))
+                    .expect("build structured create request"),
+            )
+            .await
+            .expect("run structured create request");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let created: SessionInfo = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("read structured create reply"),
+        )
+        .expect("decode structured create reply");
+        assert_eq!(created.cwd, "/home/person/work/project");
+        assert_eq!(created.canonical_cwd.as_deref(), Some("/srv/repo/project"));
+    }
+    let local = rest_harness::local_id(&harness.store).await;
+    let (status, history) = get_json(&harness, &format!("/api/launch-history?host={local}")).await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        history["launches"].as_array().expect("launch array").len(),
+        1
+    );
+    assert_eq!(history["launches"][0]["cwd"], "~/work/project");
+    assert_eq!(history["launches"][0]["canonical_cwd"], "/srv/repo/project");
+    assert_eq!(history["folders"][0]["display_cwd"], "~/work/project");
+    assert_eq!(history["folders"][0]["canonical_cwd"], "/srv/repo/project");
+    assert_eq!(history["folders"][0]["canonical_proven"], true);
+    peer.await.expect("join scripted supervisor");
 }
 
 /// The create body's `intent_key`, `agent_kind`, and `resume_template`
@@ -237,7 +454,10 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                     last_activity_at: 1_700_000_000,
                     creation_seq: None,
                     cwd: "/some/dir".into(),
+                    canonical_cwd: None,
                     invocation: "some-agent".into(),
+                    resume_template: None,
+                    launch: None,
                     status: farhelm_proto::SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1011,7 +1231,10 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "agent".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1127,7 +1350,10 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                     last_activity_at: 1_700_000_000,
                     creation_seq: None,
                     cwd: "/sess-1".into(),
+                    canonical_cwd: None,
                     invocation: "agent".into(),
+                    resume_template: None,
+                    launch: None,
                     status: farhelm_proto::SessionStatus::Running,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1227,7 +1453,10 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "claude".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1281,6 +1510,109 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
         Some("builtin-claude")
     );
 
+    peer.await.unwrap();
+}
+
+/// Replacing a structured session reuses its stored resume argv, rather than
+/// asking today's integration defaults to reconstruct an older launch.
+///
+/// A template is durable launch behavior: replacing a session after catalog
+/// or integration changes must retain the source's exact conversation-resume
+/// contract along with its declarative composer selection.
+#[farhelm_testtrace::test]
+async fn replace_of_a_structured_session_preserves_its_resume_template() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{
+        ControlMsg, Frame, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+        SessionInfo,
+    };
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let selection = LaunchSelection {
+        harness: LaunchHarness::Claude,
+        model: Some("claude-opus-4-6".to_string()),
+        effort: Some(LaunchEffort::High),
+        permissions: Some(LaunchPermission::Yolo),
+    };
+    let resume_template = vec![
+        "claude".to_string(),
+        "--resume".to_string(),
+        "{conversation}".to_string(),
+    ];
+    let source = SessionInfo {
+        invocation: "claude --model claude-opus-4-6 --dangerously-skip-permissions".to_string(),
+        launch: Some(selection.clone()),
+        resume_template: Some(resume_template.clone()),
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    };
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            invocation,
+            agent_kind,
+            resume_template: actual_template,
+            launch,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(
+            invocation,
+            Some("claude --model claude-opus-4-6 --dangerously-skip-permissions".to_string())
+        );
+        assert_eq!(agent_kind, Some(farhelm_proto::AgentKind::Claude));
+        assert_eq!(actual_template, Some(resume_template));
+        assert_eq!(launch, Some(selection.clone()));
+
+        let created = SessionInfo {
+            id: "sess-2".to_string(),
+            launch: Some(selection),
+            ..rest_harness::session("sess-2", 1_700_000_500)
+        };
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(
+        serde_json::from_str::<SessionInfo>(&body).unwrap().id,
+        "sess-2"
+    );
     peer.await.unwrap();
 }
 
@@ -1341,7 +1673,10 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "sh -c 'echo hi'".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1422,7 +1757,10 @@ async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "agent".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1553,7 +1891,10 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "agent".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1680,7 +2021,10 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "agent".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -1826,7 +2170,10 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             last_activity_at: 1_700_000_500,
             creation_seq: None,
             cwd: "/sess-1".into(),
+            canonical_cwd: None,
             invocation: "agent".into(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Unknown,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -2415,7 +2762,10 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
                     last_activity_at: 1_700_000_000,
                     creation_seq: None,
                     cwd: "/some/dir".into(),
+                    canonical_cwd: None,
                     invocation: "some-agent".into(),
+                    resume_template: None,
+                    launch: None,
                     status: farhelm_proto::SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::Resume,
@@ -2558,7 +2908,10 @@ async fn rename_session_forwards_the_title_verbatim() {
             last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: "/distinctive/dir".into(),
+            canonical_cwd: None,
             invocation: "distinctive-agent --flag".into(),
+            resume_template: None,
+            launch: None,
             status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::Resume,
@@ -2730,7 +3083,10 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                         last_activity_at: 1_700_000_000,
                         creation_seq: None,
                         cwd: "/some/dir".into(),
+                        canonical_cwd: None,
                         invocation: "some-agent".into(),
+                        resume_template: None,
+                        launch: None,
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
                         restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3159,7 +3515,10 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                     last_activity_at: 1_700_000_500,
                     creation_seq: None,
                     cwd: "/work".into(),
+                    canonical_cwd: None,
                     invocation: "claude".into(),
+                    resume_template: None,
+                    launch: None,
                     status: farhelm_proto::SessionStatus::Unknown,
                     annotation: None,
                     restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3210,6 +3569,66 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
     peer.await.unwrap();
+}
+
+/// Browse results are destination-specific just like creates. A stale
+/// connection claim must be refused before dispatch, or an old dialog could
+/// populate itself with paths from the replacement installation.
+#[farhelm_testtrace::test]
+async fn a_browse_prepared_against_a_replaced_connection_reaches_no_supervisor() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (reader, writer) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(reader);
+        let mut writer = FrameWriter::new(writer);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::BrowseDirectory { req_id, cwd } = request else {
+            panic!("expected the current browse request, got {request:?}");
+        };
+        assert_eq!(cwd, "/work");
+        writer
+            .write_frame(&Frame::control(&ControlMsg::DirectoryListing {
+                req_id,
+                cwd: "/work".to_string(),
+                parent: Some("/".to_string()),
+                children: Vec::new(),
+                truncated: false,
+            }))
+            .await
+            .unwrap();
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let local = rest_harness::local_id(&harness.store).await;
+    let current = harness
+        .manager
+        .status(local)
+        .expect("local actor")
+        .incarnation;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/browse-directory",
+        serde_json::json!({"host": local, "cwd": "/work", "expected_incarnation": current - 1}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert!(body.contains(crate::precondition::INCARNATION_MARKER));
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/browse-directory",
+        serde_json::json!({"host": local, "cwd": "/work", "expected_incarnation": current}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    peer.await
+        .expect("only the current request reaches the peer");
 }
 
 /// A stale claim fails the session-cache seed, and the remembered default
@@ -3263,7 +3682,10 @@ async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
         last_activity_at: 1_700_000_700,
         creation_seq: Some(5),
         cwd: "/work".into(),
+        canonical_cwd: None,
         invocation: "claude".into(),
+        resume_template: None,
+        launch: None,
         status: farhelm_proto::SessionStatus::Unknown,
         annotation: None,
         restart_offer: farhelm_proto::RestartOffer::default(),
@@ -3934,6 +4356,81 @@ async fn a_create_defaults_to_the_local_host_and_honors_an_explicit_one() {
         local_task.abort();
         remote_task.abort();
     }
+}
+
+/// Directory browse has the same target-host safety boundary as create: a
+/// remote path is only meaningful on the remote supervisor, and silently
+/// reading the helm's local filesystem would present a valid-looking but
+/// wrong destination to the person selecting it.
+#[farhelm_testtrace::test]
+async fn browse_directory_routes_to_the_named_host_and_preserves_its_reply() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame};
+
+    let (local_client, local_peer) = tokio::io::duplex(64 * 1024);
+    let local_task = tokio::spawn(silent_supervisor(local_peer));
+    let (remote_client, remote_peer) = tokio::io::duplex(64 * 1024);
+    let remote_task = tokio::spawn(async move {
+        let (reader, writer) = tokio::io::split(remote_peer);
+        let mut reader = FrameReader::new(reader);
+        let mut writer = FrameWriter::new(writer);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::BrowseDirectory { req_id, cwd } = request else {
+            panic!("expected BrowseDirectory, got {request:?}");
+        };
+        assert_eq!(cwd, "~/project");
+        writer
+            .write_frame(&Frame::control(&ControlMsg::DirectoryListing {
+                req_id,
+                cwd: "/remote/home/project".to_string(),
+                parent: Some("/remote/home".to_string()),
+                children: vec!["/remote/home/project/src".to_string()],
+                truncated: false,
+            }))
+            .await
+            .unwrap();
+    });
+    let (builder, remote) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            peer: Some(local_client),
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@remote",
+            rest_harness::HostScript {
+                identity: Some("identity-remote".to_string()),
+                peer: Some(remote_client),
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness.await_refreshed(remote).await;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/browse-directory",
+        serde_json::json!({"host": remote, "cwd": "~/project"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let listing: serde_json::Value = serde_json::from_str(&body).expect("browse JSON");
+    assert_eq!(listing["cwd"], "/remote/home/project");
+    assert_eq!(
+        listing["children"],
+        serde_json::json!(["/remote/home/project/src"])
+    );
+
+    local_task.abort();
+    remote_task.await.expect("remote browse peer");
 }
 
 /// A terminal socket for a session on a non-connected host must be
@@ -5453,6 +5950,7 @@ async fn a_stale_sessions_detail_is_served_from_the_cache_and_marked_stale() {
                 sessions: vec![farhelm_proto::SessionInfo {
                     title: "the work in progress".to_string(),
                     cwd: "/home/user/project".to_string(),
+                    canonical_cwd: None,
                     source_profile: Some(farhelm_proto::SourceProfile {
                         id: profile.id.clone(),
                         name: "claude".to_string(),
@@ -5519,6 +6017,7 @@ fn filterable(
 ) -> farhelm_proto::SessionInfo {
     farhelm_proto::SessionInfo {
         cwd: cwd.to_string(),
+        canonical_cwd: None,
         title: title.to_string(),
         status,
         source_profile,

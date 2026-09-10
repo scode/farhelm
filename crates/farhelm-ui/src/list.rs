@@ -46,5 +46,5 @@ mod row;
 mod shared;
 mod view;
 
-pub(crate) use shared::OpenHost;
+pub(crate) use shared::OpenDestination;
 pub(crate) use view::{ListView, SharedPreferences};
