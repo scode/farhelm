@@ -68,6 +68,8 @@
 use serde::{Deserialize, Serialize};
 
 pub mod io;
+pub mod launch;
+pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// Longest session identity accepted from a protocol peer.
 ///
@@ -85,7 +87,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
-/// Within version 12 the additive discipline of every prior version
+/// Within version 18 the additive discipline of every prior version
 /// continues to apply, with version 9's sharper reading intact: new
 /// optional fields with decode defaults are fine WHEN ignoring one is
 /// harmless; a field whose omission changes behavior, a new tagged variant,
@@ -147,7 +149,22 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// [`AgentReply::ResolvedProfile`] add the upward relay used when
 /// `farhelm spawn --agent` asks an attached helm to resolve a name.
 ///
-/// `protocol_version_is_pinned_at_15` (renamed at every bump since `_at_4`)
+/// Version 17 adds host-directory browsing. A helm asks the selected
+/// supervisor rather than reading its own filesystem, so a remote composer
+/// never receives paths from the wrong machine.
+///
+/// Version 16 adds the structured launch snapshot carried by
+/// [`ControlMsg::CreateSession`] and [`SessionInfo`]. A helm depends on the
+/// supervisor retaining it through retry, clone, and restart, so a peer that
+/// would silently discard this lifecycle data is not protocol-compatible.
+///
+/// Version 18 carries the supervisor's accepted canonical working-directory
+/// fact in [`SessionInfo::canonical_cwd`]. Although the JSON field is
+/// optional for old durable rows, a helm uses it to decide folder-history
+/// identity. An older helm silently ignoring it would retain and merge a
+/// different history, so this is not the harmless optional-field case.
+///
+/// `protocol_version_is_pinned_at_18` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -159,7 +176,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -753,7 +770,38 @@ pub struct SessionInfo {
     /// a non-UTF-8 host path cannot reach this field; it must have been
     /// rejected at the boundary before a `SessionInfo` could exist.
     pub cwd: String,
+    /// The canonical directory the supervisor accepted when creating this
+    /// session, retained separately from [`Self::cwd`].
+    ///
+    /// This is an identity fact, not a display replacement: `cwd` remains
+    /// the supervisor's accepted session directory (including its `~`
+    /// expansion), while this path is what the supervisor resolved at the
+    /// one accepted-create boundary. Consumers retaining a submitted spelling
+    /// must carry that request fact separately.
+    /// Recomputing it later could follow a repointed symlink and identify a
+    /// different directory. `None` means this sender or durable row has no
+    /// such accepted fact; consumers must keep the display spelling distinct
+    /// rather than canonically resolving it on another machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_cwd: Option<String>,
     pub invocation: String,
+    /// Immutable resume argv recorded when this session was created.
+    ///
+    /// A structured selection records its requested initial choices; this
+    /// separately records the stored lifecycle bundle so replace and
+    /// selectorless inheritance cannot derive a different resume command
+    /// after an integration or catalog change. Legacy rows and senders that
+    /// predate the field leave it absent.
+    #[serde(default)]
+    pub resume_template: Option<Vec<String>>,
+    /// Explicit structured choices used to compile this session's invocation.
+    ///
+    /// `None` means the session was created through a legacy raw/profile path
+    /// or predates the launch composer. It never asks a reader to infer a
+    /// harness from `invocation`; absent provenance is more honest than a
+    /// plausible-looking guess from a mutable command line.
+    #[serde(default)]
+    pub launch: Option<LaunchSelection>,
     /// `Unknown`, the live statuses (`Running`/`Waiting`/`Idle`), and
     /// `Exited` are computed fresh by the supervisor on
     /// every `ListSessions` reply through LIVE tmux probing — that half of
@@ -2151,6 +2199,13 @@ pub enum ControlMsg {
         /// Profile identity the helm resolved with this invocation. It is
         /// absent for raw creates and accompanies an invocation only.
         source_profile: Option<ProfileSnapshot>,
+        /// The explicit structured choices the helm compiled into
+        /// `invocation`. Legacy raw/profile creation leaves this absent.
+        ///
+        /// This travels beside the resolved command rather than replacing it:
+        /// the supervisor executes and resumes the frozen bundle, while the
+        /// composer later uses this immutable selection for clone and history.
+        launch: Option<LaunchSelection>,
     },
     /// Success reply to `CreateSession`. The session and terminal exist,
     /// but this does not establish that the agent's later `exec`
@@ -2196,6 +2251,23 @@ pub enum ControlMsg {
     SessionList {
         req_id: u64,
         sessions: Vec<SessionInfo>,
+        truncated: bool,
+    },
+    /// List immediate child directories on the supervisor's filesystem.
+    ///
+    /// `cwd` may use the same `~` spelling as a create request. The
+    /// supervisor expands and validates it; neither the helm nor the browser
+    /// is allowed to substitute its own home directory.
+    BrowseDirectory { req_id: u64, cwd: String },
+    /// A bounded directory-browser reply. `cwd` is the usable expanded path,
+    /// `parent` is absent only at the filesystem root, and `children` names
+    /// immediate directories only. `truncated` says that additional entries
+    /// existed beyond the fixed scan bound.
+    DirectoryListing {
+        req_id: u64,
+        cwd: String,
+        parent: Option<String>,
+        children: Vec<String>,
         truncated: bool,
     },
     /// Kill the agent's entire process tree (MCP servers, dev servers,
@@ -2983,6 +3055,7 @@ impl ControlMsg {
         match self {
             ControlMsg::SessionCreated { req_id, .. }
             | ControlMsg::SessionList { req_id, .. }
+            | ControlMsg::DirectoryListing { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionArchived { req_id, .. }
@@ -3007,6 +3080,7 @@ impl ControlMsg {
             // delivered as an answer.
             ControlMsg::CreateSession { .. }
             | ControlMsg::ListSessions { .. }
+            | ControlMsg::BrowseDirectory { .. }
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::ArchiveSession { .. }
@@ -3047,6 +3121,7 @@ impl ControlMsg {
         match self {
             ControlMsg::CreateSession { req_id, .. }
             | ControlMsg::ListSessions { req_id, .. }
+            | ControlMsg::BrowseDirectory { req_id, .. }
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
             | ControlMsg::ArchiveSession { req_id, .. }
@@ -3065,6 +3140,7 @@ impl ControlMsg {
             ControlMsg::Hello { .. }
             | ControlMsg::SessionCreated { .. }
             | ControlMsg::SessionList { .. }
+            | ControlMsg::DirectoryListing { .. }
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
             | ControlMsg::SessionArchived { .. }
@@ -3116,6 +3192,8 @@ impl ControlMsg {
             ControlMsg::SessionCreated { .. } => "SessionCreated",
             ControlMsg::ListSessions { .. } => "ListSessions",
             ControlMsg::SessionList { .. } => "SessionList",
+            ControlMsg::BrowseDirectory { .. } => "BrowseDirectory",
+            ControlMsg::DirectoryListing { .. } => "DirectoryListing",
             ControlMsg::StopSession { .. } => "StopSession",
             ControlMsg::SessionStopped { .. } => "SessionStopped",
             ControlMsg::DeleteSession { .. } => "DeleteSession",
@@ -3762,7 +3840,10 @@ mod tests {
             last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: "/tmp".to_string(),
+            canonical_cwd: Some("/resolved/tmp".to_string()),
             invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -3772,6 +3853,11 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&info).unwrap()["created_at"],
             serde_json::json!(1_700_000_000)
+        );
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["canonical_cwd"],
+            serde_json::json!("/resolved/tmp"),
+            "the accepted identity is distinct from the display spelling on the wire"
         );
     }
 
@@ -3796,7 +3882,10 @@ mod tests {
                 last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "agent".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::Unknown,
                 annotation: None,
                 restart_offer: RestartOffer::FreshOnly,
@@ -3836,8 +3925,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_15() {
-        assert_eq!(PROTOCOL_VERSION, 15);
+    fn protocol_version_is_pinned_at_18() {
+        assert_eq!(PROTOCOL_VERSION, 18);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -3987,7 +4076,10 @@ mod tests {
             last_activity_at: 1_700_000_000,
             creation_seq: Some(7),
             cwd: "/tmp".to_string(),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
             status: SessionStatus::Exited { exit_code: None },
             annotation: Some(STOP_ANNOTATION.to_string()),
             restart_offer: RestartOffer::FreshOnly,
@@ -4029,6 +4121,8 @@ mod tests {
                         "tabs": [],
                         "archived": true,
                         "source_profile": null,
+                        "resume_template": null,
+                        "launch": null,
                     },
                 }),
             ),
@@ -4428,7 +4522,10 @@ mod tests {
                     last_activity_at: 0,
                     creation_seq: Some(1),
                     cwd: "/tmp".to_string(),
+                    canonical_cwd: None,
                     invocation: "agent".to_string(),
+                    resume_template: None,
+                    launch: None,
                     status: SessionStatus::Exited { exit_code: None },
                     annotation: Some(STOP_ANNOTATION.to_string()),
                     restart_offer: RestartOffer::FreshOnly,
@@ -4468,7 +4565,10 @@ mod tests {
                 last_activity_at: 0,
                 creation_seq: Some(1),
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "agent".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::Exited { exit_code: None },
                 annotation: Some(STOP_ANNOTATION.to_string()),
                 restart_offer: RestartOffer::FreshOnly,
@@ -4644,7 +4744,10 @@ mod tests {
                 last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "agent".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::Exited { exit_code: Some(1) },
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -4708,7 +4811,10 @@ mod tests {
             last_activity_at: 1_700_000_600,
             creation_seq: None,
             cwd: "/tmp".to_string(),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -4732,6 +4838,8 @@ mod tests {
                 "tabs": [],
                 "archived": false,
                 "source_profile": null,
+                "resume_template": null,
+                "launch": null,
             })
         );
 
@@ -4828,7 +4936,10 @@ mod tests {
             last_activity_at,
             creation_seq: None,
             cwd: "/tmp".to_string(),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
             status: SessionStatus::default(),
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -4873,7 +4984,10 @@ mod tests {
             last_activity_at: 1_700_000_000,
             creation_seq: None,
             cwd: "/tmp".to_string(),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
             status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::default(),
@@ -5227,6 +5341,7 @@ mod tests {
                 "{conversation}".to_string(),
             ]),
             source_profile: None,
+            launch: None,
         };
         assert_eq!(
             serde_json::to_value(&msg).unwrap(),
@@ -5244,6 +5359,7 @@ mod tests {
                 "agent_kind": "claude",
                 "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
                 "source_profile": null,
+                "launch": null,
             })
         );
     }
@@ -5274,6 +5390,7 @@ mod tests {
                 id: "prof-7".to_string(),
                 name: "Claude Code".to_string(),
             }),
+            launch: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5289,6 +5406,7 @@ mod tests {
             "agent_kind": "claude",
             "resume_template": null,
             "source_profile": {"id": "prof-7", "name": "Claude Code"},
+            "launch": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         let golden_frame = Frame {
@@ -5317,6 +5435,7 @@ mod tests {
             agent_kind: None,
             resume_template: None,
             source_profile: None,
+            launch: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5332,6 +5451,7 @@ mod tests {
             "agent_kind": null,
             "resume_template": null,
             "source_profile": null,
+            "launch": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
@@ -5359,6 +5479,7 @@ mod tests {
             agent_kind: None,
             resume_template: None,
             source_profile: None,
+            launch: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5374,6 +5495,7 @@ mod tests {
             "agent_kind": null,
             "resume_template": null,
             "source_profile": null,
+            "launch": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
@@ -5408,6 +5530,7 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
+                launch: None,
             };
             let json = serde_json::to_value(&msg).unwrap();
             let decoded: ControlMsg = serde_json::from_value(json)
@@ -5517,6 +5640,7 @@ mod tests {
                 "{conversation}".to_string(),
             ]),
             source_profile: None,
+            launch: None,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
 
@@ -5599,6 +5723,7 @@ mod tests {
             agent_kind: None,
             resume_template: None,
             source_profile: None,
+            launch: None,
         };
         let LegacyV9ControlMsg::CreateSession { invocation, .. } =
             serde_json::from_value(serde_json::to_value(&raw).unwrap())
@@ -5621,6 +5746,7 @@ mod tests {
             agent_kind: None,
             resume_template: None,
             source_profile: None,
+            launch: None,
         };
         serde_json::from_value::<LegacyV9ControlMsg>(serde_json::to_value(&profile_mode).unwrap())
             .expect_err(
@@ -5670,7 +5796,10 @@ mod tests {
                 last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "claude".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
@@ -5764,7 +5893,10 @@ mod tests {
                 last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "claude".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::Resume,
@@ -5792,6 +5924,8 @@ mod tests {
                     "tabs": [],
                     "archived": false,
                     "source_profile": null,
+                    "resume_template": null,
+                    "launch": null,
                 },
             })
         );
@@ -5986,7 +6120,10 @@ mod tests {
                         last_activity_at: 1_700_000_000,
                         creation_seq: None,
                         cwd: "/tmp".to_string(),
+                        canonical_cwd: None,
                         invocation: "claude".to_string(),
+                        resume_template: None,
+                        launch: None,
                         status: SessionStatus::Running,
                         annotation: None,
                         restart_offer: RestartOffer::Resume,
@@ -6012,6 +6149,8 @@ mod tests {
                         "tabs": [],
                         "archived": false,
                         "source_profile": null,
+                        "resume_template": null,
+                        "launch": null,
                     },
                 }),
             ),
@@ -6240,7 +6379,10 @@ mod tests {
                 last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "claude".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::Running,
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -6959,7 +7101,10 @@ mod tests {
                 last_activity_at: 0,
                 creation_seq: None,
                 cwd: "/secret".to_string(),
+                canonical_cwd: None,
                 invocation: "claude --dangerously-skip-permissions".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),

@@ -99,7 +99,7 @@ impl OpLock {
     /// Move the guard into the spawned future. Dropping that future then
     /// releases the claim before a removed component can strand it.
     pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
-        self.claim().then_some(OpGuard { held: self.held })
+        claimed_owner(self.claim(), || OpGuard { held: self.held })
     }
 
     /// Claim the token, or report that someone else holds it.
@@ -284,6 +284,17 @@ fn claim_in(held: &mut bool) -> bool {
     true
 }
 
+/// Construct release ownership only after the corresponding claim succeeds.
+///
+/// The laziness is the contract. An eager `then_some(OpGuard { .. })` creates
+/// and immediately drops a guard when a second claim is refused; that drop
+/// releases the first caller's live operation. Keeping construction behind a
+/// closure makes the failed-claim path incapable of manufacturing release
+/// authority it never acquired.
+fn claimed_owner<T>(claimed: bool, owner: impl FnOnce() -> T) -> Option<T> {
+    claimed.then(owner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +321,27 @@ mod tests {
         // path that never releases at all, not one that releases twice.
         held = false;
         assert!(claim_in(&mut held));
+    }
+
+    /// A refused claim must not construct anything whose destructor could
+    /// release the operation that already owns the token.
+    ///
+    /// This pins the eager-`then_some` failure mode: evaluating the owner on
+    /// `false` briefly creates release authority and drops it immediately,
+    /// clearing the first operation's lock before that operation completes.
+    #[farhelm_testtrace::test]
+    fn a_refused_claim_never_constructs_release_ownership() {
+        let constructed = std::cell::Cell::new(false);
+
+        let owner = claimed_owner(false, || {
+            constructed.set(true);
+        });
+
+        assert!(owner.is_none());
+        assert!(
+            !constructed.get(),
+            "a failed claimant has no release authority to construct or drop"
+        );
     }
 
     /// An older read's SUCCESS must never overwrite a newer one.

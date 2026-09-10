@@ -179,8 +179,19 @@ Session creation is one action, not a wizard. Only the working directory is fund
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Agent profile: defaults to the helm's one last-used profile. If it no longer exists, the client asks instead of
-  guessing. The remembered value is a helm-wide profile id, not per-host state.
+- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, and Muse launches carry a
+  harness plus optional model, effort, and YOLO permission choices; absent optional choices mean the selected harness's
+  defaults and omit their flags. The helm owns the released model catalog and validates every structured choice, so the
+  browser never turns a model identifier into an argv fragment. A known model identifies its owning harness; a custom
+  model needs an explicit harness. Replacing a harness clears only choices that are incompatible with it. Model and
+  effort are optional, permissions begin at the harness default, and an invalid combination cannot launch.
+- Legacy agent profile or arbitrary command: an explicit secondary creation surface. Existing callers, profiles, and
+  their helm-wide last-used profile behavior remain compatible, but New does not silently choose a remembered profile.
+  Values from this surface cannot affect a structured request, or its idempotency key.
+- Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
+  identity. A recent row fills every saved choice and directory but never launches. A retargeted registry row cannot
+  expose the replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk;
+  explicit browsing asks the selected supervisor for one bounded directory level.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the
@@ -232,12 +243,13 @@ The client supports: create, open, rename, restart, clone, replace, stop, archiv
   title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
   cloning starts a brand-new, independent create through the same form and the same confirmation described under
   Creation and identity above, so every field can be edited before submitting and the request can be cancelled like any
-  other create. The agent carries over as a profile only while the source's profile is still the one it names (the same
-  identity a session's own profile snapshot already tracks); otherwise the form falls back to the source's raw
-  invocation, exactly as "the client asks instead of guessing" already requires for a vanished remembered default.
-  Cloning does not deduplicate titles — a duplicate is allowed, the same as any other create. Clone is offered on
-  archived sessions too: it is the only way to get a new, running agent out of one without restarting (and thereby
-  unarchiving) the original.
+  other create. A structured source carries its stored declarative launch selection into the composer verbatim,
+  including omitted default fields; it is never rediscovered by parsing the compiled invocation. A legacy agent carries
+  over as a profile only while the source's profile is still the one it names (the same identity a session's own profile
+  snapshot already tracks); otherwise the form falls back to the source's raw invocation, exactly as "the client asks
+  instead of guessing" already requires for a vanished remembered default. Cloning does not deduplicate titles — a
+  duplicate is allowed, the same as any other create. Clone is offered on archived sessions too: it is the only way to
+  get a new, running agent out of one without restarting (and thereby unarchiving) the original.
 - **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and agent (a
   profile while the source's profile is still the one it names, otherwise the source's raw invocation, exactly as clone
   resolves it) — and then DELETES the source; it never archives it. Confirmed directly from the row menu, with one

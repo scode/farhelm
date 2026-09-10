@@ -56,7 +56,9 @@
 //! failure-text builders) stay private to this module.
 
 use crate::skew;
-use crate::{Host, HostId, Profile, RestartOffer, Session, Tab};
+use crate::{
+    Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Profile, RestartOffer, Session, Tab,
+};
 use serde::{Deserialize, Serialize};
 
 /// Mirror of the helm's whole `GET /api/sessions` reply (farhelm-helm's
@@ -91,6 +93,68 @@ struct SessionListBody {
     matching: Option<u64>,
     #[serde(default)]
     truncated: bool,
+}
+
+/// A successful structured create that the selected installation may offer
+/// again. The helm owns the identity boundary; the UI only decodes its
+/// HTTP representation and must still guard a later create by incarnation.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct LaunchHistoryEntry {
+    pub(crate) host: HostId,
+    /// The accepted destination belongs to this launch row. Older helm
+    /// replies may lack it; callers then keep the display spelling separate
+    /// instead of consulting mutable folder suggestions.
+    pub(crate) canonical_cwd: Option<String>,
+    pub(crate) cwd: String,
+    pub(crate) selection: LaunchSelection,
+    pub(crate) created_at: i64,
+    /// `None` is an older supervisor's timestamp/id-ordered observation.
+    pub(crate) creation_seq: Option<u64>,
+}
+
+/// A path the selected installation accepted for any successful create.
+///
+/// `canonical_cwd` determines folder identity while `display_cwd` preserves
+/// the spelling that makes a suggestion recognizable to the person who used
+/// it. Accepted creates already establish the canonical destination; browsing
+/// is another way to obtain a display spelling that may differ from it.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct FolderHistoryEntry {
+    pub(crate) host: HostId,
+    pub(crate) canonical_cwd: String,
+    #[serde(default)]
+    pub(crate) canonical_proven: bool,
+    pub(crate) display_cwd: String,
+    pub(crate) created_at: i64,
+    pub(crate) creation_seq: Option<u64>,
+}
+
+/// The composer suggestion set for one connected, identity-verified host.
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub(crate) struct LaunchHistory {
+    pub(crate) launches: Vec<LaunchHistoryEntry>,
+    pub(crate) folders: Vec<FolderHistoryEntry>,
+}
+
+/// One known model the helm accepts for the named structured harness.
+///
+/// This is metadata for rendering and compatibility affordances only. The
+/// helm validates again when a create arrives, because catalog data can be
+/// stale by the time a person clicks Launch.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct LaunchCatalogModel {
+    pub(crate) id: String,
+    pub(crate) harness: LaunchHarness,
+    pub(crate) efforts: Vec<LaunchEffort>,
+}
+
+/// One bounded response from the selected host's directory browser.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub(crate) struct DirectoryBrowse {
+    pub(crate) cwd: String,
+    pub(crate) parent: Option<String>,
+    pub(crate) children: Vec<String>,
+    pub(crate) truncated: bool,
 }
 
 /// The session-list API query surface, including fields the current sidebar
@@ -1343,6 +1407,8 @@ pub(crate) enum CreateAgent<'a> {
     /// A `Profile::id` from the helm catalog. The helm resolves it before
     /// forwarding the resulting invocation to the selected host.
     Profile(&'a str),
+    /// Structured intent compiled by the helm into one safe invocation.
+    Structured(&'a LaunchSelection),
 }
 
 /// POST the create endpoint, returning the decoded `Session` on success or
@@ -1437,6 +1503,7 @@ fn create_body(
     match agent {
         CreateAgent::Command(invocation) => body["invocation"] = serde_json::json!(invocation),
         CreateAgent::Profile(profile_id) => body["profile_id"] = serde_json::json!(profile_id),
+        CreateAgent::Structured(selection) => body["launch"] = serde_json::json!(selection),
     }
     // The connection this create was prepared against. It matters most in
     // PROFILE mode, where the id would otherwise resolve on whatever install
@@ -2253,6 +2320,68 @@ pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
         return Err(read_failure("GET", &url, resp).await);
     }
     decode_hosts(resp).await
+}
+
+/// Fetch the helm build's structured-launch catalog.
+///
+/// The browser presents this data but never compiles it into argv: selection
+/// stays declarative until the helm validates and compiles the create.
+pub(crate) async fn fetch_launch_catalog(base: &str) -> Result<Vec<LaunchCatalogModel>, String> {
+    let url = format!("{base}/api/launch-catalog");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<Vec<LaunchCatalogModel>>()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Fetch reusable launch and folder suggestions for the explicitly selected
+/// host.
+///
+/// The host id is mandatory because history belongs to an installation, not
+/// to a registry label. A failure establishes only that there is no new usable
+/// history result (including for an unknown or never-connected host); callers
+/// preserve the current draft rather than rendering that failure as history.
+pub(crate) async fn fetch_launch_history(
+    base: &str,
+    host: HostId,
+) -> Result<LaunchHistory, String> {
+    let url = format!("{base}/api/launch-history?host={host}");
+    let resp = send(client().get(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("GET", &url, resp).await);
+    }
+    resp.json::<LaunchHistory>()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Browse an immediate directory level on the selected host.
+///
+/// `incarnation` fences dispatch at the helm. The open composer separately
+/// accepts a completion only when its live target and request generation
+/// still match, preventing a late reply from populating another install.
+pub(crate) async fn browse_directory(
+    base: &str,
+    host: HostId,
+    cwd: &str,
+    incarnation: Option<u64>,
+) -> Result<DirectoryBrowse, String> {
+    let url = format!("{base}/api/browse-directory");
+    let resp = send(client().post(&url).json(&serde_json::json!({
+        "host": host,
+        "cwd": cwd,
+        "expected_incarnation": incarnation,
+    })))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("POST", &url, resp).await);
+    }
+    resp.json::<DirectoryBrowse>()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// Decode the frozen host-list envelope for the desktop bootstrap and the

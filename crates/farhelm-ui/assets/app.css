@@ -274,6 +274,23 @@
      reads as a drawn frame instead of as depth. */
   --shadow-menu: 0 6px 18px rgba(0, 0, 0, 0.45);
 
+  /* Launch composer. This dialog is an embedded product surface, with a
+     slightly bluer floating panel and controls so its many related choices
+     read as one bounded task. These are roles rather than additions to the
+     general surface ladder: they must move together if the composer ever
+     gets a theme of its own. */
+  --composer-scrim: rgb(13 17 25 / 78%);
+  --composer-bg: #171e2b;
+  --composer-border: #334157;
+  --composer-control-bg: #202a3a;
+  --composer-search-hover-bg: #29364c;
+  --composer-control-fg: #a5b4ca;
+  --composer-selected-border: #9eafff;
+  --composer-selected-bg: #354477;
+  --composer-selected-fg: #edf2fa;
+  --composer-shadow: 0 18px 56px rgb(0 0 0 / 45%);
+  --composer-menu-shadow: 0 12px 28px rgb(0 0 0 / 38%);
+
   /* Corner radii. */
   --radius-sm: 3px; /* controls and inputs */
   --radius-md: 4px; /* panels and cards */
@@ -3020,6 +3037,435 @@ samp {
   padding: 2px 14px 8px;
   font-size: 12px;
   color: var(--danger);
+}
+
+/* The composer is a bounded dialog because its choices are about one launch,
+   not persistent sidebar state. Its inner controls deliberately use the
+   supplied dark blue option treatment instead of inheriting generic buttons. */
+.launch-composer-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow: auto;
+  background: var(--composer-scrim);
+}
+
+.launch-composer-backdrop .create-session-form {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  height: min(760px, calc(100vh - 40px));
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  margin: 0;
+  padding: 22px;
+  overflow: auto;
+  background: var(--composer-bg);
+  border: 1px solid var(--composer-border);
+  border-radius: 12px;
+  box-shadow: var(--composer-shadow);
+}
+
+/* The header names this transient decision and keeps reset close to the
+   choices it clears. It intentionally does not reset host or folder: those
+   remain the contextual destination the dialog opened for. */
+.launch-composer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.launch-composer-header h2 {
+  margin: 0;
+  color: var(--composer-selected-fg);
+}
+
+.launch-composer-reset {
+  border: 0;
+  background: transparent;
+  color: var(--composer-selected-fg);
+  font: inherit;
+  text-decoration: underline;
+}
+
+.launch-composer-recents,
+.launch-composer-browser {
+  display: grid;
+  gap: 4px;
+}
+
+/* The selected-value strip makes the free-order controls reviewable without
+   turning them into wizard steps. Chips are controls only for dimensions a
+   person can clear; host and folder stay readable context. */
+.launch-composer-selections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  /* The empty/default strip reserves the common four compact rows, but its
+     real content is allowed to enlarge that reservation. A long destination
+     can force more rows than the old three-row assumption; clipping it would
+     paint chips into the recents heading. `align-content` keeps short states
+     compact rather than stretching them to fill the stable baseline. */
+  min-height: 138px;
+  flex: 0 0 auto;
+  align-content: flex-start;
+}
+
+.launch-composer-backdrop .create-session-form .launch-composer-chip,
+.launch-composer-backdrop .create-session-form .launch-composer-folder > button,
+.launch-composer-backdrop .create-session-form .launch-composer-folder-options > button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--composer-border);
+  border-radius: 999px;
+  background: var(--composer-control-bg);
+  color: var(--composer-control-fg);
+  font-size: 12px;
+}
+
+/* History paths are destination choices, not decorative chips. Match the
+   ordinary composer option affordance so the checked path is unmistakable. */
+.launch-composer-backdrop .create-session-form .launch-composer-folder-options > button {
+  min-height: 38px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.launch-composer-backdrop .create-session-form .launch-composer-folder-options > button.selected {
+  border-color: var(--composer-selected-border);
+  background: var(--composer-selected-bg);
+  color: var(--composer-selected-fg);
+}
+
+.launch-composer-summary {
+  color: var(--composer-control-fg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Profile and raw-command controls remain mounted so their draft can survive
+   an explicit trip through Other, but the structured surface must not present
+   them as disabled ordinary choices. */
+.launch-composer-backdrop .create-session-form .launch-composer-legacy-hidden {
+  display: none;
+}
+
+.launch-composer-backdrop .create-session-form label.launch-composer-folder {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.launch-composer-folder > input {
+  min-width: 0;
+}
+
+.launch-composer-folder-options {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Recents reserve their three compact rows even while history is empty. This
+   keeps the option controls below them from jumping as an async history reply
+   arrives or a filter narrows its matches. */
+.launch-composer-recents {
+  display: grid;
+  gap: 4px;
+}
+
+.launch-composer-recents-heading {
+  color: var(--composer-control-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.launch-composer-recent-slots {
+  display: grid;
+  grid-template-rows: repeat(3, 44px);
+  gap: 4px;
+  min-height: 140px;
+}
+
+.launch-composer-choice {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.launch-composer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.launch-composer-options > button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--composer-border);
+  border-radius: 8px;
+  background: var(--composer-control-bg);
+  color: var(--composer-control-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.launch-composer-options > button.selected {
+  border-color: var(--composer-selected-border);
+  background: var(--composer-selected-bg);
+  color: var(--composer-selected-fg);
+}
+
+/* Each option renders the same checkmark slot. `visibility`, rather than
+   conditional text or a pseudo-element, preserves the glyph's real advance
+   on both sides of a selection change. That keeps comparison peers anchored
+   when a choice becomes selected. */
+.launch-composer-option-check {
+  display: inline-block;
+  width: 1.1em;
+  margin-right: 0.25em;
+  visibility: hidden;
+}
+
+.launch-composer-options > button.selected > .launch-composer-option-check,
+.launch-composer-folder-options > button.selected > .launch-composer-option-check {
+  visibility: visible;
+}
+
+
+/* A current catalog can reject an exact snapshot recorded by an earlier
+   release. Keep that snapshot readable, then state why Launch is disabled so
+   a clone never appears to have silently changed its requested agent. */
+.launch-composer-choice-error {
+  margin: -4px 0 0 176px;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.launch-composer-more {
+  grid-column: 2;
+  color: var(--composer-control-fg);
+  font-size: 12px;
+}
+
+.launch-composer-more > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.launch-composer-more > input {
+  width: min(100%, 360px);
+  margin-top: 6px;
+}
+
+.launch-composer-advanced {
+  margin-top: 8px;
+  color: var(--composer-control-fg);
+  font-size: 13px;
+}
+
+.launch-composer-advanced > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.launch-composer-advanced > label {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.launch-composer-search {
+  position: relative;
+}
+
+.launch-composer-search > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.launch-composer-search-results {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  padding: 6px;
+  overflow: auto;
+  background: var(--composer-bg);
+  border: 1px solid var(--composer-selected-border);
+  border-radius: 8px;
+  box-shadow: var(--composer-menu-shadow);
+}
+
+/* Search headings are semantic group boundaries: partial field actions and
+   complete recents must not collapse into one visually indistinct list. */
+.launch-composer-search-group {
+  display: grid;
+  gap: 2px;
+}
+
+/* A complete recent occupies two lines. Keep adjacent complete setups on the
+   same 4px rhythm as the ordinary three-row recent surface without changing
+   the denser partial-action groups. */
+.launch-composer-search-group.launch-composer-search-recents {
+  gap: 4px;
+}
+
+.launch-composer-search-group-heading {
+  padding: 4px 6px 1px;
+  color: var(--composer-control-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.launch-composer-search-group > button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--composer-selected-fg);
+  text-align: left;
+}
+
+.launch-composer-search-group > button.selected {
+  background: var(--composer-selected-bg);
+}
+
+/* The combobox owns keyboard focus, so `.selected` names the one result
+   Enter will use. Hover remains useful pointer feedback, but must not borrow
+   that active-result fill and make two different actions look equivalent. */
+.launch-composer-search-group > button:hover:not(.selected),
+.launch-composer-search-group > button:focus-visible:not(.selected) {
+  background: var(--composer-search-hover-bg);
+  box-shadow: inset 0 0 0 1px var(--composer-border);
+}
+
+.launch-composer-search-recent-destination,
+.launch-composer-search-recent-selection {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launch-composer-search-group > button.launch-composer-search-recent {
+  height: 44px;
+  min-height: 44px;
+}
+
+.launch-composer-search-recent-selection {
+  margin-top: 2px;
+  color: var(--composer-control-fg);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.launch-composer-recent-slots > button,
+.launch-composer-browser > button,
+.create-session-form label:has(select) select {
+  min-height: 38px;
+  border: 1px solid var(--composer-border);
+  border-radius: 8px;
+  background: var(--composer-control-bg);
+  color: var(--composer-control-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.launch-composer-recent-slots > button {
+  height: 44px;
+  min-height: 44px;
+  overflow: hidden;
+  text-align: left;
+}
+
+/* A recent changes every structured choice, so its destination and complete
+   selection are separate lines rather than one clipped concatenation. */
+.launch-composer-recent-destination,
+.launch-composer-recent-selection {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launch-composer-recent-selection {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.launch-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.launch-composer-cancel,
+.launch-composer-actions .create-session-submit {
+  min-height: 38px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.launch-composer-actions .create-session-submit {
+  border-color: var(--composer-selected-border);
+  background: var(--composer-selected-border);
+  color: var(--composer-bg);
+}
+
+@media (max-width: 560px) {
+  .launch-composer-backdrop {
+    padding: 8px;
+  }
+
+  .launch-composer-backdrop .create-session-form {
+    height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
+    padding: 14px;
+  }
+
+  .launch-composer-choice {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .launch-composer-backdrop .create-session-form label.launch-composer-folder {
+    grid-template-columns: 1fr auto;
+    gap: 4px 8px;
+  }
+
+  .launch-composer-backdrop .create-session-form .launch-composer-folder-options {
+    grid-column: 1 / -1;
+  }
+
+  .launch-composer-backdrop .create-session-form .launch-composer-folder > input {
+    grid-column: 1 / -1;
+  }
+
+  .launch-composer-choice-error,
+  .launch-composer-more {
+    margin-left: 0;
+    grid-column: 1;
+  }
 }
 
 /* ===== Session view: restart, archive, banners ==================== */

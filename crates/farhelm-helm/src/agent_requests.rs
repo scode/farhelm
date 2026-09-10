@@ -1529,7 +1529,10 @@ mod tests {
             last_activity_at: 1,
             creation_seq: None,
             cwd: "/w".to_string(),
+            canonical_cwd: None,
             invocation: "claude --dangerously".to_string(),
+            resume_template: None,
+            launch: None,
             status,
             annotation: None,
             restart_offer: RestartOffer::FreshOnly,
@@ -4108,6 +4111,7 @@ mod tests {
 
         let source = SessionInfo {
             cwd: "/srv/project".to_string(),
+            canonical_cwd: None,
             invocation: "sh -c 'echo hi'".to_string(),
             source_profile: None,
             ..session("asker", 1)
@@ -4154,6 +4158,7 @@ mod tests {
         let seen = spawn_create_responder(peer, None);
         let source = SessionInfo {
             cwd: "/srv/project".to_string(),
+            canonical_cwd: None,
             title: "source title".to_string(),
             source_profile: Some(SourceProfile {
                 id: "builtin-claude".to_string(),
@@ -4215,6 +4220,7 @@ mod tests {
         let seen = spawn_create_responder(peer, None);
         let source = SessionInfo {
             cwd: "/srv/project".to_string(),
+            canonical_cwd: None,
             source_profile: Some(SourceProfile {
                 id: "deleted-profile".to_string(),
                 name: "Former agent".to_string(),
@@ -4646,6 +4652,7 @@ mod tests {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let source = SessionInfo {
             cwd: "/srv/project".to_string(),
+            canonical_cwd: None,
             title: "the original".to_string(),
             source_profile: Some(SourceProfile {
                 id: "builtin-claude".to_string(),

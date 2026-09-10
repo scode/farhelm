@@ -517,8 +517,8 @@ mod tests {
         }
     }
 
-    /// The two creation modes are exclusive at the REST edge too, and a
-    /// body that gets it wrong reaches no supervisor at all.
+    /// Legacy raw/profile selectors remain exclusive at the REST edge after
+    /// adding structured launches; ambiguous or absent selectors reach no supervisor.
     ///
     /// Refused HERE rather than forwarded because the refusal is about the
     /// request's shape, and a helm that passed an ambiguous create along
@@ -534,7 +534,7 @@ mod tests {
         for (body, expected) in [
             (
                 serde_json::json!({"cwd": "/work", "invocation": "claude", "profile_id": "p-1"}),
-                "never both",
+                "exactly one of invocation, profile, or launch",
             ),
             (serde_json::json!({"cwd": "/work"}), "names neither"),
         ] {
@@ -542,7 +542,7 @@ mod tests {
             assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
             assert!(
                 text.as_str().unwrap_or_default().contains(expected),
-                "the refusal must say which shape was wrong: {text:?}"
+                "the refusal must explain the exclusive selectors: {text:?}"
             );
         }
         peer.await.unwrap();

@@ -125,7 +125,7 @@
 //! here.
 
 use dioxus::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 mod activity;
 mod api;
@@ -138,6 +138,7 @@ pub mod desktop;
 mod feed;
 mod hosts;
 mod icons;
+mod launch_composer;
 mod list;
 mod menu_panel;
 mod ops;
@@ -354,6 +355,47 @@ pub enum RestartOffer {
     FallbackTemplate,
 }
 
+/// Browser-facing mirror of one structured composer choice.
+///
+/// It crosses the HTTP boundary unchanged. Command construction remains
+/// helm-owned, so a browser value can never become an argv fragment.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchSelection {
+    pub harness: LaunchHarness,
+    pub model: Option<String>,
+    pub effort: Option<LaunchEffort>,
+    pub permissions: Option<LaunchPermission>,
+}
+
+/// The interactive harness selected in the launch composer.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchHarness {
+    Codex,
+    Claude,
+    Muse,
+}
+
+/// A literal reasoning effort understood by the selected harness.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchEffort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+    Ultra,
+}
+
+/// A deliberate permission override for an interactive harness launch.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchPermission {
+    Yolo,
+}
+
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept
 /// as a local type so the UI depends on the HTTP contract, not on proto
 /// internals — the browser speaks JSON, not frames.
@@ -362,7 +404,16 @@ pub struct Session {
     pub id: String,
     pub title: String,
     pub cwd: String,
+    /// The supervisor's accepted directory identity, kept apart from the
+    /// submitted spelling in `cwd`. The list UI does not render it, but the
+    /// HTTP mirror retains the fact so later consumers cannot mistake a
+    /// symlink or `~` spelling for the resolved path.
+    #[serde(default)]
+    pub canonical_cwd: Option<String>,
     pub invocation: String,
+    /// The explicit composer selection which produced this invocation.
+    /// Legacy raw/profile rows intentionally carry no guessed replacement.
+    pub launch: Option<LaunchSelection>,
     #[serde(default)]
     pub status: SessionStatus,
     /// SPEC.md's qualifier on an ended session — "stopped by user" is the
@@ -1330,15 +1381,13 @@ fn AppBody() -> Element {
                             // those to the helm's shared preference); this
                             // handler only owns the signal.
                             on_open: move |session: Session| current.set(Some(session)),
-                            // The id AND the install identity the row reported,
-                            // snapshotted together at selection time: the pair is
-                            // what lets the create default notice the row id
-                            // being retargeted onto another install after this
-                            // selection was made (see `list::OpenHost`).
-                            open_host: current
+                            // The selected session survives sidebar filtering.
+                            // Its folder and installation claim must travel
+                            // together so New never depends on a visible row.
+                            open_destination: current
                                 .read()
                                 .as_ref()
-                                .and_then(list::OpenHost::of_session),
+                                .and_then(list::OpenDestination::of_session),
                             selected: selected_id,
                             fleet_empty,
                             // A confirmed rename patches the selected session's
@@ -2387,7 +2436,9 @@ mod tests {
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            launch: None,
             status: SessionStatus::Running,
             annotation: None,
             restart_offer: RestartOffer::FreshOnly,
@@ -2447,7 +2498,9 @@ mod tests {
             id: "s1".to_string(),
             title: "demo".to_string(),
             cwd: "/tmp".to_string(),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            launch: None,
             status: SessionStatus::Idle,
             annotation: None,
             restart_offer: RestartOffer::FreshOnly,

@@ -87,6 +87,13 @@ if command -v flock >/dev/null 2>&1; then
   flock -w 10 9 || exit 1
 fi
 work="$state/work"
+# Structured composer tests compile a harness NAME, unlike the raw startup
+# fixture below, which invokes the fake-agent binary by absolute path. The
+# supervisor deliberately launches through a login shell, so a private login
+# home is the only reliable way to put an owned fake `codex` ahead of any
+# operator installation without changing this script's own PATH.
+structured_bin="$state/structured-bin"
+structured_home="$state/structured-home"
 # Assigned BEFORE the trap below, not where it is first used. The cleanup
 # expands it, so a signal arriving while it was still unset expanded to
 # `tmux -S /tmux.sock kill-server` — a command aimed at a path outside this
@@ -116,10 +123,30 @@ provisioning_backend="$state/provisioning-backend"
 # readers must not treat its presence as proof of a live stack.
 stack_info="$repo/e2e/.stack-info.json"
 auth_state="$repo/e2e/.auth/storage-state.json"
-mkdir -p "$work" "$remote_state" "$provisioning_backend" || exit 1
+mkdir -p "$work" "$remote_state" "$provisioning_backend" "$structured_bin" "$structured_home" || exit 1
 printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$provisioning_backend/ENABLED" || exit 1
 printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 : >"$provisioning_backend/events.jsonl" || exit 1
+cat >"$structured_bin/codex" <<EOF || exit 1
+#!/bin/sh
+session="\${FARHELM_SESSION_ID:?missing session id}"
+counter="$state/codex-generation-\$session"
+generation=0
+if [ -f "\$counter" ]; then
+  IFS= read -r generation <"\$counter"
+fi
+generation=\$((generation + 1))
+printf '%s\n' "\$generation" >"\$counter"
+printf 'STRUCTURED-LAUNCH-GENERATION:%s:%s\n' "\$session" "\$generation"
+printf 'STRUCTURED-LAUNCH-ARGV:'
+printf ' %s' "\$@"
+printf '\n'
+exec "$bin" internal fake-agent --script claude-record --record-home "$structured_home" "\$@"
+EOF
+chmod 700 "$structured_bin/codex" || exit 1
+printf '%s\n' "export PATH=$structured_bin:\$PATH" >"$structured_home/.bash_profile" || exit 1
+bash_shell=$(command -v bash) || exit 1
+[ -n "$bash_shell" ] && [ -x "$bash_shell" ] || exit 1
 
 # Trap installed BEFORE anything is spawned: a TERM during the socket
 # wait below would otherwise exit with no trap and orphan the supervisor
@@ -142,7 +169,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
-"$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
+HOME="$structured_home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 # A SECOND supervisor, on its own state directory inside this run's
@@ -175,7 +202,10 @@ sup_pid=$!
 # it; the local supervisor keeps reading the real boot id.
 remote_boot_id_file="$remote_state/boot-id"
 printf 'boot-1\n' >"$remote_boot_id_file" || exit 1
-"$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
+# The sidebar's remote-browse fixture reads this process's debug receipt. It
+# distinguishes supervisor routing on localhost, where both supervisors can
+# otherwise read the same absolute paths; it does not claim namespace isolation.
+RUST_LOG="${RUST_LOG:-},farhelm_supervisor::service::handlers=debug" "$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
   >"$state/remote-supervisor.log" 2>&1 9>&- &
 remote_sup_pid=$!
 

@@ -37,6 +37,8 @@
  */
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 import {
   cleanupProfile,
   cleanupSession,
@@ -211,14 +213,22 @@ test("the sidebar hides its scrollbar without giving up scrolling", async ({ pag
  * collected and reported together once the sweep is done, rather than
  * losing all but the first.
  */
+type SessionCleanup = (request: APIRequestContext, sessionId: string) => Promise<void>;
+type MountedFixtureSession = Pick<Awaited<ReturnType<typeof createSession>>, "id" | "title">;
+type MountedFixtureCreate = (
+  request: APIRequestContext,
+  options: Parameters<typeof createSession>[1],
+) => Promise<MountedFixtureSession>;
+
 async function cleanupAll(
   request: APIRequestContext,
   sessions: { id: string }[],
+  cleanup: SessionCleanup = cleanupSession,
 ): Promise<void> {
   const failures: string[] = [];
   for (const session of sessions) {
     try {
-      await cleanupSession(request, session.id);
+      await cleanup(request, session.id);
     } catch (error) {
       failures.push(`${session.id}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -227,6 +237,131 @@ async function cleanupAll(
     throw new Error(`cleanup failed for ${failures.length} session(s):\n${failures.join("\n")}`);
   }
 }
+
+/**
+ * Own the two sources that the mounted-generation fixture needs for its whole
+ * lifetime. A source is registered immediately after creation, before either
+ * the fixture body or the second creation can fail. Route draining is inside
+ * the cleanup `finally`, so a rejected drain cannot abandon a sleeping source.
+ * A body that holds a route must settle that owned handler before the route
+ * drain: Playwright waits for active handlers, while only the fixture owns
+ * the promise that can release them.
+ *
+ * The defaults are the real test-stack operations. The injected seams exist
+ * only to make partial allocation and cleanup failure observable without
+ * creating a deliberately stranded real session.
+ */
+async function withMountedFixtureSources(
+  request: APIRequestContext,
+  sources: [Parameters<typeof createSession>[1], Parameters<typeof createSession>[1]],
+  body: (first: MountedFixtureSession, second: MountedFixtureSession) => Promise<void>,
+  {
+    create = createSession,
+    cleanup = cleanupSession,
+    settleHandlers = async () => {},
+    drainRoutes = async () => {},
+  }: {
+    create?: MountedFixtureCreate;
+    cleanup?: SessionCleanup;
+    settleHandlers?: () => Promise<void>;
+    drainRoutes?: () => Promise<void>;
+  } = {},
+): Promise<void> {
+  const created: MountedFixtureSession[] = [];
+  try {
+    const first = await create(request, sources[0]);
+    created.push(first);
+    const second = await create(request, sources[1]);
+    created.push(second);
+    await body(first, second);
+  } finally {
+    try {
+      // Sessions remain live until a released handler has drained; a route
+      // may still read or fulfill against its source while it is settling.
+      try {
+        await settleHandlers();
+      } finally {
+        await drainRoutes();
+      }
+    } finally {
+      await cleanupAll(request, created, cleanup);
+    }
+  }
+}
+
+/**
+ * Partial allocation and cleanup failures must exercise the exact ownership
+ * lifetime used by mounted generation. These callbacks never call the API;
+ * they expose whether registration happens before a second creation fails and
+ * whether cleanup continues after its first error.
+ */
+test("mounted clone fixture retains partial-allocation and cleanup ownership", async ({ request }) => {
+  const cleanedAfterCreateFailure: string[] = [];
+  let bodyRan = false;
+  await expect(
+    withMountedFixtureSources(
+      request,
+      [
+        { title: "first", cwd: "/tmp", invocation: "sleep 300" },
+        { title: "second", cwd: "/tmp", invocation: "sleep 300" },
+      ],
+      async () => { bodyRan = true; },
+      {
+        create: async (_request, options) => {
+          if (options.title === "second") throw new Error("injected second-create failure");
+          return { id: options.title, title: options.title };
+        },
+        cleanup: async (_request, id) => { cleanedAfterCreateFailure.push(id); },
+      },
+    ),
+  ).rejects.toThrow("injected second-create failure");
+  expect(bodyRan, "the fixture body cannot begin with a missing second source").toBe(false);
+  expect(cleanedAfterCreateFailure).toEqual(["first"]);
+
+  const cleanupAttempts: string[] = [];
+  await expect(
+    withMountedFixtureSources(
+      request,
+      [
+        { title: "first", cwd: "/tmp", invocation: "sleep 300" },
+        { title: "second", cwd: "/tmp", invocation: "sleep 300" },
+      ],
+      async () => {},
+      {
+        create: async (_request, options) => ({ id: options.title, title: options.title }),
+        cleanup: async (_request, id) => {
+          cleanupAttempts.push(id);
+          if (id === "first") throw new Error("injected first-cleanup failure");
+        },
+      },
+    ),
+  ).rejects.toThrow("cleanup failed for 1 session(s)");
+  expect(cleanupAttempts).toEqual(["first", "second"]);
+
+  const ownershipOrder: string[] = [];
+  await expect(
+    withMountedFixtureSources(
+      request,
+      [
+        { title: "first", cwd: "/tmp", invocation: "sleep 300" },
+        { title: "second", cwd: "/tmp", invocation: "sleep 300" },
+      ],
+      async () => {
+        ownershipOrder.push("dispatched");
+        throw new Error("injected failure after dispatch before release");
+      },
+      {
+        create: async (_request, options) => ({ id: options.title, title: options.title }),
+        settleHandlers: async () => { ownershipOrder.push("released"); },
+        drainRoutes: async () => { ownershipOrder.push("drained"); },
+        cleanup: async (_request, id) => { ownershipOrder.push(`cleaned:${id}`); },
+      },
+    ),
+  ).rejects.toThrow("injected failure after dispatch before release");
+  expect(ownershipOrder).toEqual([
+    "dispatched", "released", "drained", "cleaned:first", "cleaned:second",
+  ]);
+});
 
 /**
  * Create enough sessions that `.app-sidebar` — the sidebar's real vertical
@@ -312,6 +447,7 @@ test("selecting a session leaves the sidebar and the session view visible side b
     invocation: "sleep 300",
   });
   try {
+    await pinAutoSelect(page, await sharedSessionId(request));
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
@@ -340,7 +476,12 @@ test("selecting a session leaves the sidebar and the session view visible side b
     // terminal collapses this (see .app-shell's doc in app.css).
     expect(Math.round(mainBox.height)).toBe(Math.round(shellBox.height));
   } finally {
-    await cleanupSession(request, session.id);
+    // The remote fixture is a `sleep` process, so its row can be deleted
+    // directly. Going through the normal stop-then-delete helper waits for
+    // a terminal attachment this test deliberately pinned away from source.
+    await page.close();
+    const deleted = await request.delete(`/api/sessions/${session.id}`);
+    expect(deleted.ok() || deleted.status() === 404, "the owned clone source must be removed").toBeTruthy();
   }
 });
 
@@ -3663,6 +3804,1596 @@ test("opening the create-session form closes an open row menu", async ({ page, r
     // strand a real session on the shared stack. Not worth the risk for
     // pure hygiene, so this finally does the one thing it must.
     await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The launch composer owns focus from mount through dismissal.
+ *
+ * A dialog painted above the sidebar while New still holds focus leaves Tab
+ * able to reach controls the overlay covers. The first Escape belongs to the
+ * focused combobox even when it has no visible results; only the second is
+ * the dialog dismissal shortcut. That ordering keeps a search query from
+ * unexpectedly abandoning a draft, while the final assertion pins the
+ * handoff back to the control that opened it.
+ */
+test("the launch composer autofocuses search and returns focus to New after Escape", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const opener = page.locator(".new-session-button");
+  await expect(opener).toBeVisible({ timeout: 20_000 });
+  await opener.focus();
+  await opener.click();
+
+  const form = page.locator(".create-session-form");
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await expect(form).toBeVisible();
+  await expect(search).toBeFocused();
+
+  // A no-result query still owns Escape while its search state is open. This
+  // distinguishes a combobox dismissal from the dialog's own cancellation
+  // without depending on the shared stack's current history entries.
+  await search.fill("no-launch-composer-result");
+  await page.keyboard.press("Escape");
+  await expect(form).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(form).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
+/**
+ * Harness buttons and combobox results are two ways to express the same
+ * choice. A custom model belongs to the harness on which it was entered, so
+ * moving from Codex to Claude must discard it on both paths; `high` remains
+ * because this controlled catalog explicitly supports it for both harnesses.
+ *
+ * The test uses one fixed catalog because the claim concerns reconciliation,
+ * not the release's current model names. It starts each path from the same
+ * complete state and reads the visible controls afterwards, which catches a
+ * search-only path that bypasses the shared ownership rule.
+ */
+test("composer search reconciles a custom model like a harness button", async ({ page, request }) => {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(build, "fabricated catalog replies must retain the helm build stamp").toBeTruthy();
+  await page.route(
+    (url) => url.pathname === "/api/launch-catalog",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "x-farhelm-build": build },
+        body: JSON.stringify([
+          { id: "composer-test-codex", harness: "codex", efforts: ["high"] },
+          { id: "composer-test-claude", harness: "claude", efforts: ["high"] },
+        ]),
+      });
+    },
+  );
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await expect(form).toBeVisible({ timeout: 20_000 });
+  // Harness buttons exist before their catalog arrives. Waiting for this
+  // fixture-only model instead establishes the premise the later `high`
+  // selection needs: both controlled harness vocabularies have rendered.
+  await expect(
+    form.getByRole("button", { name: "composer-test-codex (Codex)", exact: true }),
+  ).toBeVisible();
+
+  const customModel = form.locator('input[placeholder="custom model id"]');
+  // Selected controls prepend a visible checkmark, so their accessible name
+  // changes from `high` to `✓ high`; the stable trailing label identifies
+  // the same control before and after the state transition.
+  const high = form
+    .locator(".launch-composer-effort-choice")
+    .getByRole("button", { name: /high$/ });
+  const seedCustomCodexChoice = async () => {
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    const customModelDetails = form.locator("details.launch-composer-more");
+    // Reset clears choices but deliberately leaves the disclosure's reading
+    // state alone. Opening it only when closed gives both transition paths
+    // the same editable input without turning a second setup into a hidden
+    // control by accident.
+    if ((await customModelDetails.getAttribute("open")) === null) {
+      await customModelDetails.locator("summary").click();
+    }
+    await customModel.fill("private-codex-model");
+    await high.click();
+    await expect(customModel).toHaveValue("private-codex-model");
+    await expect(high).toHaveAttribute("aria-pressed", "true");
+  };
+  const expectClaudeReconciliation = async () => {
+    await expect(customModel).toHaveValue("");
+    await expect(high).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Claude$/ }),
+    ).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  };
+
+  await seedCustomCodexChoice();
+  await form.getByRole("button", { name: "Claude", exact: true }).click();
+  await expectClaudeReconciliation();
+
+  await form.getByRole("button", { name: "reset choices", exact: true }).click();
+  await seedCustomCodexChoice();
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("Claude");
+  const result = form.getByRole("option", { name: "Harness: Claude", exact: true });
+  await expect(result).toBeVisible();
+  await result.click();
+  await expectClaudeReconciliation();
+});
+
+/**
+ * The structured surface deliberately permits selecting a known model before
+ * its harness. Once that ownership is known, unrelated model buttons must
+ * disappear without changing the selected choice, and the review strip must
+ * make the optional defaults explicit before a launch is attempted.
+ */
+test("composer keeps arbitrary model-first choices reviewable", async ({ page, request }) => {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(build, "the controlled catalog must preserve the stack build identity").toBeTruthy();
+  await page.route("**/api/launch-catalog", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify([
+        { id: "reviewable-codex", harness: "codex", efforts: ["high"] },
+        { id: "reviewable-claude", harness: "claude", efforts: ["low"] },
+      ]),
+    });
+  });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await expect(form).toBeVisible({ timeout: 20_000 });
+  await expect(form.getByRole("button", { name: "reviewable-codex (Codex)", exact: true })).toBeVisible();
+  await expect(form.getByRole("button", { name: "reviewable-claude (Claude)", exact: true })).toBeVisible();
+
+  await form.getByRole("button", { name: "reviewable-codex (Codex)", exact: true }).click();
+  await expect(form.getByRole("button", { name: /reviewable-claude(?: \(Claude\))?$/, exact: false })).toHaveCount(0);
+  await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
+  await expect(form.locator(".launch-composer-selections")).toContainText("Codex");
+  await expect(form.locator(".launch-composer-selections")).toContainText("Model: reviewable-codex");
+  await expect(form.locator(".launch-composer-summary")).toHaveText(
+    /Codex · .* · .* · model: reviewable-codex · effort: default · permissions: default/,
+  );
+  await form.getByRole("button", { name: "remove model reviewable-codex" }).click();
+  await expect(form.locator(".launch-composer-summary")).toHaveText(
+    /Codex · .* · .* · model: default · effort: default · permissions: default/,
+  );
+});
+
+/** Install an identified catalog/history reply before navigation so the
+ * composer has no dependency on launches left by another browser case. */
+async function installComposerChoices(
+  page: Page,
+  request: APIRequestContext,
+  launches: unknown[],
+  models: unknown[],
+  folders: unknown[] = [],
+) {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(build, "controlled composer replies must retain the stack build identity").toBeTruthy();
+  await page.route("**/api/launch-catalog", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify(models),
+    });
+  });
+  await page.route("**/api/launch-history**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify({ launches, folders }),
+    });
+  });
+}
+
+/**
+ * A feed revision is a data refresh, not permission to move an open picker.
+ *
+ * The controlled route changes only after a second client has successfully
+ * created a real session. That establishes the cross-client premise before
+ * comparing the first client's draft, ordered rows, and active descendant.
+ * A controlled feed notification then makes A consume its held fresh reply;
+ * this fixture does not claim that B itself delivered that event. The final
+ * search-result and folder choices are distinct promotion boundaries.
+ */
+test("composer holds offered history steady until destination and search promotion", async ({
+  browser,
+  page,
+  request,
+  timeline,
+}) => {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(build, "history fixtures must retain the helm build stamp").toBeTruthy();
+  const feed = await stubFeed(page);
+  // A real feed greets each connection immediately. Without that premise,
+  // the client correctly retires this silent stub while the peer creates
+  // its session, leaving no connection on which to deliver the later change.
+  feed.notifyOnConnect(0);
+  const oldLaunch = {
+    host: 1, canonical_cwd: "/offered-history/old", cwd: "/offered-history/old",
+    selection: { harness: "codex", model: "offered-old", effort: "high", permissions: "yolo" },
+    created_at: 2, creation_seq: 2,
+  };
+  const newLaunch = {
+    host: 1, canonical_cwd: "/offered-history/folder-a", cwd: "/offered-history/folder-a",
+    selection: { harness: "codex", model: "offered-fresh", effort: "high", permissions: null },
+    created_at: 3, creation_seq: 3,
+  };
+  const oldFolders = [
+    { host: 1, canonical_cwd: "/offered-history/folder-a", canonical_proven: true, display_cwd: "/offered-history/folder-a", created_at: 2, creation_seq: 2 },
+    { host: 1, canonical_cwd: "/offered-history/folder-b", canonical_proven: true, display_cwd: "/offered-history/folder-b", created_at: 1, creation_seq: 1 },
+  ];
+  const newFolders = [
+    { host: 1, canonical_cwd: "/offered-history/folder-new", canonical_proven: true, display_cwd: "/offered-history/folder-new", created_at: 3, creation_seq: 3 },
+    ...oldFolders,
+  ];
+  let fresh = false;
+  let historyReads = 0;
+  let releaseFresh: (() => void) | undefined;
+  const freshHeld = new Promise<void>((resolve) => { releaseFresh = resolve; });
+  await page.route("**/api/launch-catalog", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify([
+        { id: "offered-old", harness: "codex", efforts: ["high"] },
+        { id: "offered-fresh", harness: "codex", efforts: ["high"] },
+      ]),
+    });
+  });
+  await page.route("**/api/launch-history**", async (route) => {
+    historyReads += 1;
+    if (fresh) await freshHeld;
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify({ launches: fresh ? [newLaunch, oldLaunch] : [oldLaunch], folders: fresh ? newFolders : oldFolders }),
+    });
+  });
+
+  let second: import("@playwright/test").BrowserContext | undefined;
+  let secondClientSession: { id: string } | undefined;
+  try {
+    await page.goto("/");
+    const form = page.locator(".create-session-form");
+    await page.locator(".new-session-button").click();
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByRole("button", { name: "offered-old", exact: true }).click();
+    await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/i }).click();
+    await form.getByRole("button", { name: "YOLO", exact: true }).click();
+    await form.getByRole("button", { name: "/offered-history/folder-a", exact: true }).click();
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await search.fill("offered-history");
+    const rows = form.getByRole("group", { name: "Recent setups" }).getByRole("option");
+    await expect(rows, "the initial controlled history must be rendered before the peer create").toHaveCount(1);
+    const initialRow = await rows.first().getAttribute("title");
+    const initialActive = await search.getAttribute("aria-activedescendant");
+    const draft = await form.locator(".launch-composer-summary").innerText();
+    const initialFolders = await form.locator(".launch-composer-folder-options button").allTextContents();
+    const initialFetchedRevision = Number(await form.getAttribute("data-history-fetched-revision"));
+    const baselineFreshReads = historyReads;
+
+    // Client B performs a real admission through its own mounted composer.
+    // A's controlled feed is a separate fixture input: this proves fresh
+    // consumption after admission, not browser-to-browser event delivery.
+    second = await newObservedContext(browser, timeline, {
+      storageState: await page.context().storageState(),
+    });
+    const pageB = await second.newPage();
+    await pageB.route("**/api/launch-catalog", async (route) => {
+      await route.fulfill({ status: 200, headers: { "content-type": "application/json", "x-farhelm-build": build }, body: JSON.stringify([
+        { id: "client-b-nondefault", harness: "codex", efforts: ["high"] },
+      ]) });
+    });
+    await pageB.goto("/");
+    const formB = pageB.locator(".create-session-form");
+    await pageB.locator(".new-session-button").click();
+    await formB.getByRole("button", { name: "Codex", exact: true }).click();
+    await formB.getByRole("button", { name: "client-b-nondefault", exact: true }).click();
+    await formB.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/i }).click();
+    await formB.getByRole("button", { name: "YOLO", exact: true }).click();
+    await formB.getByLabel("folder", { exact: true }).fill("/tmp");
+    const [response] = await Promise.all([
+      pageB.waitForResponse((candidate) =>
+        candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions"),
+      ),
+      formB.locator('button[type="submit"]').click(),
+    ]);
+    expect(response.ok(), "client B's structured create must be admitted before A observes history").toBe(true);
+    secondClientSession = await response.json() as { id: string };
+    fresh = true;
+    await expect.poll(() => feed.openSockets(), {
+      message: "A must still have a live, greeted feed before the history notification",
+    }).toBe(1);
+    feed.notify(91);
+    await expect.poll(() => historyReads, { message: "A must request a fresh history generation after B is admitted" }).toBeGreaterThan(baselineFreshReads);
+    releaseFresh!();
+    await expect.poll(
+      async () => Number(await form.getAttribute("data-history-fetched-revision")),
+      { message: "the mounted component must consume the released fresh reply before stability is measured" },
+    ).toBeGreaterThan(initialFetchedRevision);
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toHaveAttribute("title", initialRow ?? "");
+    await expect(search).toHaveAttribute("aria-activedescendant", initialActive ?? "");
+    await expect(form.locator(".launch-composer-summary")).toHaveText(draft);
+    await expect(form.locator(".launch-composer-folder-options button")).toHaveText(initialFolders);
+
+    const capturedSearchResult = form
+      .locator(".launch-composer-search-recent-destination")
+      .filter({ hasText: "Recent setup: /offered-history/old" });
+    await expect(capturedSearchResult, "the frozen search result must remain clickable until its own promotion boundary").toBeVisible();
+    await capturedSearchResult.click();
+    await expect(form.getByLabel("folder", { exact: true }), "search activation must apply the captured old result, not replace it with fresh history").toHaveValue("/offered-history/old");
+    const freshFolder = form
+      .locator(".launch-composer-folder-options")
+      .getByRole("button", { name: "/offered-history/folder-new", exact: true });
+    await expect(freshFolder, "search activation must make the fresh destination suggestion available without another feed read").toBeVisible();
+    await freshFolder.click();
+    await expect(form.getByLabel("folder", { exact: true }), "the ordinary destination control must apply the fresh folder it made available").toHaveValue("/offered-history/folder-new");
+  } finally {
+    await second?.close();
+    if (secondClientSession) await cleanupSession(request, secondClientSession.id);
+  }
+});
+
+/**
+ * Search text is inert until an explicit destination action is chosen.
+ *
+ * The final Browse forwards the real selected remote fixture's response.
+ * Both localhost supervisors can read the same absolute paths, so the listing
+ * alone does not prove filesystem isolation. The remote supervisor's own
+ * debug receipt is the separate routing witness; Use and typing stay inert.
+ */
+test("composer path actions keep typing inert and browse the selected remote host", async ({ page, request }) => {
+  let browseBodies: any[] = [];
+  let createPosts = 0;
+  const hosts = await (await request.get("/api/hosts")).json();
+  const remoteFixture = hosts.hosts.find((candidate: { id: number; local?: boolean; remote_state_dir?: string | null; state?: { phase?: string } }) => !candidate.local && candidate.remote_state_dir);
+  expect(remoteFixture, "the owned stack must expose a remote fixture before its connection premise is checked").toBeTruthy();
+  expect(remoteFixture.state?.phase, "the selected remote fixture must already be connected").toBe("connected");
+  await page.route("**/api/browse-directory", async (route) => {
+    browseBodies.push(route.request().postDataJSON());
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+    });
+  });
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    createPosts += 1;
+    await route.abort();
+  });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  const host = form.locator("select.create-session-host");
+  await host.selectOption(String(remoteFixture.id));
+  const remote = await host.inputValue();
+  expect(remote, "the selected option must be the asserted remote fixture, not a positional row").toBe(String(remoteFixture.id));
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  const remotePath = remoteFixture.remote_state_dir;
+  await expect(form.locator(".launch-composer-folder-options").getByRole("button", { name: remotePath, exact: true }), "the remote path must be absent from selected-host history before Use or Browse").toHaveCount(0);
+  await search.fill(remotePath);
+  expect(browseBodies, "typing must not inspect either filesystem").toHaveLength(0);
+  expect(createPosts, "typing must not start a session").toBe(0);
+  await form.getByRole("option", { name: `Use this path: ${remotePath}`, exact: true }).click();
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue(remotePath);
+  await expect(form.getByRole("listbox")).toHaveCount(0);
+  expect(createPosts, "Use changes only the draft folder").toBe(0);
+
+  await search.fill(remotePath);
+  await form.getByRole("option", { name: `Browse this path: ${remotePath}`, exact: true }).click();
+  await expect.poll(() => browseBodies.length).toBe(1);
+  expect(browseBodies[0], "Browse carries the selected remote destination").toMatchObject({
+    host: Number(remote), cwd: remotePath,
+  });
+  await expect(form.getByRole("button", { name: `${remotePath}/launch`, exact: true }), "the forwarded remote listing must expose its real launch child").toBeVisible();
+  const remoteLog = path.join(path.dirname(remotePath), "remote-supervisor.log");
+  await expect.poll(
+    () => fs.readFileSync(remoteLog, "utf8").includes(`received directory browse request cwd=${remotePath}`),
+    { message: "the selected remote supervisor must independently record the forwarded browse request" },
+  ).toBe(true);
+  expect(createPosts, "Browse only opens the picker").toBe(0);
+});
+
+/** A no-result combobox Enter remains search input, never a form submit. */
+test("composer no-result Enter keeps a valid launch draft open without posting", async ({ page }) => {
+  let createPosts = 0;
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    createPosts += 1;
+    await route.abort();
+  });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(form.locator('button[type="submit"]')).toBeEnabled();
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("no-result-that-must-not-launch");
+  await expect(search, "Enter must remain in the focused search field").toBeFocused();
+  await expect(search, "the no-result search must remain open even though no listbox is rendered").toHaveAttribute("aria-expanded", "true");
+  await expect(form.locator(".launch-composer-search").getByRole("option")).toHaveCount(0);
+  await page.evaluate(() => {
+    const form = document.querySelector<HTMLFormElement>(".create-session-form")!;
+    form.dataset.submitWitness = "0";
+    form.addEventListener("submit", () => { form.dataset.submitWitness = "1"; }, { once: true });
+  });
+  await page.keyboard.press("Enter");
+  await expect(form).toHaveAttribute("data-submit-witness", "0");
+  expect(createPosts).toBe(0);
+  await expect(form).toBeVisible();
+  await expect(search).toHaveValue("no-result-that-must-not-launch");
+});
+
+/** Restoring defaults clears explicit fields but is still only a draft edit. */
+test("composer saved defaults clear explicit choices without posting", async ({ page, request }) => {
+  const launch = {
+    host: 1, canonical_cwd: "/saved-defaults", cwd: "/saved-defaults",
+    selection: { harness: "codex", model: null, effort: null, permissions: null },
+    created_at: 1, creation_seq: 1,
+  };
+  let createPosts = 0;
+  await installComposerChoices(page, request, [launch], [{ id: "explicit-default-test", harness: "codex", efforts: ["high"] }]);
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    createPosts += 1;
+    await route.abort();
+  });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await form.getByRole("button", { name: "explicit-default-test", exact: true }).click();
+  await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ }).click();
+  await form.getByRole("button", { name: "YOLO", exact: true }).click();
+  await expect(form.getByRole("button", { name: "explicit-default-test", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("saved-defaults");
+  await form.getByRole("group", { name: "Recent setups" }).getByRole("option").click();
+  await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: default");
+  expect(createPosts).toBe(0);
+});
+
+/** A late structured catalog may fill options, never replace an explicit choice. */
+test("composer keeps a deliberate structured choice through a late catalog", async ({ page, request }) => {
+  const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let catalogRequested: (() => void) | undefined;
+  const catalogRequest = new Promise<void>((resolve) => { catalogRequested = resolve; });
+  let catalogReleased: (() => void) | undefined;
+  const catalogReply = new Promise<void>((resolve) => { catalogReleased = resolve; });
+  await page.route("**/api/launch-catalog", async (route) => {
+    catalogRequested?.();
+    await held;
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify([{ id: "late-codex-sentinel", harness: "codex", efforts: ["high"] }]),
+    });
+    catalogReleased?.();
+  });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(form.locator(".launch-composer-summary")).toContainText("Codex");
+  await catalogRequest;
+  release!();
+  await catalogReply;
+  await expect(form.getByRole("button", { name: "late-codex-sentinel", exact: true }), "the sentinel proves the held catalog reply reached the mounted picker").toBeVisible();
+  await expect(form.locator(".launch-composer-summary")).toContainText("Codex ·");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Codex$/ })).toHaveAttribute("aria-pressed", "true");
+});
+
+/**
+ * A browse reply is scoped to the destination transition that dispatched it.
+ *
+ * The first listing is rendered and then revoked by a connection-only change.
+ * The next held reply tests completion after that same kind of replacement;
+ * the third survives an A→B→A saved-folder trip, where matching final text
+ * must not resurrect an older generation. The last reply is rendered before
+ * the test queues a folder edit and child activation in one browser turn,
+ * exercising handler-time authority rather than only ordinary rerendering.
+ */
+test("composer rejects held and queued stale browse activation after destination changes", async ({ page, request }) => {
+  const bodies: any[] = [];
+  const hostResponse = await request.get("/api/hosts");
+  const build = hostResponse.headers()["x-farhelm-build"] ?? "";
+  const hostListing = await hostResponse.json();
+  expect(build, "the replacement host read must keep the stack build identity").toBeTruthy();
+  const remoteFixture = hostListing.hosts.find((candidate: { id: number }) => candidate.id !== 1);
+  expect(remoteFixture, "the authority fixture needs the mounted remote row before it seeds its saved folders").toBeTruthy();
+  const savedFolders = ["/authority/a", "/authority/b"].map((display_cwd, index) => ({
+    host: remoteFixture.id,
+    canonical_cwd: display_cwd,
+    canonical_proven: true,
+    display_cwd,
+    created_at: 2 - index,
+    creation_seq: 2 - index,
+  }));
+  await installComposerChoices(page, request, [], [], savedFolders);
+  let replacement = 0;
+  let hostReads = 0;
+  const feed = await stubFeed(page);
+  await page.route("**/api/hosts", async (route) => {
+    hostReads += 1;
+    const listing = structuredClone(hostListing);
+    if (replacement) {
+      const remote = listing.hosts.find((candidate: { id: number }) => candidate.id !== 1);
+      remote.incarnation += replacement;
+    }
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify(listing),
+    });
+  });
+  const releases: Array<() => void> = [];
+  await page.route("**/api/browse-directory", async (route) => {
+    bodies.push(route.request().postDataJSON());
+    if (bodies.length === 2 || bodies.length === 3) await new Promise<void>((resolve) => releases.push(resolve));
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json", "x-farhelm-build": build },
+      body: JSON.stringify({ cwd: "/authority/a", parent: "/authority", children: ["/authority/a/STALE-CHILD"], truncated: false }),
+    });
+  });
+  await page.goto("/");
+  await feed.waitForConnection(1);
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  const host = form.locator("select.create-session-host");
+  await host.selectOption({ index: 1 });
+  const remote = await host.inputValue();
+  expect(Number(remote), "the authority fixture needs a selected remote host").not.toBe(1);
+  const folder = form.getByLabel("folder", { exact: true });
+  const saved = form.locator(".launch-composer-folder-options");
+  await expect(saved.getByRole("button", { name: "/authority/a", exact: true }), "A must be an actual seeded saved-folder control").toBeVisible();
+  await expect(saved.getByRole("button", { name: "/authority/b", exact: true }), "B must be an actual seeded saved-folder control").toBeVisible();
+  await saved.getByRole("button", { name: "/authority/a", exact: true }).click();
+  await expect(folder).toHaveValue("/authority/a");
+  await form.getByRole("button", { name: "browse this path", exact: true }).click();
+  await expect.poll(() => bodies.length, { message: "the initial request must be dispatched before its rendered-listing premise is measured" }).toBe(1);
+  await expect(form.getByRole("button", { name: "/authority/a/STALE-CHILD", exact: true }), "the initial reply must render before connection-only revocation is tested").toBeVisible();
+  const firstConnection = await form.getAttribute("data-browse-live-connection");
+  replacement = 1;
+  feed.notify(1);
+  await expect.poll(() => hostReads, { message: "the connection replacement must reach the mounted host registry" }).toBeGreaterThan(1);
+  await expect(form, "the refreshed live token must reach the mounted composer without changing host or folder").not.toHaveAttribute("data-browse-live-connection", firstConnection ?? "");
+  await expect(form.getByRole("button", { name: "/authority/a/STALE-CHILD", exact: true }), "render-time authority must withdraw an already accepted listing after only the live token changes").toHaveCount(0);
+
+  await form.getByRole("button", { name: "browse this path", exact: true }).click();
+  await expect.poll(() => bodies.length, { message: "the held connection-replacement request must be dispatched before its token changes" }).toBe(2);
+  const firstCompletion = Number(await form.getAttribute("data-browse-reply-completions"));
+  const secondConnection = await form.getAttribute("data-browse-live-connection");
+  replacement = 2;
+  feed.notify(1);
+  await expect.poll(() => hostReads, { message: "the second connection replacement must reach the mounted host registry" }).toBeGreaterThan(2);
+  await expect(form, "the second live token must be consumed before the held reply is released").not.toHaveAttribute("data-browse-live-connection", secondConnection ?? "");
+  releases.shift()!();
+  await expect.poll(async () => Number(await form.getAttribute("data-browse-reply-completions"))).toBeGreaterThan(firstCompletion);
+  await expect(form.getByRole("button", { name: "/authority/a/STALE-CHILD", exact: true })).toHaveCount(0);
+
+  // Keep the host fixed for the ABA leg. The only authority changes below
+  // are folder controls, so a host-selection invalidation cannot hide a
+  // regression in the destination path transition.
+  await form.getByRole("button", { name: "browse this path", exact: true }).click();
+  await expect.poll(() => bodies.length).toBe(3);
+  const secondCompletion = Number(await form.getAttribute("data-browse-reply-completions"));
+  await saved.getByRole("button", { name: "/authority/b", exact: true }).click();
+  await expect(folder).toHaveValue("/authority/b");
+  await saved.getByRole("button", { name: "/authority/a", exact: true }).click();
+  await expect(folder).toHaveValue("/authority/a");
+  releases.shift()!();
+  await expect.poll(async () => Number(await form.getAttribute("data-browse-reply-completions"))).toBeGreaterThan(secondCompletion);
+  await expect(form.getByRole("button", { name: "/authority/a/STALE-CHILD", exact: true })).toHaveCount(0);
+
+  const child = form.getByRole("button", { name: "/authority/a/STALE-CHILD", exact: true });
+  await form.getByRole("button", { name: "browse this path", exact: true }).click();
+  await expect.poll(() => bodies.length).toBe(4);
+  await expect(child, "the fourth reply establishes an already-rendered activation premise").toBeVisible();
+  const attempts = Number(await form.getAttribute("data-browse-activation-attempts"));
+  const invoked = await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="folder"]')!;
+    const child = [...document.querySelectorAll<HTMLButtonElement>(".launch-composer-browser button")]
+      .find((button) => button.textContent?.includes("STALE-CHILD"));
+    if (!child) return false;
+    input.value = "/authority/other";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    child.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return true;
+  });
+  expect(invoked, "the stale target must be captured before its transition, not optionally looked up after it").toBe(true);
+  await expect.poll(async () => Number(await form.getAttribute("data-browse-activation-attempts")), {
+    message: "the mounted stale-child handler must run synchronously in the queued event turn",
+  }).toBeGreaterThan(attempts);
+  await expect(folder).toHaveValue("/authority/other");
+  await expect(form.getByRole("button", { name: "/authority/a/STALE-CHILD", exact: true })).toHaveCount(0);
+  expect(bodies[0], "the first request targets the selected remote host").toMatchObject({
+    host: Number(remote), cwd: "/authority/a",
+  });
+});
+
+/** Measure the rendered text itself, not just its block wrapper. A clipped or
+ * overlapping run can retain a plausible element box, so recents use this
+ * bounded Range probe to keep their two-line contract observable. */
+async function recentTextBands(row: Locator, destination: string, selection: string) {
+  return await row.evaluate((node, [destinationClass, selectionClass]) => {
+    const rect = (selector: string) => {
+      const element = node.querySelector(selector)!;
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const boxes = [...range.getClientRects()].map(({ top, bottom, height }) => ({ top, bottom, height }));
+      return boxes;
+    };
+    const rowBox = node.getBoundingClientRect();
+    return { row: { top: rowBox.top, bottom: rowBox.bottom }, destination: rect(destinationClass), selection: rect(selectionClass) };
+  }, [destination, selection]);
+}
+
+/** Assert the compact recent row has two real, readable text bands inside its
+ * own 44px button. Element boxes alone cannot distinguish clipped text from a
+ * legible line, and every Range rect matters when an engine fragments text. */
+function expectRecentTextBands(
+  bands: Awaited<ReturnType<typeof recentTextBands>>,
+  description: string,
+) {
+  for (const [name, rects] of Object.entries({
+    destination: bands.destination,
+    selection: bands.selection,
+  })) {
+    expect(rects.length, `${description}: ${name} must produce at least one text rectangle`).toBeGreaterThan(0);
+    for (const [index, rect] of rects.entries()) {
+      expect(rect.height, `${description}: ${name} text rectangle ${index} must have positive height`).toBeGreaterThan(0);
+      expect(rect.top, `${description}: ${name} text rectangle ${index} starts inside its row`).toBeGreaterThanOrEqual(bands.row.top);
+      expect(rect.bottom, `${description}: ${name} text rectangle ${index} ends inside its row`).toBeLessThanOrEqual(bands.row.bottom);
+    }
+  }
+  const destinationBottom = Math.max(...bands.destination.map((rect) => rect.bottom));
+  const selectionTop = Math.min(...bands.selection.map((rect) => rect.top));
+  expect(
+    destinationBottom,
+    `${description}: destination text must not overlap the selection text`,
+  ).toBeLessThanOrEqual(selectionTop);
+}
+
+/**
+ * Relayed custom ids must be reviewable without changing their accepted
+ * bytes. This routes a recent setup containing a permitted bidi formatter,
+ * observes every visible representation, then captures the actual POST.
+ */
+test("composer escapes a restored custom model while submitting its raw bytes", async ({ page, request }) => {
+  const rawModel = "private\u202E-model";
+  const launch = {
+    host: 1,
+    canonical_cwd: "/composer-bidi",
+    cwd: "/composer-bidi",
+    selection: { harness: "codex", model: rawModel, effort: "high", permissions: "yolo" },
+    created_at: 1,
+    creation_seq: 1,
+  };
+  await installComposerChoices(page, request, [launch], [
+    { id: "fixture-codex", harness: "codex", efforts: ["high"] },
+  ]);
+  const posts: any[] = [];
+  await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    posts.push(JSON.parse(route.request().postData() ?? "{}"));
+    await route.fulfill({ status: 500, body: "fixture refusal after capture" });
+  });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await form.getByLabel("folder", { exact: true }).fill("/composer-bidi");
+  const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
+  await expect(recent, "the controlled recent must be rendered before selection").toBeVisible();
+  await recent.click();
+  const customDetails = form.locator("details.launch-composer-more");
+  if ((await customDetails.getAttribute("open")) === null) await customDetails.locator("summary").click();
+  const custom = form.getByPlaceholder("custom model id");
+  const escaped = "private<U+202E>-model";
+  await expect(custom).toHaveValue(escaped);
+  await expect(form.locator(".launch-composer-selections")).toContainText(escaped);
+  await expect(form.locator(".launch-composer-summary")).toContainText(escaped);
+  await form.locator("button[type=submit]").click();
+  await expect.poll(() => posts.length).toBe(1);
+  expect(posts[0].launch.model).toBe(rawModel);
+});
+
+/**
+ * Strong RTL values exercise the summary's three independent peer runs.
+ *
+ * This is deliberately a controlled hosts reply rather than whatever the
+ * fixture helm happens to call its local machine. The test runs a restored
+ * recent because that is the one action which sets host, folder, and model
+ * together; each value must remain complete in its own isolated LTR run.
+ */
+test("composer isolates strong RTL destination and model summary values", async ({ page, request }) => {
+  const host = "مضيف-שלום";
+  const folder = "/rtl/שלום";
+  const model = "نموذج";
+  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+  expect(stamp, "the controlled host reply must retain the helm build identity").toBeTruthy();
+  await page.route("**/api/hosts", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({ headers: { "content-type": "application/json", "x-farhelm-build": stamp }, json: {
+      hosts: [{ id: 1, kind: "local", destination: null, name: host, identity: "rtl-host",
+        remote_farhelm: null, remote_state_dir: null,
+        state: { phase: "connected", identity: "rtl-host", build_version: "0.1.0", refresh: { status: "ok", sessions: 0 } } }],
+    } });
+  });
+  await installComposerChoices(page, request, [{ host: 1, canonical_cwd: folder, cwd: folder,
+    selection: { harness: "codex", model, effort: "high", permissions: "yolo" }, created_at: 1, creation_seq: 1 }],
+  [{ id: "fixture", harness: "codex", efforts: ["high"] }]);
+  await page.goto("/"); const form = page.locator(".create-session-form"); await page.locator(".new-session-button").click();
+  await form.getByLabel("folder", { exact: true }).fill(folder);
+  await form.locator(".launch-composer-recent-slots").getByRole("button").first().click();
+  const peers = form.locator(".launch-composer-summary .peer-value");
+  await expect(peers).toHaveCount(3);
+  for (const [index, value] of [host, folder, model].entries()) {
+    await expect(peers.nth(index)).toHaveText(value);
+    await expect(peers.nth(index)).toHaveAttribute("dir", "ltr");
+    await expect(peers.nth(index)).toHaveCSS("unicode-bidi", "isolate");
+    await expect(peers.nth(index)).toHaveCSS("direction", "ltr");
+  }
+});
+
+/** The local-home chip overrides the open-session remote default; the POST is
+ * the final assertion that the displayed local destination reaches the wire. */
+test("composer local-home reset takes over a remote open destination", async ({ page, request }) => {
+  const local = await localHostId(request); const hosts = await (await request.get("/api/hosts")).json();
+  const remote = hosts.hosts.find((host: { id: number }) => host.id !== local);
+  expect(remote, "the owned fixture must expose a remote host").toBeTruthy();
+  const session = await createSession(request, { title: `composer-local-reset-${Date.now()}`, cwd: "/tmp", invocation: "sleep 300", host: remote.id });
+  const posts: any[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    posts.push(JSON.parse(route.request().postData() ?? "{}")); await route.fulfill({ status: 500, body: "captured" });
+  });
+  try {
+    await page.goto("/"); await expect(row(page, session.id), "the remote open-session premise must render").toBeVisible();
+    await row(page, session.id).locator(".session-row-open").click();
+    await page.locator(".new-session-button").click(); const form = page.locator(".create-session-form");
+    const hostSelect = form.locator("select.create-session-host");
+    await expect(hostSelect).toHaveValue(String(remote.id));
+    await form.getByRole("button", { name: "reset destination to local home" }).click();
+    await expect(hostSelect).toHaveValue(String(local));
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
+    const localName = hosts.hosts.find((host: { id: number }) => host.id === local).name;
+    await expect(form.locator(".launch-composer-summary .peer-value").nth(0)).toHaveText(localName);
+    await expect(form.locator(".launch-composer-summary .peer-value").nth(1)).toHaveText("~");
+    await form.getByRole("button", { name: "Codex", exact: true }).click(); await form.locator("button[type=submit]").click();
+    await expect.poll(() => posts.length).toBe(1); expect(posts[0]).toMatchObject({ host: local, cwd: "~" });
+  } finally { await cleanupSession(request, session.id); }
+});
+
+/**
+ * Clone has its own prefill lifecycle, so the ordinary remote-open coverage
+ * above cannot prove this reset wins after `.session-row-clone`. The captured
+ * refusal keeps the modal mounted long enough to compare UI and wire values.
+ */
+test("composer local-home reset takes over a remote clone destination", async ({ page, request }) => {
+  const local = await localHostId(request);
+  const hosts = await (await request.get("/api/hosts")).json();
+  const remote = hosts.hosts.find((host: { id: number }) => host.id !== local);
+  expect(remote, "the owned fixture must expose a remote host").toBeTruthy();
+  expect(remote.kind, "the clone source must use the SSH fixture, not the local row").toBe("ssh");
+  expect(remote.state?.phase, "the SSH source must be connected before clone snapshots it").toBe("connected");
+  const cwd = "/tmp";
+  // Keep the owned backend source as a sleeping legacy session (which has a
+  // bounded teardown), while its page-local listing gains the structured
+  // snapshot this clone test needs to enter the composer surface.
+  const session = await createSession(request, {
+    title: `composer-local-clone-${Date.now()}`, cwd, invocation: "sleep 300", host: remote.id,
+  });
+  const posts: any[] = [];
+  try {
+    const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+    expect(build, "the controlled clone refusal must retain the stack build identity").toBeTruthy();
+    const sourceListing = await (await request.get("/api/sessions")).json();
+    const sourceRecord = sourceListing.sessions.find((entry: { id: string }) => entry.id === session.id);
+    expect(sourceRecord, "the real source must exist before its page-local structured snapshot is installed").toBeTruthy();
+    expect(sourceRecord.host, "the listed source must name the SSH fixture").toBe(remote.id);
+    expect(sourceRecord.cwd, "the listed source must carry the clone folder").toBe(cwd);
+    expect(sourceRecord.host_identity, "the listed source must retain its remote installation identity").toBe(remote.state.identity);
+    await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+    if (route.request().method() === "POST") {
+      posts.push(JSON.parse(route.request().postData() ?? "{}"));
+      await route.fulfill({ status: 500, headers: { "x-farhelm-build": build, "content-type": "text/plain" }, body: "captured clone reset" });
+      return;
+    }
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const source = body.sessions.find((entry: { id: string }) => entry.id === session.id);
+    expect(source, "the listed remote source must still exist when its clone snapshot is fabricated").toBeTruthy();
+    source.launch = { harness: "codex", model: null, effort: null, permissions: null };
+    const headers = { ...response.headers() };
+    delete headers["content-length"];
+    await route.fulfill({ status: response.status(), headers, json: body });
+    });
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const source = row(page, session.id);
+    await expect(source, "the remote clone source must render before its action opens the composer").toBeVisible();
+    await openRowMenu(source);
+    await source.locator(".session-row-clone").click();
+    const form = page.locator(".create-session-form");
+    await expect(form, "clicking clone, not opening New, must mount this modal").toBeVisible();
+    const formHandle = await form.elementHandle();
+    expect(formHandle, "the clone modal must have one concrete DOM node").not.toBeNull();
+    await formHandle!.evaluate((node) => node.setAttribute("data-clone-form-identity", "owned"));
+    const hostSelect = form.locator("select.create-session-host");
+    await expect(hostSelect, "the clone's remote host must be selected before reset").toHaveValue(String(remote.id));
+    const folder = form.locator('input[aria-label="folder"]');
+    await expect(folder, "the clone must carry its source folder").toHaveValue(cwd);
+    const summaryPeers = form.locator(".launch-composer-summary .peer-value");
+    await expect(summaryPeers).toHaveCount(3);
+    await expect(summaryPeers.nth(0)).toHaveText(remote.name);
+    await expect(summaryPeers.nth(1)).toHaveText(cwd);
+    const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ });
+    await expect(codex, "the structured clone retains its inherited harness before reset").toHaveAttribute("aria-pressed", "true");
+    await form.getByRole("button", { name: "reset destination to local home" }).click();
+    await expect(hostSelect).toHaveValue(String(local));
+    await expect(folder).toHaveValue("~");
+    await expect(summaryPeers.nth(0)).toHaveText(hosts.hosts.find((host: { id: number }) => host.id === local).name);
+    await expect(summaryPeers.nth(1)).toHaveText("~");
+    await expect(codex, "reset destination must not discard the inherited harness").toHaveAttribute("aria-pressed", "true");
+    await expect(form).toHaveAttribute("data-clone-form-identity", "owned");
+    await form.locator("button[type=submit]").click();
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0]).toMatchObject({ host: local, cwd: "~", launch: { harness: "codex" } });
+    await expect(form.getByText("captured clone reset")).toBeVisible();
+    await expect(form.locator("button[type=submit]")).toBeEnabled();
+    await expect(form, "the captured refusal keeps the clone dialog mounted").toBeVisible();
+    await expect(form).toHaveAttribute("data-clone-form-identity", "owned");
+  } finally {
+    try {
+      await page.unrouteAll({ behavior: "wait" });
+    } finally {
+      await cleanupSession(request, session.id);
+      const listed = await (await request.get("/api/sessions")).json();
+      expect(listed.sessions.some((entry: { id: string }) => entry.id === session.id)).toBe(false);
+    }
+  }
+});
+
+/**
+ * A second clone generation must replace an already-mounted draft wholesale.
+ *
+ * A real modal makes the sidebar inert, so a person cannot click row B while
+ * row A's form is open. The two synthetic `click` events below deliberately
+ * invoke the actual row menu and clone handlers without pretending that is a
+ * user-reachable path. That is the only browser seam that can advance
+ * `ListView`'s generation signal while keeping this exact `CreateSessionForm`
+ * node mounted. The first clone establishes a real compatibility notice; the
+ * second must replace it along with every source field. Its held browse reply
+ * also crosses A→B→A clone reseeding on that same node, so the generation
+ * invalidation cannot be replaced by an ordinary host or folder edit.
+ */
+test("composer mounted clone generation replaces the prior draft and notice", async ({ page, request }) => {
+  const local = await localHostId(request);
+  // The fixture's guaranteed cleanup owns this release, so it must remain in
+  // scope outside the body where a failed assertion can otherwise abandon the
+  // active route before Playwright is allowed to drain it.
+  let releaseHeldBrowse: (() => void) | undefined;
+  await withMountedFixtureSources(
+    request,
+    [
+      {
+      title: `composer-mounted-first-${Date.now()}`, cwd: "/tmp", invocation: "sleep 300", host: local,
+      },
+      {
+      title: `composer-mounted-second-${Date.now()}`, cwd: "/", invocation: "sleep 300", host: local,
+      },
+    ],
+    async (first, second) => {
+    const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+    expect(build, "the controlled mounted-generation sources retain the stack build identity").toBeTruthy();
+    await page.route((url) => url.pathname === "/api/sessions", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const response = await route.fetch();
+      const body = await response.json();
+      const firstSource = body.sessions.find((entry: { id: string }) => entry.id === first.id);
+      const secondSource = body.sessions.find((entry: { id: string }) => entry.id === second.id);
+      expect(firstSource, "the first owned source must still exist before its clone click").toBeTruthy();
+      expect(secondSource, "the second owned source must still exist before its clone click").toBeTruthy();
+      firstSource.launch = { harness: "codex", model: "mounted-old-custom", effort: "high", permissions: "yolo" };
+      secondSource.launch = { harness: "claude", model: "mounted-new-custom", effort: null, permissions: null };
+      const headers = { ...response.headers() };
+      delete headers["content-length"];
+      await route.fulfill({ status: response.status(), headers, json: body });
+    });
+    await installComposerChoices(page, request, [], [
+      { id: "fixture-codex", harness: "codex", efforts: ["high"] },
+      { id: "fixture-muse", harness: "muse", efforts: ["low"] },
+      { id: "fixture-claude", harness: "claude", efforts: ["high"] },
+    ]);
+    const browseBodies: any[] = [];
+    const heldBrowse = new Promise<void>((resolve) => { releaseHeldBrowse = resolve; });
+    await page.route("**/api/browse-directory", async (route) => {
+      browseBodies.push(route.request().postDataJSON());
+      await heldBrowse;
+      await route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "x-farhelm-build": build },
+        body: JSON.stringify({ cwd: "/tmp", parent: "/", children: ["/tmp/STALE-CHILD"], truncated: false }),
+      });
+    });
+    await pinAutoSelect(page, await sharedSessionId(request));
+    await page.goto("/");
+    const firstRow = row(page, first.id);
+    const secondRow = row(page, second.id);
+    await expect(firstRow).toBeVisible();
+    await expect(secondRow).toBeVisible();
+    const firstSourceNode = await firstRow.elementHandle();
+    const secondSourceNode = await secondRow.elementHandle();
+    expect(firstSourceNode, "the held-reply lifecycle starts with source A in the mounted sidebar").not.toBeNull();
+    expect(secondSourceNode, "the held-reply lifecycle starts with source B in the mounted sidebar").not.toBeNull();
+    await openRowMenu(firstRow);
+    await firstRow.locator(".session-row-clone").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    const formHandle = await form.elementHandle();
+    expect(formHandle, "the first generation mounts one concrete form node").not.toBeNull();
+    await formHandle!.evaluate((node) => node.setAttribute("data-mounted-generation", "owned"));
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
+    await expect(form.getByRole("status"), "the old clone must establish a real compatibility notice").toContainText("not in this harness's Farhelm offering");
+    await form.getByRole("button", { name: "browse this path", exact: true }).click();
+    await expect.poll(() => browseBodies.length, { message: "clone A's browse must be held before the same mounted form is reseeded" }).toBe(1);
+    expect(browseBodies[0], "the held request must capture clone A's destination before clone B arrives").toMatchObject({ host: local, cwd: "/tmp" });
+
+    // This is an internal lifecycle stimulus, not an attempt to click through
+    // the modal. It dispatches to ListView's normal handlers so a new prefill
+    // generation reaches the already-mounted CreateSessionForm.
+    await secondRow.locator(".session-row-menu").evaluate((node) => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const secondClone = secondRow.locator(".session-row-clone");
+    await expect(secondClone, "the synthetic menu handler must expose row B's real clone action").toHaveCount(1);
+    await expect(form.getByRole("status"), "the old draft notice must survive until the next clone generation dispatches").toBeVisible();
+    await secondClone.evaluate((node) => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await expect(form.getByLabel("folder", { exact: true }), "clone B must reseed the mounted form before clone A is restored").toHaveValue("/");
+    await form.locator("details.launch-composer-advanced summary").click();
+    await expect(form.getByLabel("title (optional)"), "the second clone must replace source A's title before A is restored").toHaveValue(second.title);
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
+    await form.locator("details.launch-composer-more summary").click();
+    await expect(form.getByPlaceholder("custom model id")).toHaveValue("mounted-new-custom");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /harness default$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /harness default$/ })).toHaveAttribute("aria-pressed", "true");
+    await firstRow.locator(".session-row-menu").evaluate((node) => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const firstCloneAgain = firstRow.locator(".session-row-clone");
+    await expect(firstCloneAgain, "the original source remains present for the A→B→A generation reseed").toHaveCount(1);
+    await firstCloneAgain.evaluate((node) => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(form.getByLabel("folder", { exact: true }), "clone A must restore its destination without a manual host or folder transition").toHaveValue("/tmp");
+    const completions = Number(await form.getAttribute("data-browse-reply-completions"));
+    releaseHeldBrowse!();
+    await expect.poll(async () => Number(await form.getAttribute("data-browse-reply-completions")), {
+      message: "the held original-A reply must complete after the generation reseeds",
+    }).toBeGreaterThan(completions);
+    await expect(form.getByRole("button", { name: "/tmp/STALE-CHILD", exact: true }), "the original A reply must remain refused after A is restored by a newer clone generation").toHaveCount(0);
+
+    await expect(form.locator("select.create-session-host")).toHaveValue(String(local));
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+    await expect(form.getByLabel("title (optional)")).toHaveValue(first.title);
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.getByPlaceholder("custom model id")).toHaveValue("mounted-old-custom");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.getByRole("status"), "the final clone generation must discard notice prose from the replaced draft").toHaveCount(0);
+    await expect(form, "the ready replacement draft must still be the original form node").toHaveAttribute("data-mounted-generation", "owned");
+    expect(await formHandle!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await form.evaluate((node, original) => node === original, formHandle!)).toBe(true);
+    expect(await firstSourceNode!.evaluate((node) => node.isConnected), "source A must remain in the same sidebar DOM through the generation test").toBe(true);
+    expect(await secondSourceNode!.evaluate((node) => node.isConnected), "source B must remain in the same sidebar DOM through the generation test").toBe(true);
+    },
+    {
+      // An assertion above can fail while the route is held. This owner-level
+      // release lets Playwright drain it before the real source sessions die.
+      settleHandlers: async () => { releaseHeldBrowse?.(); },
+      drainRoutes: () => page.unrouteAll({ behavior: "wait" }),
+    },
+  );
+});
+
+/**
+ * Folder suggestions are an alternate destination picker. This uses distinct
+ * saved paths so an edited input can prove the selected affordance follows
+ * the value that will be submitted, rather than an older raw seed.
+ */
+test("composer folder history tracks edited destinations at narrow width", async ({ page, request }) => {
+  const folders = ["/fixture/history-a", "/fixture/history-b"].map((display_cwd, index) => ({
+    host: 1, canonical_cwd: display_cwd, canonical_proven: true, display_cwd,
+    created_at: 2 - index, creation_seq: 2 - index,
+  }));
+  await installComposerChoices(page, request, [], [], folders);
+  await page.setViewportSize({ width: 540, height: 900 });
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  const choices = form.locator(".launch-composer-folder-options").getByRole("button");
+  await expect(choices, "the controlled history must populate the narrow destination picker").toHaveCount(2);
+  const folder = form.getByLabel("folder", { exact: true });
+  await expect(folder).toBeVisible();
+  await choices.first().click();
+  await expect(choices.first()).toHaveAttribute("aria-pressed", "true");
+  await expect(choices.first()).toContainText("✓");
+  await folder.fill("/fixture/history-b");
+  await expect(choices.first()).toHaveAttribute("aria-pressed", "false");
+  await expect(choices.nth(1)).toHaveAttribute("aria-pressed", "true");
+  const folderRow = form.locator("label.launch-composer-folder");
+  const grid = await folderRow.evaluate((node) => getComputedStyle(node).gridTemplateColumns.trim().split(/\s+/));
+  expect(grid, "the narrow Folder row has its intended two columns").toHaveLength(2);
+  for (const control of [folder, choices.first(), choices.nth(1), form.getByRole("button", { name: "browse this path" })]) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box!.x, "each narrow Folder control starts inside the viewport").toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width, "each narrow Folder control remains reachable without horizontal clipping").toBeLessThanOrEqual(540);
+  }
+});
+
+/**
+ * The recent band always reserves three 44px tracks, so async history and
+ * harness filters cannot make the option rows below it jump. This runs the
+ * empty, one-, two-, and three-visible-row states and measures every visible
+ * row and gap; the long three-row fixture also proves that visual two-line
+ * compaction did not hide any of a setup's meaningful values.
+ */
+test("composer recent slots keep fixed geometry and full two-line labels", async ({ page, request }) => {
+  const long = "/composer-long/" + "segment-".repeat(18);
+  const launches = ["codex", "codex-two", "claude"].map((name, index) => ({
+    host: 1,
+    canonical_cwd: long,
+    cwd: long,
+    selection: { harness: name === "claude" ? "claude" : "codex", model: `long-${name}`, effort: "high", permissions: index ? null : "yolo" },
+    created_at: 10 - index,
+    creation_seq: 10 - index,
+  }));
+  await installComposerChoices(page, request, launches, [
+    { id: "fixture-codex", harness: "codex", efforts: ["high"] },
+    { id: "fixture-claude", harness: "claude", efforts: ["high"] },
+  ]);
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await form.getByLabel("folder", { exact: true }).fill(long);
+  const slots = form.locator(".launch-composer-recent-slots");
+  const harnessChoices = form.locator(".launch-composer-harness-choice");
+  const optionAnchor = harnessChoices.boundingBox.bind(harnessChoices);
+  const assertRows = async (count: number) => {
+    const rows = slots.getByRole("button");
+    await expect(rows).toHaveCount(count);
+    expect((await slots.boundingBox())?.height, "three reserved 44px tracks and two 4px gaps").toBe(140);
+    const anchor = await optionAnchor();
+    expect(anchor, "the harness option row must have measurable geometry").not.toBeNull();
+    for (let index = 0; index < count; index += 1) {
+      await expect(rows.nth(index), `recent row ${index} must be painted before geometry is read`).toBeVisible();
+      const current = await rows.nth(index).boundingBox();
+      expect(current?.height, `visible recent row ${index} stays 44px`).toBe(44);
+      if (index > 0) {
+        const previous = await rows.nth(index - 1).boundingBox();
+        expect(current!.y - (previous!.y + previous!.height), "adjacent recent rows have a 4px gap").toBe(4);
+      }
+    }
+    return anchor!.y;
+  };
+  const threeAnchor = await assertRows(3);
+  for (let index = 0; index < 3; index += 1) {
+    const row = slots.getByRole("button").nth(index);
+    const entry = launches[index];
+    const permission = entry.selection.permissions === "yolo" ? "Yolo" : "default";
+    const harness = entry.selection.harness === "claude" ? "Claude" : "Codex";
+    const expected = `${entry.cwd} · this machine · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
+    await expect(row).toHaveAttribute("title", expected);
+    await expect(row).toHaveAccessibleName(expected);
+    expectRecentTextBands(
+      await recentTextBands(row, ".launch-composer-recent-destination", ".launch-composer-recent-selection"),
+      `ordinary recent row ${index}`,
+    );
+  }
+  await expect(slots.getByRole("button").first().locator(".launch-composer-recent-destination")).toHaveCSS("display", "block");
+  await expect(slots.getByRole("button").first().locator(".launch-composer-recent-selection")).toHaveCSS("display", "block");
+  const destination = await slots.getByRole("button").first().locator(".launch-composer-recent-destination").boundingBox();
+  const selection = await slots.getByRole("button").first().locator(".launch-composer-recent-selection").boundingBox();
+  expect(destination, "the destination line must have geometry").not.toBeNull();
+  expect(selection, "the selection line must have geometry").not.toBeNull();
+  expect(destination!.y + destination!.height, "the two recent lines must not overlap").toBeLessThanOrEqual(selection!.y);
+  const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
+  const claude = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true });
+  const claudeBefore = await claude.boundingBox();
+  await codex.click();
+  const claudeAfter = await claude.boundingBox();
+  expect(claudeAfter, "the unchanged harness peer must remain measurable after Codex gains its checkmark").not.toBeNull();
+  expect(claudeAfter!.x, "reserving the checkmark keeps an unchanged harness peer in place").toBe(claudeBefore!.x);
+  expect(claudeAfter!.width, "selected borders must not change an unchanged peer's width").toBe(claudeBefore!.width);
+  expect(await assertRows(2), "the harness option row must not move at two visible recents").toBe(threeAnchor);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
+  expect(await assertRows(1), "the harness option row must not move at a different one-row filter").toBe(threeAnchor);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
+  expect(await assertRows(0), "the harness option row must not move at no visible recents").toBe(threeAnchor);
+  await form.getByRole("button", { name: "reset choices", exact: true }).click();
+  await form.getByLabel("folder", { exact: true }).fill("/no-matching-recent");
+  expect(await assertRows(0), "the harness option row must not move while no recent is visible").toBe(threeAnchor);
+  await form.getByLabel("folder", { exact: true }).fill(long);
+});
+
+/** Complete search recents must retain the same compact two-line contract as
+ * ordinary recents, including when two long saved setups are adjacent. */
+test("composer search recents keep complete 44px two-line rows", async ({ page, request }) => {
+  const cwd = "/search-recent/" + "long-segment-".repeat(12);
+  const launches = ["one", "two"].map((suffix, index) => ({
+    host: 1, canonical_cwd: `${cwd}${suffix}`, cwd: `${cwd}${suffix}`,
+    selection: { harness: "codex", model: `model-${suffix}`, effort: "high", permissions: "yolo" },
+    created_at: 2 - index, creation_seq: 2 - index,
+  }));
+  await installComposerChoices(page, request, launches, [{ id: "fixture", harness: "codex", efforts: ["high"] }]);
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("search-recent");
+  const recents = form.getByRole("group", { name: "Recent setups" }).getByRole("option");
+  await expect(recents, "the controlled query must expose both complete recent setups").toHaveCount(2);
+  for (let index = 0; index < 2; index += 1) {
+    await expect(recents.nth(index)).toBeVisible();
+    expect((await recents.nth(index).boundingBox())?.height).toBe(44);
+    await expect(recents.nth(index)).toHaveAttribute("title", new RegExp(`search-recent.*model-${index ? "two" : "one"}.*high.*Yolo`, "i"));
+    await expect(recents.nth(index).locator(".launch-composer-search-recent-destination")).toHaveCSS("display", "block");
+    await expect(recents.nth(index).locator(".launch-composer-search-recent-selection")).toHaveCSS("display", "block");
+    const suffix = index ? "two" : "one";
+    const expected = `${cwd}${suffix} · this machine · Codex · model: model-${suffix} · effort: High · permissions: Yolo`;
+    await expect(recents.nth(index)).toHaveAttribute("title", expected);
+    await expect(recents.nth(index)).toHaveAccessibleName(`Recent setup: ${expected}`);
+  }
+  const first = await recents.first().boundingBox(); const second = await recents.nth(1).boundingBox();
+  expect(second!.y - (first!.y + first!.height)).toBe(4);
+  for (let index = 0; index < 2; index += 1) {
+    const destination = await recents.nth(index).locator(".launch-composer-search-recent-destination").boundingBox();
+    const selection = await recents.nth(index).locator(".launch-composer-search-recent-selection").boundingBox();
+    expect(destination, "the search destination line must have geometry").not.toBeNull();
+    expect(selection, "the search selection line must have geometry").not.toBeNull();
+    expect(destination!.y + destination!.height, "search recent lines must not overlap").toBeLessThanOrEqual(selection!.y);
+    expectRecentTextBands(
+      await recentTextBands(recents.nth(index), ".launch-composer-search-recent-destination", ".launch-composer-search-recent-selection"),
+      `search recent row ${index}`,
+    );
+  }
+});
+
+/**
+ * A restored complete setup is not a sticky profile: changing its harness
+ * clears only the incompatible custom model, says why, and keeps compatible
+ * effort and permission choices. Pointer and search activation share this
+ * assertion because either route could otherwise bypass reconciliation.
+ */
+test("composer reset notices follow every restored-choice transition", async ({ page, request }) => {
+  const launch = {
+    host: 1, canonical_cwd: "/composer-reset", cwd: "/composer-reset",
+    selection: { harness: "codex", model: "restored-custom", effort: "high", permissions: "yolo" },
+    created_at: 1, creation_seq: 1,
+  };
+  const lowLaunch = {
+    host: 1, canonical_cwd: "/composer-reset", cwd: "/composer-reset",
+    selection: { harness: "codex", model: "fixture-codex-low-only", effort: "low", permissions: "yolo" },
+    created_at: 2, creation_seq: 2,
+  };
+  const explicitConflict = {
+    host: 1, canonical_cwd: "/composer-reset", cwd: "/composer-reset",
+    selection: { harness: "codex", model: "fixture-codex-all-conflict", effort: "low", permissions: null },
+    created_at: 3, creation_seq: 3,
+  };
+  const savedHighEffort = {
+    host: 1, canonical_cwd: "/composer-reset", cwd: "/composer-reset",
+    selection: { harness: "codex", model: "fixture-codex-low-only", effort: "high", permissions: "yolo" },
+    created_at: 4, creation_seq: 4,
+  };
+  await installComposerChoices(page, request, [launch, lowLaunch, explicitConflict, savedHighEffort], [
+    { id: "fixture-codex", harness: "codex", efforts: ["high"] },
+    { id: "fixture-codex-low-only", harness: "codex", efforts: ["low"] },
+    { id: "fixture-claude", harness: "claude", efforts: ["high"] },
+    { id: "fixture-muse", harness: "muse", efforts: ["low"] },
+    { id: "fixture-muse-owned", harness: "muse", efforts: ["low"] },
+  ]);
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  await form.getByLabel("folder", { exact: true }).fill("/composer-reset");
+  const refill = async () => {
+    // Recent visibility follows the active harness. Return to the source
+    // harness before measuring an ordinary restoration; reset choices clears
+    // dependent fields but does not promise to choose that filter for us.
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ }).click();
+    await form.locator(".launch-composer-recent-slots").getByRole("button").first().click();
+    await expect(form.locator(".launch-composer-selections")).toContainText("restored-custom");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  };
+  const status = form.getByRole("status");
+  const custom = form.getByPlaceholder("custom model id");
+  const customDetails = form.locator("details.launch-composer-more");
+  const recentSlots = form.locator(".launch-composer-recent-slots > button");
+  const allConflictRecent = recentSlots.filter({ hasText: "fixture-codex-all-conflict" });
+  const savedHighEffortRecent = form.locator(".launch-composer-recent-slots").getByTitle(
+    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: High · permissions: Yolo",
+    { exact: true },
+  );
+  // With only the harness selected, remembered explicit values are candidates.
+  // Once the complete custom/High/YOLO draft is active, this same row conflicts
+  // with every explicit filter field and must disappear before ranking.
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(allConflictRecent, "absent model, effort, and permission filters permit an explicit saved setup").toBeVisible();
+  await refill();
+  await expect(allConflictRecent, "an explicit model, effort, and permission conflict is excluded before recent ranking").toHaveCount(0);
+  await expect(status, "a restored choice is not itself a reset").toHaveCount(0);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
+  await expect(form.getByRole("status")).toContainText("not in this harness's Farhelm offering");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(custom).toHaveValue("");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-summary")).toContainText("Claude · this machine · folder: /composer-reset · model: default · effort: high · permissions: Yolo");
+  await form.getByRole("button", { name: "reset choices", exact: true }).click();
+  await refill();
+  // Keep Codex selected while choosing its low-only catalog model. That
+  // replacement model matches the saved Low row, so it can remain offered
+  // while its effort-clearing notice is live; the next recent click alone
+  // retires that notice.
+  await form.getByRole("button", { name: "fixture-codex-low-only", exact: true }).click();
+  await expect(status, "the low-only Codex model must genuinely clear high effort").toContainText("the selected effort is not in Farhelm's offering for that model, so it was cleared");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveCount(0);
+  const ordinaryRecent = form.locator(".launch-composer-recent-slots").getByTitle(
+    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: Low · permissions: Yolo",
+    { exact: true },
+  );
+  await expect(ordinaryRecent, "the Codex recent remains available while its notice is visible").toBeVisible();
+  await expect(savedHighEffortRecent, "an absent effort filter still permits a saved explicit High effort").toBeVisible();
+  await expect(status, "the old-draft notice must still exist immediately before ordinary restoration").toBeVisible();
+  await ordinaryRecent.click();
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator("select.create-session-host")).toHaveValue("1");
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
+  await expect(form.locator(".launch-composer-summary .peer-value").nth(0)).toHaveText("this machine");
+  await expect(form.locator(".launch-composer-summary .peer-value").nth(1)).toHaveText("/composer-reset");
+  await expect(form.locator(".launch-composer-selections")).toContainText("fixture-codex-low-only");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /low$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(status).toHaveCount(0);
+  // The low-only restoration intentionally replaced the earlier draft.
+  // Pointer/search reconciliation needs its own custom High/YOLO premise.
+  await form.getByRole("button", { name: "reset choices", exact: true }).click();
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  if ((await customDetails.getAttribute("open")) === null) await customDetails.locator("summary").click();
+  await custom.fill("restored-custom");
+  await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await search.fill("Claude");
+  await expect(form.getByRole("option", { name: "Harness: Claude", exact: true })).toBeVisible();
+  await expect(status, "the search transition starts without stale pointer prose").toHaveCount(0);
+  await form.getByRole("option", { name: "Harness: Claude", exact: true }).click();
+  await expect(form.getByRole("status")).toContainText("not in this harness's Farhelm offering");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(custom).toHaveValue("");
+  await expect(form.locator(".launch-composer-selections")).not.toContainText("Model:");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-summary")).toContainText("Claude · this machine · folder: /composer-reset · model: default · effort: high · permissions: Yolo");
+
+  await refill();
+  await expect(status).toHaveCount(0);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
+  await expect(status).toContainText("not in this harness's Farhelm offering");
+  await expect(status).toContainText("not in Farhelm's offering for that model or harness");
+  await expect(custom).toHaveValue("");
+  await expect(form.locator(".launch-composer-selections")).not.toContainText("Effort:");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: Yolo");
+
+  await form.getByRole("button", { name: "reset choices", exact: true }).click();
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(status).toHaveCount(0);
+  if ((await customDetails.getAttribute("open")) === null) await customDetails.locator("summary").click();
+  await custom.fill("fixture-muse-owned");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(custom).toHaveValue("fixture-muse-owned");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /harness default$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator("button[type=submit]"), "a known Muse model is incompatible while Codex remains selected").toBeDisabled();
+  await expect(status, "an absent effort must not invent an effort-reset notice in the incompatible-input branch").toHaveCount(0);
+
+  await refill();
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
+  await expect(status).toBeVisible();
+  await search.fill("composer-reset");
+  const searchRecent = form.getByRole("group", { name: "Recent setups" }).getByRole("option");
+  const customSearchRecent = searchRecent.filter({ hasText: "restored-custom" });
+  await expect(customSearchRecent, "the controlled search must expose the custom/high recent before restoration").toHaveCount(1);
+  await expect(status, "the old-draft notice must still exist immediately before search restoration").toBeVisible();
+  await customSearchRecent.click();
+  await expect(status, "a search recent also replaces the whole draft and its old notice").toHaveCount(0);
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator("select.create-session-host")).toHaveValue("1");
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
+  await expect(form.locator(".launch-composer-summary .peer-value").nth(0)).toHaveText("this machine");
+  await expect(form.locator(".launch-composer-summary .peer-value").nth(1)).toHaveText("/composer-reset");
+  await expect(custom).toHaveValue("restored-custom");
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+});
+
+/**
+ * The combobox owns keyboard focus while its options scroll beneath it. Its
+ * active descendant must therefore always name a visible real option, and a
+ * pointer result must return focus to the dialog before Tab can escape it.
+ * A hovered peer must not borrow the active result's fill: Enter follows the
+ * active descendant, not the pointer, so that mixed state needs one readable
+ * keyboard target.
+ */
+test("composer search keeps active results visible and focus contained", async ({ page, request }) => {
+  const models = Array.from({ length: 24 }, (_, index) => ({
+    id: `scroll-model-${index}`, harness: "codex", efforts: ["high"],
+  }));
+  await installComposerChoices(page, request, [], models);
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  await expect(search).toBeFocused();
+  await search.fill("scroll-model");
+  const listbox = form.getByRole("listbox");
+  const options = listbox.getByRole("option");
+  await expect(options, "the controlled catalog must contribute exactly the 24 search results").toHaveCount(24);
+  const target = options.nth(20);
+  const initiallyOffscreen = await target.evaluate((node) => {
+    const list = node.closest(".launch-composer-search-results")!;
+    return node.getBoundingClientRect().bottom > list.getBoundingClientRect().bottom;
+  });
+  expect(initiallyOffscreen, "the intended Arrow target begins below the search viewport").toBe(true);
+  const beforeScroll = await listbox.evaluate((node) => node.scrollTop);
+  for (let index = 0; index < 20; index += 1) await page.keyboard.press("ArrowDown");
+  const activeId = await search.getAttribute("aria-activedescendant");
+  await expect(search).toHaveAttribute("aria-activedescendant", await target.getAttribute("id") ?? "");
+  await expect.poll(() => listbox.evaluate((node) => node.scrollTop)).toBeGreaterThan(beforeScroll);
+  await expect.poll(() => target.evaluate((node) => {
+    const list = node.closest(".launch-composer-search-results")!;
+    const row = node.getBoundingClientRect(); const viewport = list.getBoundingClientRect();
+    return row.top >= viewport.top && row.bottom <= viewport.bottom;
+  })).toBe(true);
+  const hovered = options.nth(19);
+  await hovered.hover();
+  await expect(target).toHaveAttribute("aria-selected", "true");
+  await expect(hovered).toHaveAttribute("aria-selected", "false");
+  const [activeFill, hoverFill] = await Promise.all(
+    [target, hovered].map((option) => option.evaluate((node) => getComputedStyle(node).backgroundColor)),
+  );
+  expect(activeFill, "a pointer hover must not make a different option look keyboard-active").not.toBe(hoverFill);
+  await search.fill("no-such-composer-result");
+  await expect(search).not.toHaveAttribute("aria-activedescendant");
+  await search.fill("scroll-model-0");
+  await form.getByRole("option", { name: /Model: scroll-model-0/ }).click();
+  await expect(form.locator(":focus")).toHaveCount(1);
+  await page.keyboard.press("Tab");
+  await expect(form.locator(":focus")).toHaveCount(1);
+});
+
+/**
+ * A focus trap is only useful when its wrap target remains in the composer's
+ * own scroll window. The long, populated fixture makes both boundaries sit
+ * outside the opposite scroll position; this checks native Tab in both
+ * directions so `preventScroll` cannot quietly turn containment into an
+ * invisible focus ring again.
+ */
+test("composer focus-trap wraps reveal their targets at narrow width", async ({ page, request }) => {
+  const long = "/focus-trap/" + "long-destination-segment-".repeat(12);
+  const launches = ["one", "two", "three"].map((suffix, index) => ({
+    host: 1,
+    canonical_cwd: long,
+    cwd: long,
+    selection: { harness: "codex", model: `focus-model-${suffix}`, effort: "high", permissions: "yolo" },
+    created_at: 3 - index,
+    creation_seq: 3 - index,
+  }));
+  const folders = launches.map(({ cwd, canonical_cwd, created_at, creation_seq }) => ({
+    host: 1,
+    display_cwd: cwd,
+    canonical_cwd,
+    canonical_proven: true,
+    created_at,
+    creation_seq,
+  }));
+  await installComposerChoices(page, request, launches, [{ id: "focus-model", harness: "codex", efforts: ["high"] }], folders);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const reset = form.getByRole("button", { name: "reset choices", exact: true });
+  const launch = form.getByRole("button", { name: "launch", exact: true });
+  await form.getByLabel("folder", { exact: true }).fill(long);
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(form.locator(".launch-composer-recent-slots > button"), "the controlled history must make the composer scrollable").toHaveCount(3);
+  await expect(launch).toBeVisible();
+
+  const intersectsViewport = async (control: Locator) => await control.evaluate((node) => {
+    const target = node.getBoundingClientRect();
+    const viewport = node.closest(".create-session-form")!.getBoundingClientRect();
+    return target.top < viewport.bottom && target.bottom > viewport.top;
+  });
+
+  await launch.focus();
+  await form.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  await expect(launch).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(reset).toBeFocused();
+  await expect.poll(() => intersectsViewport(reset), {
+    message: "Tab wrapping from Launch must reveal reset choices in the composer viewport",
+  }).toBe(true);
+
+  await reset.focus();
+  await form.evaluate((node) => { node.scrollTop = 0; });
+  await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
+  await expect(reset).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(launch).toBeFocused();
+  await expect.poll(() => intersectsViewport(launch), {
+    message: "Shift+Tab wrapping from reset choices must reveal Launch in the composer viewport",
+  }).toBe(true);
+});
+
+/**
+ * The composer paints its search, draft summary, history, and destination
+ * groups in this order. This follows ordinary browser Tab traversal through
+ * the same real controls, so a future CSS-only reorder cannot make keyboard
+ * and assistive reading order disagree with the visible surface.
+ */
+test("composer menu-closed Tab order follows the displayed launch groups", async ({ page, request }) => {
+  const folder = "/tab-order/fixture";
+  const launches = [{
+    host: 1,
+    canonical_cwd: folder,
+    cwd: folder,
+    selection: { harness: "codex", model: null, effort: null, permissions: null },
+    created_at: 1,
+    creation_seq: 1,
+  }];
+  await installComposerChoices(page, request, launches, [{ id: "tab-order-model", harness: "codex", efforts: ["high"] }], [{
+    host: 1,
+    canonical_cwd: folder,
+    display_cwd: folder,
+    canonical_proven: true,
+    created_at: 1,
+    creation_seq: 1,
+  }]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
+  await form.getByLabel("folder", { exact: true }).fill(folder);
+  const controls = [
+    form.getByRole("button", { name: "reset destination to local home", exact: true }),
+    form.getByRole("button", { name: "reset folder to home", exact: true }),
+    form.locator(".launch-composer-recent-slots").getByRole("button", { name: new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }),
+    form.getByRole("combobox", { name: "host", exact: true }),
+    form.getByLabel("folder", { exact: true }),
+    form.getByRole("button", { name: folder, exact: true }),
+    form.getByRole("button", { name: "browse this path", exact: true }),
+    form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }),
+  ];
+  await expect(search).toHaveAttribute("aria-expanded", "false");
+  await expect(form.getByRole("listbox")).toHaveCount(0);
+  await expect(controls[2], "the controlled recent must establish the history traversal premise").toBeVisible();
+  await expect(controls[6], "the structured fixture must expose the Harness group").toBeVisible();
+  await search.focus();
+  await expect(search).toBeFocused();
+  for (const control of controls) {
+    await page.keyboard.press("Tab");
+    await expect(control).toBeFocused();
+  }
+});
+
+/**
+ * A create claim is a lifetime boundary, not merely a disabled paint state.
+ *
+ * Holding the real POST after dispatch establishes that the first structured
+ * create owns the page operation. Directly dispatching events against the
+ * now-disabled controls is deliberate adversarial input: browser hit testing
+ * normally blocks it, but a click already queued before the next render can
+ * still reach the Dioxus handler. The test therefore proves the handler-time
+ * guard keeps one binding/key live, rejects a second submit and Cancel, and
+ * does not let YOLO rewrite the accepted request.
+ */
+test("composer busy guard preserves one structured create through queued edits and cancel", async ({
+  page,
+  request,
+}) => {
+  const title = `composer-busy-${Date.now()}`;
+  const bodies: any[] = [];
+  let releasePost: (() => void) | undefined;
+  const heldPost = new Promise<void>((resolve) => {
+    releasePost = resolve;
+  });
+  let requestDispatched: (() => void) | undefined;
+  const dispatched = new Promise<void>((resolve) => {
+    requestDispatched = resolve;
+  });
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    bodies.push(JSON.parse(route.request().postData() ?? "{}"));
+    requestDispatched?.();
+    await heldPost;
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    const form = page.locator(".create-session-form");
+    await page.locator(".new-session-button").click();
+    await expect(form).toBeVisible({ timeout: 20_000 });
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.locator("details.launch-composer-advanced summary").click();
+    await form.getByLabel("title (optional)").fill(title);
+
+    await form.locator('button[type="submit"]').click();
+    await dispatched;
+    const yolo = form.getByRole("button", { name: "YOLO", exact: true });
+    await expect(yolo).toBeDisabled();
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].intent_key).toBeTruthy();
+    expect(bodies[0].launch).toMatchObject({ harness: "codex" });
+    expect(bodies[0].launch.permissions ?? null).toBeNull();
+
+    // These events model controls queued before disabled feedback painted.
+    // Their visible state and the already-dispatched request must both stay
+    // unchanged while the controlled response remains held.
+    await yolo.dispatchEvent("click");
+    await expect(form, "a queued choice click must not dismiss the owned create").toBeVisible();
+    await form.dispatchEvent("submit");
+    await expect(form, "a refused second submit must leave the first create mounted").toBeVisible();
+    await form.getByRole("button", { name: "cancel", exact: true }).dispatchEvent("click");
+    await expect(form, "queued Cancel must not unmount an owned create").toBeVisible();
+    await expect(yolo).toHaveAttribute("aria-pressed", "false");
+    expect(bodies).toHaveLength(1);
+
+    releasePost?.();
+    await expect
+      .poll(
+        async () => {
+          const listing = await (await request.get("/api/sessions")).json();
+          return listing.sessions.filter((entry: any) => entry.title === title).length;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(1);
+    await expect(form).toHaveCount(0);
+  } finally {
+    releasePost?.();
+    const listing = await (await request.get("/api/sessions")).json();
+    for (const session of listing.sessions.filter((entry: any) => entry.title === title)) {
+      await cleanupSession(request, session.id);
+    }
   }
 });
 

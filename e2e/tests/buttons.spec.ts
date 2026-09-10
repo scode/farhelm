@@ -6,7 +6,11 @@
  * more than one live at a time on
  * the sidebar's resting chrome, and never more than one live at a time
  * inside any single open dialog. Nothing else in the suite reads computed
- * color to check that promise (the rest of the browser suite treats CSS as
+ * color to check that promise. The launch composer is the deliberate
+ * exception: its supplied interaction study calls for a brighter, scoped
+ * launch action, so the test reads that role token separately rather than
+ * accidentally pulling the dialog back to the sidebar paint. The rest of
+ * the browser suite treats CSS as
  * an implementation detail behind whatever text or attribute it asserts
  * on), which is exactly how a specificity bug or a stray literal color
  * could ship unnoticed behind a screenshot nobody diffed pixel-for-pixel.
@@ -76,6 +80,7 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
 
     const accentFill = await resolveToken(page, "--accent-fill");
     const accentEdge = await resolveToken(page, "--accent-edge");
+    const composerLaunch = await resolveToken(page, "--composer-selected-border");
     const danger = await resolveToken(page, "--danger");
 
     // `toHaveCSS` (polling) rather than a one-shot `getComputedStyle`
@@ -85,13 +90,17 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     // `rgba(22, 41, 74, 0.016)` on one loaded CI run, the tail of its
     // selected fill draining away. The web-first assertion waits for the
     // value to settle instead of racing the transition.
-    async function expectPrimary(selector: string) {
+    async function expectPrimary(selector: string, fill = accentFill, edge = accentEdge) {
       const el = page.locator(selector);
       await expect(el, `${selector} must be visible to check its resting style`).toBeVisible();
-      await expect(el, `${selector} is a permitted primary and must carry the accent fill`)
-        .toHaveCSS("background-color", accentFill);
-      await expect(el, `${selector} is a permitted primary and must carry the accent-edge border`)
-        .toHaveCSS("border-top-color", accentEdge);
+      await expect(el, `${selector} must carry its surface's primary fill`).toHaveCSS(
+        "background-color",
+        fill,
+      );
+      await expect(el, `${selector} must carry its surface's primary border`).toHaveCSS(
+        "border-top-color",
+        edge,
+      );
     }
 
     async function expectGhost(selector: string) {
@@ -112,14 +121,18 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     // state rather than a post-interaction snapshot.
     await expectPrimary(".new-session-button");
 
-    // --- Primary #2: the create-session dialog's own submit.
+    // --- Primary #2: the composer launch action is deliberately brighter
+    // than the generic sidebar primary, per its supplied interaction study.
     await page.locator(".new-session-button").click();
     await expect(page.locator(".create-session-form")).toBeVisible();
-    await expectPrimary(".create-session-submit");
+    await expectPrimary(".create-session-submit", composerLaunch, composerLaunch);
     // Close it again rather than leaving it open into the next section —
     // an open create form is its own dialog surface and this test has no
     // further business with it.
-    await page.locator(".new-session-button").click();
+    await page
+      .locator(".create-session-form")
+      .getByRole("button", { name: "cancel", exact: true })
+      .click();
     await expect(page.locator(".create-session-form")).toHaveCount(0);
 
     // --- Primary #3: the "add a host" dialog's own submit.

@@ -1052,6 +1052,10 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             agent_kind: None,
             resume_template: None,
             source_profile: None,
+            // Spawn has no structured selector. A selectorless spawn inherits
+            // the authenticated parent's stored launch bundle in the
+            // supervisor, which is the only safe source of that provenance.
+            launch: None,
         })
         .await
         .context("sending the spawn request")?;

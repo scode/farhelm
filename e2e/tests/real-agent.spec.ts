@@ -89,18 +89,17 @@ async function createSession(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  // The agent picker is told, explicitly, that this create means the command
-  // below. It is not a formality: the dialog defaults to the target host's
-  // last-used profile, and when that profile has since been DELETED — which
-  // is the state any run that exercised profiles leaves the shared stack in —
-  // it selects nothing at all and blocks the create until someone answers
-  // (SPEC.md's ask-don't-guess). Saying "custom command" here is what a user
-  // in that state would do, and it makes this helper independent of whatever
-  // the last profile-backed create left behind.
+  // An arbitrary command belongs to the legacy path. Choosing it first keeps
+  // this helper independent of a profile-backed create the shared stack may
+  // have recorded before this test started.
+  await form.getByRole("button", { name: "other / command" }).click();
   await form.locator(".create-session-profile").selectOption("");
   await form.locator('input[type="text"]').nth(0).fill(cwd);
   await form.locator('input[type="text"]').nth(1).fill(invocation);
-  await form.locator('input[type="text"]').nth(2).fill(title);
+  // Keep the helper on the visible product path: title lives in the
+  // composer’s deliberate advanced disclosure, not an input ordinal.
+  await form.locator("details.launch-composer-advanced summary").click();
+  await form.getByLabel("title (optional)").fill(title);
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),

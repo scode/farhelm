@@ -65,14 +65,24 @@ impl CreateAdmission {
 }
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, ErrorKind, Frame,
-    MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot, RestartMode, SessionInfo,
-    TerminalSelector,
+    AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, ErrorKind, Frame, LaunchHarness,
+    LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot, RestartMode,
+    SessionInfo, TerminalSelector,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, watch};
+
+/// A directory browse may block in a filesystem implementation, but it must
+/// not occupy one of the shared request-admission permits indefinitely.
+///
+/// This is deliberately generous: normal local and remote mounts should
+/// finish much sooner, while expiry replies without waiting for the worker.
+/// The worker keeps its separate supervisor-wide permit until the filesystem
+/// call returns, so repeated timeouts cannot multiply stuck blocking work.
+const DIRECTORY_BROWSE_TIMEOUT: Duration = Duration::from_secs(30);
 use tracing::{debug, warn};
 
 /// Combined byte cap on every caller-supplied field a `CreateSession` can
@@ -225,7 +235,35 @@ fn create_mode(
     agent_kind: Option<AgentKind>,
     resume_template: Option<Vec<String>>,
     source_profile: Option<WireProfileSnapshot>,
+    launch: Option<LaunchSelection>,
 ) -> Result<CreateSelector, String> {
+    if let Some(selection) = launch {
+        let Some(invocation) = invocation else {
+            return Err("a structured launch must carry its resolved invocation".to_string());
+        };
+        if profile_name.is_some() || source_profile.is_some() {
+            return Err("a structured launch cannot also carry profile fields".to_string());
+        }
+        let expected_kind = match selection.harness {
+            LaunchHarness::Codex => AgentKind::Codex,
+            LaunchHarness::Claude => AgentKind::Claude,
+            LaunchHarness::Muse => AgentKind::Generic,
+        };
+        if agent_kind != Some(expected_kind) {
+            return Err("a structured launch's harness and agent_kind disagree".to_string());
+        }
+        return Ok(CreateSelector::Bundle(CreateMode::Structured {
+            invocation,
+            agent_kind: expected_kind,
+            // The helm owns compilation, but a structured replace or
+            // authenticated inherited spawn must preserve the source's
+            // frozen resume argv. HTTP rejects a user-supplied template;
+            // this trusted supervisor boundary stores the one the helm
+            // forwarded beside the already-resolved structured invocation.
+            resume_template,
+            selection,
+        }));
+    }
     match (invocation, profile_name) {
         (Some(invocation), None) => Ok(CreateSelector::Bundle(CreateMode::Raw {
             invocation,
@@ -235,6 +273,7 @@ fn create_mode(
                 id: profile.id,
                 name: profile.name,
             }),
+            launch: None,
         })),
         (None, Some(profile_name)) => {
             if agent_kind.is_some() || resume_template.is_some() || source_profile.is_some() {
@@ -309,6 +348,7 @@ async fn resolve_create_selector(
                         id: source_profile.id,
                         name: source_profile.name,
                     }),
+                    launch: None,
                 }),
                 AgentOutcome::Ok { reply } => Err((
                     ErrorKind::Internal,
@@ -349,11 +389,25 @@ async fn resolve_create_selector(
                         "the asking session no longer exists".to_string(),
                     )
                 })?;
+            if let Some(selection) = parent.launch {
+                let agent_kind = match selection.harness {
+                    LaunchHarness::Codex => AgentKind::Codex,
+                    LaunchHarness::Claude => AgentKind::Claude,
+                    LaunchHarness::Muse => AgentKind::Generic,
+                };
+                return Ok(CreateMode::Structured {
+                    invocation: parent.invocation,
+                    agent_kind,
+                    resume_template: parent.resume_template,
+                    selection,
+                });
+            }
             Ok(CreateMode::Raw {
                 invocation: parent.invocation,
                 agent_kind: Some(parent.agent_kind),
                 resume_template: parent.resume_template,
                 source_profile: parent.source_profile,
+                launch: None,
             })
         }
     }
@@ -381,6 +435,7 @@ async fn handle_create_session(
     agent_kind: Option<AgentKind>,
     resume_template: Option<Vec<String>>,
     source_profile: Option<WireProfileSnapshot>,
+    launch: Option<LaunchSelection>,
 ) {
     let selector = match create_mode(
         invocation,
@@ -388,6 +443,7 @@ async fn handle_create_session(
         agent_kind,
         resume_template,
         source_profile,
+        launch,
     ) {
         Ok(selector) => selector,
         Err(message) => {
@@ -478,6 +534,23 @@ async fn handle_create_session(
                 + source_profile
                     .as_ref()
                     .map_or(0, |profile| profile.id.len() + profile.name.len()),
+            resume_template.as_ref().map_or(0, Vec::len),
+        ),
+        CreateMode::Structured {
+            invocation,
+            resume_template,
+            selection,
+            ..
+        } => (
+            invocation.len()
+                + resume_template
+                    .iter()
+                    .flatten()
+                    .map(|element| element.len())
+                    .sum::<usize>()
+                + serde_json::to_string(selection)
+                    .expect("launch selection is always serializable")
+                    .len(),
             resume_template.as_ref().map_or(0, Vec::len),
         ),
     };
@@ -696,6 +769,63 @@ async fn handle_list_sessions(
         send_reply(&tx, &reply).await;
     })
     .await;
+}
+
+/// Run host-directory browsing outside the connection loop. The supervisor
+/// owns path expansion and disk access, so the helm never accidentally lists
+/// its own filesystem for a remote destination.
+async fn handle_browse_directory(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    req_id: u64,
+    cwd: String,
+) {
+    let sup2 = Arc::clone(sup);
+    let tx = tx.clone();
+    spawn_admitted(&sup.admission, tasks, async move {
+        let reply = directory_browse_reply(
+            req_id,
+            DIRECTORY_BROWSE_TIMEOUT,
+            sup2.browse_directory(&cwd),
+        )
+        .await;
+        send_reply(&tx, &reply).await;
+    })
+    .await;
+}
+
+/// Turn one directory-browse result into the protocol reply while enforcing
+/// the request's finite lifetime.
+///
+/// The future is passed in rather than constructing it here so this policy
+/// can be tested with a deliberately stalled operation. Expiry drops the
+/// caller's awaiter and releases the handler admission permit. Production
+/// browse work owns a distinct filesystem-worker permit until its blocking
+/// operation returns; dropping this future never claims to cancel that work.
+async fn directory_browse_reply<F>(req_id: u64, timeout: Duration, browse: F) -> ControlMsg
+where
+    F: std::future::Future<Output = anyhow::Result<super::core::DirectoryBrowse>>,
+{
+    match tokio::time::timeout(timeout, browse).await {
+        Ok(Ok(list)) => ControlMsg::DirectoryListing {
+            req_id,
+            cwd: list.cwd,
+            parent: list.parent,
+            children: list.children,
+            truncated: list.truncated,
+        },
+        Ok(Err(error)) => ControlMsg::Error {
+            req_id,
+            message: format!("{error:#}"),
+            kind: ErrorKind::InvalidRequest,
+        },
+        Err(_) => ControlMsg::Error {
+            req_id,
+            message: format!("directory browse did not finish within {timeout:?}"),
+            kind: ErrorKind::Internal,
+        },
+    }
 }
 
 /// Spawned for the same reason as `ListSessions`: the process-
@@ -2493,6 +2623,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             agent_kind,
             resume_template,
             source_profile,
+            launch,
         } => {
             handle_create_session(
                 sup,
@@ -2510,11 +2641,21 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 agent_kind,
                 resume_template,
                 source_profile,
+                launch,
             )
             .await
         }
         ControlMsg::ListSessions { req_id } => {
             handle_list_sessions(sup, ctx.tx, ctx.tasks, req_id).await
+        }
+        ControlMsg::BrowseDirectory { req_id, cwd } => {
+            // Keep this at debug level because directory names can be private,
+            // but make the receiving supervisor observable when a deployment
+            // needs to distinguish a routed browse from a locally answered one.
+            // The request is logged before its async filesystem work begins, so
+            // a later timeout or invalid-directory reply still has a receipt.
+            debug!(%cwd, "received directory browse request");
+            handle_browse_directory(sup, ctx.tx, ctx.tasks, req_id, cwd).await
         }
         ControlMsg::StopSession { req_id, session_id } => {
             handle_stop_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
@@ -2706,6 +2847,7 @@ pub(crate) async fn handle_restricted_control(
             agent_kind,
             resume_template,
             source_profile,
+            launch,
         } => {
             // The hello check admits the connection; this check authorizes
             // each create. Holding the parent's lifecycle claim across the
@@ -2782,6 +2924,23 @@ pub(crate) async fn handle_restricted_control(
                 .await;
                 return;
             }
+            // A structured bundle is compiled by the helm and carries a
+            // selection that the authenticated child did not originate.
+            // Children may inherit their parent's established launch, but
+            // cannot present a new structured bundle as trusted authority.
+            if launch.is_some() {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "launch is not available to session-authenticated creates"
+                            .to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
             handle_create_session(
                 sup,
                 tx,
@@ -2800,6 +2959,7 @@ pub(crate) async fn handle_restricted_control(
                 agent_kind,
                 resume_template,
                 source_profile,
+                launch,
             )
             .await;
         }
@@ -3280,6 +3440,67 @@ mod tests {
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
     use farhelm_proto::{RestartOffer, SessionStatus};
+    use std::sync::atomic::AtomicBool;
+
+    /// Records cancellation of a synthetic browse future. The timeout test
+    /// needs this observable because an error reply alone could come from a
+    /// timeout implementation that leaves its stalled work alive.
+    struct BrowseCancellation(Arc<AtomicBool>);
+
+    impl Drop for BrowseCancellation {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A stalled directory browse must yield an internal error and cancel
+    /// its pending filesystem future, so its handler cannot retain an
+    /// admission permit after the request lifetime ends.
+    ///
+    /// This uses Tokio's paused clock instead of making the test wait for
+    /// the production thirty-second protection window. The synthetic future
+    /// never completes on its own; its drop flag distinguishes cancellation
+    /// from an implementation that merely sends an error while leaking the
+    /// operation in the background.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn directory_browse_timeout_cancels_the_stalled_operation() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancellation = BrowseCancellation(Arc::clone(&cancelled));
+        let browse = async move {
+            let _cancellation = cancellation;
+            std::future::pending::<anyhow::Result<super::super::core::DirectoryBrowse>>().await
+        };
+
+        let reply = tokio::spawn(directory_browse_reply(71, Duration::from_secs(1), browse));
+        tokio::task::yield_now().await;
+        assert!(
+            !reply.is_finished(),
+            "the pending browse must remain in flight until its configured lifetime expires"
+        );
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let reply = reply
+            .await
+            .expect("directory browse reply task must not panic");
+        let ControlMsg::Error {
+            req_id,
+            message,
+            kind,
+        } = reply
+        else {
+            panic!("a stalled directory browse must reply with ControlMsg::Error");
+        };
+        assert_eq!(req_id, 71);
+        assert_eq!(kind, ErrorKind::Internal);
+        assert!(
+            message.contains("directory browse did not finish"),
+            "timeout reply must identify the failed operation, got: {message}"
+        );
+        assert!(
+            cancelled.load(Ordering::SeqCst),
+            "timeout must drop the pending browse rather than leaving it alive after replying"
+        );
+    }
 
     /// Seed the durable half of a parent, which is the authority source a
     /// restricted connection must revalidate before every create.
@@ -3302,6 +3523,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: cwd.to_string_lossy().into_owned(),
                     invocation: "/fixture/parent-agent --flag".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -3334,6 +3556,151 @@ mod tests {
             session_id: id.to_string(),
             token: session_token,
         }
+    }
+
+    /// Seed a structured parent without involving the helm. Restricted
+    /// creates must inherit this already-durable selection while remaining
+    /// unable to claim a new one as their own authority.
+    async fn authenticated_structured_parent(
+        sup: &Supervisor,
+        cwd: &std::path::Path,
+        id: &str,
+    ) -> farhelm_proto::SessionAuth {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: Some("gpt-6-astra".to_string()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+        };
+        let claimed = sup
+            .store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: crate::store::now_unix(),
+                    last_activity_at: crate::store::now_unix(),
+                    creation_seq: 0,
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    invocation: "codex -m gpt-6-astra -c model_reasoning_effort=high --yolo"
+                        .to_string(),
+                    launch: Some(selection),
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: AgentKind::Codex,
+                    resume_template: Some(vec![
+                        "codex".to_string(),
+                        "resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed structured authenticated parent");
+        let crate::store::Claimed::Ours { session_token, .. } = claimed else {
+            panic!("an unkeyed parent insert cannot be taken");
+        };
+        farhelm_proto::SessionAuth {
+            session_id: id.to_string(),
+            token: session_token,
+        }
+    }
+
+    /// Structured bundles are a fourth wire concern beside raw invocation,
+    /// profile-name resolution, and selectorless inheritance. This keeps
+    /// their shape rules at the admission boundary, before any reservation
+    /// can make a malformed request permanently uncorrectable.
+    #[test]
+    fn structured_create_selector_rejects_ambiguous_or_inconsistent_bundles() {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        for (invocation, profile_name, agent_kind, resume_template, source_profile, expected) in [
+            (
+                None,
+                None,
+                Some(AgentKind::Codex),
+                None,
+                None,
+                "resolved invocation",
+            ),
+            (
+                Some("codex".to_string()),
+                Some("profile".to_string()),
+                Some(AgentKind::Codex),
+                None,
+                None,
+                "profile",
+            ),
+            (
+                Some("codex".to_string()),
+                None,
+                Some(AgentKind::Claude),
+                None,
+                None,
+                "harness and agent_kind disagree",
+            ),
+            (
+                Some("codex".to_string()),
+                None,
+                Some(AgentKind::Codex),
+                None,
+                Some(WireProfileSnapshot {
+                    id: "profile".to_string(),
+                    name: "Profile".to_string(),
+                }),
+                "profile",
+            ),
+        ] {
+            let error = match create_mode(
+                invocation,
+                profile_name,
+                agent_kind,
+                resume_template,
+                source_profile,
+                Some(selection.clone()),
+            ) {
+                Ok(_) => panic!("an ambiguous structured bundle must be refused"),
+                Err(error) => error,
+            };
+            assert!(
+                error.contains(expected),
+                "expected {expected:?} in structured-create refusal {error:?}"
+            );
+        }
+
+        let template = vec!["codex".to_string(), "resume".to_string()];
+        let CreateSelector::Bundle(CreateMode::Structured {
+            resume_template, ..
+        }) = create_mode(
+            Some("codex".to_string()),
+            None,
+            Some(AgentKind::Codex),
+            Some(template.clone()),
+            None,
+            Some(selection),
+        )
+        .expect("the trusted structured path may preserve a frozen resume template")
+        else {
+            panic!("expected a structured bundle");
+        };
+        assert_eq!(resume_template, Some(template));
     }
 
     /// A helm-resolved bundle is recorded verbatim and its source existence
@@ -3369,6 +3736,7 @@ mod tests {
                     id: "profile-1".to_string(),
                     name: "Claude".to_string(),
                 }),
+                launch: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -3431,6 +3799,7 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
+                launch: None,
             },
             &tx,
             &auth,
@@ -3461,6 +3830,69 @@ mod tests {
         assert_eq!(stored.source_profile.unwrap().id, "parent-profile");
     }
 
+    /// A structured parent may spawn without a helm because its resolved
+    /// invocation and requested choices are already in supervisor storage.
+    #[farhelm_testtrace::test]
+    async fn selectorless_spawn_keeps_a_structured_parents_launch_snapshot() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let auth = authenticated_structured_parent(&sup, state.path(), "parent").await;
+        handle_restricted_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 2,
+                parent: Some("parent".to_string()),
+                cwd: state.path().to_string_lossy().into_owned(),
+                invocation: None,
+                profile_name: None,
+                title: Some("child".to_string()),
+                cols: 80,
+                rows: 24,
+                intent_key: Some("structured-spawn-copy".to_string()),
+                agent_kind: None,
+                resume_template: None,
+                source_profile: None,
+                launch: None,
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
+        let ControlMsg::SessionCreated { session, .. } = reply else {
+            panic!("selectorless structured spawn must succeed: {reply:?}");
+        };
+        let expected = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: Some("gpt-6-astra".to_string()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+        };
+        assert_eq!(session.launch, Some(expected.clone()));
+        let stored = sup
+            .store
+            .session(&session.id)
+            .await
+            .expect("read child")
+            .expect("child exists");
+        assert_eq!(stored.launch, Some(expected));
+        assert_eq!(
+            stored.resume_template,
+            Some(vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+            "a structured child must inherit the parent bundle, rather than deriving a new \
+             resume template from its current harness"
+        );
+        assert_eq!(stored.source_profile, None);
+    }
+
     /// A named spawn with no attached helm refuses with both available
     /// remedies instead of falling back to the parent's agent silently.
     #[farhelm_testtrace::test]
@@ -3486,6 +3918,7 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
                 source_profile: None,
+                launch: None,
             },
             &tx,
             &auth,
@@ -3625,6 +4058,7 @@ mod tests {
                     intent_key: Some(format!("ambiguous-{req_id}")),
                     agent_kind,
                     resume_template,
+                    launch: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -3821,6 +4255,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-s1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
@@ -4066,6 +4501,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-s1".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
@@ -4976,6 +5412,7 @@ mod tests {
                 intent_key: Some("forged-key".to_string()),
                 agent_kind: None,
                 resume_template: None,
+                launch: None,
             },
             &tx,
             &auth,
@@ -5031,6 +5468,7 @@ mod tests {
                 intent_key: Some("revoked-key".to_string()),
                 agent_kind: None,
                 resume_template: None,
+                launch: None,
             },
             &tx,
             &auth,
@@ -5084,6 +5522,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "claude".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,
@@ -5864,6 +6303,7 @@ mod tests {
             intent_key: Some("spawn-key".to_string()),
             agent_kind: None,
             resume_template: None,
+            launch: None,
         };
         let mut send = async |msg| {
             handle_restricted_control(&sup, msg, &tx, &auth).await;
@@ -6019,6 +6459,7 @@ mod tests {
                 cwd: "x".repeat(CREATE_FIELD_CAP),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
+                launch: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -6104,6 +6545,7 @@ mod tests {
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     source_profile: None,
+                    launch: None,
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -6156,6 +6598,7 @@ mod tests {
                 cwd: "/nonexistent/definitely/not/here".to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
+                launch: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -6220,6 +6663,7 @@ mod tests {
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     source_profile: None,
+                    launch: None,
                     title: None,
                     cols: 80,
                     rows: 24,
@@ -6296,7 +6740,10 @@ mod tests {
                     last_activity_at: 1_700_000_000,
                     creation_seq: None,
                     cwd: "/tmp".to_string(),
+                    canonical_cwd: None,
                     invocation: "agent".to_string(),
+                    resume_template: None,
+                    launch: None,
                     status: SessionStatus::default(),
                     annotation: None,
                     restart_offer: RestartOffer::default(),
@@ -6473,7 +6920,10 @@ mod tests {
                 last_activity_at: created_at,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "agent".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -6657,7 +7107,10 @@ mod tests {
                     last_activity_at: 1_700_000_000,
                     creation_seq: None,
                     cwd: "/tmp".to_string(),
+                    canonical_cwd: None,
                     invocation: "agent".to_string(),
+                    resume_template: None,
+                    launch: None,
                     status: SessionStatus::default(),
                     annotation: None,
                     restart_offer: RestartOffer::default(),
