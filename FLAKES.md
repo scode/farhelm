@@ -565,3 +565,117 @@ fixture boundary. Do not remove the assertions or extend the product focus deadl
 Class: pointer-focus
 
 Cause: unknown
+
+## 2026-09-10 — printable paste delays supervisor control traffic
+
+The previously recorded `an over-one-megabyte message does not drop the terminal socket`, in
+`e2e/tests/terminal-flood.spec.ts`, failed again in full browser run `7fd44a19-ce3f-42fb-a3df-410da327634a` on frozen
+composer candidate `f0aa71e488d1cb2f55099865b85c23025c106edf`. The command selected the full Chromium/WebKit suite with
+one worker and zero retries. An independent tmux receiver probe confirmed the parsing cost: equal 256 KiB inputs took
+8.66 seconds with per-byte hex arguments and 0.386 seconds with one literal argument per printable chunk, with both
+receiver counts verified. Serial input handling delayed session-list replies enough to retire the helm connection. The
+repair in #542 uses escaped, option-terminated literal arguments only for printable ASCII; arbitrary bytes retain the
+hex path. The browser fixture now inspects the buffer inside the page and checks the same live socket before and after
+the paste. Focused browser run `dd8e52e9-2546-45d7-a8a9-dc5e3c84bc9d` passed all four paste/control-key cases in both
+engines; it preceded the option-termination correction. Corrected native run `1f004419-8f6c-4847-9b8c-1e4166d854dd` on
+`ee5dcbaa4348fd697a1ef5bab71e3e7ad11bc430` passed the four exact byte-preservation, option-looking-input, chunk-ordering
+and reconstruction cases with four nextest slots and zero retries. These local Linux runs overlapped isolated validation
+jobs. The recorded tmux 3.7c executable SHA256 was `2981fc785ff7ac6236d1c13ebbf1eb3169fa316ed94169e786d75df44a692bcb`;
+`LANG`, `LC_ALL` and `LC_CTYPE` were `C.UTF-8`. Ambient `FARHELM_*` inputs were scrubbed; the recorder supplied
+`FARHELM_TEST_TRACE_DIR`. Pure Jujutsu and copied browser fixtures lacked strict Git-root attestation; retained source
+identities and executable hashes supplement that gap. Disposition: printable-paste repair in #542; the separate
+historical backspace setup failure remains in TODO.md.
+
+Final corrected-input browser shards also passed both oversized-paste and backspace cases in both engines. Their
+combined 998-case selection had 978 passes, 14 skips and six unrelated or separately repaired fixture failures; this
+focused coverage does not make the broad gate green.
+
+Class: product
+
+Cause: established
+
+## 2026-09-10 — profile focus premises fail again in the browser gate
+
+WebKit run `a612fb9b-803b-4de1-ad55-0be77ebc8699` selected `npx playwright test --shard=3/4 --workers=1 --retries=0`:
+256 passed, three skipped and three failed. Two failures in `e2e/tests/profiles.spec.ts` occurred before their intended
+behavior: `Tab leaving the document preserves busy dismissal intent` lacked editor-name focus, and
+`a profile edited in another browser reaches this one over the real feed` lacked the first client's popup focus. The
+third failure was a new composer stub-handshake mistake, repaired separately, and is not a latent flake. The immutable
+fixture combined corrected native source `ee5dcbaa4348fd697a1ef5bab71e3e7ad11bc430` with browser sources captured in
+`638e83bb71f8cc297e1a5e480117a4a8471f368f`; it did not change during execution. The local Linux runner overlapped other
+isolated validation jobs, with one worker per browser shard. It used the same recorded tmux executable, locale and
+scrubbed-variable policy as the paste entry above; strict Git-root attestation was unavailable for the copied fixture.
+This extends the earlier popup-readiness observations without proving a regression in profile saving or feed delivery.
+Disposition: open in TODO.md; preserve the focus assertions and investigate the failed premise before expanding repairs.
+
+Class: pointer-focus
+
+Cause: unknown
+
+## 2026-09-10 — provisioning attach misses a listening supervisor
+
+`provisioning::tests::local_provisioning_and_update_preserve_a_running_session`, in
+`crates/farhelm-helm/src/provisioning.rs`, passed exact run `568e8782-afa5-4e2f-9ac3-64dd0c227de4`, then failed the
+workspace run `de55db2b-7b22-475a-9465-35212dd8de5a` on recorded Jujutsu snapshot
+`cab86367182889c97e15170bf2b69a1638651fcc`. The latter selected workspace Rust targets excluding desktop, four nextest
+slots and zero retries, while isolated browser validation also ran. The manager had exhausted its active retry ladder.
+Its provisioning-triggered single probe preceded the supervisor's listening log, and the next 45-second reprobe would
+fall outside the 30-second attach deadline. These timings and unchanged provisioning/manager control flow support a
+startup-race hypothesis; there was no pre-composer reproduction. Both commands used the local Linux substrate, actual
+tmux 3.7c SHA256 `2981fc785ff7ac6236d1c13ebbf1eb3169fa316ed94169e786d75df44a692bcb`, and `C.UTF-8` for `LANG`, `LC_ALL`
+and `LC_CTYPE`. Ambient `FARHELM_*` inputs were scrubbed and the recorder supplied `FARHELM_TEST_TRACE_DIR`. Strict
+Git-root attestation was unavailable. The broad JUnit overwrote the exact run's shared report path; the exact console
+and recorder remain, but its original JUnit is missing. Disposition: open in TODO.md; do not weaken attach readiness or
+increase its deadline based on the exact pass.
+
+Class: readiness
+
+Cause: hypothesis
+
+## 2026-09-10 — sidebar scrolling passes before teardown exhausts its budget
+
+`the sidebar app bar stays pinned while the session list scrolls`, in `e2e/tests/sidebar.spec.ts`, failed Chromium run
+`45efb275-84b9-4aab-9dd2-550fd45d4e7a`. Its trace passed all nine scrolling/geometry expectations, then the last session
+DELETE raced request-context disposal when the 60-second test budget expired. The fixture's serial cleanup behavior was
+unchanged. The command used an explicit 250-case test list preserving the original first shard minus authentication
+rotation, which ran separately, with one worker and zero retries. Its immutable source assembly and local Linux
+tmux/locale/variable policy were the same as the profile-focus entry above, with other isolated validation jobs running.
+This is evidence about cleanup duration, not a failed sticky-bar assertion or a proven composer regression. Disposition:
+open in TODO.md; preserve geometry assertions and establish teardown ownership separately.
+
+Class: budget
+
+Cause: established
+
+## 2026-09-10 — authentication recovery assertions vary between runs
+
+`rotation logs out an open client and drops its feed and terminal sockets`, in `e2e/tests/auth.spec.ts`, failed the
+original first browser shard `7653ea10-0f7d-411d-88cc-872ac7d1906b` on an aborted recovery detail read. The shared
+credential file is updated only after recovery assertions, so later cases used stale credentials and produced a cascade;
+that shard was canceled as invalid evidence. Exact candidate run `498f139d-3aa6-41a3-8f0f-00b10a1a4a62` instead failed a
+sidebar-row assertion after a successful detail read. A prior composer build and exact candidate run
+`62dbfa15-2692-4217-91af-79c69ec4215f` passed. No authentication source or test was changed. Candidate fixtures used the
+immutable source assembly, local Linux substrate, actual tmux hash, locale and scrubbed-variable policy recorded in the
+profile-focus entry above. Each exact command selected only this Chromium test, one worker and zero retries, alongside
+isolated validation jobs. This establishes intermittent observations, not the cause of recovery failure or pre-composer
+provenance. Disposition: open in TODO.md; retain the original failure separately from the stale-credential cleanup
+consequence.
+
+Class: unknown
+
+Cause: unknown
+
+## 2026-09-10 — Chromium profile boundaries fail before the create picker
+
+Run `45efb275-84b9-4aab-9dd2-550fd45d4e7a`, with the exact source assembly, selection and substrate recorded in the
+sidebar-scrolling entry above, also failed two existing `e2e/tests/profiles.spec.ts` cases. In
+`an outside click overrides a delayed opening focus commit`, the trusted click reached a held commit after its deadline;
+the fixture's unexpired-boundary assertion failed. In `a popup-created profile is offered on every host`, the saved
+profile was registered successfully, but `closeProfiles` left the popup mounted after its toggle click, before opening
+the create picker. The latter differs from the older editor-fill failure despite sharing a test title. Production
+`profiles.rs` is unchanged from the preserved host-selector parent. Disposition: both observations remain in TODO.md;
+retain deadline, save-settlement and focus receipts without treating a persistent popup as proof of a failed save.
+
+Class: fixture-premise
+
+Cause: unknown

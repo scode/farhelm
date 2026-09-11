@@ -438,7 +438,7 @@ from scrollback even had they been delivered one at a time.
 
 Outbound key delivery has one non-obvious mechanic: for input small enough to fit one protocol frame and one `send-keys`
 command, message boundaries are pty write boundaries. The transport frames input at 32KiB and the supervisor chunks each
-frame into `send-keys -H` commands of at most 256 bytes, so larger input is deliberately split — nothing may depend on
+frame into `send-keys` commands of at most 256 bytes, so larger input is deliberately split — nothing may depend on
 atomic delivery of an arbitrary message. But a message at or under one command IS one command, and tmux flushes each
 command to the pane as its own write — measured on the pinned 3.7b: two commands landed as two reads ~7ms apart, never
 coalesced. For almost all input none of this matters, but SPEC.md's Shift+Enter chord (ESC CR, two bytes, always one
@@ -567,23 +567,26 @@ rather than a freshly spawned `tmux send-keys` command's arguments — the earli
 being world-readable via `/proc/<pid>/cmdline`, which matters because input includes credentials typed at agent prompts,
 and that risk never applied to bytes written to a pipe. Each `send-keys` command is chunked at 256 bytes because tmux
 rejects a command carrying on the order of ~1000 arguments as "command too long" and each input byte becomes one hex
-argument; every command's `%begin`/`%end` reply rides back on the same stdout the client's other notifications use,
-which is safe to ignore because the output-streaming loop already discards every notification it has no use for (see
-below). Passthrough sequences (audited): the control-mode pane-output stream carries `\ePtmux;...\e\\`-wrapped payloads
-still wrapped, regardless of the `allow-passthrough` option — that option only gates forwarding to rendering clients,
-which Farhelm has none of — so the supervisor unwraps passthrough payloads itself before they reach xterm.js. Reconnect
-replay prefills xterm.js from `capture-pane -e` history, then continues with live bytes from the same control client —
-that is how the 10,000-line floor is met without a gap between the two. The live stream also removes only the literal
-terminal queries that the pinned tmux answers itself, retaining possible split prefixes briefly and flushing them after
-idle; a query split longer than that idle window is deliberately forwarded and answered twice. This is a bounded byte
-transform, not a VT parser. The handoff ordering is load-bearing: a separate tmux command process targets the incumbent
-control client by its tmux-assigned name and switches it back to `no-output`; only after that process succeeds is the
-incumbent's stdin closed and the process reaped. The acknowledgement cannot share the output client's protocol stream
-because cancellation may leave older positional command replies unread there. tmux applies `no-output` by discarding all
-pending pane blocks for that client and refusing new ones, so this is a client-wide boundary rather than a racy list of
-panes that existed when teardown began. Closing or killing tmux 3.7b's client while one of those blocks remains can
-abort the whole private server with `fatal: not enough data`; the acknowledged transition is therefore part of the
-handoff contract, not cleanup polish. Pane modes, a history snapshot, a visible-screen snapshot, and a final
+argument. Entirely printable ASCII chunks instead use one quoted `send-keys -l` argument, avoiding per-byte argument
+parsing that otherwise delays large pastes and queues control requests behind them. Quotes, backslashes, dollar signs
+and tildes are escaped for tmux's parser; an explicit `--` prevents leading hyphens from becoming options or overriding
+the target. Control and non-ASCII bytes retain hex delivery. Both forms use the same dedicated no-output input client
+and wait for every command's matching `%end`; errors are never discarded as output notifications. Passthrough sequences
+(audited): the control-mode pane-output stream carries `\ePtmux;...\e\\`-wrapped payloads still wrapped, regardless of
+the `allow-passthrough` option — that option only gates forwarding to rendering clients, which Farhelm has none of — so
+the supervisor unwraps passthrough payloads itself before they reach xterm.js. Reconnect replay prefills xterm.js from
+`capture-pane -e` history, then continues with live bytes from the same control client — that is how the 10,000-line
+floor is met without a gap between the two. The live stream also removes only the literal terminal queries that the
+pinned tmux answers itself, retaining possible split prefixes briefly and flushing them after idle; a query split longer
+than that idle window is deliberately forwarded and answered twice. This is a bounded byte transform, not a VT parser.
+The handoff ordering is load-bearing: a separate tmux command process targets the incumbent control client by its
+tmux-assigned name and switches it back to `no-output`; only after that process succeeds is the incumbent's stdin closed
+and the process reaped. The acknowledgement cannot share the output client's protocol stream because cancellation may
+leave older positional command replies unread there. tmux applies `no-output` by discarding all pending pane blocks for
+that client and refusing new ones, so this is a client-wide boundary rather than a racy list of panes that existed when
+teardown began. Closing or killing tmux 3.7b's client while one of those blocks remains can abort the whole private
+server with `fatal: not enough data`; the acknowledged transition is therefore part of the handoff contract, not cleanup
+polish. Pane modes, a history snapshot, a visible-screen snapshot, and a final
 `refresh-client -f !no-output,pause-after=N` are submitted as one semicolon-separated command group through that
 replacement. The matching `%end` for the final refresh block is the cutover: earlier pane bytes are represented by the
 snapshot, later ones arrive as live output, and `no-output` advances rather than queueing a second copy for delivery.

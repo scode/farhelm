@@ -2882,7 +2882,7 @@ async fn stdio_proxy_carries_a_real_session() {
 /// the helm client splits it into two 32 KiB-capped frames, with a line
 /// straddling the split, and each arriving frame is handed to
 /// `InputClient::send`, which further chunks it into many 256-byte
-/// `send-keys -H` commands against the same dedicated input client (see
+/// `send-keys` commands against the same dedicated input client (see
 /// `tmux/input.rs`). Every other test sends a dozen bytes, so a truncation, a
 /// reorder, or a dropped chunk at either boundary — the frame split or
 /// any of the many `send-keys` chunk splits inside it — would otherwise
@@ -3528,6 +3528,99 @@ async fn input_bytes_survive_verbatim_through_hexecho() {
     assert!(
         !contains_sequence(&[0x5e, 0x43]),
         "ETX (ctrl-C) must not arrive caret-escaped as ^C: {transcript}"
+    );
+}
+
+/// Printable input quoting and binary fallback must preserve every pane byte.
+///
+/// The literal-text optimization crosses tmux's command parser, so quotes,
+/// variable/tilde expansion and command separators are data rather than syntax.
+/// A raw receiver also pins every non-ASCII/control byte through the hex path;
+/// the ordered acknowledgment prevents a truncated prefix from passing.
+#[farhelm_testtrace::test]
+async fn printable_and_binary_input_preserve_bytes_across_commands() {
+    let h = harness().await;
+    let work = farhelm_teststate::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script hexecho"),
+            None,
+            200,
+            50,
+        )
+        .await
+        .expect("create raw receiver");
+    let (chan, replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 200, 50)
+        .await
+        .expect("attach");
+    let mut seen = replay;
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client.send_input(chan, b"!".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "21", 10).await;
+    seen.clear();
+
+    // Lead a command with ~ and include every printable ASCII value. The
+    // repeated blocks exceed one command, including escaped bytes near cuts.
+    let mut printable = b"~/${HOME} #{pane_id}; 'quoted' \\\" ".to_vec();
+    for _ in 0..4 {
+        printable.extend(0x20..=0x7e);
+    }
+    // Quoting alone does not protect an argument from tmux's option
+    // parser. Exercise option-looking text both at a message start and
+    // exactly where the second command's payload begins.
+    let mut at_chunk_boundary = vec![b'a'; 256];
+    at_chunk_boundary.extend_from_slice(b"-R; keep this as input");
+    let literal_messages = [
+        b"-R".to_vec(),
+        b"--".to_vec(),
+        b"-Rt%2".to_vec(),
+        at_chunk_boundary,
+        printable,
+    ];
+    let binary: Vec<u8> = (0..=255).collect();
+    let acknowledgment = b"input-encoding-ack";
+    let mut expected: Vec<u8> = literal_messages.iter().flatten().copied().collect();
+    expected.extend_from_slice(&binary);
+    expected.extend_from_slice(acknowledgment);
+    for message in literal_messages {
+        h.client.send_input(chan, message).await;
+    }
+    h.client.send_input(chan, binary).await;
+    h.client.send_input(chan, acknowledgment.to_vec()).await;
+
+    // Decode across reads: neither the PTY nor output frames promise that
+    // one input command produces one output record. Retain only a small
+    // transcript, and fail immediately if the owned attachment disappears.
+    let result = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let received = hex_tokens(&String::from_utf8_lossy(&seen));
+            if received.len() >= expected.len() {
+                return received;
+            }
+            assert!(
+                seen.len() < 32 * 1024,
+                "unexpected raw receiver output growth"
+            );
+            match rx.recv().await {
+                Some(TermEvent::Data(bytes)) => seen.extend_from_slice(&bytes),
+                Some(TermEvent::ReplayComplete) => {}
+                Some(TermEvent::Detached(reason)) => panic!("input attachment detached: {reason}"),
+                None => panic!("input attachment closed before acknowledgment"),
+            }
+        }
+    })
+    .await;
+    assert_eq!(
+        result.unwrap_or_else(|_| panic!(
+            "raw receiver did not acknowledge input; received {} bytes",
+            hex_tokens(&String::from_utf8_lossy(&seen)).len()
+        )),
+        expected,
+        "tmux parsing and both encodings must preserve the complete ordered byte stream"
     );
 }
 

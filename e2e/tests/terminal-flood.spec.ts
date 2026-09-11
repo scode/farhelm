@@ -1135,8 +1135,14 @@ test("an over-one-megabyte message does not drop the terminal socket", async ({
 }) => {
   const pasteOverOneMiB = 1024 * 1024 + 1;
   await openTerminal(page);
+  // A fresh response proves the receiver is live before the large send;
+  // replayed readiness cannot establish that this attachment accepts input.
+  await page.keyboard.type("before-big-message");
+  await page.keyboard.press("Enter");
+  await waitForTermText(page, "echo:before-big-message");
   await page.evaluate((payloadBytes) => {
     const ws = (window as any).__farhelmWs as WebSocket;
+    (window as any).__farhelmPasteSocket = ws;
     ws.send(new Uint8Array(payloadBytes).fill(0x61));
   }, pasteOverOneMiB);
   // The send is async; poll until the socket has drained it, still open.
@@ -1155,10 +1161,15 @@ test("an over-one-megabyte message does not drop the terminal socket", async ({
   await page.keyboard.type("after-big-message");
   await page.keyboard.press("Enter");
   // The oversized payload becomes 4,097 `send-keys` commands, but the
-  // supervisor writes those in bounded batches of 64 before reading tmux's
-  // replies. The marker stays behind the paste on that same ordered input
+  // supervisor encodes printable chunks as one literal argument, avoiding
+  // per-byte hex argument parsing. The marker stays behind the paste on the ordered input
   // path, so seeing it proves more than the browser socket merely draining.
   await waitForTermText(page, "echo:after-big-message");
+  // A replacement socket must not turn a dropped attachment into a pass.
+  expect(await page.evaluate(() => {
+    const original = (window as any).__farhelmPasteSocket as WebSocket;
+    return original === (window as any).__farhelmWs && original.readyState === WebSocket.OPEN;
+  })).toBe(true);
 });
 
 // Regression test for the tmux paste-buffer input-mangling bug at the

@@ -112,6 +112,11 @@ impl TmuxDriver {
 /// because tmux rejects a command carrying on the order of ~1000
 /// arguments as "command too long", and each input byte becomes one hex
 /// argument; 256 stays far below that ceiling with comfortable margin.
+/// Printable ASCII uses one quoted `send-keys -l` argument instead: the
+/// per-byte hex argument parsing is expensive enough to hold a large paste
+/// ahead of the helm's control requests. Control bytes and non-ASCII data
+/// retain `-H`, since literal-string key handling is not byte-transparent
+/// for those values. Both forms preserve the same command boundaries.
 /// Chunks are pipelined in bounded batches before their ordered replies are
 /// read. Nothing else contends for this client's stdin/stdout, so reply order
 /// is enough to keep each confirmation paired with its command; the bound
@@ -216,10 +221,30 @@ impl InputClient {
         for batch in chunks.chunks(Self::PIPELINE_BATCH) {
             for chunk in batch {
                 line.clear();
-                write!(line, "send-keys -t {} -H", self.target)
-                    .expect("String write is infallible");
-                for byte in *chunk {
-                    write!(line, " {byte:02x}").expect("String write is infallible");
+                if chunk.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
+                    // Printable ASCII has the same pane bytes under -l and
+                    // -H. Keep it in one argument to avoid parsing hundreds
+                    // of separate hex arguments. This is tmux syntax, not
+                    // shell syntax: even a leading tilde in double quotes
+                    // expands unless escaped. Quoting does not stop option
+                    // parsing, so -- also protects chunks beginning with -
+                    // from being consumed as flags or overriding the target.
+                    // Payload never enters a process's argv.
+                    write!(line, "send-keys -t {} -l -- \"", self.target)
+                        .expect("String write is infallible");
+                    for &byte in *chunk {
+                        if matches!(byte, b'\\' | b'"' | b'$' | b'~') {
+                            line.push('\\');
+                        }
+                        line.push(char::from(byte));
+                    }
+                    line.push('"');
+                } else {
+                    write!(line, "send-keys -t {} -H", self.target)
+                        .expect("String write is infallible");
+                    for byte in *chunk {
+                        write!(line, " {byte:02x}").expect("String write is infallible");
+                    }
                 }
                 line.push('\n');
                 tokio::time::timeout(self.exchange_timeout, self.stdin.write_all(line.as_bytes()))
