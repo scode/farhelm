@@ -32,11 +32,32 @@ export async function termText(page: Page): Promise<string> {
  *
  * Terminal output arrives asynchronously over a WebSocket with no DOM event
  * to await, so a one-shot buffer read cannot establish that output landed.
+ * Search inside the page: transferring megabytes of scrollback on every
+ * mismatch makes the observation itself expensive and floods failure reports.
+ * The bounded tail and attachment state remain available when the wait fails;
+ * containment still covers the complete buffer, including line separators.
  */
 export async function waitForTermText(page: Page, needle: string, timeout = 15_000) {
   await expect
-    .poll(() => termText(page), { timeout, message: `waiting for ${needle}` })
-    .toContain(needle);
+    .poll(() => page.evaluate((expected) => {
+      const term = (window as any).__farhelmTerm;
+      const lines: string[] = [];
+      if (term) {
+        const buffer = term.buffer.active;
+        for (let i = 0; i < buffer.length; i++) {
+          lines.push(buffer.getLine(i)?.translateToString(true) ?? "");
+        }
+      }
+      const text = lines.join("\n");
+      return {
+        found: text.includes(expected),
+        mounted: !!term,
+        socketState: (window as any).__farhelmWs?.readyState ?? null,
+        characters: text.length,
+        tail: text.slice(-1024),
+      };
+    }, needle), { timeout, message: `waiting for ${needle}` })
+    .toMatchObject({ found: true });
 }
 
 /**
