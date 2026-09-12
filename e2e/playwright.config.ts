@@ -140,7 +140,17 @@ export default defineConfig({
     ),
   ],
   webServer: {
-    command: "bash ./start-stack.sh",
+    // The `exec` is load-bearing, not cosmetic. Playwright launches this
+    // as `/bin/sh -c "<command>"`, and on Linux that shell is dash, which
+    // stays resident instead of replacing itself — so without `exec` the
+    // script's parent is a dash wrapper in the detached session, and that
+    // wrapper survives the Playwright leader's death. start-stack.sh's
+    // orphan watcher waits on its parent pid, so it would wait on a pid
+    // that never goes away and the stack would leak exactly as before.
+    // With `exec` the shell becomes the script and the leader is the
+    // direct parent on every platform. scripts/test-start-stack-cleanup.sh
+    // pins this layering; do not drop the prefix without updating it.
+    command: "exec bash ./start-stack.sh",
     // The stack script is a shell child with no view of this module, so the
     // port it must bind reaches it the same way it reaches the workers.
     env: { [STACK_PORT_ENV]: String(stackPort) },

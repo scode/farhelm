@@ -180,6 +180,12 @@ bash_shell=$(command -v bash) || exit 1
 # plus its daemonized tmux server, which nothing reaps until a later
 # run's sweep judges the state dead.
 cleanup() {
+  # The orphan watcher dies first, and its death is awaited: a TERM it
+  # delivered mid-cleanup would re-enter the exit path and abort the
+  # sweep below. (On the orphan path itself the watcher already exited
+  # after delivering; the kill then fails silently and the wait reaps it.)
+  kill "${watcher_pid:-}" 2>/dev/null
+  wait "${watcher_pid:-}" 2>/dev/null
   kill "${helm_pid:-}" 2>/dev/null
   kill "${sup_pid:-}" 2>/dev/null
   kill "${remote_sup_pid:-}" 2>/dev/null
@@ -195,6 +201,42 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 143' TERM INT
+
+# The spawner's pid, for the orphan watcher below. Playwright runs this
+# script detached in its own process group and SIGTERMs that group on its
+# graceful paths — but it handles SIGINT only, so a SIGTERM, SIGKILL, or
+# crash of the Playwright leader skips teardown entirely and strands this
+# shell with its helm, supervisors, ports, and state lock, unreachable to
+# the recorder's group cleanup (which owns the leader's group, not this
+# one). The watcher notices the spawner going away and delivers the same
+# TERM this script would have received, so every death of the spawner
+# converges on the trap above. Each shell watches only its own spawner,
+# so the watcher normally touches nothing but its own stack; the two pid
+# reuses it can see both degrade safely. A reused spawner pid merely keeps
+# the watcher waiting (the status-quo leak, never a wrong kill), and the
+# TERM below is guarded by a live command-line check, so it lands only on
+# a process still running this script. The one shape that check cannot
+# exclude is a reused pid running ANOTHER stack's copy of this same
+# script — that stack would run its own trap early. Pids do not come
+# around that fast next to a 2-second poll, but "never" would overclaim.
+spawner_pid=$PPID
+script_name=${0##*/}
+orphan_watch() {
+  command -v ps >/dev/null 2>&1 || exit 0
+  while kill -0 "$spawner_pid" 2>/dev/null; do
+    sleep 2
+  done
+  # If the script itself is already gone (SIGKILL, which no trap can
+  # catch), signaling $$ would hit a dead or reused pid — deliver only
+  # when $$ still runs this script. PPID cannot answer that: a
+  # background subshell inherits its parent's PPID instead of its own,
+  # so the check reads the live command line instead.
+  case "$(ps -p "$$" -o args= 2>/dev/null)" in
+    *"$script_name"*) kill -TERM $$ 2>/dev/null ;;
+  esac
+}
+orphan_watch 9>&- &
+watcher_pid=$!
 
 HOME="$structured_home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!

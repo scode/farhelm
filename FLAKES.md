@@ -715,3 +715,30 @@ same host. Disposition: fixed; the TODO.md entry is removed.
 Class: budget
 
 Cause: established
+
+## 2026-09-12 — canceled runs strand detached stacks; the fixture shell now watches its spawner (e2e/start-stack.sh)
+
+Canceled recorder-backed Playwright shards left their `start-stack.sh` shells, helms, and supervisors alive, holding
+ports and state locks. The layering is now established: Playwright (pinned 1.62.0) spawns its web server detached into
+its own process group and SIGTERMs that group on its graceful paths — but the runner handles SIGINT only, so a SIGTERM,
+SIGKILL, or crash of the Playwright leader skips teardown entirely. The recorder owns the leader's group, not the
+detached one, so no layer reaped the stack; the live shell kept holding the run lock the sweep would otherwise reap.
+`start-stack.sh` now watches its spawner and delivers the same TERM a graceful shutdown would have, converging every
+spawner death on the existing trap. Delivery is guarded by a live `ps` identity check on the script pid, because a
+background subshell inherits its parent's PPID instead of its own, which a PPID comparison cannot see. Review then found
+the watcher was watching the wrong pid on Linux: Playwright launches the command as `/bin/sh -c`, and that shell is
+dash, which stays resident — so the script's parent was a dash wrapper in the detached session that survives the
+leader's death, while the test's direct-child spawner never modeled that hop. The webServer command now carries an
+`exec` prefix so the shell becomes the script (one layering on every platform), and the test's new layering guard pins
+the configured command's `exec` prefix plus the shell honoring it before the kill phases assume the direct-child shape.
+Run `e8a8e126` passed the spawner-SIGKILL, spawner-SIGTERM, and script-SIGTERM phases on `1a356896` with uncommitted
+working-copy changes; a repeat run on 2026-09-12 passed the extended script with the added guard, each kill phase
+asserting helm liveness before its kill, with an unrelated tmux server, process, and state lookalike surviving all three
+— on an 18-CPU Ubuntu 24.04 Linux host with pinned tmux 3.7c, executable SHA256
+`b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, and ambient `FARHELM_*` names
+scrubbed. The ssh control mux still lingers up to its 60s ControlPersist window on every path including the old normal
+one; it holds no port or lock and is out of scope. Disposition: fixed; the TODO.md entry is removed.
+
+Class: harness
+
+Cause: established
