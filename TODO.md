@@ -23,14 +23,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   existing "harness + model" model. Initially limit models to GLM 5.3 Flash, Grok 4.5, Grok 4.6, and GLM 5.3. Support
   for multiple providers is deferred to future work.
 
-- Integrate the macOS window title bar into the app's top header, following the sidebar-integrated visual direction.
-  Remove the separate gray title strip and centered app title, keep the native traffic-light controls within the
-  sidebar's top row, and make the session header and terminal tabs visually continuous with the window's top edge. Limit
-  this to header styling and spacing: preserve Profiles, the version display, every existing control and action, and
-  terminal interactions; leave hosts, session lists, terminal content, and the rest of the layout unchanged. Keep
-  browser and Linux appearance unchanged. Provide window dragging in suitable empty header areas and verify dragging,
-  resizing, fullscreen, and traffic-light placement on macOS. This is a visual polish task, not a full UI redesign.
-
 - Investigate and fix scrolling backward becoming unreliable while an agent is actively emitting output. Frequently, the
   terminal appears split somewhere around the middle: the upper portion freezes while the lower portion keeps scrolling
   upward as new output arrives. Scrolling up does not restore normal behavior; after output stops, scrolling eventually

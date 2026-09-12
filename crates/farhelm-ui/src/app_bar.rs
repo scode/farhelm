@@ -617,6 +617,7 @@ pub(crate) fn AppBar(
                 },
                 "profiles"
             }
+            crate::window_chrome::WindowDragRegion {}
             span {
                 class: "app-version peer-value",
                 dir: "ltr",

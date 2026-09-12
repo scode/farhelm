@@ -153,6 +153,7 @@ mod session_view;
 mod skew;
 mod status;
 mod tabs;
+mod window_chrome;
 // Same reasoning as `webview_watchdog` below: declared for every non-wasm
 // build so its search-order tests run under the plain `cargo test` that is
 // the suite's main gate, not only under the separate desktop-feature test
@@ -1235,13 +1236,15 @@ pub fn App() -> Element {
             // arming goes through the pending-config global (see
             // client-log-shim.js's module docs) instead of trusting this
             // ordering.
-            document::Script { src: CLIENT_LOG_SHIM_JS }
-            auth::DesktopBootstrapGate {}
+            window_chrome::WindowFrame {
+                document::Script { src: CLIENT_LOG_SHIM_JS }
+                auth::DesktopBootstrapGate {}
+            }
         };
     }
 
     #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
-    return rsx! { AppBody {} };
+    return rsx! { window_chrome::WindowFrame { AppBody {} } };
 }
 
 /// The renderer-independent application mounted only after desktop IPC auth
@@ -1344,7 +1347,7 @@ fn AppBody() -> Element {
                 // key a selection change would leave the view talking to the
                 // previous session.
                 div {
-                    class: "app-shell",
+                    class: window_chrome::shell_class(),
                     // See `layout_epoch`'s own doc above: this element's
                     // OWN horizontal scrolling (a legal narrow window, per
                     // this class's app.css comment) moves everything inside
