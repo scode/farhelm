@@ -290,6 +290,7 @@
   --composer-selected-border: #9eafff;
   --composer-selected-bg: #354477;
   --composer-selected-fg: #edf2fa;
+  --composer-launch-context-fg: #cfe0f7; /* the launch button's destination text: legible on the accent fill, quieter than the verb */
   --composer-shadow: 0 18px 56px rgb(0 0 0 / 45%);
   --composer-menu-shadow: 0 12px 28px rgb(0 0 0 / 38%);
 
@@ -3156,13 +3157,11 @@ samp {
   background: var(--composer-scrim);
 }
 
-/* Content-sized rather than a fixed box: a launcher with the name field and
-   Launch/Cancel already visible at the top, no reserved recents band, and no
-   advanced disclosure has far less to show, and stretching it to a stable
-   height would reintroduce the empty space this whole change removes. The
+/* Content-sized rather than a fixed box: Launch and Cancel lead the composer,
+   no recents band is reserved, and no advanced disclosure adds a hidden
+   region. Stretching it to a stable height would reintroduce empty space. The
    viewport is still the hard ceiling — `max-height` plus `overflow: auto`
-   scrolls a genuinely long draft (many chips, a long history match) rather
-   than pushing Launch off the bottom of the screen. */
+   scrolls a genuinely long draft rather than pushing Launch off screen. */
 .launch-composer-backdrop .create-session-form {
   display: flex;
   flex-direction: column;
@@ -3178,27 +3177,30 @@ samp {
   box-shadow: var(--composer-shadow);
 }
 
-/* The header names this transient decision and keeps reset close to the
-   choices it clears. It intentionally does not reset host or folder: those
-   remain the contextual destination the dialog opened for. */
-.launch-composer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+/* The eyebrow names this transient launcher without competing with its
+   first action: small caps above the row, never a heading that pushes Launch
+   down. */
+.launch-composer-topbar {
+  margin-bottom: 8px;
 }
 
-.launch-composer-header h2 {
-  margin: 0;
-  color: var(--composer-selected-fg);
+.launch-composer-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--composer-control-fg);
 }
 
+/* Reset shares the action row but sits at its far end: it clears the launch
+   choices (never the host or folder that make up the destination), and a
+   clearing action next to Launch would read as a peer of it. */
 .launch-composer-reset {
   border: 0;
   background: transparent;
   color: var(--composer-selected-fg);
   font: inherit;
   text-decoration: underline;
+  margin-left: auto;
 }
 
 .launch-composer-recents,
@@ -3505,49 +3507,76 @@ samp {
   font-weight: 400;
 }
 
-/* The row a person actually needs to reach: name, then Cancel, then Launch,
-   directly under the header (or first in the dialog on the legacy surface,
-   which has no header). `flex-wrap` is deliberate rather than a fixed single
-   line — at widths where the three controls do not fit on one line, the name
-   field wraps onto its own line with the buttons on the next, which keeps
-   every control fully reachable instead of crowding them into a width none
-   of them fit in. */
+/* The first controls answer the maintainer's complaint directly: Launch says
+   what it will do, Cancel remains available beside it, and Reset is distant
+   enough not to compete with either. The row does not wrap at ordinary
+   widths on purpose — the launch context's `max-width` plus ellipsis (below)
+   is what keeps a long folder from pushing Cancel onto a second line; only
+   the phone-width media query lets Reset drop to its own line. */
 .launch-composer-actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
-  margin-top: 8px;
 }
 
-/* Grows to fill the row so Cancel and Launch stay pinned to its end rather
-   than trailing after a short, content-sized field — the same "well" look
-   every other composer text input gets from `.create-session-form label` /
-   `.create-session-form input` (see that rule's own comment on why fields
-   read as recessed wells cut into the dialog's card). */
-.launch-composer-name {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
+/* Name belongs to destination because it describes the session created there,
+   not the action that starts it. Its input remains a full-width form well. */
 .launch-composer-name > input {
   width: 100%;
   box-sizing: border-box;
 }
 
-.launch-composer-cancel,
+/* Launch is the one saturated fill in the composer. It takes the accent at
+   border weight as its FILL (brighter than `--accent-fill`, which is a
+   surface tint), so it reads as the single action while everything around it
+   stays outline or text. The hover/focus rule below must outrank the generic
+   `.btn-primary:hover` (0,3,0), which would otherwise swap this fill for the
+   surface tint the moment the pointer arrives. */
 .launch-composer-actions .create-session-submit {
-  flex: 0 0 auto;
-  min-height: 38px;
-  border-radius: var(--radius-lg);
-  font-size: 14px;
-  font-weight: 600;
+  align-self: auto;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1.5px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-edge);
+  color: var(--composer-selected-fg);
+  font-size: 15px;
+  font-weight: 700;
 }
 
-.launch-composer-actions .create-session-submit {
-  border-color: var(--composer-selected-border);
-  background: var(--composer-selected-border);
-  color: var(--composer-bg);
+.launch-composer-actions .create-session-submit:hover:not(:disabled),
+.launch-composer-actions .create-session-submit:focus-visible:not(:disabled) {
+  background: var(--accent);
+}
+
+/* The context is what the button will do, in a lighter weight than the verb;
+   capped and ellipsized so a deep folder path cannot grow the button past
+   the row (see `.launch-composer-actions`). */
+.launch-composer-launch-context {
+  display: inline-block;
+  max-width: 34ch;
+  margin-left: 12px;
+  overflow: hidden;
+  color: var(--composer-launch-context-fg);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launch-composer-cancel {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1.5px solid var(--composer-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--composer-control-fg);
+  font-size: 14px;
+}
+
+.launch-composer-danger {
+  color: var(--danger);
 }
 
 @media (max-width: 560px) {
@@ -3558,6 +3587,17 @@ samp {
   .launch-composer-backdrop .create-session-form {
     max-height: calc(100vh - 16px);
     padding: 14px;
+  }
+
+  /* Reset is secondary, so a narrow row gives it the trailing line instead
+     of squeezing the launch decision into an unreadable button. */
+  .launch-composer-actions {
+    flex-wrap: wrap;
+  }
+
+  .launch-composer-reset {
+    flex-basis: 100%;
+    text-align: right;
   }
 
   .launch-composer-choice {
