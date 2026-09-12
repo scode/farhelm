@@ -98,9 +98,12 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   const desktop = { width: 1280, height: 900 };
   const narrow = { width: 390, height: 844 };
   const selectExplicit = async (form: Locator) => {
-    await form.getByRole("button", { name: "gpt-6-astra (Codex)", exact: true }).click();
+    const model = form.getByRole("combobox", { name: "model", exact: true });
+    await model.fill("gpt-6-astra");
+    // No harness is chosen yet, so the row carries its owner's suffix.
+    await form.locator("#launch-composer-model-results").getByRole("option", { name: "gpt-6-astra (Codex)", exact: true }).click();
     await form.locator(".launch-composer-effort-choice").getByRole("button", { name: "high", exact: true }).click();
-    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
   };
   const prefillSavedDefaults = async (form: Locator) => {
     // Ordinary recents honour the complete explicit draft and therefore

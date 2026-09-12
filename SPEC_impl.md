@@ -1250,6 +1250,11 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its
   empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
   provider-specific effort or conversation lifecycle contract.
+- The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
+  text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
+  after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
+  can never become a custom id behind a highlighted model. This keeps known ownership visible while preserving the
+  custom-model contract without a separate disclosure.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
   existence are not user management surface — but its alias is user-editable on the same terms as any other host's. It

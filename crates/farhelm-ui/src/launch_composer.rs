@@ -56,6 +56,123 @@ pub(crate) enum ComposerSearchResult {
     Recent(LaunchHistoryEntry),
 }
 
+/// One actionable row in the model combobox's stable keyboard order.
+///
+/// The component renders rows from other harnesses with a " (Harness)"
+/// suffix rather than under headings, so this flat sequence IS the
+/// accessibility contract: Arrow keys and `aria-activedescendant` must agree
+/// with pointer activation even when the chosen harness filters rows away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ModelOption {
+    HarnessDefault,
+    Model {
+        id: String,
+        harness: LaunchHarness,
+    },
+    /// Toggle between the chosen harness's rows and every harness's rows.
+    /// Offered only while a harness is chosen: with none chosen every row is
+    /// already listed and the toggle would be a no-op with a lying label.
+    ShowAll,
+}
+
+/// The model action Enter commits after navigation and draft interpretation.
+///
+/// Keeping this decision outside the renderer prevents keyboard handling from
+/// silently treating the first visible row as selected. Custom ids retain the
+/// exact bytes the person typed; only catalog ids are canonicalized. A custom
+/// id carries the harness it was accepted under, so the renderer never has to
+/// re-read the harness and trust that it is still there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ModelEnterTarget {
+    Nothing,
+    Option(ModelOption),
+    Custom { id: String, harness: LaunchHarness },
+    NeedsHarness(String),
+}
+
+/// Resolve Enter against the current options and catalog.
+///
+/// Arrow navigation takes precedence over text. Without navigation, an empty
+/// draft does nothing, an exact known id carries its catalog owner, and only
+/// an unknown id depends on an explicitly selected harness.
+pub(crate) fn model_enter_target(
+    options: &[ModelOption],
+    active: Option<usize>,
+    draft: &str,
+    catalog: &[LaunchCatalogModel],
+    harness: Option<LaunchHarness>,
+) -> ModelEnterTarget {
+    if let Some(index) = active {
+        return options
+            .get(index)
+            .cloned()
+            .map(ModelEnterTarget::Option)
+            .unwrap_or(ModelEnterTarget::Nothing);
+    }
+    if draft.trim().is_empty() {
+        return ModelEnterTarget::Nothing;
+    }
+    if let Some(model) = catalog
+        .iter()
+        .find(|model| model.id.eq_ignore_ascii_case(draft))
+    {
+        return ModelEnterTarget::Option(ModelOption::Model {
+            id: model.id.clone(),
+            harness: model.harness,
+        });
+    }
+    match harness {
+        Some(harness) => ModelEnterTarget::Custom {
+            id: draft.to_string(),
+            harness,
+        },
+        None => ModelEnterTarget::NeedsHarness(draft.to_string()),
+    }
+}
+
+/// Return the bounded, filtered model choices for the launch combobox.
+///
+/// A known id carries its owning harness, so matching it never depends on a
+/// browser-side guess. The catalog order remains stable within the fixed
+/// harness order, making movement predictable while the list is open.
+pub(crate) fn model_options(
+    catalog: &[LaunchCatalogModel],
+    harness: Option<LaunchHarness>,
+    query: &str,
+    show_all: bool,
+) -> Vec<ModelOption> {
+    let folded_query = query.to_ascii_lowercase();
+    let mut options = Vec::new();
+    if harness != Some(LaunchHarness::OpenCode) {
+        options.push(ModelOption::HarnessDefault);
+    }
+    for owner in [
+        LaunchHarness::Codex,
+        LaunchHarness::Claude,
+        LaunchHarness::Muse,
+        LaunchHarness::OpenCode,
+    ] {
+        if !show_all && harness.is_some_and(|selected| selected != owner) {
+            continue;
+        }
+        options.extend(
+            catalog
+                .iter()
+                .filter(|model| {
+                    model.harness == owner && model.id.to_ascii_lowercase().contains(&folded_query)
+                })
+                .map(|model| ModelOption::Model {
+                    id: model.id.clone(),
+                    harness: model.harness,
+                }),
+        );
+    }
+    if harness.is_some() {
+        options.push(ModelOption::ShowAll);
+    }
+    options
+}
+
 /// The visible and keyboard order of one kind of search result.
 ///
 /// Grouping prevents a partial field action from resembling a complete saved
@@ -775,6 +892,155 @@ mod tests {
         let wrong = selection(LaunchHarness::Claude, Some("gpt-5.6-sol"), None);
 
         assert!(!selection_is_compatible(&wrong, &catalog));
+    }
+
+    /// The model picker must keep its bounded default row, filter only ids,
+    /// and omit an invalid OpenCode default before any renderer is involved.
+    #[test]
+    fn model_options_filter_and_respect_opencode_requirements() {
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "codex-fast".into(),
+                harness: LaunchHarness::Codex,
+                efforts: vec![],
+            },
+            LaunchCatalogModel {
+                id: "claude-fast".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![],
+            },
+        ];
+        assert_eq!(
+            model_options(&catalog, Some(LaunchHarness::Codex), "FAST", false),
+            vec![
+                ModelOption::HarnessDefault,
+                ModelOption::Model {
+                    id: "codex-fast".into(),
+                    harness: LaunchHarness::Codex
+                },
+                ModelOption::ShowAll
+            ]
+        );
+        assert_eq!(
+            model_options(&catalog, Some(LaunchHarness::Codex), "", true),
+            vec![
+                ModelOption::HarnessDefault,
+                ModelOption::Model {
+                    id: "codex-fast".into(),
+                    harness: LaunchHarness::Codex
+                },
+                ModelOption::Model {
+                    id: "claude-fast".into(),
+                    harness: LaunchHarness::Claude
+                },
+                ModelOption::ShowAll
+            ]
+        );
+        assert!(matches!(
+            model_options(&catalog, Some(LaunchHarness::OpenCode), "", false).first(),
+            Some(ModelOption::ShowAll)
+        ));
+        // With no harness chosen every row is already listed, so the toggle
+        // would flip its label without changing anything; it must be absent.
+        assert_eq!(
+            model_options(&catalog, None, "", false),
+            vec![
+                ModelOption::HarnessDefault,
+                ModelOption::Model {
+                    id: "codex-fast".into(),
+                    harness: LaunchHarness::Codex
+                },
+                ModelOption::Model {
+                    id: "claude-fast".into(),
+                    harness: LaunchHarness::Claude
+                },
+            ]
+        );
+    }
+
+    /// Enter must apply only an explicitly navigated row or the draft's own
+    /// meaning, because defaulting to row zero can erase a valid selection.
+    /// Exact catalog ids canonicalize and carry ownership, while unknown ids
+    /// remain byte-preserving custom drafts that require a harness.
+    #[test]
+    fn model_enter_target_distinguishes_navigation_and_draft_semantics() {
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "codex-fast".into(),
+                harness: LaunchHarness::Codex,
+                efforts: vec![],
+            },
+            LaunchCatalogModel {
+                id: "claude-fast".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![],
+            },
+        ];
+        let options = model_options(&catalog, Some(LaunchHarness::Codex), "fast", false);
+
+        assert_eq!(
+            model_enter_target(
+                &options,
+                Some(1),
+                "unfinished-custom",
+                &catalog,
+                Some(LaunchHarness::Codex),
+            ),
+            ModelEnterTarget::Option(ModelOption::Model {
+                id: "codex-fast".into(),
+                harness: LaunchHarness::Codex,
+            }),
+            "navigation must win over the draft"
+        );
+        assert_eq!(
+            model_enter_target(&options, None, "  ", &catalog, Some(LaunchHarness::Codex),),
+            ModelEnterTarget::Nothing,
+            "a whitespace-only draft must preserve the current selection"
+        );
+        assert_eq!(
+            model_enter_target(
+                &options,
+                None,
+                "CLAUDE-FAST",
+                &catalog,
+                Some(LaunchHarness::Codex),
+            ),
+            ModelEnterTarget::Option(ModelOption::Model {
+                id: "claude-fast".into(),
+                harness: LaunchHarness::Claude,
+            }),
+            "a known id must use its canonical catalog owner"
+        );
+        assert_eq!(
+            model_enter_target(
+                &options,
+                None,
+                " custom-id ",
+                &catalog,
+                Some(LaunchHarness::Codex),
+            ),
+            ModelEnterTarget::Custom {
+                id: " custom-id ".into(),
+                harness: LaunchHarness::Codex,
+            },
+            "a custom id must retain the submitted bytes and carry its harness"
+        );
+        assert_eq!(
+            model_enter_target(&options, None, "custom-id", &catalog, None),
+            ModelEnterTarget::NeedsHarness("custom-id".into()),
+            "a custom id has no owner to infer"
+        );
+        assert_eq!(
+            model_enter_target(
+                &options,
+                Some(options.len()),
+                "custom-id",
+                &catalog,
+                Some(LaunchHarness::Codex),
+            ),
+            ModelEnterTarget::Nothing,
+            "a stale active index must not fall through to draft application"
+        );
     }
 
     /// Search and button transitions must not disagree about a model that
