@@ -140,11 +140,36 @@ pub fn run() -> anyhow::Result<()> {
     builder
         .with_cfg(
             dioxus::desktop::Config::new()
-                .with_window(dioxus::desktop::WindowBuilder::new().with_title("farhelm"))
+                .with_window(desktop_window())
                 .with_disable_drag_drop_handler(true),
         )
         .launch(crate::App);
     Ok(())
+}
+
+/// Retain native window controls while letting macOS content reach the top edge.
+///
+/// The visible title is hidden only on macOS; the window still has a title
+/// for system window menus. Native decorations stay enabled so AppKit owns
+/// resizing, fullscreen, shadows, and the traffic-light buttons. Their inset
+/// is paired with the macOS-only header reservation in app.css.
+fn desktop_window() -> dioxus::desktop::WindowBuilder {
+    let window = dioxus::desktop::WindowBuilder::new().with_title("farhelm");
+    #[cfg(target_os = "macos")]
+    {
+        use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
+
+        window
+            .with_titlebar_transparent(true)
+            .with_title_hidden(true)
+            .with_fullsize_content_view(true)
+            .with_traffic_light_inset(dioxus::desktop::LogicalPosition::new(12.0, 16.0))
+            .with_movable_by_window_background(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window
+    }
 }
 
 /// Print every `asset!()` path this build will ask the webview for, one per

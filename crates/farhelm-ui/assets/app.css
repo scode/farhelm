@@ -327,6 +327,53 @@
 
 /* ===== Shell and layout =========================================== */
 
+/* Preserve the definite-height chain through the window-level component. */
+.window-root {
+  height: 100%;
+}
+
+/* Startup/authentication surfaces have no sidebar row to reserve the native
+   controls. A mismatch notice precedes the shell, so it also needs a band
+   above its text. Keep that notice in normal flow and let the remaining
+   shell consume only the available height. */
+.macos-root:not(:has(.app-shell)),
+.macos-root:has(.build-skew) {
+  box-sizing: border-box;
+  padding-top: 48px;
+}
+
+/* Focus may scroll an oversized auth card into view. Make that scroll
+   belong to the page below the buttons, not to the whole document: WebKit
+   otherwise scrolls away the root's padding when the viewport shrinks. */
+.macos-root:not(:has(.app-shell)) {
+  overflow: hidden;
+}
+
+.macos-root .auth-page {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.macos-root:has(.build-skew) {
+  display: flex;
+  flex-direction: column;
+}
+
+.macos-root:has(.build-skew) .app-shell {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  padding-top: 0;
+}
+
+.macos-root:has(.build-skew) .app-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 341px;
+}
+
 /* Minimal M1 chrome: dark, terminal-first, nothing decorative. */
 html,
 body,
@@ -450,6 +497,60 @@ samp {
   padding: 8px 12px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border-row);
+}
+
+/* Only the native macOS shell extends beneath AppKit's titlebar. Reserve
+   the native traffic lights at (12, 16), keeping Profiles and the version
+   in their existing sticky row. Logical CSS pixels match Tao's logical
+   coordinates across Retina scale factors. Browser and Linux shells never
+   receive this class, even when an ordinary browser runs on macOS. */
+.macos-window .app-bar {
+  min-height: 48px;
+  box-sizing: border-box;
+  padding-left: 88px;
+}
+
+.macos-window .titlebar {
+  min-height: 48px;
+}
+
+/* A dedicated empty element is the only HTML window-drag surface. Keep
+   native dragging away from controls, text, and the terminal; don't make
+   the whole webview or header draggable. */
+.window-drag-region {
+  display: none;
+}
+
+.macos-window .window-drag-region {
+  display: block;
+  flex: 1 0 12px;
+  align-self: stretch;
+  user-select: none;
+  cursor: default;
+}
+
+/* Native controls stay at viewport coordinates when the lower shell
+   scrolls horizontally. At narrow widths, give the app row its own fixed
+   top band and start BOTH scrolling panes below it. Keeping only static
+   left padding would let a scrolled Profiles button pass under Close.
+   The sidebar width and main-pane minimum remain unchanged. */
+@media (max-width: 661px) {
+  .macos-window {
+    box-sizing: border-box;
+    padding-top: 48px;
+  }
+
+  .macos-window .app-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+
+  .macos-root:has(.build-skew) .app-bar {
+    width: auto;
+    right: 0;
+  }
 }
 
 /* A reported helm stamp can be up to 64 characters (skew.rs's display cap),

@@ -522,6 +522,16 @@ position is current when the transfer completes. For a typical screenshot this i
 
 Upload failures must be visible; an attachment must never disappear silently.
 
+## Desktop window chrome
+
+The macOS desktop window integrates its native title bar with the app header: native traffic-light controls sit in the
+sidebar's top row beside Profiles and the version readout, with no separate visible app-title strip. The session header
+and terminal tabs continue the app's surface to the top edge. Empty header space provides window dragging; controls and
+terminal text retain their own interactions. This treatment changes only header appearance and spacing. Browser and
+Linux window layouts retain their existing appearance. In narrow macOS windows, the app-level row stays fixed above both
+scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
+authentication errors, and build-mismatch notices also keep their content clear of native controls.
+
 ## Durability and resume
 
 The runtime guarantees below do not establish support for every historical data schema or a downgrade path between

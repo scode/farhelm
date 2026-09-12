@@ -3,6 +3,27 @@
 NOTE: These are manual checks, not CI gates. Playwright's WebKit build does not run inside WKWebView, and remote-paste
 latency needs a real Mac-to-host link. Record the observed facts and timings here when the release candidate is run.
 
+## Integrated window header
+
+Run this against the desktop candidate on an actual Mac. Browser WebKit checks cannot establish AppKit window behavior.
+The initial implementation deliberately leaves these observations for the maintainer.
+
+- Confirm there is no separate gray app-title strip. Native traffic lights sit within the sidebar header without
+  covering Profiles or the version, and the session header and terminal tabs reach the window's top edge.
+- Drag the empty space between Profiles and the version. Confirm the window moves, while Profiles still opens its popup
+  and selecting header or terminal text does not move the window.
+- Resize through ordinary and narrow widths, scroll the sidebar, and horizontally scroll a narrow window. Check that the
+  traffic lights do not cover active controls, the version remains available, and the sticky header stays usable.
+- Enter and leave fullscreen using the native green button, reveal the fullscreen toolbar, and repeat resizing and
+  dragging afterward. Check traffic-light placement and verify that header dragging does not move a fullscreen window.
+- Exercise native close and minimize, the session header's actions, and terminal tab selection and creation. Confirm
+  that no control disappeared or changed behavior, and that the window retains its normal corners and shadow.
+- Compare the browser and Linux desktop: neither should gain traffic-light padding or a window-drag area.
+- Check startup/error messages and any build-mismatch notice: all text remains below native controls. In a short
+  authentication window, scroll to the last form control and confirm the native-button reservation stays fixed.
+
+Observed: not run; native macOS verification is deferred to the maintainer.
+
 ## Native-app release close-out
 
 Run these eight steps against the same release candidate and record failures with the app build, Mac model, macOS

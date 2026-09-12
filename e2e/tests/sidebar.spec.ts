@@ -142,6 +142,169 @@ test("the sidebar app bar stays pinned while the session list scrolls", async ({
 });
 
 /**
+ * Native window buttons occupy fixed viewport coordinates even when the
+ * narrow shell scrolls horizontally. Opt the real application markup into
+ * its macOS CSS to prove that Profiles, version, and session actions stay
+ * clear of that region. This is DOM geometry coverage, not AppKit testing:
+ * the browser's drag spacer has no native action.
+ */
+test("macOS header controls stay clear of native buttons while the shell scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 500 });
+  await page.goto("/");
+  const shell = page.locator(".app-shell");
+  const bar = page.locator(".app-bar");
+  const profiles = bar.locator(".profiles-toggle");
+  const version = bar.locator(".app-version");
+  const drag = bar.locator(".window-drag-region");
+  const header = page.locator(".titlebar");
+  await expect(profiles).toBeVisible();
+  await expect(version).not.toHaveText("");
+  await expect(header).toBeVisible();
+  await expect(drag).toBeHidden();
+  const browserBar = await bar.boundingBox();
+  expect(browserBar).not.toBeNull();
+
+  await shell.evaluate((element) => element.classList.add("macos-window"));
+  await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
+  // Only inert content height is synthetic. The bar, controls, drag
+  // spacer, scrollers, and selected session header are production nodes.
+  await page.locator(".app-sidebar").evaluate((element) => {
+    const filler = document.createElement("div");
+    filler.dataset.headerScrollFixture = "true";
+    filler.style.height = "1200px";
+    element.append(filler);
+  });
+  const sidebar = page.locator(".app-sidebar");
+  await expect.poll(() => sidebar.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await expect(drag).toBeVisible();
+  await expect(drag.locator("button, input, a, [tabindex]")).toHaveCount(0);
+  const dragBox = await drag.boundingBox();
+  expect(dragBox).not.toBeNull();
+  expect(dragBox!.width).toBeGreaterThan(0);
+  expect(dragBox!.height).toBeGreaterThan(0);
+
+  for (const width of [900, 540, 400]) {
+    await page.setViewportSize({ width, height: 500 });
+    const maximum = await shell.evaluate((element) => element.scrollWidth - element.clientWidth);
+    if (width < 661) expect(maximum, "the narrow fixture must actually overflow horizontally").toBeGreaterThan(0);
+    for (const offset of [0, Math.min(76, maximum), maximum]) {
+      await shell.evaluate((element, left) => { element.scrollLeft = left; }, offset);
+      await expect.poll(() => shell.evaluate((element) => element.scrollLeft)).toBeCloseTo(offset, 0);
+      await sidebar.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      await expect.poll(() => sidebar.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+      // The native cluster begins at (12, 16), with roughly 60x14
+      // logical pixels of buttons. A document-relative padding check
+      // would pass the broken implementation; compare viewport boxes.
+      for (const control of [profiles, version]) {
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.x).toBeGreaterThanOrEqual(0);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+        const overlapsNativeButtons = box!.x < 72 && box!.x + box!.width > 12 &&
+          box!.y < 30 && box!.y + box!.height > 16;
+        expect(overlapsNativeButtons, "application control overlaps a native window action").toBe(false);
+      }
+      const barBox = await bar.boundingBox();
+      expect(barBox).not.toBeNull();
+      expect(barBox!.y).toBeCloseTo(0, 0);
+      if (maximum > 0) {
+        const headerBox = await header.boundingBox();
+        expect(headerBox).not.toBeNull();
+        expect(headerBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
+      }
+      await expect(drag).toBeVisible();
+    }
+    // At the far end of horizontal scrolling, the session's right-hand
+    // actions remain reachable below the pinned app-level row.
+    const actions = await header.locator(".titlebar-actions").boundingBox();
+    expect(actions).not.toBeNull();
+    expect(actions!.x + actions!.width).toBeLessThanOrEqual(width + 1);
+  }
+
+  await page.setViewportSize({ width: 900, height: 500 });
+  await sidebar.evaluate((element) => {
+    element.querySelector("[data-header-scroll-fixture]")?.remove();
+    element.scrollTop = 0;
+  });
+  await shell.evaluate((element) => {
+    element.classList.remove("macos-window");
+    element.scrollLeft = 0;
+  });
+  await page.locator(".window-root").evaluate((element) => element.classList.remove("macos-root"));
+  await expect(drag).toBeHidden();
+  expect(await bar.boundingBox()).toEqual(browserBar);
+});
+
+/**
+ * The mismatch notice belongs to the page, above the shell. It must remain
+ * readable when the native header occupies that same viewport edge, even
+ * when a narrow window pins the app bar independently of horizontal scroll.
+ */
+test("macOS header leaves the build mismatch notice readable", async ({ page }) => {
+  await forceBuildSkew(page, "9.9.9-header-layout");
+  await page.goto("/");
+  const notice = page.locator(".build-skew");
+  const bar = page.locator(".app-bar");
+  await expect(notice).toContainText("9.9.9-header-layout");
+  await expect(bar.locator(".profiles-toggle")).toBeVisible();
+  await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
+  await page.locator(".app-shell").evaluate((element) => element.classList.add("macos-window"));
+  for (const width of [900, 400]) {
+    await page.setViewportSize({ width, height: 500 });
+    const barBox = await bar.boundingBox();
+    const noticeBox = await notice.boundingBox();
+    expect(barBox).not.toBeNull();
+    expect(noticeBox).not.toBeNull();
+    expect(noticeBox!.y).toBeGreaterThanOrEqual(48);
+    expect(noticeBox!.y).toBeGreaterThanOrEqual(barBox!.y + barBox!.height);
+    expect(noticeBox!.x).toBeGreaterThanOrEqual(0);
+    expect(noticeBox!.x + noticeBox!.width).toBeLessThanOrEqual(width);
+    const shellBox = await page.locator(".app-shell").boundingBox();
+    expect(shellBox).not.toBeNull();
+    expect(shellBox!.y).toBeGreaterThanOrEqual(noticeBox!.y + noticeBox!.height);
+  }
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+/**
+ * Pages without a session shell need their own native-button reservation.
+ * Exercise the real unauthenticated page and root; native bootstrap uses
+ * the same auth-page geometry, but its IPC handshake is outside this test.
+ */
+test("macOS header reserves space before the session shell exists", async ({ browser, timeline, baseURL }) => {
+  const context = await newObservedContext(browser, timeline, {
+    storageState: { cookies: [], origins: [] },
+    extraHTTPHeaders: {},
+  });
+  try {
+    const page = await context.newPage();
+    await page.goto(baseURL!);
+    const authPage = page.locator(".auth-page");
+    await expect(authPage).toBeVisible();
+    await expect(page.locator(".app-shell")).toHaveCount(0);
+    await page.locator(".window-root").evaluate((element) => element.classList.add("macos-root"));
+    for (const width of [900, 400]) {
+      await page.setViewportSize({ width, height: 300 });
+      // A short window must still reach the form's last control without
+      // scrolling the native-button reservation out of the viewport.
+      const submit = page.locator(".auth-submit");
+      await submit.scrollIntoViewIfNeeded();
+      const submitBox = await submit.boundingBox();
+      expect(submitBox).not.toBeNull();
+      expect(submitBox!.y).toBeGreaterThanOrEqual(48);
+      expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(300);
+      const box = await authPage.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(48);
+      await expect(page.getByRole("heading", { name: "Authenticate this device" })).toBeVisible();
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+/**
  * The sidebar scrolls without a scrollbar. On macOS the overlay scrollbar
  * painted over the row menus and controls at the column's right edge, and a
  * classic scrollbar (which the OS can force on) would reserve a gutter the
