@@ -302,12 +302,21 @@ even if a later run passed. Do not rewrite older entries to make them fit the ne
 
 `TODO.md` is the maintainer's running list of wanted fixes and features. When a PR addresses an entry, remove that entry
 in the same PR — the file only ever describes what is still wanted. Do not add entries on your own initiative; they are
-the maintainer's.
+the maintainer's. The exception is a deflake run (below), which records the flakes it finds as Deflake entries. When a
+Deflake entry is removed, remove the matching line in `deflake/known-flakes.txt` in the same PR: the deflake sweep reads
+that file as its exclusion list, so a stale line is a test that never runs again.
 
 "tldr todo", "what's in the todo", and similar requests mean the FULL list, grouped under the file's own bucket
 headings, in the file's order, one to two sentences per entry: what it is and, when the entry says so, why or the first
 step. Every entry, not a selection — the point is to see the whole board at a glance. Bold a short handle at the start
 of each line so an entry can be referred to by name afterwards.
+
+# Deflake runs
+
+"Start a deflake run" (optionally "and repeat until I say stop") means the full-suite flake-discovery sweep in
+`deflake/`. Read `deflake/AGENTS.md` and follow it exactly; `deflake/SPEC.md` holds the requirements, chiefly that the
+agent never polls and only takes a turn when `deflake/bin/deflake wait` returns. A change to the driver or to those
+instructions is validated with the end-to-end procedure in `deflake/EVAL.md`, a few minutes with a low-power delegate.
 
 # plans/
 

@@ -1,0 +1,1112 @@
+#!/usr/bin/env python3
+"""Drive a full-suite flake-discovery sweep so an agent only wakes on events.
+
+The sweep is a fixed sequence of the AGENTS.md finishing-work batteries, run
+one after another in a detached git worktree pinned at a base commit. A detached
+daemon owns the whole sweep; the agent starts it, then blocks on `deflake wait`,
+which returns only when there is an event to act on. Everything mechanical
+(running phases, collecting failures, rerunning each failed test to classify
+it, excluding known flakes) happens without inference. The requirements this
+serves are in deflake/SPEC.md; the agent-side protocol is in deflake/AGENTS.md.
+
+Subcommands:
+
+  start   [--repeat] [--base REV]   detach a daemon and return immediately
+  wait    [--max-wait SECONDS]      block until an unacknowledged event, a
+                                    finished run, or the wait limit
+  ack     EVENT_ID                  mark an event handled
+  status                            one-screen summary of the current run
+  events                            list every event with its ack state
+  stop                              terminate the daemon and its running phase
+
+State lives under `$XDG_STATE_HOME/farhelm-deflake` (default
+`~/.local/state/farhelm-deflake`), never in the checkout: `workspaces/<key>/`
+is the persistent worktree the sweep runs in for one checkout (kept so warm
+builds survive across runs), `runs/<uuid>/` holds one sweep's status, phase
+logs, and events, and `daemon.lock` allows one sweep per machine at a time.
+Test evidence itself is retained by scripts/record-test-run.py in its own root;
+events point at those run directories rather than copying them.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import traceback
+import uuid
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from typing import Callable
+
+# ---------------------------------------------------------------------------
+# Constants and paths
+# ---------------------------------------------------------------------------
+
+KNOWN_FLAKES_FILE = pathlib.Path("deflake") / "known-flakes.txt"
+CLASSIFICATION_RERUNS = 3
+# Wall-clock caps handed to the recorder per phase. They are hard limits on a
+# runaway phase, not budgets: a phase that hits one produces a `phase-error`
+# event and the sweep moves on. Nothing here is expected to come close.
+PHASE_TIMEOUT_SECONDS = 4 * 3600
+RERUN_TIMEOUT_SECONDS = 30 * 60
+# A phase whose combined output has not grown for this long gets a `stalled`
+# event so the agent can look, but the phase is left running: the recorder's
+# timeout, not the stall detector, decides when to give up.
+STALL_SECONDS = 30 * 60
+EXCERPT_LIMIT = 6000
+WAIT_POLL_SECONDS = 5
+DEFAULT_MAX_WAIT = 540
+
+
+def state_root() -> pathlib.Path:
+    home = os.environ.get("XDG_STATE_HOME")
+    base = pathlib.Path(home) if home else pathlib.Path.home() / ".local" / "state"
+    return base / "farhelm-deflake"
+
+
+def find_checkout(start: pathlib.Path) -> pathlib.Path:
+    """The jj repository root containing `start`, refused outside one.
+
+    The driver reads known-flakes.txt from THIS checkout, live, while the sweep
+    runs in its own workspace. That split is what lets the agent's flake PRs
+    take effect on the next phase without touching the running sweep.
+    """
+    for candidate in [start, *start.parents]:
+        if (candidate / ".jj").is_dir():
+            return candidate
+    raise SystemExit(f"deflake: {start} is not inside a jj checkout")
+
+
+def checkout_key(checkout: pathlib.Path) -> str:
+    return hashlib.sha256(str(checkout.resolve()).encode()).hexdigest()[:16]
+
+
+def current_pointer(checkout: pathlib.Path) -> pathlib.Path:
+    """Per-checkout pointer at the run a later `wait`/`ack`/`status` means.
+
+    Keyed by checkout path rather than global so that two agents on the machine,
+    each in its own checkout, address their own sweep; the daemon lock below
+    still serializes actual sweeps because they share one workspace.
+    """
+    return state_root() / "current" / checkout_key(checkout)
+
+
+# ---------------------------------------------------------------------------
+# Test identities and known-flake exclusions
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TestId:
+    """One excludable unit: a nextest case, a Playwright case, or a whole phase.
+
+    `kind` is `nextest` (binary id + full test name), `playwright` (spec file
+    relative to e2e/tests plus the leaf title), or `phase` (a monolithic
+    battery with no per-test selection, identified by its phase name). The
+    textual form is the line format of known-flakes.txt.
+    """
+
+    kind: str
+    parts: tuple[str, ...]
+
+    def line(self) -> str:
+        return " ".join((self.kind, *self.parts))
+
+    @staticmethod
+    def parse(line: str) -> "TestId":
+        """Inverse of `line`. The last field may contain spaces (Playwright titles)."""
+        kind, _, rest = line.strip().partition(" ")
+        if kind in {"nextest", "playwright"}:
+            first, _, last = rest.strip().partition(" ")
+            if first and last.strip():
+                return TestId(kind, (first, last.strip()))
+        elif kind == "phase" and rest.strip() and " " not in rest.strip():
+            return TestId("phase", (rest.strip(),))
+        raise ValueError(f"unrecognized known-flake line: {line!r}")
+
+
+def parse_known_flakes(text: str) -> list[TestId]:
+    """Read known-flakes.txt: one id per line, `#` comments, blank lines ignored.
+
+    A trailing comment on an entry line is stripped, which is where the slug
+    naming the TODO.md entry lives. A comment starts at a `#` that begins the
+    line or follows at least two spaces (or a tab); a `#` inside a Playwright
+    title, which is normally preceded by one space, stays part of the id.
+    Malformed lines are errors rather than silently skipped: a typo that made
+    an entry unparseable would otherwise quietly put a known flake back into
+    the sweep.
+    """
+    ids = []
+    for raw in text.splitlines():
+        line = re.split(r"(?:^|\s{2,}|\t)#", raw, maxsplit=1)[0].strip()
+        if line:
+            ids.append(TestId.parse(line))
+    return ids
+
+
+def load_known_flakes(checkout: pathlib.Path) -> list[TestId]:
+    path = checkout / KNOWN_FLAKES_FILE
+    if not path.exists():
+        return []
+    return parse_known_flakes(path.read_text(encoding="utf-8"))
+
+
+def nextest_exclusion(ids: list[TestId]) -> list[str]:
+    """Extra nextest argv excluding every nextest id, or nothing when none apply.
+
+    The filterset names the binary as well as the test so a same-named test in
+    another binary (unit and integration tests share module naming habits) is
+    not excluded by accident. `-E` is one of the selection options the
+    recorder's nextest mode accepts. One binary id is shared across phases:
+    `farhelm-ui` names the crate's lib tests both with and without the desktop
+    feature, so a `nextest farhelm-ui ...` line excludes the test from the
+    workspace phase and the desktop phase alike.
+    """
+    terms = [f"(binary_id(={b}) & test(={t}))" for b, t in (i.parts for i in ids if i.kind == "nextest")]
+    if not terms:
+        return []
+    return ["-E", "not (" + " | ".join(terms) + ")"]
+
+
+def playwright_title_regex(spec: str, title: str) -> str:
+    """A grep regex that selects one case under both engines.
+
+    Playwright matches grep against the space-joined title path, which starts
+    with the project name (`chromium-feed`) and the spec file and ends with the
+    leaf title, so anchoring the file and the title's end is enough. It can
+    overshoot onto a case whose title ends with the same words, which for a
+    rerun means extra evidence and for an exclusion means a logged overreach.
+
+    Two Playwright 1.62 details a future reader should know: CLI grep regexes
+    are compiled case-insensitively, and the grep subject has any `@tags`
+    appended after the title, so a tagged test would escape the `$` anchor.
+    No spec uses tags today; if one starts to, drop the anchor.
+    """
+    return re.escape(spec) + " .*" + re.escape(title) + "$"
+
+
+def playwright_exclusion(ids: list[TestId]) -> list[str]:
+    """`--grep-invert` over every Playwright id, or nothing when none apply."""
+    patterns = [playwright_title_regex(s, t) for s, t in (i.parts for i in ids if i.kind == "playwright")]
+    if not patterns:
+        return []
+    return ["--grep-invert", "|".join(f"(?:{p})" for p in patterns)]
+
+
+# ---------------------------------------------------------------------------
+# Failure extraction from retained evidence
+# ---------------------------------------------------------------------------
+
+
+def evidence_dir_from_log(text: str) -> pathlib.Path | None:
+    """The recorder announces its run directory once on stderr; find it."""
+    matches = re.findall(r"^test-run evidence: (.+)$", text, flags=re.MULTILINE)
+    return pathlib.Path(matches[-1].strip()) if matches else None
+
+
+def nextest_failures(junit_text: str) -> list[TestId]:
+    """Failed cases from a nextest JUnit report as (binary id, test name) ids.
+
+    Nextest names each testsuite by binary id (`farhelm::e2e`, `farhelm-helm`)
+    and each testcase by its full test path, which is exactly the pair the
+    filterset in `nextest_exclusion` needs. Skipped and selected-out cases are
+    reported too; only `failure`/`error` children count here.
+    """
+    if "<!DOCTYPE" in junit_text or "<!ENTITY" in junit_text:
+        raise ValueError("XML declarations are not supported")
+    root = ET.fromstring(junit_text)
+    failed = []
+    for suite in root.iter("testsuite"):
+        binary = suite.attrib.get("name", "")
+        for case in suite.findall("testcase"):
+            if case.find("failure") is not None or case.find("error") is not None:
+                failed.append(TestId("nextest", (binary, case.attrib.get("name", ""))))
+    return failed
+
+
+def playwright_failures(report: dict) -> list[tuple[TestId, str, str]]:
+    """Unexpected cases from a Playwright JSON report: (id, project, message).
+
+    One case runs under both engines and appears once per project; the id
+    (spec file, leaf title) is engine-agnostic on purpose, since a known flake
+    is excluded from both engines. The project name travels alongside so the
+    event can say which engine failed.
+    """
+    found = []
+
+    def walk(suite: dict, file: str | None):
+        file = suite.get("file") or file
+        for spec in suite.get("specs", []):
+            spec_file = spec.get("file") or file or ""
+            for test in spec.get("tests", []):
+                if test.get("status") in {"unexpected", "flaky"}:
+                    results = test.get("results") or []
+                    message = ""
+                    if results and isinstance(results[0], dict):
+                        error = results[0].get("error") or {}
+                        message = str(error.get("message") or "")
+                    found.append((
+                        TestId("playwright", (spec_file, spec.get("title", ""))),
+                        str(test.get("projectName", "")),
+                        message,
+                    ))
+        for child in suite.get("suites", []):
+            walk(child, file)
+
+    for suite in report.get("suites", []):
+        walk(suite, None)
+    return found
+
+
+def read_evidence_output(run_dir: pathlib.Path) -> str:
+    """Concatenate the recorder's retained output chunks in read order."""
+    # The manifest lists each chunk as `{"name": ..., "bytes": ..., "role": ...}`
+    # (schema 1); accept bare names too so a schema change degrades to the
+    # glob fallback rather than a crash. An unreadable manifest is one of the
+    # documented recorder outcomes (SIGKILL mid-run), hence the fallback.
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        entries = manifest.get("output", {}).get("files_in_read_order") or []
+        names = [e.get("name") if isinstance(e, dict) else e for e in entries]
+        names = [n for n in names if isinstance(n, str)]
+    except (OSError, ValueError, AttributeError):
+        names = []
+    if not names:
+        names = ["output-head.log", *sorted(p.name for p in run_dir.glob("output-tail-*.log"))]
+    pieces = []
+    for name in names:
+        try:
+            pieces.append((run_dir / name).read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "".join(pieces)
+
+
+def nextest_excerpt(output: str, test_name: str) -> str:
+    """The failing test's final output block, bounded, from the console log.
+
+    The JUnit report deliberately stores no output, but nextest's
+    `failure-output = immediate-final` policy reprints every failure's
+    stdout/stderr at the end of the run under `--- STDERR: <binary> <test> ---`
+    headers. The LAST such header for the test is that final reprint.
+    """
+    # Two header shapes, by nextest version. The pinned 0.9.143 prints a
+    # status line `FAIL [ 0.015s ] ( 1/103) <binary id> <test name>` followed
+    # by indented `stdout ───` / `stderr ───` sections; older releases print
+    # `--- STDERR: <binary id> <test name> ---` (or `STDOUT + STDERR:`). The
+    # space before the name keeps `a::fails` from matching `xa::fails`.
+    name = re.escape(test_name)
+    header = re.compile(
+        r"^(?:[ \t]+(?:FAIL|TIMEOUT|SIGSEGV|SIGABRT|ABORT|LEAK)\b.*\) \S+ " + name + r"$"
+        r"|--- (?:STDOUT|STDERR|STDOUT \+ STDERR):\s+\S+ " + name + r" ---$)",
+        re.MULTILINE)
+    positions = [m.start() for m in header.finditer(output)]
+    if not positions:
+        lines = [l for l in output.splitlines() if test_name in l]
+        return "\n".join(lines[-40:])[-EXCERPT_LIMIT:]
+    block = output[positions[-1]:]
+    # Stop at the next case's status line or header, or the run summary, so
+    # one test's block does not swallow the next.
+    boundary = re.compile(r"^(?:[ \t]+(?:PASS|FAIL|SKIP|TIMEOUT|SIGSEGV|SIGABRT|ABORT|LEAK|SLOW|TRY)\b.*\[|"
+                          r"--- (?:STDOUT|STDERR): |─|[ \t]+Summary \[)", re.MULTILINE)
+    following = boundary.search(block, block.find("\n") + 1)
+    if following:
+        block = block[: following.start()]
+    return block[-EXCERPT_LIMIT:] if len(block) > EXCERPT_LIMIT else block
+
+
+# ---------------------------------------------------------------------------
+# Phases
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Phase:
+    """One battery of the sweep and how to run, re-run, and read it.
+
+    `kind` decides failure granularity: `nextest` and `playwright` phases yield
+    per-test ids from their reports and rerun single tests; `monolithic` phases
+    (doctests, scripts with no per-scenario selection) are one id each and are
+    rerun whole. `argv` is the recorder child command; `rerun` builds the child
+    command for one id.
+    """
+
+    name: str
+    kind: str
+    selection: str
+    concurrency: str
+    tmux: str
+    argv: list[str]
+    cwd: str = "."
+    rerun: Callable[["Phase", TestId], list[str]] | None = None
+    runner: str | None = None
+
+
+def nextest_rerun(phase: Phase, test: TestId) -> list[str]:
+    binary, name = test.parts
+    return [*phase.argv, "-E", f"binary_id(={binary}) & test(={name})"]
+
+
+def playwright_rerun(phase: Phase, test: TestId) -> list[str]:
+    spec, title = test.parts
+    return ["npx", "playwright", "test", spec, "-g", playwright_title_regex(spec, title)]
+
+
+PROFILES = ("full", "eval")
+
+
+def phases(profile: str = "full") -> list[Phase]:
+    """The sweep, in order: the flake-prone batteries first, then the rest.
+
+    This mirrors the AGENTS.md finishing-work inventory minus the checks that
+    cannot flake (formatters, clippy, compile-only checks, generated-file
+    parity) and minus `test-tmux-pinned-shutdown.sh`, whose scenarios the
+    workspace nextest run already executes on the same pinned tmux. Doctests
+    are their own phase because nextest does not run them.
+
+    The `eval` profile exists to exercise the driver and the agent protocol
+    end to end in minutes rather than hours: the same phase kinds, the same
+    recorder modes, but narrow selections (one small crate, one small spec
+    file) and none of the slow deterministic batteries. It is for validating
+    this tooling, never for a real deflake run; its selections say nothing
+    about the suite.
+    """
+    if profile == "eval":
+        return [
+            Phase("rust-nextest", "nextest", "farhelm-proto unit tests (eval profile)", "4 nextest slots; retries 0",
+                  "required", ["cargo", "nextest", "run", "-p", "farhelm-proto", "--lib"],
+                  rerun=nextest_rerun, runner="nextest"),
+            Phase("browser", "playwright", "feed spec, both engines (eval profile)", "one browser worker; retries 0",
+                  "required", ["npx", "playwright", "test", "feed.spec.ts"], cwd="e2e", rerun=playwright_rerun,
+                  runner="playwright"),
+            Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery", "none",
+                  ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
+            Phase("install-sh", "monolithic", "install.sh harness", "single process", "none",
+                  ["bash", "scripts/test-install-sh.sh"]),
+        ]
+    workspace_nextest = ["cargo", "nextest", "run", "--workspace", "--exclude", "farhelm-desktop"]
+    desktop_nextest = ["cargo", "nextest", "run", "-p", "farhelm-ui", "--features", "desktop"]
+    return [
+        Phase("rust-nextest", "nextest", "workspace Rust targets", "4 nextest slots; retries 0",
+              "required", workspace_nextest, rerun=nextest_rerun, runner="nextest"),
+        Phase("browser", "playwright", "browser suite, both engines", "one browser worker; retries 0",
+              "required", ["npx", "playwright", "test"], cwd="e2e", rerun=playwright_rerun,
+              runner="playwright"),
+        Phase("desktop-nextest", "nextest", "desktop Rust targets", "4 nextest slots; retries 0",
+              "none", desktop_nextest, rerun=nextest_rerun, runner="nextest"),
+        Phase("rust-doctests", "monolithic", "workspace doctests", "4 doctest threads", "required",
+              ["cargo", "test", "--locked", "--doc", "--workspace", "--exclude", "farhelm-desktop",
+               "--", "--show-output", "--test-threads=4"]),
+        Phase("desktop-doctests", "monolithic", "desktop doctests", "4 doctest threads", "none",
+              ["cargo", "test", "--locked", "--doc", "-p", "farhelm-ui", "--features", "desktop",
+               "--", "--show-output", "--test-threads=4"]),
+        Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery", "none",
+              ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
+        Phase("install-sh", "monolithic", "install.sh harness", "single process", "none",
+              ["bash", "scripts/test-install-sh.sh"]),
+        Phase("provision-centos", "monolithic", "CentOS provisioning over ssh", "one container", "none",
+              ["scripts/test-provision-centos.sh"]),
+        Phase("desktop-smoke", "monolithic", "desktop smoke", "one Xvfb display", "required",
+              ["scripts/desktop-smoke.sh"]),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Run state
+# ---------------------------------------------------------------------------
+
+
+def write_json(path: pathlib.Path, data: dict) -> None:
+    """Atomic replace so a reader never sees a half-written status or event."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def read_json(path: pathlib.Path) -> dict | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+class RunDir:
+    """Layout of one sweep's private state directory.
+
+    status.json is the daemon's heartbeat and progress record; events/ holds
+    numbered event files with a sibling `.acked` marker once handled; phases/
+    holds the combined console log of every recorder invocation, named by
+    sweep index, phase, and attempt so reruns are distinguishable.
+    """
+
+    def __init__(self, path: pathlib.Path):
+        self.path = path
+        self.events = path / "events"
+        self.phases = path / "phases"
+        self.status_file = path / "status.json"
+        self.pid_file = path / "daemon.pid"
+        self.found_file = path / "found-flakes.txt"
+
+    def create(self) -> None:
+        self.path.mkdir(parents=True, mode=0o700)
+        self.events.mkdir(mode=0o700)
+        self.phases.mkdir(mode=0o700)
+
+    def status(self) -> dict:
+        return read_json(self.status_file) or {}
+
+    def update_status(self, **fields) -> None:
+        data = self.status()
+        data.update(fields, updated_at=time.time())
+        write_json(self.status_file, data)
+
+    def emit(self, kind: str, **fields) -> str:
+        """Write one event; returns its id. Numbering is monotonic per run.
+
+        Two writers can race here: the daemon's main thread and its stall
+        watcher, or the daemon and a `wait` synthesizing `daemon-died`. The id
+        is claimed with an exclusive create so a collision retries with the
+        next number instead of one event silently replacing the other.
+        """
+        while True:
+            existing = [p.stem for p in self.events.glob("*.json")]
+            event_id = f"{len(existing) + 1:04d}"
+            path = self.events / f"{event_id}.json"
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"id": event_id, "kind": kind, "at": time.time(), **fields},
+                                    indent=2, sort_keys=True) + "\n")
+            return event_id
+
+    def has_event(self, kind: str) -> bool:
+        return any((read_json(f) or {}).get("kind") == kind for f in self.event_files())
+
+    def event_files(self) -> list[pathlib.Path]:
+        return sorted(self.events.glob("*.json"))
+
+    def is_acked(self, event_file: pathlib.Path) -> bool:
+        return event_file.with_suffix(".acked").exists()
+
+    def unacked(self) -> list[dict]:
+        out = []
+        for f in self.event_files():
+            if not self.is_acked(f):
+                data = read_json(f)
+                if data:
+                    out.append(data)
+        return out
+
+    def daemon_alive(self) -> bool:
+        """Liveness by pidfile + kill -0, never by process-name grep."""
+        try:
+            pid = int(self.pid_file.read_text().strip())
+            os.kill(pid, 0)
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def found_flakes(self) -> list[TestId]:
+        if not self.found_file.exists():
+            return []
+        return parse_known_flakes(self.found_file.read_text(encoding="utf-8"))
+
+    def record_found(self, test: TestId) -> None:
+        with self.found_file.open("a", encoding="utf-8") as fh:
+            fh.write(test.line() + "\n")
+
+
+# ---------------------------------------------------------------------------
+# The daemon
+# ---------------------------------------------------------------------------
+
+
+class Daemon:
+    """Owns the sweep: workspace, preparation, phases, classification, events.
+
+    Runs detached in its own session. SIGTERM (from `deflake stop`) terminates
+    the currently running recorder, which forwards it to its own process group,
+    and marks the run stopped. Every subprocess is run through `_run`, which
+    also feeds the stall detector.
+    """
+
+    def __init__(self, run: RunDir, checkout: pathlib.Path, workspace: pathlib.Path, base: str, repeat: bool,
+                 only: set[str] | None = None, profile: str = "full"):
+        self.run = run
+        self.checkout = checkout
+        self.workspace = workspace
+        self.base = base
+        self.repeat = repeat
+        self.profile = profile
+        # `only` narrows the sweep to named phases. It exists for smoke-testing
+        # the driver itself and for an agent re-covering one battery; a full
+        # deflake run never sets it.
+        self.only = only
+        self.stop_requested = False
+        self.child: subprocess.Popen | None = None
+        self.path_prefix: list[str] = []
+        self.log = (run.path / "daemon.log").open("a", encoding="utf-8")
+
+    # -- logging and process helpers ---------------------------------------
+
+    def say(self, message: str) -> None:
+        self.log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {message}\n")
+        self.log.flush()
+
+    def env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        if self.path_prefix:
+            env["PATH"] = os.pathsep.join([*self.path_prefix, env.get("PATH", "")])
+        return env
+
+    def _run(self, argv: list[str], log_path: pathlib.Path, cwd: pathlib.Path, phase_name: str) -> int:
+        """Run one command with combined output to `log_path`; returns its exit status.
+
+        The stall thread watches the log's size. The child is its own process
+        group so a stop can reach the whole tree with one signal.
+        """
+        self.say(f"[{phase_name}] $ {shlex.join(argv)}  (cwd {cwd})")
+        with log_path.open("ab") as out:
+            self.child = subprocess.Popen(argv, cwd=cwd, env=self.env(), stdout=out, stderr=subprocess.STDOUT,
+                                          stdin=subprocess.DEVNULL, start_new_session=True)
+            stalled_flag = threading.Event()
+            watcher = threading.Thread(target=self._watch_stall, args=(log_path, phase_name, stalled_flag), daemon=True)
+            watcher.start()
+            status = self.child.wait()
+            stalled_flag.set()
+            self.child = None
+        self.say(f"[{phase_name}] exit {status}")
+        return status
+
+    def _watch_stall(self, log_path: pathlib.Path, phase_name: str, done: threading.Event) -> None:
+        last_size, last_change, reported = -1, time.time(), False
+        while not done.wait(30):
+            try:
+                size = log_path.stat().st_size
+            except OSError:
+                continue
+            if size != last_size:
+                last_size, last_change, reported = size, time.time(), False
+            elif not reported and time.time() - last_change > STALL_SECONDS:
+                reported = True
+                self.run.emit("stalled", phase=phase_name, log=str(log_path), quiet_seconds=int(time.time() - last_change),
+                              note="no new output for the stall window; the phase is still running under the recorder's timeout")
+
+    def recorder_argv(self, phase: Phase, argv: list[str], kind: str, timeout: int) -> list[str]:
+        recorder = self.workspace / "scripts" / "record-test-run.py"
+        cmd = [sys.executable, str(recorder), "--kind", kind, "--selection", phase.selection,
+               "--concurrency", phase.concurrency, "--tmux", phase.tmux, "--timeout", str(timeout)]
+        if phase.runner:
+            cmd += ["--runner", phase.runner]
+        return [*cmd, "--", *argv]
+
+    # -- lifecycle ---------------------------------------------------------
+
+    def handle_signal(self, signum, _frame) -> None:
+        self.stop_requested = True
+        self.say(f"signal {signum}: stopping")
+        if self.child is not None:
+            try:
+                os.killpg(self.child.pid, signal.SIGTERM)
+            except OSError:
+                pass
+
+    def main(self) -> None:
+        signal.signal(signal.SIGTERM, self.handle_signal)
+        signal.signal(signal.SIGINT, self.handle_signal)
+        self.run.pid_file.write_text(f"{os.getpid()}\n")
+        try:
+            self.run.update_status(status="preparing", sweep=0)
+            if not self.prepare():
+                if self.stop_requested:
+                    # A stop during preparation is the operator's choice, not
+                    # a tooling failure; report it as such.
+                    self.run.update_status(status="stopped", phase=None)
+                    return
+                self.run.update_status(status="failed")
+                self.run.emit("prepare-failed", note="workspace preparation failed; see daemon.log and phases/prepare-*.log",
+                              log=str(self.run.path / "daemon.log"))
+                return
+            sweep = 0
+            while not self.stop_requested:
+                sweep += 1
+                self.run.update_status(sweep=sweep)
+                self.sweep(sweep)
+                if self.stop_requested:
+                    break
+                self.run.emit("sweep-finished", sweep=sweep, repeating=self.repeat,
+                              found=[t.line() for t in self.run.found_flakes()])
+                if not self.repeat:
+                    break
+            self.run.update_status(status="stopped" if self.stop_requested else "finished", phase=None)
+        except Exception as error:  # noqa: BLE001 - the daemon must record, not vanish
+            self.say(f"daemon error: {error!r}\n{traceback.format_exc()}")
+            self.run.update_status(status="failed", error=repr(error))
+            self.run.emit("daemon-error", error=repr(error), log=str(self.run.path / "daemon.log"))
+        finally:
+            try:
+                self.run.pid_file.unlink()
+            except OSError:
+                pass
+
+    # -- preparation -------------------------------------------------------
+
+    def prepare(self) -> bool:
+        """Point the workspace at the base commit and build every prerequisite.
+
+        The workspace is persistent across runs so cargo, dx, npm, the pinned
+        tmux, and the pinned nextest stay warm; only the working-copy commit
+        moves. Each step is logged under phases/prepare-<step>.log.
+        """
+        # The sweep tree is a detached git worktree, not a jj workspace. A jj
+        # workspace of a colocated repo carries only `.jj` (verified on jj
+        # 0.45.1), and the recorder locates the checkout with
+        # `git rev-parse --show-toplevel`, so it refused every nextest,
+        # Playwright and tmux-required phase there. jj resolves the base
+        # revision (so `main`, a change id, or any revset works) and git owns
+        # the tree; the checkout's jj view never sees or snapshots it.
+        log = self.run.phases / "prepare-workspace.log"
+        resolved = subprocess.run(["jj", "--ignore-working-copy", "log", "-r", self.base, "--no-graph",
+                                   "-T", "commit_id"], cwd=self.checkout, capture_output=True, text=True)
+        commit = resolved.stdout.strip()
+        if resolved.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            self.say(f"could not resolve base revision {self.base!r}: {resolved.stderr.strip()}")
+            return False
+        if not (self.workspace / ".git").exists():
+            self.workspace.parent.mkdir(parents=True, exist_ok=True)
+            # A worktree registration left behind by a deleted directory would
+            # make `worktree add` refuse; prune first, it is a no-op otherwise.
+            self._run(["git", "worktree", "prune"], log, self.checkout, "prepare")
+            if self._run(["git", "worktree", "add", "--detach", str(self.workspace), commit], log,
+                         self.checkout, "prepare") != 0:
+                return False
+        else:
+            owner = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                   cwd=self.workspace, capture_output=True, text=True).stdout.strip()
+            if pathlib.Path(owner).resolve() != (self.checkout / ".git").resolve():
+                self.say(f"workspace {self.workspace} belongs to another checkout ({owner}); refusing to reuse it")
+                return False
+            if self._run(["git", "checkout", "--detach", commit], log, self.workspace, "prepare") != 0:
+                return False
+        self.run.update_status(base_commit=commit, workspace=str(self.workspace))
+
+        steps: list[tuple[str, list[str], str]] = []
+        # The CentOS provisioning phase links a musl-static farhelm and needs
+        # musl-tools for rusqlite's bundled SQLite. On Ubuntu that is one apt
+        # package, so a missing musl-gcc is installed here rather than turning
+        # into a deterministic phase failure hours later. Passwordless sudo is
+        # assumed (`-n` refuses to prompt); elsewhere the step fails visibly.
+        if shutil.which("musl-gcc") is None:
+            steps.append(("musl-tools", ["sudo", "-n", "apt-get", "install", "-y", "musl-tools"], "."))
+        steps += [
+            ("nextest", [sys.executable, "scripts/install-pinned-nextest.py"], "."),
+            ("tmux", ["scripts/build-pinned-tmux-ci.sh"], "."),
+            ("cargo-build", ["cargo", "build"], "."),
+            ("dx-build", ["dx", "build", "--package", "farhelm-ui", "--platform", "web", "--release"], "crates/farhelm-ui"),
+            ("npm", ["npm", "ci"], "e2e"),
+            ("browsers", ["npx", "playwright", "install", "chromium", "webkit"], "e2e"),
+        ]
+        for name, argv, cwd in steps:
+            if self.stop_requested:
+                return False
+            log = self.run.phases / f"prepare-{name}.log"
+            if self._run(argv, log, self.workspace / cwd, "prepare") != 0:
+                self.say(f"prepare step {name} failed")
+                return False
+            if name in {"nextest", "tmux"}:
+                # Both tools print their directory as the last stdout line; the
+                # log also carries any progress they wrote, so take the last
+                # line that is an existing directory.
+                lines = [l.strip() for l in log.read_text(encoding="utf-8", errors="replace").splitlines()]
+                dirs = [l for l in lines if l and pathlib.Path(l).is_dir()]
+                if not dirs:
+                    self.say(f"prepare step {name} printed no directory")
+                    return False
+                self.path_prefix.append(dirs[-1])
+        self.run.update_status(path_prefix=self.path_prefix)
+        return True
+
+    # -- one sweep ---------------------------------------------------------
+
+    def exclusions(self) -> list[TestId]:
+        """Known flakes from the agent's checkout plus what this run already found.
+
+        Re-read at every phase so a flake the agent recorded during the sweep
+        is excluded from the next run without restarting anything. A malformed
+        file is reported as an event and treated as empty rather than aborting
+        the sweep.
+        """
+        path = self.checkout / KNOWN_FLAKES_FILE
+        try:
+            known = parse_known_flakes(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            # A missing file is reported too: the checkout may have moved or
+            # been deleted under the daemon, and silently dropping every
+            # exclusion would put known flakes back into the sweep. One event
+            # per run is enough; the agent is told to stop on it.
+            if not self.run.has_event("known-flakes-unreadable"):
+                self.run.emit("known-flakes-unreadable", error=str(error), file=str(path))
+            known = []
+        seen, merged = set(), []
+        for t in [*known, *self.run.found_flakes()]:
+            if t not in seen:
+                seen.add(t)
+                merged.append(t)
+        return merged
+
+    def sweep(self, sweep: int) -> None:
+        for phase in phases(self.profile):
+            if self.stop_requested:
+                return
+            if self.only is not None and phase.name not in self.only:
+                continue
+            self.run.update_status(status="running", phase=phase.name, phase_started=time.time())
+            excluded = self.exclusions()
+            # A `phase <name>` line skips any phase, per-test ones included:
+            # that is how a battery that cannot run on this host at all (no
+            # webkit dev packages, no docker) is kept from failing every sweep.
+            if TestId("phase", (phase.name,)) in excluded:
+                self.say(f"[{phase.name}] excluded by known-flakes.txt")
+                continue
+            argv = list(phase.argv)
+            if phase.kind == "nextest":
+                argv += nextest_exclusion(excluded)
+            elif phase.kind == "playwright":
+                argv += playwright_exclusion(excluded)
+            log = self.run.phases / f"{sweep:02d}-{phase.name}.log"
+            status = self._run(self.recorder_argv(phase, argv, "development", PHASE_TIMEOUT_SECONDS), log,
+                               self.workspace / phase.cwd, phase.name)
+            if self.stop_requested:
+                return
+            if status == 0:
+                continue
+            try:
+                self.classify_phase(sweep, phase, log, status)
+            except Exception as error:  # noqa: BLE001 - a report-parsing bug must not end the sweep
+                # The first eval run died here on a manifest-shape mismatch,
+                # taking the whole sweep with it. A phase whose failures could
+                # not be turned into events is itself the event; the rest of
+                # the sweep still runs.
+                self.say(f"[{phase.name}] classification failed: {error!r}")
+                self.run.emit("phase-error", sweep=sweep, phase=phase.name, error=repr(error), phase_log=str(log),
+                              exit_status=status,
+                              note="the phase failed and the driver could not classify its failures; read the log")
+
+    def classify_phase(self, sweep: int, phase: Phase, log: pathlib.Path, status: int) -> None:
+        """Turn a failed phase into events, one per failed test, each with a verdict."""
+        text = log.read_text(encoding="utf-8", errors="replace")
+        evidence = evidence_dir_from_log(text)
+        failures: list[tuple[TestId, dict]] = []
+        try:
+            if phase.kind == "nextest" and evidence:
+                junit = (evidence / "nextest" / "default" / "junit.xml").read_text(encoding="utf-8")
+                output = read_evidence_output(evidence)
+                for t in nextest_failures(junit):
+                    failures.append((t, {"excerpt": nextest_excerpt(output, t.parts[1])}))
+            elif phase.kind == "playwright" and evidence:
+                report = json.loads((evidence / "playwright.json").read_text(encoding="utf-8"))
+                merged: dict[TestId, dict] = {}
+                for t, project, message in playwright_failures(report):
+                    entry = merged.setdefault(t, {"projects": [], "excerpt": ""})
+                    entry["projects"].append(project)
+                    if message and not entry["excerpt"]:
+                        entry["excerpt"] = message[-EXCERPT_LIMIT:]
+                failures = list(merged.items())
+        except (OSError, ValueError, ET.ParseError) as error:
+            self.say(f"[{phase.name}] could not read reports: {error!r}")
+        if not failures:
+            # Monolithic phase, or a per-test phase that failed without naming
+            # a test (build error, recorder refusal, timeout): the whole phase
+            # is the unit.
+            unit = TestId("phase", (phase.name,))
+            details = {"excerpt": text[-EXCERPT_LIMIT:], "exit_status": status}
+            if phase.kind != "monolithic":
+                details["note"] = ("phase failed without per-test failures in its report; "
+                                   "likely a build, runner, or timeout problem rather than a test")
+            failures = [(unit, details)]
+        for test, details in failures:
+            if self.stop_requested:
+                return
+            if test.kind == "phase" and phase.kind != "monolithic":
+                # Rerunning a whole nextest or Playwright battery three times
+                # to classify a build or runner failure would cost hours and,
+                # under the rerun timeout, manufacture a "deterministic"
+                # verdict out of three timeouts. The agent reads the log.
+                verdict, reruns = "unclassified", []
+            else:
+                verdict, reruns = self.classify(sweep, phase, test)
+            if verdict == "flake":
+                self.run.record_found(test)
+            self.run.emit("failure", sweep=sweep, phase=phase.name, test=test.line(), test_kind=test.kind,
+                          verdict=verdict, reruns=reruns, phase_log=str(log),
+                          evidence=str(evidence) if evidence else None, **details)
+
+    def classify(self, sweep: int, phase: Phase, test: TestId) -> tuple[str, list[dict]]:
+        """Rerun one failed unit alone; every-time failure means deterministic.
+
+        Passing even once under identical conditions is the definition of a
+        flake for the sweep's purposes. Reruns are narrow recorded runs so each
+        attempt retains its own evidence for the agent's write-up.
+        """
+        if test.kind == "phase":
+            # A monolithic battery is rerun whole, under the phase budget: the
+            # narrow rerun cap is sized for one test, not for a whole script.
+            rerun_argv, timeout = list(phase.argv), PHASE_TIMEOUT_SECONDS
+        else:
+            rerun_argv, timeout = phase.rerun(phase, test), RERUN_TIMEOUT_SECONDS  # type: ignore[misc]
+        results = []
+        slug = re.sub(r"[^A-Za-z0-9]+", "_", test.line()).strip("_")[:80]
+        for attempt in range(1, CLASSIFICATION_RERUNS + 1):
+            if self.stop_requested:
+                break
+            log = self.run.phases / f"{sweep:02d}-{phase.name}-rerun-{slug}-{attempt}.log"
+            status = self._run(self.recorder_argv(phase, rerun_argv, "repetition", timeout), log,
+                               self.workspace / phase.cwd, f"{phase.name} rerun {attempt}")
+            if self.stop_requested:
+                # This attempt was killed by the stop, not by the test; it is
+                # not evidence either way.
+                break
+            text = log.read_text(encoding="utf-8", errors="replace")
+            evidence = evidence_dir_from_log(text)
+            results.append({"attempt": attempt, "exit_status": status, "passed": status == 0,
+                            "evidence": str(evidence) if evidence else None, "log": str(log)})
+        if len(results) < CLASSIFICATION_RERUNS and not any(r["passed"] for r in results):
+            return "unclassified", results
+        return ("flake" if any(r["passed"] for r in results) else "deterministic"), results
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def resolve_run(checkout: pathlib.Path) -> RunDir:
+    pointer = current_pointer(checkout)
+    try:
+        path = pathlib.Path(pointer.read_text(encoding="utf-8").strip())
+    except OSError:
+        raise SystemExit("deflake: no current run for this checkout; run `deflake start` first")
+    if not path.is_dir():
+        raise SystemExit(f"deflake: current run directory {path} is gone")
+    return RunDir(path)
+
+
+def cmd_start(args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    root = state_root()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_path = root / "daemon.lock"
+    lock = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("deflake: another sweep daemon holds the lock; `deflake status` / `deflake stop` it first", file=sys.stderr)
+        return 1
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    os.close(lock)
+
+    run = RunDir(root / "runs" / str(uuid.uuid4()))
+    run.create()
+    write_json(run.status_file, {
+        "status": "starting", "run_id": run.path.name, "checkout": str(checkout), "base": args.base,
+        "repeat": args.repeat, "profile": args.profile, "started_at": time.time(),
+    })
+    pointer = current_pointer(checkout)
+    pointer.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    pointer.write_text(str(run.path) + "\n", encoding="utf-8")
+
+    daemon_log = (run.path / "daemon.log").open("ab")
+    # One sweep tree per checkout, so two agents in sibling checkouts never
+    # share build outputs or a base commit; the daemon lock still allows only
+    # one sweep at a time on the machine.
+    workspace = root / "workspaces" / checkout_key(checkout)
+    daemon = subprocess.Popen(
+        [sys.executable, os.path.abspath(__file__), "_daemon", str(run.path), str(checkout), str(workspace),
+         args.base, "1" if args.repeat else "0", args.only or "", args.profile],
+        stdin=subprocess.DEVNULL, stdout=daemon_log, stderr=daemon_log, start_new_session=True, cwd=checkout,
+    )
+    # Write the pidfile here, before returning: a `wait` issued in the same
+    # breath as `start` would otherwise see no pidfile and report the daemon
+    # dead before it had finished importing. The daemon rewrites it on entry.
+    run.pid_file.write_text(f"{daemon.pid}\n")
+    print(f"deflake: started run {run.path.name}" + (" (repeat mode)" if args.repeat else ""))
+    print(f"run dir: {run.path}")
+    print("next: `deflake/bin/deflake wait` — it returns only when there is something to do")
+    return 0
+
+
+def cmd_daemon(argv: list[str]) -> int:
+    run_path, checkout, workspace, base, repeat, only, profile = argv
+    run = RunDir(pathlib.Path(run_path))
+    root = state_root()
+    lock = os.open(root / "daemon.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # held for the daemon's lifetime
+    only_set = set(only.split(",")) if only else None
+    Daemon(run, pathlib.Path(checkout), pathlib.Path(workspace), base, repeat == "1", only_set, profile).main()
+    return 0
+
+
+def format_event(event: dict) -> str:
+    """The compact, human-readable rendering `wait` prints for one event."""
+    lines = [f"event {event['id']}: {event['kind']}"]
+    for key in ("sweep", "phase", "test", "verdict", "note", "error"):
+        if event.get(key) is not None:
+            lines.append(f"  {key}: {event[key]}")
+    if event.get("projects"):
+        lines.append(f"  engines: {', '.join(event['projects'])}")
+    if event.get("reruns"):
+        summary = ", ".join("pass" if r["passed"] else f"exit {r['exit_status']}" for r in event["reruns"])
+        lines.append(f"  reruns: {summary}")
+        # Each rerun is its own retained run; the record the agent writes
+        # cites these ids, so they have to be visible without opening JSON.
+        for r in event["reruns"]:
+            if r.get("evidence"):
+                lines.append(f"    rerun {r['attempt']} evidence: {r['evidence']}")
+    for key in ("evidence", "phase_log", "log"):
+        if event.get(key):
+            lines.append(f"  {key}: {event[key]}")
+    if event.get("found"):
+        lines.append("  flakes found this sweep:")
+        lines.extend(f"    {t}" for t in event["found"])
+    if event.get("excerpt"):
+        lines.append("  excerpt:")
+        lines.extend("    " + l for l in event["excerpt"].rstrip().splitlines()[-60:])
+    return "\n".join(lines)
+
+
+def cmd_wait(args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    """Block until there is something for the agent to do.
+
+    Exit 0: an unacknowledged event was printed. Exit 3: the wait limit passed
+    with nothing new (call again). Exit 4: the run is over and every event is
+    acknowledged. A daemon that vanished without finishing is synthesized as a
+    `daemon-died` event so it is handled like any other (exit 0).
+    """
+    run = resolve_run(checkout)
+    deadline = time.time() + args.max_wait
+    while True:
+        pending = run.unacked()
+        if pending:
+            print(format_event(pending[0]))
+            print(f"\nack with: deflake/bin/deflake ack {pending[0]['id']}")
+            return 0
+        status = run.status()
+        if status.get("status") in {"finished", "stopped", "failed"}:
+            print(f"run {run.path.name} is {status['status']}; no pending events")
+            return 4
+        if not run.daemon_alive():
+            # Emit once and mark the run failed, so the next `wait` after the
+            # ack reaches exit 4 instead of synthesizing the same event again.
+            if not run.has_event("daemon-died"):
+                run.emit("daemon-died", note="daemon pidfile is stale and the run is not marked finished",
+                         log=str(run.path / "daemon.log"))
+            run.update_status(status="failed")
+            continue
+        if time.time() >= deadline:
+            print(f"no event after {args.max_wait}s; run is {status.get('status')} in phase {status.get('phase')} "
+                  f"(sweep {status.get('sweep')}). Call wait again.")
+            return 3
+        time.sleep(WAIT_POLL_SECONDS)
+
+
+def cmd_ack(args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    run = resolve_run(checkout)
+    target = run.events / f"{args.event_id}.json"
+    if not target.exists():
+        print(f"deflake: no event {args.event_id}", file=sys.stderr)
+        return 1
+    target.with_suffix(".acked").write_text(f"{time.time()}\n")
+    remaining = len(run.unacked())
+    print(f"acked {args.event_id}; {remaining} pending")
+    return 0
+
+
+def cmd_status(_args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    run = resolve_run(checkout)
+    status = run.status()
+    alive = run.daemon_alive()
+    print(f"run: {run.path}")
+    print(f"status: {status.get('status')}  daemon: {'alive' if alive else 'not running'}")
+    print(f"base: {status.get('base')} @ {status.get('base_commit', '?')}  repeat: {status.get('repeat')}")
+    print(f"sweep: {status.get('sweep')}  phase: {status.get('phase')}")
+    if status.get("phase_started"):
+        print(f"phase running for: {int(time.time() - status['phase_started'])}s")
+    events = run.event_files()
+    pending = run.unacked()
+    print(f"events: {len(events)} total, {len(pending)} pending")
+    found = run.found_flakes()
+    if found:
+        print("flakes found this run:")
+        for t in found:
+            print(f"  {t.line()}")
+    return 0
+
+
+def cmd_events(_args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    run = resolve_run(checkout)
+    for f in run.event_files():
+        e = read_json(f) or {}
+        mark = "acked  " if run.is_acked(f) else "PENDING"
+        print(f"{mark} {e.get('id')} {e.get('kind')} {e.get('phase') or ''} {e.get('test') or ''} {e.get('verdict') or ''}")
+    return 0
+
+
+def cmd_stop(_args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    run = resolve_run(checkout)
+    try:
+        pid = int(run.pid_file.read_text().strip())
+    except (OSError, ValueError):
+        print("deflake: daemon is not running")
+        return 0
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(120):
+        if not run.daemon_alive():
+            print("deflake: daemon stopped")
+            return 0
+        time.sleep(1)
+    print("deflake: daemon still alive after 120s; it may be waiting for the recorder's cleanup grace", file=sys.stderr)
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] == ["_daemon"]:
+        return cmd_daemon(argv[1:])
+    parser = argparse.ArgumentParser(prog="deflake", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+    start = sub.add_parser("start", help="detach a sweep daemon")
+    start.add_argument("--repeat", action="store_true", help="start the next sweep when one finishes, until stopped")
+    start.add_argument("--base", default="main", help="jj revision the sweep runs against (default: main)")
+    start.add_argument("--only", help="comma-separated phase names to run instead of the full sweep (driver smoke tests)")
+    start.add_argument("--profile", choices=PROFILES, default="full",
+                       help="'eval' runs narrow, fast selections to exercise the driver and protocol; never a real run")
+    phase_names = ", ".join(p.name for p in phases())
+    eval_names = ", ".join(p.name for p in phases("eval"))
+    start.epilog = f"phases, in sweep order: {phase_names}\neval profile: {eval_names}"
+    wait = sub.add_parser("wait", help="block until an event, the run's end, or the wait limit")
+    wait.add_argument("--max-wait", type=int, default=DEFAULT_MAX_WAIT, help=f"seconds before returning 3 (default {DEFAULT_MAX_WAIT})")
+    ack = sub.add_parser("ack", help="mark an event handled")
+    ack.add_argument("event_id")
+    sub.add_parser("status")
+    sub.add_parser("events")
+    sub.add_parser("stop")
+    args = parser.parse_args(argv)
+    checkout = find_checkout(pathlib.Path.cwd())
+    handlers = {"start": cmd_start, "wait": cmd_wait, "ack": cmd_ack, "status": cmd_status, "events": cmd_events, "stop": cmd_stop}
+    return handlers[args.command](args, checkout)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
