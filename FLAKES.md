@@ -830,3 +830,22 @@ fixed in this PR; the TODO.md entry is removed.
 Class: product
 
 Cause: established
+
+## 2026-09-12 — `composer path actions keep typing inert and browse the selected remote host` never matched the remote log receipt (e2e/tests/sidebar.spec.ts)
+
+The test's final predicate polls the remote supervisor's log for `received directory browse request cwd=<path>` and
+timed out on every attempt ever recorded: Chromium run `1024be47-ca56-4651-afd6-a56d01a5c890`, then runs
+`2489c509-e3e3-4e9d-b6b5-f860a7fbd565` and `ce1a9bec-cf6b-453b-bf1b-61f3e4ec297d` in both engines, then five isolated
+reproductions on the current tree and three on the pre-composer baseline. The retained failure evidence left three
+hypotheses: the log never flushed, the test read a different path than the supervisor wrote, or the browse was never
+forwarded. A reproduction with a temporary dump of the file's tail disproved all three: the receipt was present in the
+exact file the test reads, written immediately, with the routing it asserts — but tracing decorates the field with ANSI
+SGR sequences, so the raw bytes read `received directory browse request ESC[3mcwd ESC[0m ESC[2m= ESC[0m/tmp/...` and the
+bare `request cwd=` needle could never match on any substrate with ANSI-enabled tracing. Forwarding itself was
+independently verified: a manual browse-directory call against the same stack produced the same receipt in the same
+file. The predicate now strips SGR sequences before matching; three exact repetitions passed on the fixed tree (the same
+selection failed 100% before). Disposition: fixed in this PR; the TODO.md entry is removed.
+
+Class: fixture-premise
+
+Cause: established

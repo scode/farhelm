@@ -4505,8 +4505,12 @@ test("composer path actions keep typing inert and browse the selected remote hos
   });
   await expect(form.getByRole("button", { name: `${remotePath}/launch`, exact: true }), "the forwarded remote listing must expose its real launch child").toBeVisible();
   const remoteLog = path.join(path.dirname(remotePath), "remote-supervisor.log");
+  // tracing decorates every field with ANSI SGR sequences (cwd= arrives as
+  // ESC[3mcwd ESC[0m ESC[2m= ESC[0m), so the receipt must be matched on the
+  // stripped text; the raw bytes never contain the bare needle.
+  const ansiSgr = /\x1b\[[0-9;]*m/g;
   await expect.poll(
-    () => fs.readFileSync(remoteLog, "utf8").includes(`received directory browse request cwd=${remotePath}`),
+    () => fs.readFileSync(remoteLog, "utf8").replace(ansiSgr, "").includes(`received directory browse request cwd=${remotePath}`),
     { message: "the selected remote supervisor must independently record the forwarded browse request" },
   ).toBe(true);
   expect(createPosts, "Browse only opens the picker").toBe(0);
