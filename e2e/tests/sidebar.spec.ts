@@ -4738,9 +4738,9 @@ test("composer rejects held and queued stale browse activation after destination
   });
 });
 
-/** Measure the rendered text itself, not just its block wrapper. A clipped or
- * overlapping run can retain a plausible element box, so recents use this
- * bounded Range probe to keep their two-line contract observable. */
+/** Measure search-result text itself, not just its block wrapper. A clipped
+ * or overlapping run can retain a plausible element box, so the unchanged
+ * two-line search surface uses this bounded Range probe. */
 async function recentTextBands(row: Locator, destination: string, selection: string) {
   return await row.evaluate((node, [destinationClass, selectionClass]) => {
     const rect = (selector: string) => {
@@ -4755,8 +4755,8 @@ async function recentTextBands(row: Locator, destination: string, selection: str
   }, [destination, selection]);
 }
 
-/** Assert the compact recent row has two real, readable text bands inside its
- * own 44px button. Element boxes alone cannot distinguish clipped text from a
+/** Assert a search recent has two real, readable text bands inside its own
+ * 44px button. Element boxes alone cannot distinguish clipped text from a
  * legible line, and every Range rect matters when an engine fragments text. */
 function expectRecentTextBands(
   bands: Awaited<ReturnType<typeof recentTextBands>>,
@@ -5222,14 +5222,14 @@ test("composer folder history tracks edited destinations at narrow width", async
 
 /**
  * The recent band is present ONLY while at least one recent matches the
- * current filter, and while present its rows keep their fixed 44px height and
- * 4px gap so a two-line label stays readable. With no match the whole
+ * current filter, and while present its rows keep their fixed 36px height and
+ * share a border with no gap. With no match the whole
  * `.launch-composer-recents` element (heading included) is absent from the
  * DOM rather than present-but-empty — the composer no longer reserves a
  * three-row band the way it used to, so the harness option row below it is
  * now free to move as recents come and go, and this test no longer pins it
- * in place. The long three-row fixture also proves visual two-line
- * compaction did not hide any of a setup's meaningful values.
+ * in place. The long fixture proves the harness remains readable while the
+ * one-line setup detail truncates rather than wrapping.
  */
 test("composer recent slots appear only with matches, at fixed row geometry", async ({ page, request }) => {
   const long = "/composer-long/" + "segment-".repeat(18);
@@ -5262,10 +5262,10 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
     for (let index = 0; index < count; index += 1) {
       await expect(rows.nth(index), `recent row ${index} must be painted before geometry is read`).toBeVisible();
       const current = await rows.nth(index).boundingBox();
-      expect(current?.height, `visible recent row ${index} stays 44px`).toBe(44);
+      expect(current?.height, `visible recent row ${index} stays 36px`).toBe(36);
       if (index > 0) {
         const previous = await rows.nth(index - 1).boundingBox();
-        expect(current!.y - (previous!.y + previous!.height), "adjacent recent rows have a 4px gap").toBe(4);
+        expect(current!.y, "adjacent recent rows share a divider without a gap").toBe(previous!.y + previous!.height);
       }
     }
   };
@@ -5278,18 +5278,29 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
     const expected = `${entry.cwd} · this machine · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
     await expect(row).toHaveAttribute("title", expected);
     await expect(row).toHaveAccessibleName(expected);
-    expectRecentTextBands(
-      await recentTextBands(row, ".launch-composer-recent-destination", ".launch-composer-recent-selection"),
-      `ordinary recent row ${index}`,
-    );
+    await expect(row.locator(".launch-composer-recent-harness")).toHaveText(harness);
   }
-  await expect(slots.getByRole("button").first().locator(".launch-composer-recent-destination")).toHaveCSS("display", "block");
-  await expect(slots.getByRole("button").first().locator(".launch-composer-recent-selection")).toHaveCSS("display", "block");
-  const destination = await slots.getByRole("button").first().locator(".launch-composer-recent-destination").boundingBox();
-  const selection = await slots.getByRole("button").first().locator(".launch-composer-recent-selection").boundingBox();
-  expect(destination, "the destination line must have geometry").not.toBeNull();
-  expect(selection, "the selection line must have geometry").not.toBeNull();
-  expect(destination!.y + destination!.height, "the two recent lines must not overlap").toBeLessThanOrEqual(selection!.y);
+  const firstRow = slots.getByRole("button").first();
+  const destination = firstRow.locator(".launch-composer-recent-destination");
+  expect(await destination.evaluate((span) => span.scrollWidth > span.clientWidth), "the long folder must truncate inside its own span, not push the row").toBe(true);
+  const rowBox = await firstRow.boundingBox();
+  const harnessBox = await firstRow.locator(".launch-composer-recent-harness").boundingBox();
+  expect(rowBox, "the long recent row must have a measurable box").not.toBeNull();
+  expect(harnessBox, "the leading harness must have a measurable box").not.toBeNull();
+  expect(harnessBox!.x).toBeGreaterThanOrEqual(rowBox!.x);
+  expect(harnessBox!.x + harnessBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+  // The whole point of one-line rows is that the launch affordance survives
+  // a long folder: reach the row by keyboard (the hint is shown for
+  // `:focus-visible`, which Chromium withholds from programmatic focus) and
+  // require the hint inside the row's box.
+  const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
+  await search.focus();
+  await expect(search).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(firstRow, "Tab from the search box must land on the first recent row").toBeFocused();
+  const hintBox = await firstRow.locator(".launch-composer-recent-hint").boundingBox();
+  expect(hintBox, "the focused row's hint must be painted").not.toBeNull();
+  expect(hintBox!.x + hintBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1);
   const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
   const claude = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true });
   const claudeBefore = await claude.boundingBox();
@@ -5309,8 +5320,87 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
   await form.getByLabel("folder", { exact: true }).fill(long);
 });
 
-/** Complete search recents must retain the same compact two-line contract as
- * ordinary recents, including when two long saved setups are adjacent. */
+/** A focused recent is a keyboard launch shortcut, but pointer activation
+ * remains a draft-only affordance so an accidental click cannot start work. */
+test("composer Enter on a focused recent launches the filled setup", async ({ page, request }) => {
+  const cwd = "/tmp";
+  const launch = {
+    host: 1, canonical_cwd: cwd, cwd,
+    selection: { harness: "codex", model: "enter-model", effort: "high", permissions: "yolo" },
+    created_at: 1, creation_seq: 1,
+  };
+  await installComposerChoices(page, request, [launch], [
+    { id: "enter-model", harness: "codex", efforts: ["high"] },
+  ]);
+  const posts: any[] = [];
+  const created: string[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    posts.push(route.request().postDataJSON());
+    await route.continue();
+  });
+  try {
+    await page.goto("/");
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await form.getByLabel("folder", { exact: true }).fill(cwd);
+    const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
+    await expect(recent, "the seeded recent must be visible before its pointer and keyboard contracts are tested").toBeVisible();
+    await recent.click();
+    // A click must fill: the harness chip and the summary show the applied
+    // draft, which is the observable that separates "fills only" from a
+    // click that silently did nothing.
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo");
+    expect(posts, "clicking a recent only fills the draft").toHaveLength(0);
+    const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
+    await search.focus();
+    await page.keyboard.press("Tab");
+    await expect(recent, "Tab from the search box must establish the keyboard-visible row focus before Enter").toBeFocused();
+    await expect(recent.locator(".launch-composer-recent-hint")).toBeVisible();
+    const [response] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions")),
+      page.keyboard.press("Enter"),
+    ]);
+    expect(response.ok(), "the Enter-launched create must be admitted by the ordinary Launch path").toBe(true);
+    created.push((await response.json()).id);
+    expect(posts, "Enter must produce exactly one ordinary create request, and the earlier click none").toHaveLength(1);
+    expect(posts[0]).toMatchObject({
+      host: 1,
+      cwd,
+      launch: { harness: "codex", model: "enter-model", effort: "high", permissions: "yolo" },
+    });
+  } finally {
+    for (const id of created) await cleanupSession(request, id);
+  }
+});
+
+/** Harness is the row's first comparison value, so otherwise identical
+ * destinations remain distinguishable before their muted setup detail. */
+test("composer recent rows lead with the harness", async ({ page, request }) => {
+  const cwd = "/composer-harness-first";
+  await installComposerChoices(page, request, [
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "codex", model: "shared-model", effort: "high", permissions: null }, created_at: 2, creation_seq: 2 },
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "claude", model: "shared-model", effort: "high", permissions: null }, created_at: 1, creation_seq: 1 },
+  ], [
+    { id: "shared-model", harness: "codex", efforts: ["high"] },
+    { id: "shared-model", harness: "claude", efforts: ["high"] },
+  ]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
+  const rows = form.locator(".launch-composer-recent-slots").getByRole("button");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.locator(".launch-composer-recent-harness")).toHaveText(["Codex", "Claude"]);
+  await expect(rows.locator(".launch-composer-recent-destination")).toHaveText([
+    `${cwd} · this machine`,
+    `${cwd} · this machine`,
+  ]);
+});
+
+/** Search recents retain their independent 44px two-line contract, including
+ * when two long saved setups are adjacent. */
 test("composer search recents keep complete 44px two-line rows", async ({ page, request }) => {
   const cwd = "/search-recent/" + "long-segment-".repeat(12);
   const launches = ["one", "two"].map((suffix, index) => ({
