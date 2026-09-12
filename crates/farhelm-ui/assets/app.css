@@ -3184,7 +3184,8 @@ samp {
   margin-bottom: 8px;
 }
 
-.launch-composer-eyebrow {
+.launch-composer-eyebrow,
+.launch-composer-section-label {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3209,49 +3210,79 @@ samp {
   gap: 4px;
 }
 
-/* The selected-value strip makes the free-order controls reviewable without
-   turning them into wizard steps. Chips are controls only for dimensions a
-   person can clear; host and folder stay readable context. */
-.launch-composer-selections {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  /* Nothing here reserves empty space any more: an empty strip takes no
-     height at all, and the controls below it move down as chips arrive
-     rather than sitting a fixed distance below a phantom reservation.
-     `align-content` still matters once there IS content — it keeps a short
-     wrapped state compact instead of stretching rows to fill a height this
-     rule no longer promises. */
-  flex: 0 0 auto;
-  align-content: flex-start;
+/* The structured destination is one fact split across host and folder. Keep
+   its controls compact so browsing history remains context, not a second
+   picker competing with the typed path. */
+.launch-composer-destination {
+  display: grid;
+  gap: 8px;
 }
 
-.launch-composer-backdrop .create-session-form .launch-composer-chip,
-.launch-composer-backdrop .create-session-form .launch-composer-folder > button,
-.launch-composer-backdrop .create-session-form .launch-composer-folder-options > button {
-  min-height: 30px;
-  padding: 0 9px;
-  border: 1px solid var(--composer-border);
-  border-radius: 999px;
+/* Wraps rather than clips: at phone width the host select and the browse
+   button (which names the host) do not share a row, and a clipped browse
+   button would be the only way to reach a remote listing. */
+.launch-composer-destination-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.launch-composer-destination-row .create-session-host {
+  min-width: 12em;
+}
+
+.launch-composer-destination-row > button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1.5px solid var(--composer-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--composer-control-fg);
+  font-size: 13px;
+}
+
+/* A dialog's inputs belong to its raised control surface. This override
+   deliberately leaves the sidebar's legacy create form on its old surface. */
+.launch-composer-backdrop .create-session-form input[type="text"],
+.launch-composer-backdrop .create-session-form .create-session-host,
+.launch-composer-backdrop .create-session-form .launch-composer-search input {
   background: var(--composer-control-bg);
+  border: 1.5px solid var(--composer-border);
+  border-radius: 6px;
+  color: var(--composer-selected-fg);
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.launch-composer-folder-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
   color: var(--composer-control-fg);
   font-size: 12px;
 }
 
-/* History paths are destination choices, not decorative chips. Match the
-   ordinary composer option affordance so the checked path is unmistakable. */
-.launch-composer-backdrop .create-session-form .launch-composer-folder-options > button {
-  min-height: 38px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  text-align: left;
+.launch-composer-folder-links > button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--composer-control-fg);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline dotted;
 }
 
-.launch-composer-backdrop .create-session-form .launch-composer-folder-options > button.selected {
-  border-color: var(--composer-selected-border);
-  background: var(--composer-selected-bg);
+.launch-composer-folder-links > button.selected {
   color: var(--composer-selected-fg);
+  text-decoration: underline solid;
+}
+
+/* The "recent:" lead-in is a caption for the links, dimmer than the links
+   themselves so the eye lands on the destinations; the separators inherit
+   the line's muted color and need no rule of their own. */
+.launch-composer-folder-links-muted {
+  opacity: 0.75;
 }
 
 .launch-composer-summary {
@@ -3267,23 +3298,6 @@ samp {
   display: none;
 }
 
-.launch-composer-backdrop .create-session-form label.launch-composer-folder {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px 16px;
-}
-
-.launch-composer-folder > input {
-  min-width: 0;
-}
-
-.launch-composer-folder-options {
-  grid-column: 2 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 
 /* The whole heading-plus-slots band is absent from the DOM (see
    `create_form.rs`'s `recent_launches` guard) whenever no recent matches the
@@ -3352,8 +3366,7 @@ samp {
   visibility: hidden;
 }
 
-.launch-composer-options > button.selected > .launch-composer-option-check,
-.launch-composer-folder-options > button.selected > .launch-composer-option-check {
+.launch-composer-options > button.selected > .launch-composer-option-check {
   visibility: visible;
 }
 
@@ -3603,19 +3616,6 @@ samp {
   .launch-composer-choice {
     grid-template-columns: 1fr;
     gap: 4px;
-  }
-
-  .launch-composer-backdrop .create-session-form label.launch-composer-folder {
-    grid-template-columns: 1fr auto;
-    gap: 4px 8px;
-  }
-
-  .launch-composer-backdrop .create-session-form .launch-composer-folder-options {
-    grid-column: 1 / -1;
-  }
-
-  .launch-composer-backdrop .create-session-form .launch-composer-folder > input {
-    grid-column: 1 / -1;
   }
 
   .launch-composer-choice-error,
