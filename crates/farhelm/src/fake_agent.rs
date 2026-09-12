@@ -158,6 +158,24 @@ pub enum Script {
     ///
     /// See [`agent_relay`] for the markers and the stdin grammar.
     AgentRelay,
+    /// Numbered records scrolled inside a DECSTBM scroll region, with a
+    /// few rows of static banner text held above it — the fixture for
+    /// `terminal-scroll-freeze.spec.ts`'s DECSTBM shapes (see
+    /// [`flood_region`]'s own docs for the exact escape sequences and why
+    /// a scroll region matters: `Flood`/`FloodGated` above never establish
+    /// one, since they scroll the WHOLE screen). Gated on one input byte
+    /// like [`Script::FloodGated`], for the identical reason: the e2e
+    /// suite needs a producer it can start at a moment of its own
+    /// choosing rather than racing an already-running burst.
+    ///
+    /// Paced, not full-speed: unlike `Flood`'s "faster than every
+    /// consumer" design (whose whole point is tripping the byte-based
+    /// watermark), this fixture exists to let a test scroll the viewport
+    /// back at a KNOWN moment relative to how much scrollback exists yet
+    /// — genuinely racing an unpaced full-speed burst against the test's
+    /// own scroll action would make "not yet at the scrollback floor"
+    /// undependable on a fast host.
+    FloodRegion,
     /// Echoes one rc-file-sourced environment variable
     /// ([`RC_MARKER_VAR`]) at startup, then behaves like [`Script::Basic`].
     ///
@@ -203,7 +221,18 @@ pub const RESUME_ENV_VAR: &str = "FARHELM_FAKE_AGENT_RESUME";
 /// environment, and because several harnesses run concurrently and would
 /// otherwise share one tree. `None` is every other script, which writes no
 /// records at all.
-pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+///
+/// `sync_output` is read only by [`Script::FloodRegion`] (every other
+/// script ignores it, the same tolerance `record_home` gets): it wraps
+/// each emitted chunk in DEC private mode 2026's synchronized-output
+/// bracket (`ESC[?2026h` ... `ESC[?2026l`), for the e2e shape that pins
+/// that a scrolled-back viewport stays honest while xterm.js buffers
+/// refreshes inside a bracket and repaints in full when it closes.
+pub fn run(
+    script: Script,
+    record_home: Option<std::path::PathBuf>,
+    sync_output: bool,
+) -> anyhow::Result<()> {
     match script {
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
@@ -213,6 +242,7 @@ pub fn run(script: Script, record_home: Option<std::path::PathBuf>) -> anyhow::R
         Script::FloodMemory => flood_memory(),
         Script::FloodMemoryProducer => flood_memory_producer(),
         Script::Counter => counter(),
+        Script::FloodRegion => flood_region(sync_output),
         Script::Hexecho => hexecho(),
         Script::MouseModes => mouse_modes(),
         Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
@@ -1470,6 +1500,182 @@ fn flood_gated() -> anyhow::Result<()> {
     std::io::stdin().lock().read_exact(&mut gate)?;
 
     emit_flood_records(&mut out, "FLOOD-DONE")?;
+
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(())
+}
+
+/// How many plain, full-screen lines [`flood_region`] emits BEFORE it ever
+/// sets a scroll region — real, ordinary scrollback that a test can later
+/// scroll back into. See `flood_region`'s own docs for why this phase is
+/// load-bearing rather than throat-clearing: a DECSTBM region whose top is
+/// below row 1 does not feed the terminal's scrollback AT ALL (verified
+/// directly against the vendored xterm.js bundle — writes confined to such
+/// a region left `buffer.active.baseY` at 0 no matter how much was
+/// written), so without this phase there would be nothing to scroll back
+/// into once the region is active.
+const REGION_PRE_RECORDS: u64 = 300;
+
+/// How many `REGION-` records [`flood_region`] emits, inside its scroll
+/// region, before its `REGION-DONE` marker. Deliberately far smaller than
+/// [`FLOOD_RECORDS`]: this fixture paces itself (see `flood_region`'s own
+/// docs), so its volume only has to outlast an e2e test's worst-case
+/// budget for scrolling the viewport back into the PRE-region scrollback
+/// and observing it, not saturate any byte-based bound. At
+/// [`REGION_PACE`] (2ms), 20,000 records is ~40s of phase 2 — comfortably
+/// longer than the calling test's settle/scroll/hold budget, so the
+/// producer is still demonstrably running (not sitting idle past
+/// `REGION-DONE`) for the whole observation window; the caller asserts
+/// that premise directly rather than assuming it from this margin alone.
+pub const REGION_RECORDS: u64 = 20_000;
+
+/// Per-record pacing for both of `flood_region`'s phases — the same
+/// magnitude as `counter`'s own pacing, chosen for the same reason: slow
+/// enough that a test can reliably observe "not yet finished" at a chosen
+/// moment, fast enough that output visibly keeps moving. The fixture's
+/// total duration is governed by [`REGION_RECORDS`], not by this pace.
+const REGION_PACE: std::time::Duration = std::time::Duration::from_millis(2);
+
+/// How many records `flood_region` emits per synchronized-output bracket
+/// when `sync_output` is set — one `ESC[?2026h` ... `ESC[?2026l` pair per
+/// chunk, standing in for a real TUI's per-redraw synchronized update
+/// rather than one bracket around the whole burst (which would tell the
+/// terminal emulator to defer EVERYTHING until the end, unlike a real
+/// agent's per-frame usage).
+const REGION_SYNC_CHUNK: u64 = 50;
+
+/// Read the pty's current size the way an ioctl-aware full-screen TUI
+/// would, rather than assuming a fixed geometry: the scroll region
+/// `flood_region` sets depends on how many rows actually exist. By the time
+/// this runs, phase 1 has been emitting for its whole duration after the
+/// gate byte, which is what gives the client's resize message time to
+/// land on the pty; the gate itself only marks when the burst may start.
+fn terminal_size() -> anyhow::Result<(u16, u16)> {
+    use std::os::fd::AsRawFd;
+
+    let fd = std::io::stdout().as_raw_fd();
+    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+    // SAFETY: `fd` is stdout's own fd, valid for the process lifetime, and
+    // `size` is a plain-old-data struct `ioctl` fills in completely on
+    // success; zero-initialized so a failed call still leaves it
+    // well-defined.
+    if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut size) } != 0 {
+        anyhow::bail!("TIOCGWINSZ failed: {}", std::io::Error::last_os_error());
+    }
+    Ok((size.ws_row, size.ws_col))
+}
+
+/// Build ordinary scrollback, THEN hold a few rows of static banner text
+/// above a DECSTBM scroll region and scroll paced, numbered records inside
+/// that region only — the fixture behind `terminal-scroll-freeze.spec.ts`'s
+/// DECSTBM shapes (see that file's header for what those shapes probe).
+///
+/// Two phases, and the ORDER is the whole point:
+///
+/// 1. [`REGION_PRE_RECORDS`] plain, paced, full-screen lines — real
+///    scrollback a test can later scroll back into. A DECSTBM region
+///    whose top sits below row 1 (as this fixture's does, to leave room
+///    for a static banner) does not feed the terminal's scrollback at
+///    all; that is standard terminal-emulator behavior, confirmed directly
+///    against the vendored xterm.js bundle while building this fixture
+///    (writing thousands of lines confined to such a region left
+///    `buffer.active.baseY` at exactly 0). Without this phase there would
+///    be nothing behind the region to scroll into, which is why an
+///    earlier version of this fixture (region output only, no
+///    pre-history) could not be used the way the e2e spec needs it.
+/// 2. The banner, the DECSTBM region, and [`REGION_RECORDS`] paced records
+///    scrolling only inside it — a plain [`flood`]/[`flood_gated`] burst
+///    scrolls the WHOLE screen, which does not exercise a scroll region at
+///    all. The scenario this reproduces is a real one: a TUI that prints
+///    ordinary scrolling output and only later switches on a fixed
+///    header/footer margin (many status-line agents and monitors do
+///    exactly this) leaves a user's PRE-existing scrollback visible while
+///    fresh region-confined output keeps arriving live underneath a
+///    protected band — precisely what an e2e test scrolling back mid-burst
+///    needs to exist at all.
+///
+/// Gated the same way [`flood_gated`] is (see its own docs for why): the
+/// e2e suite needs to control exactly when the burst starts, after its own
+/// instrumentation is installed and the pty is sized. `sync_output` wraps
+/// each [`REGION_SYNC_CHUNK`]-record chunk of PHASE 2 in DEC private mode
+/// 2026's synchronized-output bracket, standing in for a real TUI's
+/// per-frame usage of that mode. Phase 1 is never bracketed: it exists
+/// only to seed scrollback, not to exercise synchronized output.
+fn flood_region(sync_output: bool) -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    // Same reasoning as `flood_gated`'s own docs: raw mode must already be
+    // in effect before the ready marker, or the pty's canonical line
+    // discipline could hold the test's single gate byte hostage.
+    set_raw_mode()?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    let mut gate = [0u8; 1];
+    std::io::stdin().lock().read_exact(&mut gate)?;
+
+    // Phase 1: plain, paced, full-screen scrolling — see this function's
+    // own docs for why real scrollback must exist BEFORE the region is
+    // ever established.
+    for sequence in 0..REGION_PRE_RECORDS {
+        writeln!(out, "PRE-{sequence:06}\r")?;
+        out.flush()?;
+        std::thread::sleep(REGION_PACE);
+    }
+
+    let (rows, _cols) = terminal_size()?;
+    // Four fixed banner rows, then everything from row 5 to the bottom of
+    // the pane scrolls. `BANNER_ROWS` is arbitrary, small enough to leave a
+    // real scroll region on any terminal size an e2e caller here uses; a
+    // pane shorter than that would make the "fixed" and "scrolling" regions
+    // overlap, which no e2e caller here provokes (the suite's terminals
+    // are sized comfortably larger).
+    const BANNER_ROWS: u16 = 4;
+    let region_top = BANNER_ROWS + 1;
+    let region_bottom = rows.max(region_top + 1);
+
+    // Cursor home, then the banner text. With the cursor on row 1 and no
+    // scroll region yet, these lines overwrite the top rows of whatever
+    // phase 1 left on screen in place (each banner line is longer than any
+    // `PRE-` record, so nothing of the old row shows through) and leave
+    // the cursor on the row below the banner. Nothing scrolls here: no
+    // line feed reaches the bottom row, so `baseY` does not move.
+    write!(out, "\x1b[H")?;
+    for i in 1..=BANNER_ROWS {
+        writeln!(out, "REGION-BANNER-{i}\r")?;
+    }
+
+    // DECSTBM: rows outside [region_top, region_bottom] no longer scroll
+    // at all. Explicitly re-home the cursor into the region's top-left
+    // afterward rather than relying on the exact DECSTBM cursor-placement
+    // rule, which differs by origin-mode state this fixture never touches.
+    write!(out, "\x1b[{region_top};{region_bottom}r")?;
+    write!(out, "\x1b[{region_top};1H")?;
+    out.flush()?;
+
+    // Phase 2: paced records confined to the region.
+    let mut chunk = 0_u64;
+    for sequence in 0..REGION_RECORDS {
+        if sync_output && chunk == 0 {
+            write!(out, "\x1b[?2026h")?;
+        }
+        writeln!(out, "REGION-{sequence:06}\r")?;
+        chunk += 1;
+        if sync_output && chunk == REGION_SYNC_CHUNK {
+            write!(out, "\x1b[?2026l")?;
+        }
+        out.flush()?;
+        std::thread::sleep(REGION_PACE);
+        if sync_output && chunk == REGION_SYNC_CHUNK {
+            chunk = 0;
+        }
+    }
+    if sync_output && chunk != 0 {
+        write!(out, "\x1b[?2026l")?;
+        out.flush()?;
+    }
+    writeln!(out, "REGION-DONE\r")?;
+    out.flush()?;
 
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;

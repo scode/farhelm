@@ -19,12 +19,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Investigate and fix scrolling backward becoming unreliable while an agent is actively emitting output. Frequently, the
-  terminal appears split somewhere around the middle: the upper portion freezes while the lower portion keeps scrolling
-  upward as new output arrives. Scrolling up does not restore normal behavior; after output stops, scrolling eventually
-  recovers on its own. This is an approximate report without precise reproduction steps or an established cause. Capture
-  the behavior during sustained output and after it stops, and identify why the viewport stops scrolling coherently.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly

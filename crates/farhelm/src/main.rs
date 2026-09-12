@@ -439,6 +439,12 @@ enum InternalCmd {
         /// own tree. Ignored by every other script.
         #[arg(long)]
         record_home: Option<PathBuf>,
+        /// Bracket each chunk of [`fake_agent::Script::FloodRegion`]'s
+        /// scrolled records in DEC private mode 2026's synchronized-output
+        /// sequences. Ignored by every other script, the same tolerance
+        /// `record_home` gets.
+        #[arg(long)]
+        sync_output: bool,
         /// Whatever the supervisor appends for the real vendor after the
         /// fixture's own flags — the per-launch hook flags, or anything a
         /// test's resume template places there. Every script tolerates the
@@ -878,13 +884,14 @@ fn main() -> anyhow::Result<()> {
             InternalCmd::FakeAgent {
                 script,
                 record_home,
+                sync_output,
                 // The fake agent does not need to understand the injected
                 // tail — it only has to survive parsing it. The record
                 // scripts read the same strings straight from
                 // `std::env::args()` for their `FAKE-AGENT ARGV:` marker,
                 // so nothing is passed through here.
                 extra: _,
-            } => fake_agent::run(script, record_home),
+            } => fake_agent::run(script, record_home, sync_output),
             InternalCmd::SweepTestState => {
                 let outcome = farhelm_teststate::sweep(
                     std::path::Path::new(farhelm_teststate::TMP_ROOT),
@@ -2059,6 +2066,7 @@ mod tests {
                     script,
                     record_home,
                     extra,
+                    ..
                 },
         } = cli.command
         else {
@@ -2070,6 +2078,78 @@ mod tests {
             Some(std::path::PathBuf::from("/tmp/fake-agent-home"))
         );
         assert_eq!(extra, vec!["--settings", "{}"]);
+    }
+
+    /// Pins the `--sync-output` flag (`fake_agent::Script::FloodRegion`):
+    /// that it parses to `true` when given, defaults to `false` when
+    /// omitted, and — like `--record-home` — is accepted regardless of
+    /// which script it accompanies, since every other script is
+    /// documented to ignore it rather than reject it.
+    #[farhelm_testtrace::test]
+    fn internal_fake_agent_sync_output_flag_parses_and_defaults_false() {
+        let with_flag = Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "fake-agent",
+            "--script",
+            "flood-region",
+            "--sync-output",
+        ])
+        .unwrap();
+        let Cmd::Internal {
+            command:
+                InternalCmd::FakeAgent {
+                    script,
+                    sync_output,
+                    ..
+                },
+        } = with_flag.command
+        else {
+            panic!("expected InternalCmd::FakeAgent");
+        };
+        assert!(matches!(script, fake_agent::Script::FloodRegion));
+        assert!(sync_output);
+
+        let without_flag = Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "fake-agent",
+            "--script",
+            "flood-region",
+        ])
+        .unwrap();
+        let Cmd::Internal {
+            command: InternalCmd::FakeAgent { sync_output, .. },
+        } = without_flag.command
+        else {
+            panic!("expected InternalCmd::FakeAgent");
+        };
+        assert!(!sync_output);
+
+        // The "accepted regardless of script" half of the contract: a
+        // script that ignores the flag must still parse with it present.
+        let other_script = Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "fake-agent",
+            "--script",
+            "counter",
+            "--sync-output",
+        ])
+        .unwrap();
+        let Cmd::Internal {
+            command:
+                InternalCmd::FakeAgent {
+                    script,
+                    sync_output,
+                    ..
+                },
+        } = other_script.command
+        else {
+            panic!("expected InternalCmd::FakeAgent");
+        };
+        assert!(matches!(script, fake_agent::Script::Counter));
+        assert!(sync_output);
     }
 
     // ---------------------------------------------------------------
