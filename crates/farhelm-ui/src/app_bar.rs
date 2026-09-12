@@ -96,6 +96,17 @@ fn focus_profiles_toggle() {
 /// commit already dispatched over the bridge can outlive its Rust future;
 /// checking this veto before focus prevents that commit from undoing the
 /// pointer event that just arrived. Each opening owns a different node.
+///
+/// A focus-out from a DISABLED control is not reported at all. Disabling the
+/// focused control (every popup button binds `disabled` to the operation
+/// lock) drops focus to `body` as a side effect of the product's own
+/// re-render, not as a user choice — but the resulting event is
+/// indistinguishable from a real move except by the target's disabled
+/// state, and only at dispatch time. Reporting it lets the dismissal
+/// classifier race save completion: if it samples `body` after the lock
+/// releases but before completion focus commits, the popup closes over a
+/// save the user never asked to dismiss. A control that was already
+/// disabled cannot hold focus, so any such event IS a disable-blur.
 fn install_profiles_outside_intent_tracking() {
     document::eval(
         "if (!window.__farhelmProfilesOutsideIntentTracking) { \
@@ -145,6 +156,7 @@ fn install_profiles_outside_intent_tracking() {
              document.addEventListener('focusout', (event) => { \
                  const popup = document.querySelector('.profiles-popover'); \
                  if (!popup || !event.composedPath().includes(popup)) return; \
+                 if (event.target instanceof Element && event.target.disabled) return; \
                  if (pointerPopup === popup) { pointerPopup = null; return; } \
                  const intent = tabIntent; \
                  if (intent?.popup === popup) { \

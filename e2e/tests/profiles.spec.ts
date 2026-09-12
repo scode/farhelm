@@ -218,8 +218,40 @@ async function openProfileEditor(row: Locator): Promise<Locator> {
   return form;
 }
 
-/** Close the popup with the same app-bar toggle that opened it. */
+/**
+ * Close the popup with the same app-bar toggle that opened it.
+ *
+ * The toggle is a closer only while the popup is open: clicking it on an
+ * already-dismissed popup reopens it, and the unmount wait below then fails
+ * with the popup mounted — the same visible shape as a close the product
+ * swallowed. The open premise and the pre-click receipts exist to tell those
+ * two apart. The disabled readout is the operation lock as the toggle sees
+ * it: a click dispatched into a busy window returns without closing, and
+ * nothing retries it.
+ */
 async function closeProfiles(page: Page) {
+  await expect(section(page), "closeProfiles closes an open popup; a dismissed one would reopen")
+    .toBeVisible({ timeout: 20_000 });
+  const before = await page.evaluate(() => {
+    const toggle = document.querySelector(".profiles-toggle");
+    const active = document.activeElement;
+    const focus = active
+      ? active.tagName.toLowerCase()
+        + (typeof active.className === "string" && active.className
+          ? `.${active.className.trim().split(/\s+/).join(".")}`
+          : "")
+      : "none";
+    return {
+      popovers: document.querySelectorAll(".profiles-popover").length,
+      toggleDisabled: toggle instanceof HTMLButtonElement ? toggle.disabled : "missing",
+      focus,
+    };
+  });
+  recordPage(page, "profiles-close-click", [
+    ["popovers", before.popovers],
+    ["toggle-disabled", before.toggleDisabled],
+    ["focus", before.focus],
+  ]);
   await page.locator(".profiles-toggle").click();
   await expect(section(page)).toHaveCount(0, { timeout: 20_000 });
 }
@@ -1919,8 +1951,28 @@ test.describe("agent profiles", () => {
     const form = await openNewProfile(page);
     await form.locator(".profile-name-input").fill(name);
     await form.locator(".profile-invocation-input").fill(FAKE_AGENT);
-    await form.locator(".profile-save").click();
+    const [saveResponse] = await Promise.all([
+      page.waitForResponse(
+        (reply) => reply.request().method() === "POST" && reply.url().endsWith("/api/profiles"),
+      ),
+      form.locator(".profile-save").click(),
+    ]);
+    recordPage(page, "profile-save-response", [["status", saveResponse.status()]]);
     const profile = await registerByName(request, name);
+    // The helm registering the profile does not prove this client's editor
+    // settled: the save completion (form unmount, row absorb, lock release)
+    // lands after the POST does, and the toggle close below is only
+    // meaningful once it has. Chromium once left the popup mounted here
+    // with the profile registered: the save's own disable-blur dismissed
+    // the popup mid-completion, and the toggle click reopened it. The
+    // product no longer reports disable-blur as outside intent; these
+    // waits stay because registration still does not prove settlement.
+    await expect(form, "the save must unmount the editor before the popup closes")
+      .toHaveCount(0, { timeout: 20_000 });
+    await expect(
+      profileRow(page, profile.id),
+      "the saved row must render before the popup closes",
+    ).toBeVisible({ timeout: 20_000 });
     await closeProfiles(page);
 
     await openCreateDialog(page);
@@ -1930,6 +1982,47 @@ test.describe("agent profiles", () => {
     await expect(page.locator(`.create-session-profile option[value="${profile.id}"]`))
       .toHaveCount(1);
     await expect(page.locator(".create-session-profile")).toHaveValue(profile.id);
+  });
+
+  /**
+   * Disabling the focused control must not dismiss the popup.
+   *
+   * Every popup button binds `disabled` to the operation lock, so saving
+   * drops the focused save button's focus to `body` as a side effect of
+   * the product's own re-render. That disable-blur is not a user choice,
+   * but the focusout listener used to report it as ordinary outside
+   * intent — and if the dismissal classifier sampled `body` at the wrong
+   * moment, the popup closed over a save the user never asked to dismiss.
+   * This pins the discriminator directly: a focused control disabled by
+   * script must leave the popup mounted past the whole classifier window.
+   */
+  test("disabling the focused save control does not dismiss the popup", async ({ page }) => {
+    await listWithStubbedFeed(page);
+    await openProfiles(page);
+    await openNewProfile(page);
+    // Focus and disable atomically: the blur must fire from a control
+    // that held focus while enabled, exactly as the lock's re-render
+    // does it — two separate steps could interleave a product focus
+    // move and test nothing.
+    await page.evaluate(() => {
+      const button = document.querySelector(".profile-save");
+      if (!(button instanceof HTMLButtonElement)) throw new Error("no save button to disable");
+      button.focus();
+      button.disabled = true;
+    });
+    // sleep-ok: deliberate observation window. Pre-fix, the disable-blur
+    // records an outside obligation the idle classifier verdicts within
+    // its 370ms deadline (FOCUS_SETTLE_MS + FOCUS_TRANSIT_GRACE_MS), so
+    // three mounted seconds prove the discriminator holds with wide
+    // margin; the wait fails (by timeout) if the popup ever unmounts.
+    await page.waitForFunction(
+      ([started, budget]: [number, number]) =>
+        Date.now() - started > budget &&
+        document.querySelectorAll(".profiles-popover").length === 1,
+      [Date.now(), 3_000],
+      { timeout: 10_000 },
+    );
+    await expect(section(page)).toHaveCount(1);
   });
 
   /** Profiles are managed from the app bar, so no host row may advertise a

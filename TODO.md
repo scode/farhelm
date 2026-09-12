@@ -79,12 +79,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   spec's name-field label, so this reads as the same WebKit initial-focus family recorded above rather than a composer
   regression, but that attribution is not established. Retain focus-event traces before changing the test.
 
-- Investigate the separate popup-close observation in `a popup-created profile is offered on every host`, in
-  `e2e/tests/profiles.spec.ts`. Chromium run `45efb275-84b9-4aab-9dd2-550fd45d4e7a` successfully registered the saved
-  profile, then the toggle click in `closeProfiles` left the popup mounted. This occurs before the create picker opens
-  and differs from the older editor-fill race recorded below. Retain save-response, busy-state and pointer/focus
-  receipts before deciding why the close was lost; a registered profile alone does not prove the editor has settled.
-
 - Investigate the retained host-action fixture failures from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`.
   WebKit's `aliasing a remote host renames it everywhere but the details view`, in `e2e/tests/sidebar.spec.ts`, tried to
   read a disposed `route.fetch` response and also failed teardown.
