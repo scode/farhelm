@@ -1776,20 +1776,25 @@ pub(super) fn CreateSessionForm(
             )
         }
     });
-    // Peer-owned values remain separate directional runs. A single formatted
-    // summary lets a strong RTL host, folder, or model reorder neighboring
-    // punctuation and make a destination read as something it is not.
-    let summary_harness = structured_harness()
-        .map(|harness| format!("{harness:?}"))
-        .unwrap_or_else(|| "choose a harness".to_string());
+    // Peer-owned values remain separate directional runs. The launch context
+    // isolates its host and folder, while the summary isolates its model, so a
+    // strong RTL value cannot reorder the punctuation around another value.
+    //
+    // The harness is named only on the structured surface. Switching to
+    // "other / command" deliberately keeps the structured draft (so a trip
+    // through Other and back loses nothing), but a legacy launch runs the
+    // chosen profile or command, never that harness — so the button must not
+    // promise "Codex" while the click would launch something else.
+    let launch_harness = if *creation_surface.read() == CreationSurface::Structured {
+        structured_harness().map(|harness| format!("{harness:?}"))
+    } else {
+        None
+    };
     let summary_folder = display_peer(&cwd());
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
         .unwrap_or_else(|| "default".to_string());
     let summary_effort = structured_effort().map(effort_value).unwrap_or("default");
-    let summary_permissions = structured_permissions()
-        .map(|permission| format!("{permission:?}"))
-        .unwrap_or_else(|| "default".to_string());
     let catalog_for_submit = catalog_models.clone();
     let catalog_for_harness = catalog_models.clone();
     let catalog_for_search = catalog_models.clone();
@@ -2231,9 +2236,61 @@ pub(super) fn CreateSessionForm(
                     }
                 });
             },
-            if *creation_surface.read() == CreationSurface::Structured {
-                div { class: "launch-composer-header",
-                    h2 { "New session" }
+            div { class: "launch-composer-topbar",
+                span { class: "launch-composer-eyebrow", "new session" }
+            }
+            // Launch leads because reaching it was the maintainer's complaint:
+            // it now says exactly which harness and destination it will use.
+            // Name is optional context rather than an action, so its two
+            // surface-specific placements live with their destination fields
+            // below; exactly one copy is mounted at a time.
+            div { class: "launch-composer-actions",
+                button {
+                    r#type: "submit",
+                    class: "btn btn-primary create-session-submit",
+                    // `blocked` as well as this form's own flag: a create must
+                    // not overlap a host mutation (see `ListView`'s operation
+                    // gate), and a control that is inert for that window says so
+                    // rather than silently dropping the click.
+                    //
+                    // Inert with no agent selected for a different reason: there
+                    // is nothing to launch, and the handler refuses in words
+                    // anyway (a `disabled` attribute is one render behind, so it
+                    // is the visible half of that rule rather than the guard).
+                    disabled: busy
+                        || !selected_host_available
+                        || !remembered_destination_valid
+                        || (*creation_surface.read() == CreationSurface::Structured
+                            && (structured_harness.read().is_none()
+                                || structured_choice_error.is_some()))
+                        || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
+                    "launch"
+                    " "
+                    span { class: "launch-composer-launch-context",
+                        if let Some(harness) = &launch_harness {
+                            "{harness} · "
+                        }
+                        span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                        " · "
+                        span { class: "peer-value", dir: "ltr", "{summary_folder}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "launch-composer-cancel",
+                    disabled: busy,
+                    onclick: move |_| {
+                        // The disabled attribute updates after this event's
+                        // synchronous submit claim. Recheck the shared lock
+                        // here so a queued Cancel cannot unmount the future
+                        // that owns an already accepted create.
+                        if !ops.busy_now() {
+                            on_cancel.call(());
+                        }
+                    },
+                    "cancel"
+                }
+                if *creation_surface.read() == CreationSurface::Structured {
                     button {
                         r#type: "button",
                         class: "launch-composer-reset",
@@ -2266,96 +2323,20 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
-            // The name field, and launch/cancel, sit on one row directly under
-            // the header (or, on the legacy surface with no header, as the
-            // dialog's very first child) so a launch never requires scrolling
-            // past the destination and agent choices below it — the maintainer's
-            // own complaint was that the composer used to bury this trio at the
-            // bottom of a tall, mostly empty dialog. The name input is the
-            // former "title (optional)" field verbatim (same signal, same
-            // escaped-display/raw-seed model, same `intent_key` invalidation on
-            // edit); only its position and visible label changed. Rendered
-            // identically on both surfaces, unlike the fields below that use
-            // `launch-composer-legacy-hidden` to stay mounted-but-invisible on
-            // the inactive surface — a name has the same meaning and the same
-            // handler regardless of which creation mode is active, so there is
-            // nothing surface-specific to hide.
-            div { class: "launch-composer-actions",
-                label { class: "launch-composer-name",
-                    "name (optional)"
-                    input {
-                        r#type: "text",
-                        autocomplete: "off",
-                        autocorrect: "off",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        // See the working-directory field's own comment below
-                        // (on its `value`): a clone can seed this from a
-                        // peer-supplied title, with the same escaped-display /
-                        // raw-seed model.
-                        dir: "ltr",
-                        value: "{title}",
-                        disabled: busy,
-                        oninput: move |evt| {
-                            if !draft_transition_allowed(ops) {
-                                return;
-                            }
-                            title.set(evt.value());
-                            title_edited.set(true);
-                            // An edit makes the next submit a DIFFERENT
-                            // intent, so the key the last one used stops
-                            // applying here (this component's docs carry the
-                            // full argument for both edges of that rule).
-                            intent_key.set(None);
-                        },
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "launch-composer-cancel",
-                    disabled: busy,
-                    onclick: move |_| {
-                        // The disabled attribute updates after this event's
-                        // synchronous submit claim. Recheck the shared lock
-                        // here so a queued Cancel cannot unmount the future
-                        // that owns an already accepted create.
-                        if !ops.busy_now() {
-                            on_cancel.call(());
-                        }
-                    },
-                    "cancel"
-                }
-                button {
-                    r#type: "submit",
-                    class: "btn btn-primary create-session-submit",
-                // `blocked` as well as this form's own flag: a create must
-                // not overlap a host mutation (see `ListView`'s operation
-                // gate), and a control that is inert for that window says so
-                // rather than silently dropping the click.
-                //
-                // Inert with no agent selected for a different reason: there
-                // is nothing to launch, and the handler refuses in words
-                // anyway (a `disabled` attribute is one render behind, so it
-                // is the visible half of that rule rather than the guard).
-                disabled: busy
-                    || !selected_host_available
-                    || !remembered_destination_valid
-                    || (*creation_surface.read() == CreationSurface::Structured
-                        && (structured_harness.read().is_none()
-                            || structured_choice_error.is_some()))
-                    || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
-                    "launch"
-                }
-            }
             if *creation_surface.read() == CreationSurface::Structured {
                 div { class: "launch-composer-summary", aria_live: "polite",
-                    "{summary_harness} · "
-                    span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
-                    " · folder: "
-                    span { class: "peer-value", dir: "ltr", "{summary_folder}" }
-                    " · model: "
+                    "model: "
                     span { class: "peer-value", dir: "ltr", "{summary_model}" }
-                    " · effort: {summary_effort} · permissions: {summary_permissions}"
+                    " · effort: {summary_effort} · permissions: "
+                    // Matched on the signal, not on display text, and spelled
+                    // out per variant so every permission reads in the same
+                    // lowercase register as "default": a Debug fallback would
+                    // capitalize a future variant next to these.
+                    if structured_permissions() == Some(LaunchPermission::Yolo) {
+                        span { class: "launch-composer-danger", "yolo" }
+                    } else {
+                        "default"
+                    }
                 }
             }
             if *creation_surface.read() == CreationSurface::Structured {
@@ -2987,6 +2968,38 @@ pub(super) fn CreateSessionForm(
                         "browse this path"
                     }
                 }
+                // This is one of two conditional render sites for the same
+                // optional name signal. Keeping only the active surface's
+                // input mounted gives assistive technology one destination
+                // block and preserves the strict label lookup tests rely on.
+                label { class: "launch-composer-name",
+                    "name (optional)"
+                    input {
+                        r#type: "text",
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        // A clone can seed this from a peer-supplied title,
+                        // using the same escaped-display/raw-seed model as
+                        // the working-directory field below.
+                        dir: "ltr",
+                        value: "{title}",
+                        disabled: busy,
+                        oninput: move |evt| {
+                            if !draft_transition_allowed(ops) {
+                                return;
+                            }
+                            title.set(evt.value());
+                            title_edited.set(true);
+                            // An edit makes the next submit a DIFFERENT
+                            // intent, so the key the last one used stops
+                            // applying here (this component's docs carry the
+                            // full argument for both edges of that rule).
+                            intent_key.set(None);
+                        },
+                    }
+                }
                 div { class: "launch-composer-choice launch-composer-harness-choice",
                     span { "harness" }
                     div { class: "launch-composer-options",
@@ -3509,6 +3522,43 @@ pub(super) fn CreateSessionForm(
                     );
                 },
                 "browse this path"
+            }
+            if *creation_surface.read() == CreationSurface::Legacy {
+                // The legacy destination is its working-directory field plus
+                // the browse button above; this mirror mounts the same
+                // optional-name behavior right after them, so both surfaces
+                // read host, folder, browse, name in the same order. The two
+                // sites are surface-guarded so exactly ONE name input exists
+                // in the DOM at a time: a hidden duplicate would double the
+                // accessible form and break strict label lookups, which is
+                // why this is not a `launch-composer-legacy-hidden` twin like
+                // the working-directory and command fields.
+                label { class: "launch-composer-name",
+                    "name (optional)"
+                    input {
+                        r#type: "text",
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        // Same escaped-display / raw-seed model and the same
+                        // per-value directional isolation as the structured
+                        // copy above; see that input's comments.
+                        dir: "ltr",
+                        value: "{title}",
+                        disabled: busy,
+                        oninput: move |evt| {
+                            if !draft_transition_allowed(ops) {
+                                return;
+                            }
+                            title.set(evt.value());
+                            title_edited.set(true);
+                            // An edit is a different intent, so the last
+                            // submit's idempotency key stops applying.
+                            intent_key.set(None);
+                        },
+                    }
+                }
             }
             if let Some(reason) = browse_error.read().clone() {
                 PeerLine {

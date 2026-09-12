@@ -4273,11 +4273,11 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   await expect(form.locator(".launch-composer-selections")).toContainText("Codex");
   await expect(form.locator(".launch-composer-selections")).toContainText("Model: reviewable-codex");
   await expect(form.locator(".launch-composer-summary")).toHaveText(
-    /Codex · .* · .* · model: reviewable-codex · effort: default · permissions: default/,
+    "model: reviewable-codex · effort: default · permissions: default",
   );
   await form.getByRole("button", { name: "remove model reviewable-codex" }).click();
   await expect(form.locator(".launch-composer-summary")).toHaveText(
-    /Codex · .* · .* · model: default · effort: default · permissions: default/,
+    "model: default · effort: default · permissions: default",
   );
 });
 
@@ -4602,12 +4602,12 @@ test("composer keeps a deliberate structured choice through a late catalog", asy
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await expect(form.locator(".launch-composer-summary")).toContainText("Codex");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Codex");
   await catalogRequest;
   release!();
   await catalogReply;
   await expect(form.getByRole("button", { name: "late-codex-sentinel", exact: true }), "the sentinel proves the held catalog reply reached the mounted picker").toBeVisible();
-  await expect(form.locator(".launch-composer-summary")).toContainText("Codex ·");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Codex ·");
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Codex$/ })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -4827,7 +4827,8 @@ test("composer escapes a restored custom model while submitting its raw bytes", 
 });
 
 /**
- * Strong RTL values exercise the summary's three independent peer runs.
+ * Strong RTL values exercise the launch context's destination runs and the
+ * summary's separate model run.
  *
  * This is deliberately a controlled hosts reply rather than whatever the
  * fixture helm happens to call its local machine. The test runs a restored
@@ -4854,13 +4855,15 @@ test("composer isolates strong RTL destination and model summary values", async 
   await page.goto("/"); const form = page.locator(".create-session-form"); await page.locator(".new-session-button").click();
   await form.getByLabel("folder", { exact: true }).fill(folder);
   await form.locator(".launch-composer-recent-slots").getByRole("button").first().click();
-  const peers = form.locator(".launch-composer-summary .peer-value");
-  await expect(peers).toHaveCount(3);
-  for (const [index, value] of [host, folder, model].entries()) {
-    await expect(peers.nth(index)).toHaveText(value);
-    await expect(peers.nth(index)).toHaveAttribute("dir", "ltr");
-    await expect(peers.nth(index)).toHaveCSS("unicode-bidi", "isolate");
-    await expect(peers.nth(index)).toHaveCSS("direction", "ltr");
+  const destinationPeers = form.locator(".launch-composer-launch-context .peer-value");
+  await expect(destinationPeers).toHaveCount(2);
+  const modelPeer = form.locator(".launch-composer-summary .peer-value");
+  await expect(modelPeer).toHaveCount(1);
+  for (const [peer, value] of [[destinationPeers.nth(0), host], [destinationPeers.nth(1), folder], [modelPeer, model]] as const) {
+    await expect(peer).toHaveText(value);
+    await expect(peer).toHaveAttribute("dir", "ltr");
+    await expect(peer).toHaveCSS("unicode-bidi", "isolate");
+    await expect(peer).toHaveCSS("direction", "ltr");
   }
 });
 
@@ -4886,8 +4889,9 @@ test("composer local-home reset takes over a remote open destination", async ({ 
     await expect(hostSelect).toHaveValue(String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
     const localName = hosts.hosts.find((host: { id: number }) => host.id === local).name;
-    await expect(form.locator(".launch-composer-summary .peer-value").nth(0)).toHaveText(localName);
-    await expect(form.locator(".launch-composer-summary .peer-value").nth(1)).toHaveText("~");
+    const destinationPeers = form.locator(".launch-composer-launch-context .peer-value");
+    await expect(destinationPeers.nth(0)).toHaveText(localName);
+    await expect(destinationPeers.nth(1)).toHaveText("~");
     await form.getByRole("button", { name: "Codex", exact: true }).click(); await form.locator("button[type=submit]").click();
     await expect.poll(() => posts.length).toBe(1); expect(posts[0]).toMatchObject({ host: local, cwd: "~" });
   } finally { await cleanupSession(request, session.id); }
@@ -4953,17 +4957,17 @@ test("composer local-home reset takes over a remote clone destination", async ({
     await expect(hostSelect, "the clone's remote host must be selected before reset").toHaveValue(String(remote.id));
     const folder = form.locator('input[aria-label="folder"]');
     await expect(folder, "the clone must carry its source folder").toHaveValue(cwd);
-    const summaryPeers = form.locator(".launch-composer-summary .peer-value");
-    await expect(summaryPeers).toHaveCount(3);
-    await expect(summaryPeers.nth(0)).toHaveText(remote.name);
-    await expect(summaryPeers.nth(1)).toHaveText(cwd);
+    const destinationPeers = form.locator(".launch-composer-launch-context .peer-value");
+    await expect(destinationPeers).toHaveCount(2);
+    await expect(destinationPeers.nth(0)).toHaveText(remote.name);
+    await expect(destinationPeers.nth(1)).toHaveText(cwd);
     const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ });
     await expect(codex, "the structured clone retains its inherited harness before reset").toHaveAttribute("aria-pressed", "true");
     await form.getByRole("button", { name: "reset destination to local home" }).click();
     await expect(hostSelect).toHaveValue(String(local));
     await expect(folder).toHaveValue("~");
-    await expect(summaryPeers.nth(0)).toHaveText(hosts.hosts.find((host: { id: number }) => host.id === local).name);
-    await expect(summaryPeers.nth(1)).toHaveText("~");
+    await expect(destinationPeers.nth(0)).toHaveText(hosts.hosts.find((host: { id: number }) => host.id === local).name);
+    await expect(destinationPeers.nth(1)).toHaveText("~");
     await expect(codex, "reset destination must not discard the inherited harness").toHaveAttribute("aria-pressed", "true");
     await expect(form).toHaveAttribute("data-clone-form-identity", "owned");
     await form.locator("button[type=submit]").click();
@@ -5367,7 +5371,9 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(custom).toHaveValue("");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-summary")).toContainText("Claude · this machine · folder: /composer-reset · model: default · effort: high · permissions: Yolo");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
+  await expect(form.locator(".launch-composer-summary .launch-composer-danger")).toHaveText("yolo");
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await refill();
   // Keep Codex selected while choosing its low-only catalog model. That
@@ -5389,8 +5395,8 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator("select.create-session-host")).toHaveValue("1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
-  await expect(form.locator(".launch-composer-summary .peer-value").nth(0)).toHaveText("this machine");
-  await expect(form.locator(".launch-composer-summary .peer-value").nth(1)).toHaveText("/composer-reset");
+  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
+  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
   await expect(form.locator(".launch-composer-selections")).toContainText("fixture-codex-low-only");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /low$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
@@ -5414,7 +5420,8 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-selections")).not.toContainText("Model:");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-summary")).toContainText("Claude · this machine · folder: /composer-reset · model: default · effort: high · permissions: Yolo");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
 
   await refill();
   await expect(status).toHaveCount(0);
@@ -5424,7 +5431,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(custom).toHaveValue("");
   await expect(form.locator(".launch-composer-selections")).not.toContainText("Effort:");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-summary")).toContainText("model: default · effort: default · permissions: Yolo");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo");
 
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
@@ -5450,8 +5457,8 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator("select.create-session-host")).toHaveValue("1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
-  await expect(form.locator(".launch-composer-summary .peer-value").nth(0)).toHaveText("this machine");
-  await expect(form.locator(".launch-composer-summary .peer-value").nth(1)).toHaveText("/composer-reset");
+  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
+  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
   await expect(custom).toHaveValue("restored-custom");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
@@ -5519,10 +5526,9 @@ test("composer search keeps active results visible and focus contained", async (
  * directions so `preventScroll` cannot quietly turn containment into an
  * invisible focus ring again.
  *
- * The action row's move to the top of the dialog changed WHICH control is
- * first and last: "reset choices" is now the first focusable node (nothing
- * above the header is focusable), and Launch is no longer last — it now sits
- * near the top alongside the name field and Cancel. The last node is instead
+ * The action row leads the dialog, so Launch is now the first focusable node
+ * once its harness choice enables it. Reset remains at the end of that row,
+ * while name belongs later in the destination block. The last node is instead
  * whatever the trap's own query finds last in DOM order among the visible
  * structured controls (a choice button or the browse button, depending on
  * fixture shape), so this test finds it the same way `install_composer_focus_
@@ -5552,7 +5558,7 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const reset = form.getByRole("button", { name: "reset choices", exact: true });
+  const launch = form.getByRole("button", { name: /^launch\b/ });
   await form.getByLabel("folder", { exact: true }).fill(long);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-recent-slots > button"), "the controlled history must make the composer scrollable").toHaveCount(3);
@@ -5580,19 +5586,19 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
   await expect(last).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(reset).toBeFocused();
-  await expect.poll(() => intersectsViewport(reset), {
-    message: "Tab wrapping from the last control must reveal reset choices in the composer viewport",
+  await expect(launch).toBeFocused();
+  await expect.poll(() => intersectsViewport(launch), {
+    message: "Tab wrapping from the last control must reveal Launch in the composer viewport",
   }).toBe(true);
 
-  await reset.focus();
+  await launch.focus();
   await form.evaluate((node) => { node.scrollTop = 0; });
   await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
-  await expect(reset).toBeFocused();
+  await expect(launch).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(last).toBeFocused();
   await expect.poll(() => intersectsViewport(last), {
-    message: "Shift+Tab wrapping from reset choices must reveal the last control in the composer viewport",
+    message: "Shift+Tab wrapping from Launch must reveal the last control in the composer viewport",
   }).toBe(true);
 });
 
@@ -5648,6 +5654,7 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
     form.getByLabel("folder", { exact: true }),
     form.getByRole("button", { name: folder, exact: true }),
     browseButton,
+    form.getByLabel("name (optional)", { exact: true }),
     harnessChoice,
   ];
   await expect(search).toHaveAttribute("aria-expanded", "false");
@@ -5664,16 +5671,13 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   await harnessChoice.click();
   await search.focus();
   await expect(search).toBeFocused();
-  // The action row and the header now sit ABOVE search in DOM order, so
-  // reverse traversal from search reaches them before anything this test
-  // used to start from. Pin that leading segment explicitly: launch, then
-  // cancel, then the name field, then reset choices — the header's only
-  // other focusable control, and the true first node in the dialog.
+  // The action row sits above search in DOM order. Reverse traversal therefore
+  // reaches its trailing Reset, then Cancel, then Launch; name belongs after
+  // the folder block and is covered by the forward destination sequence.
   const reverseLeadingControls = [
-    form.getByRole("button", { name: "launch", exact: true }),
-    form.getByRole("button", { name: "cancel", exact: true }),
-    form.getByLabel("name (optional)", { exact: true }),
     form.getByRole("button", { name: "reset choices", exact: true }),
+    form.getByRole("button", { name: "cancel", exact: true }),
+    form.getByRole("button", { name: /^launch\b/ }),
   ];
   for (const control of reverseLeadingControls) {
     await page.keyboard.press("Shift+Tab");
@@ -5754,6 +5758,49 @@ test("composer name field reaches the create request; an empty name sends none",
 });
 
 /**
+ * The leading action must say where it will launch before any choice is made:
+ * Launch's own label carries the host and folder (as isolated peer runs) and,
+ * once chosen, the harness, so the top row answers "what will this do" for a
+ * sighted reader and for a screen reader alike. The keyboard half pins that
+ * Launch is the first control: Shift+Tab from Cancel lands on it.
+ *
+ * The host and folder are read from the form first and asserted non-empty so
+ * a substring check cannot pass vacuously against an unrendered option or an
+ * unseeded folder field.
+ */
+test("composer launch button names the chosen harness, host, and folder", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const launch = form.getByRole("button", { name: /^launch\b/ });
+  const context = form.locator(".launch-composer-launch-context");
+  const peers = context.locator(".peer-value");
+  const host = await form.getByRole("combobox", { name: "host", exact: true }).locator("option:checked").textContent();
+  const folder = await form.getByLabel("folder", { exact: true }).inputValue();
+  expect(host, "the host select must show a selected option before the label is checked").toBeTruthy();
+  expect(folder, "the folder field must be seeded before the label is checked").not.toBe("");
+
+  await expect(launch).toHaveAccessibleName(/^launch\b/);
+  await expect(peers).toHaveCount(2);
+  await expect(peers.nth(0)).toHaveText(host!.trim());
+  await expect(peers.nth(1)).toHaveText(folder);
+  await expect(context, "no harness is named before one is chosen").not.toHaveText(/^Codex ·/);
+  await form.getByRole("button", { name: "Codex", exact: true }).click();
+  await expect(context).toHaveText(/^Codex ·/);
+  await expect(peers.nth(0)).toHaveText(host!.trim());
+  await expect(peers.nth(1)).toHaveText(folder);
+
+  // A disabled submit is skipped by native Tab, so the reverse step below
+  // only proves Launch is first once the Codex pick has enabled it.
+  await expect(launch).toBeEnabled();
+  const cancel = form.getByRole("button", { name: "cancel", exact: true });
+  await cancel.focus();
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(launch).toBeFocused();
+});
+
+/**
  * Launching used to require scrolling past a tall, mostly empty dialog. Both
  * controls must now sit inside the dialog's own initial viewport — the
  * maintainer's exact complaint — at the ordinary desktop viewport and at the
@@ -5769,7 +5816,7 @@ test("composer keeps launch and cancel inside the initial viewport at default an
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible({ timeout: 20_000 });
-    const launch = form.getByRole("button", { name: "launch", exact: true });
+    const launch = form.getByRole("button", { name: /^launch\b/ });
     const cancel = form.getByRole("button", { name: "cancel", exact: true });
     await expect(launch).toBeVisible();
     expect(

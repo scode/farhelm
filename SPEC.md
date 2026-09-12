@@ -219,9 +219,10 @@ the terminal of an already-running agent requires reliably detecting that it is 
 problem as status detection; that route is only for agents without the argv affordance. Either way it is an additive
 change (an optional field on create/spawn), which is why v1 can skip it safely.
 
-Advanced options (the custom model id) stay hidden by default; the optional session name is not one of them and shares
-the top row of the launcher with Launch and Cancel. Project registration (associating metadata with a directory) is
-optional convenience and never a prerequisite.
+Advanced options (the custom model id) stay hidden by default; the optional session name is not one of them: it sits in
+the destination block under host and folder, visible without any disclosure. Launch and Cancel are the first controls in
+the launcher, above everything else, and Launch's label names the chosen harness, host, and folder. Project registration
+(associating metadata with a directory) is optional convenience and never a prerequisite.
 
 Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical
