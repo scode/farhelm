@@ -12,20 +12,17 @@
 # this repo's token.
 name: CI
 
+# Manual runs only. This workflow no longer fires on pushes to main or on
+# pull requests (disabled 2026-09-12): the validation that decides whether a
+# build ships is the gate inside every release build job
+# (`.github/dist-build-setup.yml`, run from the tag), and the per-change
+# checks here were being paid on every ready PR and every merge without
+# anyone waiting on the verdict. The jobs are kept intact so that
+# `gh workflow run ci.yml --ref <branch>` still runs the whole baseline on
+# demand for any ref; the `changes` filter and the draft guards on the root
+# jobs are retained, dormant, so re-enabling a `pull_request` trigger is a
+# one-line change rather than a rewrite.
 on:
-  push:
-    branches: [main]
-  # A DRAFT pull request runs nothing (see the `if:` on the three root jobs
-  # below: `changes`, `dprint`, `dist-check`; everything else hangs off
-  # `changes`). Stacked PRs get rewritten and re-pushed many times before
-  # anyone wants a verdict, and each rewrite used to cost a full run per PR.
-  # Marking a PR ready is the request for CI: `ready_for_review` starts a
-  # run, and later pushes to a ready PR keep running as before.
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  # On-demand runs for any ref, draft or not, from `gh workflow run ci.yml
-  # --ref <branch>`; the same jobs and the same draft-agnostic path pushes to
-  # main take.
   workflow_dispatch:
 
 permissions:
