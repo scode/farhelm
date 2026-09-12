@@ -695,3 +695,23 @@ TODO.md entry is removed. The separate popup-close observation in this same test
 Class: fixture-premise
 
 Cause: established
+
+## 2026-09-12 — scrolling teardown sweeps over lanes under its own step (e2e/tests/sidebar.spec.ts)
+
+`the sidebar app bar stays pinned while the session list scrolls` passed all nine geometry assertions in Chromium run
+`45efb275-84b9-4aab-9dd2-550fd45d4e7a`, then exhausted its 60-second budget deleting eighteen fixture sessions one by
+one (stop plus DELETE each, thirty-six sequential requests); the timeout then raced request-context disposal on the last
+DELETE. `cleanupAll` now sweeps over six lanes with each session's stop-before-delete order preserved, every session
+attempted, errors aggregated in creation order, and the sweep wrapped in its own `teardown:` report step so a trace
+shows teardown as teardown rather than as a failed geometry assertion. Geometry checks are unchanged. Run `5732a9ee`
+passed all four scrolling-fixture tests on both engines (8/8); run `9d6cc14c` passed the new partial-allocation and
+bounded-teardown ownership test on both engines; batch `0d1c73f3` passed the app-bar test and the mounted-fixture
+ownership test ten times on both engines (40/40). All ran on `61817891` with this fix's own uncommitted sidebar changes,
+one worker and zero retries, on an 18-CPU Ubuntu 24.04 Linux host with pinned tmux 3.7c, executable SHA256
+`b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, ambient `FARHELM_*` names scrubbed
+and the recorder supplying `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Other jobs overlapped on the
+same host. Disposition: fixed; the TODO.md entry is removed.
+
+Class: budget
+
+Cause: established
