@@ -16,9 +16,7 @@ playwright profiles.spec.ts a profile edited in another browser reaches this one
 playwright profiles.spec.ts the profiles popup border box stays inside a constrained viewport  # profiles-webkit-initial-focus
 playwright profiles.spec.ts a popup-created profile is offered on every host  # profiles-popup-close-lost
 playwright sidebar.spec.ts the sidebar app bar stays pinned while the session list scrolls  # sidebar-scroll-teardown-timeout
-playwright sidebar.spec.ts aliasing a remote host renames it everywhere but the details view  # sidebar-route-fetch-disposed
 playwright terminal-multihost.spec.ts a failed removal stays visible with details collapsed  # host-removal-details-toggle
-playwright sidebar.spec.ts composer path actions keep typing inert and browse the selected remote host  # composer-browse-log-timeout
 playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
 playwright terminal-tabs.spec.ts a tab list past the island cap is listed in full but only partly attached  # tab-cap-closed-socket
 playwright terminal-flood.spec.ts real backspace erases; real ctrl-c kills the fake agent  # backspace-ctrlc-session-deletion
