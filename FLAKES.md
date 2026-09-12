@@ -767,3 +767,20 @@ removed.
 Class: product
 
 Cause: established
+
+## 2026-09-12 — rotation recovery still unreproduced; cascade contained (e2e/tests/auth.spec.ts)
+
+Follow-up to the 2026-09-10 authentication entry. Neither shape reproduced locally: batch `f45de613` passed the exact
+rotation test fifteen times on both engines, and batch `55d47716` passed the full auth spec five times on both engines
+(a sixth attempt died on setup when another session's stack took the shared port mid-batch — environmental, not a test
+outcome). All ran with pinned tmux 3.7c, `LANG=C.UTF-8`, and scrubbed `FARHELM_*` on an 18-CPU Ubuntu 24.04 Linux host.
+The code read found the recovery path sound on its face — selection survives the token gate, mount reads fire
+unconditionally, the default view's reads are not authoritative for absence, and dropped futures cannot reopen the
+prompt — so no mechanism is claimed. What did land: the shared suite credential refresh moved from the test's end to
+right after the exchange, so a post-exchange failure (both observed shapes) no longer leaves later tests
+unauthenticated; the TODO.md entry is narrowed to the recovery provenance itself. The next failure's retained trace
+carries network, DOM, and console. Disposition: still open in TODO.md.
+
+Class: unknown
+
+Cause: unknown

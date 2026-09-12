@@ -330,6 +330,45 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   await page.route("**/api/auth/token", advanceContextHeader);
   await authenticate(page, replacement);
   await page.unroute("**/api/auth/token", advanceContextHeader);
+  // Leave the shared suite authenticated under the replacement HERE, not
+  // after the recovery assertions below: rotation already revoked the old
+  // credential, so any failure past the exchange would otherwise leave
+  // every later test unauthenticated and turn one failure into a large
+  // cascade. Playwright reloads this file for later contexts and workers,
+  // while the header refresh above advances request fixtures that remain in
+  // this worker. The secret is pinned by the route handler above, which is
+  // also what makes the `!` safe.
+  //
+  // The CREDENTIAL only, rebuilt in global-setup.ts's exact shape rather than
+  // dumped from `page.context().storageState()`. This file is the baseline
+  // localStorage every later project's contexts start from, and a whole dump
+  // would carry along anything else this page's origin storage holds. The
+  // list preference (sort order, last selection) is no longer among it — it
+  // lives in the helm now, shared by every client — but the filter stays on
+  // the whole shape rather than on a key list, so nothing a future build
+  // stores can ride out of here unnoticed.
+  //
+  // The route handler above is what pins the secret — but only if it ran.
+  // Without this premise, a token path that never matched would write
+  // `{ name: key }` with the value silently dropped by `JSON.stringify`,
+  // leaving every later test unauthenticated through a subtler cascade
+  // than the one this write exists to contain.
+  if (typeof replacementSecret !== "string" || replacementSecret === "") {
+    throw new Error("the rotation exchange completed without pinning a replacement secret");
+  }
+  const { cookies } = await page.context().storageState();
+  await writeFile(
+    AUTH_STORAGE_STATE_PATH,
+    JSON.stringify({
+      cookies,
+      origins: [{
+        origin: new URL(baseURL!).origin,
+        localStorage: [{ name: DEVICE_SECRET_KEY, value: replacementSecret! }],
+      }],
+    }),
+    { mode: 0o600 },
+  );
+  await chmod(AUTH_STORAGE_STATE_PATH, 0o600);
   await detailRead;
   // The EXACT session, not whichever one auto-select would pick: the
   // titlebar shows its title and the live terminal socket carries its id.
@@ -353,32 +392,4 @@ test("rotation logs out an open client and drops its feed and terminal sockets",
   expect(storedSecret, "re-authentication must persist the replacement device secret").toBe(
     replacementSecret,
   );
-  // Leave the shared suite authenticated under the replacement. Playwright
-  // reloads this file for later contexts and workers, while the header refresh
-  // above advances request fixtures that remain in this worker.
-  //
-  // The CREDENTIAL only, rebuilt in global-setup.ts's exact shape rather than
-  // dumped from `page.context().storageState()`. This file is the baseline
-  // localStorage every later project's contexts start from, and a whole dump
-  // would carry along anything else this page's origin storage holds. The
-  // list preference (sort order, last selection) is no longer among it — it
-  // lives in the helm now, shared by every client — but the filter stays on
-  // the whole shape rather than on a key list, so nothing a future build
-  // stores can ride out of here unnoticed.
-  const { cookies } = await page.context().storageState();
-  await writeFile(
-    AUTH_STORAGE_STATE_PATH,
-    JSON.stringify({
-      cookies,
-      origins: [{
-        origin: new URL(baseURL!).origin,
-        // Pinned to the replacement by the assertion just above, which is
-        // also what makes the `!` safe: the route handler always sets it
-        // before the exchange reply reaches the page.
-        localStorage: [{ name: DEVICE_SECRET_KEY, value: replacementSecret! }],
-      }],
-    }),
-    { mode: 0o600 },
-  );
-  await chmod(AUTH_STORAGE_STATE_PATH, 0o600);
 });

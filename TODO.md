@@ -61,10 +61,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `rotation logs out an open client and drops its feed and terminal
   sockets`, in `e2e/tests/auth.spec.ts`. Chromium
   observed an aborted recovery detail read in a broad run and a missing sidebar row after a successful detail read in an
-  exact run. Both a prior composer build and a later exact candidate run passed. The test refreshes shared credential
-  storage only after those assertions; failure leaves subsequent tests unauthenticated and turns one failure into a
-  large cascade. Keep the original failure distinct from that cleanup consequence, and establish its provenance before
-  changing authentication behavior or recovery assertions.
+  exact run. A failure past the exchange no longer cascades (the suite refresh moved to right after it); what remains is
+  the recovery provenance itself. Twenty local repetitions passed without reproducing either shape; the next failure's
+  retained trace carries network, DOM, and console. Establish provenance before changing authentication behavior or
+  recovery assertions.
 
 - Investigate the remaining initial profile focus failures in `e2e/tests/profiles.spec.ts`. WebKit failed the editor
   focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus in
