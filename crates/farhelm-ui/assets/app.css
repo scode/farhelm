@@ -3154,11 +3154,17 @@ samp {
   background: var(--composer-scrim);
 }
 
+/* Content-sized rather than a fixed box: a launcher with the name field and
+   Launch/Cancel already visible at the top, no reserved recents band, and no
+   advanced disclosure has far less to show, and stretching it to a stable
+   height would reintroduce the empty space this whole change removes. The
+   viewport is still the hard ceiling — `max-height` plus `overflow: auto`
+   scrolls a genuinely long draft (many chips, a long history match) rather
+   than pushing Launch off the bottom of the screen. */
 .launch-composer-backdrop .create-session-form {
   display: flex;
   flex-direction: column;
   width: min(760px, 100%);
-  height: min(760px, calc(100vh - 40px));
   box-sizing: border-box;
   max-height: calc(100vh - 40px);
   margin: 0;
@@ -3206,12 +3212,12 @@ samp {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  /* The empty/default strip reserves the common four compact rows, but its
-     real content is allowed to enlarge that reservation. A long destination
-     can force more rows than the old three-row assumption; clipping it would
-     paint chips into the recents heading. `align-content` keeps short states
-     compact rather than stretching them to fill the stable baseline. */
-  min-height: 138px;
+  /* Nothing here reserves empty space any more: an empty strip takes no
+     height at all, and the controls below it move down as chips arrive
+     rather than sitting a fixed distance below a phantom reservation.
+     `align-content` still matters once there IS content — it keeps a short
+     wrapped state compact instead of stretching rows to fill a height this
+     rule no longer promises. */
   flex: 0 0 auto;
   align-content: flex-start;
 }
@@ -3275,9 +3281,13 @@ samp {
   gap: 8px;
 }
 
-/* Recents reserve their three compact rows even while history is empty. This
-   keeps the option controls below them from jumping as an async history reply
-   arrives or a filter narrows its matches. */
+/* The whole heading-plus-slots band is absent from the DOM (see
+   `create_form.rs`'s `recent_launches` guard) whenever no recent matches the
+   current filter, rather than present-but-empty: nothing here reserves space
+   for a band that has nothing to show, and the controls below are free to
+   move up when history is absent and back down again once it returns. Each
+   row keeps its fixed 44px height and 4px gap so a real row's two-line label
+   stays readable and geometry stays predictable WHILE the band exists. */
 .launch-composer-recents {
   display: grid;
   gap: 4px;
@@ -3291,9 +3301,7 @@ samp {
 
 .launch-composer-recent-slots {
   display: grid;
-  grid-template-rows: repeat(3, 44px);
   gap: 4px;
-  min-height: 140px;
 }
 
 .launch-composer-choice {
@@ -3369,23 +3377,6 @@ samp {
 .launch-composer-more > input {
   width: min(100%, 360px);
   margin-top: 6px;
-}
-
-.launch-composer-advanced {
-  margin-top: 8px;
-  color: var(--composer-control-fg);
-  font-size: 13px;
-}
-
-.launch-composer-advanced > summary {
-  width: fit-content;
-  cursor: pointer;
-}
-
-.launch-composer-advanced > label {
-  display: grid;
-  gap: 4px;
-  margin-top: 8px;
 }
 
 .launch-composer-search {
@@ -3512,17 +3503,41 @@ samp {
   font-weight: 400;
 }
 
+/* The row a person actually needs to reach: name, then Cancel, then Launch,
+   directly under the header (or first in the dialog on the legacy surface,
+   which has no header). `flex-wrap` is deliberate rather than a fixed single
+   line — at widths where the three controls do not fit on one line, the name
+   field wraps onto its own line with the buttons on the next, which keeps
+   every control fully reachable instead of crowding them into a width none
+   of them fit in. */
 .launch-composer-actions {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 8px;
   margin-top: 8px;
 }
 
+/* Grows to fill the row so Cancel and Launch stay pinned to its end rather
+   than trailing after a short, content-sized field — the same "well" look
+   every other composer text input gets from `.create-session-form label` /
+   `.create-session-form input` (see that rule's own comment on why fields
+   read as recessed wells cut into the dialog's card). */
+.launch-composer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.launch-composer-name > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .launch-composer-cancel,
 .launch-composer-actions .create-session-submit {
+  flex: 0 0 auto;
   min-height: 38px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 14px;
   font-weight: 600;
 }
@@ -3539,7 +3554,6 @@ samp {
   }
 
   .launch-composer-backdrop .create-session-form {
-    height: calc(100vh - 16px);
     max-height: calc(100vh - 16px);
     padding: 14px;
   }

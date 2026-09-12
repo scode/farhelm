@@ -202,7 +202,8 @@ Session creation is one action, not a wizard. Only the working directory is fund
 - Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
   identity. A recent row fills every saved choice and directory but never launches. A retargeted registry row cannot
   expose the replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk;
-  explicit browsing asks the selected supervisor for one bounded directory level.
+  explicit browsing asks the selected supervisor for one bounded directory level. Recent-setup rows appear only when the
+  current filter actually matches history; the dialog reserves no space for them when it does not.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the
@@ -218,8 +219,9 @@ the terminal of an already-running agent requires reliably detecting that it is 
 problem as status detection; that route is only for agents without the argv affordance. Either way it is an additive
 change (an optional field on create/spawn), which is why v1 can skip it safely.
 
-Advanced options stay hidden by default. Project registration (associating metadata with a directory) is optional
-convenience and never a prerequisite.
+Advanced options (the custom model id) stay hidden by default; the optional session name is not one of them and shares
+the top row of the launcher with Launch and Cancel. Project registration (associating metadata with a directory) is
+optional convenience and never a prerequisite.
 
 Creation guards against accidental double submission (a double-click, a retry after a timeout): one intended create
 yields one session or a clear error, never two silently. Deliberately creating several sessions with identical

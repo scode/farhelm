@@ -94,12 +94,11 @@ async function createSession(
   // have recorded before this test started.
   await form.getByRole("button", { name: "other / command" }).click();
   await form.locator(".create-session-profile").selectOption("");
-  await form.locator('input[type="text"]').nth(0).fill(cwd);
-  await form.locator('input[type="text"]').nth(1).fill(invocation);
-  // Keep the helper on the visible product path: title lives in the
-  // composer’s deliberate advanced disclosure, not an input ordinal.
-  await form.locator("details.launch-composer-advanced summary").click();
-  await form.getByLabel("title (optional)").fill(title);
+  await form.getByLabel("working directory").fill(cwd);
+  await form.getByLabel("agent command").fill(invocation);
+  // Name is visible on the top action row now; find it by label rather
+  // than by DOM position, which a future reorder could otherwise retarget.
+  await form.getByLabel("name (optional)").fill(title);
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),

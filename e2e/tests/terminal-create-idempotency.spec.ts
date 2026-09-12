@@ -124,8 +124,8 @@ test("a create whose reply is lost is retried with the same key and yields one s
 // the key alone rather than about whether the corrected request happens to
 // succeed — and so both attempts land in the same observable state.
 for (const field of [
-  { name: "working directory", index: 0, edit: "/nonexistent/also/not/here" },
-  { name: "agent command", index: 1, edit: "also-not-an-agent" },
+  { name: "working directory", edit: "/nonexistent/also/not/here" },
+  { name: "agent command", edit: "also-not-an-agent" },
 ]) {
   test(`editing the ${field.name} after a failed create mints a new intent key`, async ({
     page,
@@ -154,7 +154,7 @@ for (const field of [
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 
-      await form.locator('input[type="text"]').nth(field.index).fill(field.edit);
+      await form.getByLabel(field.name).fill(field.edit);
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 
@@ -198,8 +198,8 @@ test("editing the title after a failed create mints a new intent key", async ({
     await form.locator('button[type="submit"]').click();
     await expect(form.locator(".create-session-error")).toBeVisible();
 
-    await form.getByLabel("title (optional)").fill(`${title}-renamed`);
-    await form.locator('input[type="text"]').nth(0).fill("/tmp");
+    await form.getByLabel("name (optional)").fill(`${title}-renamed`);
+    await form.getByLabel("working directory").fill("/tmp");
     await form.locator('button[type="submit"]').click();
     const id = await sessionIdFor(rowByTitle(page, `${title}-renamed`));
     await waitForSessionRevealed(page, id);
@@ -251,8 +251,8 @@ test("the create form's inputs are disabled while a create is in flight", async 
       ),
       form.locator('button[type="submit"]').click(),
     ]);
-    for (const index of [0, 1, 2]) {
-      await expect(form.locator('input[type="text"]').nth(index)).toBeDisabled();
+    for (const label of ["name (optional)", "working directory", "agent command"]) {
+      await expect(form.getByLabel(label)).toBeDisabled();
     }
     release(true);
     const id = await sessionIdFor(rowByTitle(page, title));

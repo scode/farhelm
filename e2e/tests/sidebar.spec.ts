@@ -4932,8 +4932,7 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     });
 
     await expect(form.getByLabel("folder", { exact: true }), "clone B must reseed the mounted form before clone A is restored").toHaveValue("/");
-    await form.locator("details.launch-composer-advanced summary").click();
-    await expect(form.getByLabel("title (optional)"), "the second clone must replace source A's title before A is restored").toHaveValue(second.title);
+    await expect(form.getByLabel("name (optional)"), "the second clone must replace source A's title before A is restored").toHaveValue(second.title);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
     await form.locator("details.launch-composer-more summary").click();
     await expect(form.getByPlaceholder("custom model id")).toHaveValue("mounted-new-custom");
@@ -4957,7 +4956,7 @@ test("composer mounted clone generation replaces the prior draft and notice", as
 
     await expect(form.locator("select.create-session-host")).toHaveValue(String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
-    await expect(form.getByLabel("title (optional)")).toHaveValue(first.title);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(first.title);
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
     await expect(form.getByPlaceholder("custom model id")).toHaveValue("mounted-old-custom");
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
@@ -5015,13 +5014,17 @@ test("composer folder history tracks edited destinations at narrow width", async
 });
 
 /**
- * The recent band always reserves three 44px tracks, so async history and
- * harness filters cannot make the option rows below it jump. This runs the
- * empty, one-, two-, and three-visible-row states and measures every visible
- * row and gap; the long three-row fixture also proves that visual two-line
+ * The recent band is present ONLY while at least one recent matches the
+ * current filter, and while present its rows keep their fixed 44px height and
+ * 4px gap so a two-line label stays readable. With no match the whole
+ * `.launch-composer-recents` element (heading included) is absent from the
+ * DOM rather than present-but-empty — the composer no longer reserves a
+ * three-row band the way it used to, so the harness option row below it is
+ * now free to move as recents come and go, and this test no longer pins it
+ * in place. The long three-row fixture also proves visual two-line
  * compaction did not hide any of a setup's meaningful values.
  */
-test("composer recent slots keep fixed geometry and full two-line labels", async ({ page, request }) => {
+test("composer recent slots appear only with matches, at fixed row geometry", async ({ page, request }) => {
   const long = "/composer-long/" + "segment-".repeat(18);
   const launches = ["codex", "codex-two", "claude"].map((name, index) => ({
     host: 1,
@@ -5039,15 +5042,16 @@ test("composer recent slots keep fixed geometry and full two-line labels", async
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   await form.getByLabel("folder", { exact: true }).fill(long);
+  const recents = form.locator(".launch-composer-recents");
   const slots = form.locator(".launch-composer-recent-slots");
-  const harnessChoices = form.locator(".launch-composer-harness-choice");
-  const optionAnchor = harnessChoices.boundingBox.bind(harnessChoices);
   const assertRows = async (count: number) => {
+    if (count === 0) {
+      await expect(recents, "no matching recent leaves the whole band out of the DOM").toHaveCount(0);
+      return;
+    }
+    await expect(recents).toHaveCount(1);
     const rows = slots.getByRole("button");
     await expect(rows).toHaveCount(count);
-    expect((await slots.boundingBox())?.height, "three reserved 44px tracks and two 4px gaps").toBe(140);
-    const anchor = await optionAnchor();
-    expect(anchor, "the harness option row must have measurable geometry").not.toBeNull();
     for (let index = 0; index < count; index += 1) {
       await expect(rows.nth(index), `recent row ${index} must be painted before geometry is read`).toBeVisible();
       const current = await rows.nth(index).boundingBox();
@@ -5057,9 +5061,8 @@ test("composer recent slots keep fixed geometry and full two-line labels", async
         expect(current!.y - (previous!.y + previous!.height), "adjacent recent rows have a 4px gap").toBe(4);
       }
     }
-    return anchor!.y;
   };
-  const threeAnchor = await assertRows(3);
+  await assertRows(3);
   for (let index = 0; index < 3; index += 1) {
     const row = slots.getByRole("button").nth(index);
     const entry = launches[index];
@@ -5088,14 +5091,14 @@ test("composer recent slots keep fixed geometry and full two-line labels", async
   expect(claudeAfter, "the unchanged harness peer must remain measurable after Codex gains its checkmark").not.toBeNull();
   expect(claudeAfter!.x, "reserving the checkmark keeps an unchanged harness peer in place").toBe(claudeBefore!.x);
   expect(claudeAfter!.width, "selected borders must not change an unchanged peer's width").toBe(claudeBefore!.width);
-  expect(await assertRows(2), "the harness option row must not move at two visible recents").toBe(threeAnchor);
+  await assertRows(2);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
-  expect(await assertRows(1), "the harness option row must not move at a different one-row filter").toBe(threeAnchor);
+  await assertRows(1);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
-  expect(await assertRows(0), "the harness option row must not move at no visible recents").toBe(threeAnchor);
+  await assertRows(0);
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.getByLabel("folder", { exact: true }).fill("/no-matching-recent");
-  expect(await assertRows(0), "the harness option row must not move while no recent is visible").toBe(threeAnchor);
+  await assertRows(0);
   await form.getByLabel("folder", { exact: true }).fill(long);
 });
 
@@ -5364,6 +5367,16 @@ test("composer search keeps active results visible and focus contained", async (
  * outside the opposite scroll position; this checks native Tab in both
  * directions so `preventScroll` cannot quietly turn containment into an
  * invisible focus ring again.
+ *
+ * The action row's move to the top of the dialog changed WHICH control is
+ * first and last: "reset choices" is now the first focusable node (nothing
+ * above the header is focusable), and Launch is no longer last — it now sits
+ * near the top alongside the name field and Cancel. The last node is instead
+ * whatever the trap's own query finds last in DOM order among the visible
+ * structured controls (a choice button or the browse button, depending on
+ * fixture shape), so this test finds it the same way `install_composer_focus_
+ * trap` does rather than hard-coding a control name that used to be true only
+ * because Launch happened to render last.
  */
 test("composer focus-trap wraps reveal their targets at narrow width", async ({ page, request }) => {
   const long = "/focus-trap/" + "long-destination-segment-".repeat(12);
@@ -5389,11 +5402,21 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   const reset = form.getByRole("button", { name: "reset choices", exact: true });
-  const launch = form.getByRole("button", { name: "launch", exact: true });
   await form.getByLabel("folder", { exact: true }).fill(long);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(form.locator(".launch-composer-recent-slots > button"), "the controlled history must make the composer scrollable").toHaveCount(3);
-  await expect(launch).toBeVisible();
+
+  // Tag the trap's own last node rather than assuming which control that is:
+  // the same selector and visibility filter `install_composer_focus_trap`
+  // uses, so this test tracks the mechanism instead of one control's name.
+  await form.evaluate((dialog) => {
+    const nodes = [...dialog.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => !(node as HTMLElement).hidden && node.getClientRects().length);
+    nodes[nodes.length - 1].setAttribute("data-focus-trap-last-probe", "true");
+  });
+  const last = form.locator('[data-focus-trap-last-probe="true"]');
+  await expect(last).toBeVisible();
 
   const intersectsViewport = async (control: Locator) => await control.evaluate((node) => {
     const target = node.getBoundingClientRect();
@@ -5401,14 +5424,14 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
     return target.top < viewport.bottom && target.bottom > viewport.top;
   });
 
-  await launch.focus();
+  await last.focus();
   await form.evaluate((node) => { node.scrollTop = node.scrollHeight; });
   await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
-  await expect(launch).toBeFocused();
+  await expect(last).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(reset).toBeFocused();
   await expect.poll(() => intersectsViewport(reset), {
-    message: "Tab wrapping from Launch must reveal reset choices in the composer viewport",
+    message: "Tab wrapping from the last control must reveal reset choices in the composer viewport",
   }).toBe(true);
 
   await reset.focus();
@@ -5416,9 +5439,9 @@ test("composer focus-trap wraps reveal their targets at narrow width", async ({ 
   await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
   await expect(reset).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(launch).toBeFocused();
-  await expect.poll(() => intersectsViewport(launch), {
-    message: "Shift+Tab wrapping from reset choices must reveal Launch in the composer viewport",
+  await expect(last).toBeFocused();
+  await expect.poll(() => intersectsViewport(last), {
+    message: "Shift+Tab wrapping from reset choices must reveal the last control in the composer viewport",
   }).toBe(true);
 });
 
@@ -5451,26 +5474,208 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   const form = page.locator(".create-session-form");
   const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
   await form.getByLabel("folder", { exact: true }).fill(folder);
+  // Named rather than indexed into `controls`: a later insertion into that
+  // array (the harness removal chip, below) already broke one index-based
+  // reference silently once, by shifting every position after it. Naming the
+  // two locators other assertions depend on makes that class of drift
+  // impossible to reintroduce.
+  const recentSlot = form.locator(".launch-composer-recent-slots").getByRole("button", {
+    name: new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  });
+  const browseButton = form.getByRole("button", { name: "browse this path", exact: true });
+  const harnessChoice = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
   const controls = [
     form.getByRole("button", { name: "reset destination to local home", exact: true }),
     form.getByRole("button", { name: "reset folder to home", exact: true }),
-    form.locator(".launch-composer-recent-slots").getByRole("button", { name: new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }),
+    // Choosing Codex below (so Launch is enabled for the reverse-order check)
+    // renders its own removal chip right here in DOM order — between the
+    // folder reset and the recent slot — and Tab must land on it like any
+    // other real control, not skip over it.
+    form.getByRole("button", { name: "remove harness Codex", exact: true }),
+    recentSlot,
     form.getByRole("combobox", { name: "host", exact: true }),
     form.getByLabel("folder", { exact: true }),
     form.getByRole("button", { name: folder, exact: true }),
-    form.getByRole("button", { name: "browse this path", exact: true }),
-    form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }),
+    browseButton,
+    harnessChoice,
   ];
   await expect(search).toHaveAttribute("aria-expanded", "false");
   await expect(form.getByRole("listbox")).toHaveCount(0);
-  await expect(controls[2], "the controlled recent must establish the history traversal premise").toBeVisible();
-  await expect(controls[6], "the structured fixture must expose the Harness group").toBeVisible();
+  await expect(recentSlot, "the controlled recent must establish the history traversal premise").toBeVisible();
+  await expect(browseButton, "the destination group must expose its browse action").toBeVisible();
+  await expect(harnessChoice, "the structured fixture must expose the Harness group").toBeVisible();
+  // Launch is disabled until a harness is chosen, and a disabled control is
+  // skipped entirely by native Tab — it would never receive focus below, so
+  // the reverse-order assertion needs a real harness pick first, exactly as
+  // a person reaching for Launch would have already made one. That same
+  // pick is why the removal chip above exists at all: selecting a harness is
+  // what renders it, so the forward loop must expect it too.
+  await harnessChoice.click();
+  await search.focus();
+  await expect(search).toBeFocused();
+  // The action row and the header now sit ABOVE search in DOM order, so
+  // reverse traversal from search reaches them before anything this test
+  // used to start from. Pin that leading segment explicitly: launch, then
+  // cancel, then the name field, then reset choices — the header's only
+  // other focusable control, and the true first node in the dialog.
+  const reverseLeadingControls = [
+    form.getByRole("button", { name: "launch", exact: true }),
+    form.getByRole("button", { name: "cancel", exact: true }),
+    form.getByLabel("name (optional)", { exact: true }),
+    form.getByRole("button", { name: "reset choices", exact: true }),
+  ];
+  for (const control of reverseLeadingControls) {
+    await page.keyboard.press("Shift+Tab");
+    await expect(control).toBeFocused();
+  }
   await search.focus();
   await expect(search).toBeFocused();
   for (const control of controls) {
     await page.keyboard.press("Tab");
     await expect(control).toBeFocused();
   }
+});
+
+/**
+ * The name field is the whole point of moving it: reachable without opening
+ * anything, and its value actually reaches the create request. A typed name
+ * becomes the request's `title`; an empty field omits it entirely (SPEC.md's
+ * "auto-generated when omitted" — the server, not this field, decides the
+ * generated name), rather than sending an empty string the server would
+ * dutifully use as a literal title.
+ */
+test("composer name field reaches the create request; an empty name sends none", async ({
+  page,
+  request,
+}) => {
+  const bodies: any[] = [];
+  const created: string[] = [];
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    bodies.push(JSON.parse(route.request().postData() ?? "{}"));
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/");
+    await page.locator(".new-session-button").click();
+    let form = page.locator(".create-session-form");
+    await expect(form).toBeVisible({ timeout: 20_000 });
+    // Visible the moment the dialog opens — no disclosure to find first.
+    await expect(form.getByLabel("name (optional)")).toBeVisible();
+
+    const named = `composer-name-${Date.now()}`;
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    await form.getByLabel("name (optional)").fill(named);
+    const [namedResponse] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
+      ),
+      form.locator('button[type="submit"]').click(),
+    ]);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].title, "a typed name reaches the create request's title").toBe(named);
+    created.push((await namedResponse.json()).id);
+    await expect(form).toHaveCount(0);
+
+    await page.locator(".new-session-button").click();
+    form = page.locator(".create-session-form");
+    await expect(form).toBeVisible({ timeout: 20_000 });
+    await form.getByRole("button", { name: "Codex", exact: true }).click();
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
+    const [emptyResponse] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
+      ),
+      form.locator('button[type="submit"]').click(),
+    ]);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].title, "an empty name omits the title rather than sending an empty string").toBeNull();
+    created.push((await emptyResponse.json()).id);
+    await expect(form).toHaveCount(0);
+  } finally {
+    for (const id of created) await cleanupSession(request, id);
+  }
+});
+
+/**
+ * Launching used to require scrolling past a tall, mostly empty dialog. Both
+ * controls must now sit inside the dialog's own initial viewport — the
+ * maintainer's exact complaint — at the ordinary desktop viewport and at the
+ * narrow 390×844 shape a phone browser opens at.
+ */
+test("composer keeps launch and cancel inside the initial viewport at default and narrow width", async ({
+  page,
+  request,
+}) => {
+  await installComposerChoices(page, request, [], [{ id: "viewport-model", harness: "codex", efforts: ["high"] }]);
+
+  const assertReachableWithoutScrolling = async () => {
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible({ timeout: 20_000 });
+    const launch = form.getByRole("button", { name: "launch", exact: true });
+    const cancel = form.getByRole("button", { name: "cancel", exact: true });
+    await expect(launch).toBeVisible();
+    expect(
+      await form.evaluate((node) => node.scrollTop),
+      "the dialog must open with nothing to scroll past",
+    ).toBe(0);
+    const formBox = (await form.boundingBox())!;
+    for (const control of [launch, cancel]) {
+      const box = (await control.boundingBox())!;
+      expect(box.y, "the control's top stays inside the dialog's own box").toBeGreaterThanOrEqual(formBox.y);
+      expect(
+        box.y + box.height,
+        "the control's bottom stays inside the dialog's own box",
+      ).toBeLessThanOrEqual(formBox.y + formBox.height);
+    }
+    await cancel.click();
+    await expect(form).toHaveCount(0);
+  };
+
+  await page.goto("/");
+  await assertReachableWithoutScrolling();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertReachableWithoutScrolling();
+});
+
+/**
+ * The empty-history dialog is the case the old fixed-height, reserved-band
+ * layout handled worst: a first-time host, or any filter matching nothing,
+ * used to pay for a "recent setups" band and its three tracks even though
+ * there was nothing to show. Neither is true any more — the recents element
+ * is absent from the DOM (see the recent-slots test above), and the dialog
+ * itself is shorter than its viewport ceiling rather than stretched to fill it.
+ *
+ * The height check runs at a tall viewport on purpose. At the default 720px
+ * window the composer's real content (four harness rows once OpenCode joined
+ * them, model, effort, permissions) already reaches the `max-height` ceiling,
+ * so "shorter than the ceiling" would be measuring how much content the
+ * composer has, not whether it reserves empty space. With room to spare the
+ * only way to hit the ceiling is a fixed height, which is what this pins.
+ */
+test("composer reserves no space for recents when launch history is empty", async ({
+  page,
+  request,
+}) => {
+  await installComposerChoices(page, request, [], [{ id: "empty-history-model", harness: "codex", efforts: ["high"] }]);
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await expect(form).toBeVisible({ timeout: 20_000 });
+  await expect(
+    form.locator(".launch-composer-recents"),
+    "no history at all leaves the recents band out of the DOM entirely",
+  ).toHaveCount(0);
+  const height = (await form.boundingBox())!.height;
+  const maxHeight = await page.evaluate(() => window.innerHeight - 40);
+  expect(height, "the dialog is content-sized rather than stretched to the viewport ceiling").toBeLessThan(maxHeight);
 });
 
 /**
@@ -5516,8 +5721,7 @@ test("composer busy guard preserves one structured create through queued edits a
     await expect(form).toBeVisible({ timeout: 20_000 });
     await form.getByRole("button", { name: "Codex", exact: true }).click();
     await form.getByLabel("folder", { exact: true }).fill("/tmp");
-    await form.locator("details.launch-composer-advanced summary").click();
-    await form.getByLabel("title (optional)").fill(title);
+    await form.getByLabel("name (optional)").fill(title);
 
     await form.locator('button[type="submit"]').click();
     await dispatched;

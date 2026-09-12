@@ -31,14 +31,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a light or dark terminal. Determine whether a small configuration change can reproduce Ghostty's behavior before
   committing to exact parity; matching the palette alone may not explain the difference.
 
-- Add a way to name the session in the "New session" launcher composer. The composer offers host, folder, harness, and
-  model, but no session name field.
-
-- Make the launcher composer compact and put launch/cancel within easy reach. Launch and cancel currently sit at the
-  bottom right, below the fold at typical window sizes, so launching requires scrolling; move them to the very top of
-  the composer. Remove the large empty regions (the area reserved for "recent setups" is mostly blank); even when recent
-  setups or similar lists have content, they must stay compact rather than reserve space.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
@@ -82,6 +74,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   corrected second-client terminal-readiness boundary. Preserve both tests' focus and feed assertions; the new
   observation does not establish a regression in saving profiles or delivering their updates.
 
+- Investigate `the profiles popup border box stays inside a constrained viewport`, in `e2e/tests/profiles.spec.ts`.
+  WebKit failed its focus premise (`toBeFocused` received inactive) once in browser run
+  `ed375214-fa16-4b8f-bcad-00117ff59e97`, a landing-time run of the launcher composer stack rebased onto the OpenCode
+  and macOS-header changes; the same run passed the test on Chromium. The launcher change touches only the profiles
+  spec's name-field label, so this reads as the same WebKit initial-focus family recorded above rather than a composer
+  regression, but that attribution is not established. Retain focus-event traces before changing the test.
+
 - Investigate the separate popup-close observation in `a popup-created profile is offered on every host`, in
   `e2e/tests/profiles.spec.ts`. Chromium run `45efb275-84b9-4aab-9dd2-550fd45d4e7a` successfully registered the saved
   profile, then the toggle click in `closeProfiles` left the popup mounted. This occurs before the create picker opens
@@ -100,6 +99,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
   `.host-details-toggle`. Preserve route lifetime and host-row state evidence before changing product behavior; the
   failures alone do not establish a composer regression or a confirmed pre-composer cause.
+
+- Investigate `composer path actions keep typing inert and browse the selected remote host`, in
+  `e2e/tests/sidebar.spec.ts`. This fails CONSISTENTLY on this substrate, not intermittently: Chromium run
+  `1024be47-ca56-4651-afd6-a56d01a5c890` timed out on the 5-second predicate waiting for the selected remote
+  supervisor's own log to record the forwarded browse request, and it failed again the same way in runs
+  `2489c509-e3e3-4e9d-b6b5-f860a7fbd565` (both engines) and `ce1a9bec-cf6b-453b-bf1b-61f3e4ec297d` (both engines). An
+  isolated rerun reproduced the identical timeout on both the current tree and, checked out separately, the tree from
+  before the launcher-composer name-field change, five times and three times respectively — establishing this as
+  pre-existing and unrelated to that change, but not establishing its cause; nothing points at flakiness rather than a
+  standing environmental fact. The remote fixture's log file may not be flushed, written to a different path than the
+  test reads, or genuinely never receiving the forwarded request; retain browse-request and remote-log receipts before
+  changing the assertion or the fixture.
 
 - Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
   `7fd44a19-ce3f-42fb-a3df-410da327634a`.

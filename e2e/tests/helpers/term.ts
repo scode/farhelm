@@ -115,13 +115,11 @@ export async function fillCreateForm(
   // the request's source of intent. This also makes the helper independent of
   // whatever profile-backed create a shared stack last recorded.
   await form.locator(".create-session-profile").selectOption("");
-  await form.locator('input[type="text"]').nth(0).fill(cwd);
-  await form.locator('input[type="text"]').nth(1).fill(invocation);
-  // Title is deliberately secondary launch metadata. Open its disclosure as
-  // a person would, rather than filling the hidden input by ordinal and
-  // turning a real interaction helper into a DOM-only shortcut.
-  await form.locator("details.launch-composer-advanced summary").click();
-  await form.getByLabel("title (optional)").fill(title);
+  await form.getByLabel("working directory").fill(cwd);
+  await form.getByLabel("agent command").fill(invocation);
+  // The name field sits on the top action row now, visible without opening
+  // anything — fill it by its label directly rather than by DOM position.
+  await form.getByLabel("name (optional)").fill(title);
   return form;
 }
 

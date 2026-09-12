@@ -2265,6 +2265,100 @@ pub(super) fn CreateSessionForm(
                         "reset choices"
                     }
                 }
+            }
+            // The name field, and launch/cancel, sit on one row directly under
+            // the header (or, on the legacy surface with no header, as the
+            // dialog's very first child) so a launch never requires scrolling
+            // past the destination and agent choices below it — the maintainer's
+            // own complaint was that the composer used to bury this trio at the
+            // bottom of a tall, mostly empty dialog. The name input is the
+            // former "title (optional)" field verbatim (same signal, same
+            // escaped-display/raw-seed model, same `intent_key` invalidation on
+            // edit); only its position and visible label changed. Rendered
+            // identically on both surfaces, unlike the fields below that use
+            // `launch-composer-legacy-hidden` to stay mounted-but-invisible on
+            // the inactive surface — a name has the same meaning and the same
+            // handler regardless of which creation mode is active, so there is
+            // nothing surface-specific to hide.
+            div { class: "launch-composer-actions",
+                label { class: "launch-composer-name",
+                    "name (optional)"
+                    input {
+                        r#type: "text",
+                        autocomplete: "off",
+                        autocorrect: "off",
+                        autocapitalize: "none",
+                        spellcheck: "false",
+                        // See the working-directory field's own comment below
+                        // (on its `value`): a clone can seed this from a
+                        // peer-supplied title, with the same escaped-display /
+                        // raw-seed model.
+                        dir: "ltr",
+                        value: "{title}",
+                        disabled: busy,
+                        oninput: move |evt| {
+                            if !draft_transition_allowed(ops) {
+                                return;
+                            }
+                            title.set(evt.value());
+                            title_edited.set(true);
+                            // An edit makes the next submit a DIFFERENT
+                            // intent, so the key the last one used stops
+                            // applying here (this component's docs carry the
+                            // full argument for both edges of that rule).
+                            intent_key.set(None);
+                        },
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: "launch-composer-cancel",
+                    disabled: busy,
+                    onclick: move |_| {
+                        // The disabled attribute updates after this event's
+                        // synchronous submit claim. Recheck the shared lock
+                        // here so a queued Cancel cannot unmount the future
+                        // that owns an already accepted create.
+                        if !ops.busy_now() {
+                            on_cancel.call(());
+                        }
+                    },
+                    "cancel"
+                }
+                button {
+                    r#type: "submit",
+                    class: "btn btn-primary create-session-submit",
+                // `blocked` as well as this form's own flag: a create must
+                // not overlap a host mutation (see `ListView`'s operation
+                // gate), and a control that is inert for that window says so
+                // rather than silently dropping the click.
+                //
+                // Inert with no agent selected for a different reason: there
+                // is nothing to launch, and the handler refuses in words
+                // anyway (a `disabled` attribute is one render behind, so it
+                // is the visible half of that rule rather than the guard).
+                disabled: busy
+                    || !selected_host_available
+                    || !remembered_destination_valid
+                    || (*creation_surface.read() == CreationSurface::Structured
+                        && (structured_harness.read().is_none()
+                            || structured_choice_error.is_some()))
+                    || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
+                    "launch"
+                }
+            }
+            if *creation_surface.read() == CreationSurface::Structured {
+                div { class: "launch-composer-summary", aria_live: "polite",
+                    "{summary_harness} · "
+                    span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                    " · folder: "
+                    span { class: "peer-value", dir: "ltr", "{summary_folder}" }
+                    " · model: "
+                    span { class: "peer-value", dir: "ltr", "{summary_model}" }
+                    " · effort: {summary_effort} · permissions: {summary_permissions}"
+                }
+            }
+            if *creation_surface.read() == CreationSurface::Structured {
                 div {
                     class: "launch-composer-search",
                     onclick: move |evt| evt.stop_propagation(),
@@ -2617,74 +2711,84 @@ pub(super) fn CreateSessionForm(
                         }
                     }
                 }
-                div { class: "launch-composer-recents",
-                        div { class: "launch-composer-recents-heading", "recent setups" }
-                        div { class: "launch-composer-recent-slots",
-                        for (entry, summary) in recent_launches.iter().take(3).map(|entry| (
-                            entry,
-                            crate::launch_composer::selection_summary(&entry.selection),
-                        )) {
-                            button {
-                                r#type: "button",
-                                dir: "ltr",
-                                disabled: busy,
-                                title: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
-                                // Visual lines are intentionally separate so a
-                                // long destination cannot consume the launch
-                                // selection. Give assistive technology the
-                                // same complete, punctuated label as `title`;
-                                // concatenating the two spans would lose the
-                                // delimiter at their DOM boundary.
-                                aria_label: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
-                                onclick: {
-                                    let entry = entry.clone();
-                                    let catalog = catalog_models.clone();
-                                    let history = history_for_recents.clone();
-                                    let history_target = current_history_target.clone();
-                                    move |_| {
-                                        if !draft_transition_allowed(ops) {
-                                            return;
+                // Absent, not merely empty, with no history to offer: an
+                // always-present band used to reserve three 44px tracks so
+                // the controls below it would never jump, but that traded a
+                // near-empty dialog for every first-time host and every
+                // filter that happens to match nothing. Nothing below this
+                // point reserves space for it any more, so a match arriving
+                // later is a layout that grows rather than one that was
+                // secretly already at its full height.
+                if !recent_launches.is_empty() {
+                    div { class: "launch-composer-recents",
+                            div { class: "launch-composer-recents-heading", "recent setups" }
+                            div { class: "launch-composer-recent-slots",
+                            for (entry, summary) in recent_launches.iter().take(3).map(|entry| (
+                                entry,
+                                crate::launch_composer::selection_summary(&entry.selection),
+                            )) {
+                                button {
+                                    r#type: "button",
+                                    dir: "ltr",
+                                    disabled: busy,
+                                    title: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
+                                    // Visual lines are intentionally separate so a
+                                    // long destination cannot consume the launch
+                                    // selection. Give assistive technology the
+                                    // same complete, punctuated label as `title`;
+                                    // concatenating the two spans would lose the
+                                    // delimiter at their DOM boundary.
+                                    aria_label: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
+                                    onclick: {
+                                        let entry = entry.clone();
+                                        let catalog = catalog_models.clone();
+                                        let history = history_for_recents.clone();
+                                        let history_target = current_history_target.clone();
+                                        move |_| {
+                                            if !draft_transition_allowed(ops) {
+                                                return;
+                                            }
+                                            if !admit_history_destination(
+                                                history_target.clone(), live_destination,
+                                                remembered_destination, history_activation_attempts,
+                                            ) { return; }
+                                            promote_history_snapshot(
+                                                offered_history,
+                                                create_target(),
+                                                history.clone(),
+                                            );
+                                            let selection = crate::launch_composer::select_recent(&entry);
+                                            structured_harness.set(Some(selection.harness));
+                                            structured_model_raw_seed.set(selection.model.clone());
+                                            structured_model_edited.set(false);
+                                            structured_model.set(selection.model);
+                                            custom_model_harness.set(
+                                                entry.selection.model.as_ref().and_then(|model| {
+                                                    (!catalog.iter().any(|candidate| candidate.id == *model))
+                                                        .then_some(entry.selection.harness)
+                                                }),
+                                            );
+                                            structured_effort.set(selection.effort);
+                                            structured_permissions.set(selection.permissions);
+                                            invalidate_directory_browse(
+                                                browse_generation, browse_request, browse_result, browse_error,
+                                            );
+                                            reseed_cloned_field(
+                                                &mut cwd,
+                                                &mut cwd_raw_seed,
+                                                &mut cwd_edited,
+                                                &entry.cwd,
+                                            );
+                                            composer_reset_reason.set(None);
+                                            intent_key.set(None);
                                         }
-                                        if !admit_history_destination(
-                                            history_target.clone(), live_destination,
-                                            remembered_destination, history_activation_attempts,
-                                        ) { return; }
-                                        promote_history_snapshot(
-                                            offered_history,
-                                            create_target(),
-                                            history.clone(),
-                                        );
-                                        let selection = crate::launch_composer::select_recent(&entry);
-                                        structured_harness.set(Some(selection.harness));
-                                        structured_model_raw_seed.set(selection.model.clone());
-                                        structured_model_edited.set(false);
-                                        structured_model.set(selection.model);
-                                        custom_model_harness.set(
-                                            entry.selection.model.as_ref().and_then(|model| {
-                                                (!catalog.iter().any(|candidate| candidate.id == *model))
-                                                    .then_some(entry.selection.harness)
-                                            }),
-                                        );
-                                        structured_effort.set(selection.effort);
-                                        structured_permissions.set(selection.permissions);
-                                        invalidate_directory_browse(
-                                            browse_generation, browse_request, browse_result, browse_error,
-                                        );
-                                        reseed_cloned_field(
-                                            &mut cwd,
-                                            &mut cwd_raw_seed,
-                                            &mut cwd_edited,
-                                            &entry.cwd,
-                                        );
-                                        composer_reset_reason.set(None);
-                                        intent_key.set(None);
-                                    }
-                                },
-                                span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&entry.cwd)} · {selected_host_label}" }
-                                span { class: "launch-composer-recent-selection", "{display_peer(&summary)}" }
+                                    },
+                                    span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&entry.cwd)} · {selected_host_label}" }
+                                    span { class: "launch-composer-recent-selection", "{display_peer(&summary)}" }
+                                }
                             }
-                        }
-                        }
+                            }
+                    }
                 }
             // Working directory and agent command are literal text that
             // gets EXECUTED, never prose — OS-level text mangling has no
@@ -3572,86 +3676,6 @@ pub(super) fn CreateSessionForm(
                         // full argument for both edges of that rule).
                         intent_key.set(None);
                     },
-                }
-            }
-            details { class: "launch-composer-advanced",
-                summary { "advanced launch configuration" }
-                label {
-                    "title (optional)"
-                    input {
-                    r#type: "text",
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    // See the working-directory field's own comment above:
-                    // a clone can seed this from a peer-supplied title, with
-                    // the same escaped-display / raw-seed model.
-                    dir: "ltr",
-                    value: "{title}",
-                    disabled: busy,
-                    oninput: move |evt| {
-                        if !draft_transition_allowed(ops) {
-                            return;
-                        }
-                        title.set(evt.value());
-                        title_edited.set(true);
-                        // An edit makes the next submit a DIFFERENT
-                        // intent, so the key the last one used stops
-                        // applying here (this component's docs carry the
-                        // full argument for both edges of that rule).
-                        intent_key.set(None);
-                    },
-                    }
-                }
-            }
-            div { class: "launch-composer-actions",
-                if *creation_surface.read() == CreationSurface::Structured {
-                    div { class: "launch-composer-summary", aria_live: "polite",
-                        "{summary_harness} · "
-                        span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
-                        " · folder: "
-                        span { class: "peer-value", dir: "ltr", "{summary_folder}" }
-                        " · model: "
-                        span { class: "peer-value", dir: "ltr", "{summary_model}" }
-                        " · effort: {summary_effort} · permissions: {summary_permissions}"
-                    }
-                }
-                button {
-                    r#type: "button",
-                    class: "launch-composer-cancel",
-                    disabled: busy,
-                    onclick: move |_| {
-                        // The disabled attribute updates after this event's
-                        // synchronous submit claim. Recheck the shared lock
-                        // here so a queued Cancel cannot unmount the future
-                        // that owns an already accepted create.
-                        if !ops.busy_now() {
-                            on_cancel.call(());
-                        }
-                    },
-                    "cancel"
-                }
-                button {
-                    r#type: "submit",
-                    class: "btn btn-primary create-session-submit",
-                // `blocked` as well as this form's own flag: a create must
-                // not overlap a host mutation (see `ListView`'s operation
-                // gate), and a control that is inert for that window says so
-                // rather than silently dropping the click.
-                //
-                // Inert with no agent selected for a different reason: there
-                // is nothing to launch, and the handler refuses in words
-                // anyway (a `disabled` attribute is one render behind, so it
-                // is the visible half of that rule rather than the guard).
-                disabled: busy
-                    || !selected_host_available
-                    || !remembered_destination_valid
-                    || (*creation_surface.read() == CreationSurface::Structured
-                        && (structured_harness.read().is_none()
-                            || structured_choice_error.is_some()))
-                    || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
-                    "launch"
                 }
             }
             if let Some(err) = error.read().clone() {
