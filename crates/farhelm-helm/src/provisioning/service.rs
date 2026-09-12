@@ -1348,9 +1348,17 @@ impl ProvisioningService {
                 }
                 let previous_incarnation =
                     self.manager.status(host).map(|status| status.incarnation);
-                self.manager.retry_now(host).await.map_err(|error| {
-                    BackendFailure::new("requesting supervisor attach", error.to_string())
-                })?;
+                // A fresh window, not a plain retry: this step runs seconds
+                // after starting or restarting the supervisor's own unit,
+                // so the host is coming back by our own action — and a
+                // single probe would race that start latency, then sit out
+                // a full re-probe past this step's own deadline.
+                self.manager
+                    .retry_now_with_fresh_window(host)
+                    .await
+                    .map_err(|error| {
+                        BackendFailure::new("requesting supervisor attach", error.to_string())
+                    })?;
                 let attached = tokio::time::timeout(ATTACH_TIMEOUT, async {
                     loop {
                         let status = self.manager.status(host)?;

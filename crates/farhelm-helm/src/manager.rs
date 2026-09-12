@@ -913,7 +913,10 @@ struct Nudge {
     /// unfolding a whole ladder per click is exactly the hammering the
     /// two-regime design avoids. A registry EDIT is different: it changes
     /// what is being dialed, which is the same kind of event as a freeze
-    /// being resolved, and it gets the ladder for the same reason.
+    /// being resolved, and it gets the ladder for the same reason. So is
+    /// provisioning's attach, which runs seconds after starting or
+    /// restarting the supervisor's own unit: the host is coming back by
+    /// our own action, and a single probe would race that start latency.
     fresh_window: bool,
 }
 
@@ -2372,8 +2375,11 @@ impl ConnectionManager {
     /// ONE attempt and returns to its re-probe cadence, because a user
     /// clicking retry is not evidence the host is back. A registry edit,
     /// which is such evidence, goes through [`Self::sync_registry`]
-    /// instead. Resolving a freeze still earns the ladder — that decision
-    /// lives in the actor, where the freeze does.
+    /// instead, and provisioning's attach — same kind of evidence, from a
+    /// restarted unit rather than an edited row — goes through
+    /// [`Self::retry_now_with_fresh_window`]. Resolving a freeze still
+    /// earns the ladder — that decision lives in the actor, where the
+    /// freeze does.
     ///
     /// A RETIRED host is the exception, and the important one: its actor is
     /// gone, so there is no wait to interrupt and nothing a nudge could
@@ -2389,6 +2395,33 @@ impl ConnectionManager {
     /// registry entry, which the REST edge reports as a 404 rather than
     /// answering 200 to a retry that could not possibly have happened.
     pub async fn retry_now(&self, host: HostId) -> anyhow::Result<bool> {
+        self.nudge_now(host, false).await
+    }
+
+    /// Reconnect `host` now with a fresh active-retry window: drop whatever
+    /// connection it has, reload its row, and dial through the full ladder.
+    ///
+    /// The narrow sibling of [`Self::retry_now`] for the one caller with
+    /// positive evidence the host is coming back: provisioning's
+    /// `AttachSupervisor`, which runs seconds after starting or restarting
+    /// the supervisor's own unit. A plain retry's single probe races that
+    /// start latency and, on losing, resets the re-probe clock while
+    /// buying only one dial — the next attempt lands a full
+    /// [`Cadence::reprobe`] out, past the attach step's own deadline. The
+    /// ladder dials through that startup instead: the early steps recover a
+    /// supervisor that is back within a second or two, exactly the case
+    /// they exist for.
+    ///
+    /// Returns whether a host was actually found, like [`Self::retry_now`].
+    pub async fn retry_now_with_fresh_window(&self, host: HostId) -> anyhow::Result<bool> {
+        self.nudge_now(host, true).await
+    }
+
+    /// The shared body of [`Self::retry_now`] and
+    /// [`Self::retry_now_with_fresh_window`]: interrupt the live actor, or
+    /// revive a dead entry, exactly as `retry_now` documents. Only the
+    /// window the nudge carries differs.
+    async fn nudge_now(&self, host: HostId, fresh_window: bool) -> anyhow::Result<bool> {
         // A nudge is only meaningful to a LIVE actor. Two things make one
         // meaningless, and both used to be reported as success: a retired
         // entry (its task is gone), and an entry whose nudge receiver has
@@ -2406,11 +2439,11 @@ impl ConnectionManager {
             if !(retired || unreachable_actor) {
                 handle.nudge.send_modify(|nudge| {
                     nudge.revision += 1;
-                    // Explicitly cleared rather than left alone: the value
+                    // Explicitly set rather than left alone: the value
                     // is retained between sends, so a previous
                     // reconfigure's flag would otherwise still be riding
                     // along.
-                    nudge.fresh_window = false;
+                    nudge.fresh_window = fresh_window;
                 });
                 return Ok(true);
             }
@@ -5857,6 +5890,126 @@ mod tests {
             seconds(&attempts)[8],
             105,
             "the next probe must be one full re-probe interval later"
+        );
+    }
+
+    /// An attach retry against an UNREACHABLE host runs the whole ladder.
+    ///
+    /// The provisioning-attach half of the contract: unlike a user's "try
+    /// now" click, attach runs seconds after starting or restarting the
+    /// supervisor's own unit, so the host is coming back by our own action.
+    /// A single probe would race that start latency and, on losing, sit out a
+    /// full re-probe past the attach step's own deadline — the ladder
+    /// dials through it instead. The host stays DOWN so the schedule is
+    /// observable; one that answered would settle on the first attempt
+    /// and prove nothing about the other six.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn attach_retry_on_an_unreachable_host_runs_the_ladder() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("down.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    reachable: false,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .expect("actor is running");
+        // The whole first window, and nothing after it yet.
+        assert_eq!(fixture.transport.attempts(host).len(), 7);
+
+        fixture
+            .manager
+            .retry_now_with_fresh_window(host)
+            .await
+            .expect("the host exists");
+        let attempts = fixture.transport.wait_for_attempts(host, 14).await;
+        assert_eq!(
+            seconds(&attempts),
+            vec![0, 1, 3, 7, 15, 30, 60, 60, 61, 63, 67, 75, 90, 120],
+            "attach must dial through the restart latency, not probe once and wait out the re-probe"
+        );
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .expect("actor is running");
+    }
+
+    /// An attach retry against a host that comes back mid-ladder connects
+    /// instead of dialing out the window.
+    ///
+    /// The complement of the schedule test above: the ladder exists so a
+    /// supervisor that returns seconds after our own start is caught by an
+    /// early step, not so the actor performs all seven dials. The host flips
+    /// reachable after the fresh window's immediate dial has already failed,
+    /// so the connection below is unambiguously a later ladder step's — and
+    /// nothing may dial after the settle.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn attach_retry_connects_when_the_host_comes_back_mid_ladder() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("back.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    reachable: false,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .expect("actor is running");
+        assert_eq!(fixture.transport.attempts(host).len(), 7);
+
+        fixture
+            .manager
+            .retry_now_with_fresh_window(host)
+            .await
+            .expect("the host exists");
+        // The fresh window's immediate dial lands while the host is still
+        // down; the flip after it means the NEXT ladder step connects.
+        // Paused time makes this ordering exact: nothing advances the
+        // clock between the wait returning and the synchronous edit.
+        fixture.transport.wait_for_attempts(host, 8).await;
+        fixture
+            .transport
+            .edit(host, |script| script.reachable = true);
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .expect("attach connects once the host is back");
+        let attempts = fixture.transport.attempts(host);
+        assert_eq!(
+            seconds(&attempts).last(),
+            Some(&61),
+            "the early ladder step must do the connecting, not a later re-probe"
+        );
+        let settled = attempts.len();
+        tokio::time::advance(Duration::from_secs(120)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            fixture.transport.attempts(host).len(),
+            settled,
+            "no dials after the settle"
         );
     }
 

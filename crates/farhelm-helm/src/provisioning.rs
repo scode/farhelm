@@ -3917,11 +3917,12 @@ mod tests {
     /// the middle.
     ///
     /// A published `Arc<SupervisorClient>` is a snapshot of a connection the
-    /// manager owns and may end at any moment. `ConnectionManager::retry_now`
-    /// — which `ProvisioningService`'s own `AttachSupervisor` action and
-    /// every rediscovery `probe` of an already-registered host call — drops
-    /// the live connection and returns as soon as the nudge is SENT, without
-    /// waiting for the actor to act on it. So there is always an interval in
+    /// manager owns and may end at any moment. The manager's nudge methods
+    /// ([`ConnectionManager::retry_now`] — which every rediscovery `probe`
+    /// of an already-registered host calls — and the fresh-window sibling
+    /// `AttachSupervisor` calls) drop the live connection and return as
+    /// soon as the nudge is SENT, without waiting for the actor to act on
+    /// it. So there is always an interval in
     /// which [`wait_real_client`] hands back a client the actor is about to
     /// withdraw, and `manager::retire_withdrawn` then fails everything that
     /// connection was carrying. A test that sampled a client and issued one
