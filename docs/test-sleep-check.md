@@ -16,8 +16,9 @@ python3 -m venv /path/to/test-sleep-env
 The command neither builds nor executes test code. `--inventory` prints JSON for all recognized calls, including their
 annotations. Both modes exit 1 while any recognized delay lacks a rationale, 0 when none do, and 2 when source discovery
 or parsing is incomplete. Cancellation retains its signal status. `--root` selects another checkout with the same source
-layout. The existing CI formatting job runs this check for code changes, preserving draft-PR suppression. It installs
-the pinned prebuilt parsers in an isolated environment and requires zero unannotated delays; it does not run tests.
+layout. The CI workflow's formatting job runs this check for code changes when the workflow is dispatched by hand (it
+has no push or pull-request trigger). It installs the pinned prebuilt parsers in an isolated environment and requires
+zero unannotated delays; it does not run tests.
 
 Place `// sleep-ok: <why>` on its own line immediately before the call or after the completed call on its ending line.
 Explain the observable window, scheduling stimulus, deadline or helper responsibility that requires the delay. Empty
