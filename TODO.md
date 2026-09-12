@@ -124,12 +124,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   close-reason receipts; keep these failures distinct from the existing single-client stall entry, and do not weaken
   liveness assertions based on a later passing run.
 
-- Make interrupted browser-run cleanup account for the detached `start-stack.sh` fixture servers. Three deliberately
-  canceled recorder-backed Playwright shards returned after their runner was terminated while their owned fixture
-  servers still held their ports and state directories. Explicit cleanup of the owned fixture shells released both.
-  Establish which layer owns these detached children and verify cleanup on cancellation without touching other stacks.
-  This is an observed harness limitation; the exact cleanup mechanism responsible has not been established.
-
 ### Difficult deflake
 
 The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
