@@ -367,6 +367,17 @@ test("the sidebar hides its scrollbar without giving up scrolling", async ({ pag
 });
 
 /**
+ * How many fixture sessions `cleanupAll` tears down at once.
+ *
+ * Serial teardown blew a test's whole 60s budget under full-shard load:
+ * eighteen sessions times stop-plus-delete is thirty-six sequential
+ * requests, and the timeout then raced request-context disposal, masking
+ * the teardown as a generic timeout. Unbounded teardown would stampede a
+ * loaded supervisor instead. This bound is politeness, not a tuned value.
+ */
+const CLEANUP_LANES = 6;
+
+/**
  * Clean up every session in `sessions`, even when some cleanups fail.
  *
  * A plain loop that stopped at the first failure would abandon every
@@ -375,6 +386,15 @@ test("the sidebar hides its scrollbar without giving up scrolling", async ({ pag
  * cleanup is attempted regardless of earlier failures; their errors are
  * collected and reported together once the sweep is done, rather than
  * losing all but the first.
+ *
+ * The sweep runs over a few lanes rather than one. Each session still
+ * stops before it deletes; only distinct sessions overlap, and the
+ * aggregated error keeps creation order so repeated failures read the
+ * same.
+ *
+ * The sweep is its own report step, so a trace shows teardown as
+ * teardown — a slow or failing cleanup must never read as the geometry
+ * (or menu, or chrome) assertion it follows.
  */
 type SessionCleanup = (request: APIRequestContext, sessionId: string) => Promise<void>;
 type MountedFixtureSession = Pick<Awaited<ReturnType<typeof createSession>>, "id" | "title">;
@@ -388,17 +408,39 @@ async function cleanupAll(
   sessions: { id: string }[],
   cleanup: SessionCleanup = cleanupSession,
 ): Promise<void> {
-  const failures: string[] = [];
-  for (const session of sessions) {
-    try {
-      await cleanup(request, session.id);
-    } catch (error) {
-      failures.push(`${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+  await test.step(`teardown: delete ${sessions.length} fixture session(s)`, async () => {
+    const failures: { index: number; message: string }[] = [];
+    // Claimed synchronously between awaits, so lanes never share an index.
+    let next = 0;
+    const lanes = Array.from(
+      { length: Math.min(CLEANUP_LANES, sessions.length) },
+      async () => {
+        for (;;) {
+          const index = next++;
+          if (index >= sessions.length) return;
+          try {
+            await cleanup(request, sessions[index].id);
+          } catch (error) {
+            failures.push({
+              index,
+              message: `${sessions[index].id}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            });
+          }
+        }
+      },
+    );
+    await Promise.all(lanes);
+    failures.sort((a, b) => a.index - b.index);
+    if (failures.length > 0) {
+      throw new Error(
+        `cleanup failed for ${failures.length} session(s):\n${
+          failures.map((failure) => failure.message).join("\n")
+        }`,
+      );
     }
-  }
-  if (failures.length > 0) {
-    throw new Error(`cleanup failed for ${failures.length} session(s):\n${failures.join("\n")}`);
-  }
+  });
 }
 
 /**
@@ -527,6 +569,87 @@ test("mounted clone fixture retains partial-allocation and cleanup ownership", a
 });
 
 /**
+ * The scrolling fixture owns its sessions end to end: a creation failing
+ * partway through still tears down what DID get created, one cleanup
+ * failing does not abandon the rest, a failing teardown does not mask
+ * the creation error that triggered it, and the sweep overlaps distinct
+ * sessions instead of deleting them one by one.
+ *
+ * Serial teardown is what exhausted a test's whole budget under
+ * full-shard load; the lane assertion below is what keeps a future edit
+ * from silently re-serializing it. These callbacks never call the API —
+ * the gate they park at makes the overlap deterministic rather than a
+ * timing bet.
+ */
+test("scrolling fixture owns partial allocation and bounded teardown", async ({ request }) => {
+  const cleanedAfterCreateFailure: string[] = [];
+  await expect(
+    fillSidebarPastOneScreen(request, "partial", {
+      create: async (_request, options) => {
+        if (options.title.endsWith("-2")) throw new Error("injected third-create failure");
+        return { id: options.title };
+      },
+      cleanup: async (_request, id) => { cleanedAfterCreateFailure.push(id); },
+    }),
+  ).rejects.toThrow("injected third-create failure");
+  expect(cleanedAfterCreateFailure.sort()).toEqual(["partial-0", "partial-1"]);
+
+  // When the teardown itself fails, the thrown error must name both the
+  // creation failure and the cleanup failure: either one alone would send
+  // the next reader after the wrong half of the story.
+  await expect(
+    fillSidebarPastOneScreen(request, "halfclean", {
+      create: async (_request, options) => {
+        if (options.title.endsWith("-2")) throw new Error("injected third-create failure");
+        return { id: options.title };
+      },
+      cleanup: async (_request, id) => {
+        if (id === "halfclean-0") throw new Error("injected teardown failure");
+      },
+    }),
+  ).rejects.toThrow(
+    "scrolling setup failed: injected third-create failure; partial-allocation cleanup also failed: cleanup failed for 1 session(s):\nhalfclean-0: injected teardown failure",
+  );
+
+  const cleanupAttempts: string[] = [];
+  await expect(
+    cleanupAll(request, [{ id: "a" }, { id: "b" }, { id: "c" }], async (_request, id) => {
+      cleanupAttempts.push(id);
+      if (id === "a") throw new Error("injected cleanup failure");
+    }),
+  ).rejects.toThrow("cleanup failed for 1 session(s)");
+  expect(cleanupAttempts.sort()).toEqual(["a", "b", "c"]);
+
+  // Every lane parks at the closed gate before any of them can finish, so
+  // a serial implementation could never reach the full lane count here —
+  // the poll below would time out instead.
+  let open = false;
+  let inflight = 0;
+  let maxInflight = 0;
+  const gated = Array.from({ length: CLEANUP_LANES * 3 }, (_, index) => ({ id: `g-${index}` }));
+  const sweep = cleanupAll(request, gated, async () => {
+    inflight++;
+    maxInflight = Math.max(maxInflight, inflight);
+    try {
+      await expect.poll(() => open, { timeout: 10_000 }).toBe(true);
+    } finally {
+      inflight--;
+    }
+  });
+  // The sweep is awaited even when the poll below fails, so a failure
+  // here never leaves an unobserved rejection behind it.
+  try {
+    await expect.poll(() => inflight, { timeout: 10_000 }).toBe(CLEANUP_LANES);
+  } finally {
+    open = true;
+    await sweep;
+  }
+  // The poll above already proved the lanes overlap; what remains is the
+  // cap: no schedule may run more cleanups at once than there are lanes.
+  expect(maxInflight, "lane cap held").toBeLessThanOrEqual(CLEANUP_LANES);
+});
+
+/**
  * Create enough sessions that `.app-sidebar` — the sidebar's real vertical
  * scroll container — must scroll to show them all, regardless of engine or
  * viewport font metrics.
@@ -545,17 +668,34 @@ test("mounted clone fixture retains partial-allocation and cleanup ownership", a
  * never reaches its `finally` if this call throws before returning, so
  * nothing else would ever clean those up. Every already-created id is
  * torn down (via `cleanupAll`, so one cleanup failing does not mask
- * another) before the original error is rethrown.
+ * another) before the original error is rethrown; if the teardown itself
+ * fails, the thrown error names both failures instead of masking either.
+ *
+ * The defaults are the real test-stack operations. The injected seams
+ * exist only to make partial allocation and cleanup failure observable
+ * without creating a deliberately stranded real session.
  */
+type ScrollingFixtureCreate = (
+  request: APIRequestContext,
+  options: Parameters<typeof createSession>[1],
+) => Promise<{ id: string }>;
+
 async function fillSidebarPastOneScreen(
   request: APIRequestContext,
   marker: string,
+  {
+    create = createSession,
+    cleanup = cleanupSession,
+  }: {
+    create?: ScrollingFixtureCreate;
+    cleanup?: SessionCleanup;
+  } = {},
 ): Promise<{ id: string }[]> {
   const created: { id: string }[] = [];
   try {
     for (let i = 0; i < 18; i++) {
       created.push(
-        await createSession(request, {
+        await create(request, {
           title: `${marker}-${i}`,
           cwd: "/tmp",
           invocation: "sleep 300",
@@ -563,7 +703,18 @@ async function fillSidebarPastOneScreen(
       );
     }
   } catch (error) {
-    await cleanupAll(request, created);
+    try {
+      await cleanupAll(request, created, cleanup);
+    } catch (cleanupError) {
+      // Both failures matter: the creation error explains why setup
+      // stopped, the cleanup error explains what may still be stranded.
+      // Rethrowing only one would hide the other from the next reader.
+      const original = error instanceof Error ? error.message : String(error);
+      const cleanup = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      throw new Error(
+        `scrolling setup failed: ${original}; partial-allocation cleanup also failed: ${cleanup}`,
+      );
+    }
     throw error;
   }
   return created;

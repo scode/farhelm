@@ -95,12 +95,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and differs from the older editor-fill race recorded below. Retain save-response, busy-state and pointer/focus
   receipts before deciding why the close was lost; a registered profile alone does not prove the editor has settled.
 
-- Give the existing scrolling fixture in `the sidebar app bar stays pinned while the session list scrolls`, in
-  `e2e/tests/sidebar.spec.ts`, reliable cleanup ownership. A Chromium full-shard trace passed every scrolling and bar
-  geometry assertion, then exhausted the test's 60-second budget during sequential session teardown. The last DELETE
-  raced disposal of the request context. Preserve the geometry checks and record cleanup separately from a product
-  scrolling failure; do not infer a layout defect from the teardown timeout.
-
 - Investigate the retained host-action fixture failures from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`.
   WebKit's `aliasing a remote host renames it everywhere but the details view`, in `e2e/tests/sidebar.spec.ts`, tried to
   read a disposed `route.fetch` response and also failed teardown.
