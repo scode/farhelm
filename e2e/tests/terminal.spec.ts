@@ -93,6 +93,30 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
 });
 
 /**
+ * The terminal's effective surface must be continuous from the xterm canvas
+ * through its application-owned wrapper. A theme option alone would leave
+ * the vendored viewport black, while a CSS-only assertion would miss a
+ * palette regression inside xterm.js.
+ */
+test("matches Ghostty's terminal theme and surface", async ({ page }) => {
+  await openTerminal(page);
+  await waitForTermText(page, "fake-agent starting");
+  const colors = await page.evaluate(() => {
+    const terminal = document.querySelector(".terminal");
+    const viewport = document.querySelector(".xterm-viewport");
+    const term = (window as any).__farhelmTerm;
+    return {
+      themeBackground: term.options.theme.background,
+      terminalBackground: getComputedStyle(terminal!).backgroundColor,
+      viewportBackground: getComputedStyle(viewport!).backgroundColor,
+    };
+  });
+  expect(colors.themeBackground.toLowerCase()).toBe("#282c34");
+  expect(colors.viewportBackground, "the vendored #000 viewport rule must lose to the app override").toBe("rgb(40, 44, 52)");
+  expect(colors.terminalBackground).toBe(colors.viewportBackground);
+});
+
+/**
  * The shared session's listing row, read only once the supervisor's live
  * classification of it has stopped moving.
  *

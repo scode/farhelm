@@ -25,12 +25,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   recovers on its own. This is an approximate report without precise reproduction steps or an established cause. Capture
   the behavior during sustained output and after it stops, and identify why the viewport stops scrolling coherently.
 
-- Investigate whether Farhelm can easily match Ghostty's default terminal colors for a readable out-of-the-box
-  experience. Foreground text was too dark in Farhelm while the same application was readable in Ghostty. Compare the
-  foreground/background colors, ANSI palette, and color-query responses through tmux, including how applications detect
-  a light or dark terminal. Determine whether a small configuration change can reproduce Ghostty's behavior before
-  committing to exact parity; matching the palette alone may not explain the difference.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly

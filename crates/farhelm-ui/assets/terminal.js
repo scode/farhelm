@@ -2687,6 +2687,7 @@
           window.FitAddon &&
           window.ClipboardAddon &&
           window.farhelmTermBytes &&
+          window.farhelmTerminalTheme &&
           window.farhelmClipboardNames &&
           window.farhelmShiftEnterKey &&
           window.farhelmCopyOnSelect &&
@@ -2860,6 +2861,7 @@
           scrollback: 12000,
           fontSize: 14,
           cursorBlink: true,
+          theme: window.farhelmTerminalTheme,
           // xterm's forced-selection gesture — the modifier that wins a
           // local xterm selection even while an app has mouse reporting on
           // (copy-on-select.js's header has the full duality) — is NOT the

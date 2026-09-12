@@ -20,6 +20,8 @@
 //! it would leave the pane program waiting for an answer that never arrives.
 //! Zero-padded CSI spellings such as `CSI 06n` are deliberately outside this
 //! table even when tmux treats them like their canonical counterparts.
+//! Tmux's answers are made to agree with the browser theme through
+//! `window-style` in the generated config.
 //!
 //! Queries can be split across control-mode notifications, so the matcher
 //! holds a possible prefix until the next notification. That hold-back is

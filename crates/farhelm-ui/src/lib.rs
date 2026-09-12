@@ -1148,6 +1148,9 @@ declare_assets! {
         AssetOptions::builder().with_hash_suffix(false)
     );
     const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
+    // The Ghostty-compatible palette terminal.js passes to xterm.js. It is
+    // separate so the node tests can load the exact shipped theme object.
+    const TERMINAL_THEME_JS: Asset = asset!("/assets/terminal-theme.js");
     // Clipboard fact capture, MIME-extension policy, and the pure filename
     // decision terminal.js calls. Kept as its own asset so node --test executes
     // the shipped functions rather than test-only copies; terminal.js also treats
@@ -1297,6 +1300,7 @@ fn AppBody() -> Element {
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: VENDOR_CLIPBOARD_JS }
         document::Script { src: TERM_BYTES_JS }
+        document::Script { src: TERMINAL_THEME_JS }
         document::Script { src: CLIPBOARD_NAME_JS }
         document::Script { src: SHIFT_ENTER_KEY_JS }
         document::Script { src: COPY_ON_SELECT_JS }

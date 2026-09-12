@@ -2589,10 +2589,11 @@ mod tests {
         }
     }
 
-    /// Recognize the response family tmux emits for one guarded query.
+    /// Recognize the exact response tmux emits for one guarded query.
     ///
-    /// The guard needs signatures rather than exact replies because cursor
-    /// coordinates and terminal identity vary with the scratch pane.
+    /// Cursor coordinates and terminal identity vary with the scratch pane,
+    /// but the two theme responses are fixed by the generated config and must
+    /// remain synchronized with the browser palette.
     fn reply_matches(query: &[u8], observed: &[u8]) -> bool {
         match query {
             b"\x1b[6n" => {
@@ -2605,12 +2606,12 @@ mod tests {
             b"\x1b[>c" | b"\x1b[>0c" => {
                 observed.windows(3).any(|window| window == b"\x1b[>") && observed.contains(&b'c')
             }
-            b"\x1b]10;?\x07" | b"\x1b]10;?\x1b\\" => {
-                observed.windows(9).any(|window| window == b"\x1b]10;rgb:")
-            }
-            b"\x1b]11;?\x07" | b"\x1b]11;?\x1b\\" => {
-                observed.windows(9).any(|window| window == b"\x1b]11;rgb:")
-            }
+            b"\x1b]10;?\x07" | b"\x1b]10;?\x1b\\" => observed
+                .windows(b"\x1b]10;rgb:ffff/ffff/ffff".len())
+                .any(|window| window == b"\x1b]10;rgb:ffff/ffff/ffff"),
+            b"\x1b]11;?\x07" | b"\x1b]11;?\x1b\\" => observed
+                .windows(b"\x1b]11;rgb:2828/2c2c/3434".len())
+                .any(|window| window == b"\x1b]11;rgb:2828/2c2c/3434"),
             _ => false,
         }
     }
