@@ -114,21 +114,52 @@ pub(crate) fn grouped_search_results(
     .collect()
 }
 
-/// Render every choice a recent setup will apply before a click changes the
-/// form. Omitted fields are named as defaults so absence is never mistaken
-/// for an invisible retained value.
+/// Render every choice a recent setup will apply before an interaction changes
+/// the form.
+///
+/// Omitted fields are named as defaults so absence is never mistaken for an
+/// invisible retained value. This is the complete accessible description; the
+/// compact row surface puts its harness in a separately styled leading span.
 pub(crate) fn selection_summary(selection: &LaunchSelection) -> String {
     format!(
-        "{:?} · model: {} · effort: {} · permissions: {}",
+        "{:?} · {}",
         selection.harness,
+        selection_summary_without_harness(selection)
+    )
+}
+
+/// Render the non-harness fields of a saved structured selection.
+///
+/// Recent rows put the harness first as their scan target, while titles and
+/// accessible names still need the complete summary from [`selection_summary`].
+/// Keeping one tail builder prevents those two representations from silently
+/// disagreeing about which saved defaults a row will apply.
+pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> String {
+    format!(
+        "{} · permissions: {}",
+        selection_summary_before_permissions(selection),
+        selection
+            .permissions
+            .map(|permissions| format!("{permissions:?}"))
+            .unwrap_or_else(|| "default".to_string()),
+    )
+}
+
+/// Render the model and effort of a saved selection, stopping before the
+/// permission.
+///
+/// The visible recent row spells the permission itself, so it can color
+/// "yolo" as a warning without cutting that word back out of a formatted
+/// string; this is the prefix it renders in front of that word. Every other
+/// summary appends the permission through [`selection_summary_without_harness`],
+/// so the two never disagree about the model or effort a row will apply.
+pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) -> String {
+    format!(
+        "model: {} · effort: {}",
         selection.model.as_deref().unwrap_or("default"),
         selection
             .effort
             .map(|effort| format!("{effort:?}"))
-            .unwrap_or_else(|| "default".to_string()),
-        selection
-            .permissions
-            .map(|permissions| format!("{permissions:?}"))
             .unwrap_or_else(|| "default".to_string()),
     )
 }
@@ -486,7 +517,7 @@ pub(crate) fn compatible_efforts(
 mod tests {
     use super::*;
     use crate::api::{FolderHistoryEntry, LaunchCatalogModel};
-    use crate::{HostId, LaunchEffort, LaunchHarness};
+    use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission};
 
     fn selection(
         harness: LaunchHarness,
@@ -499,6 +530,37 @@ mod tests {
             effort,
             permissions: None,
         }
+    }
+
+    /// The compact row presents its harness separately and spells the
+    /// permission itself, while the complete accessible summary must still
+    /// describe the exact same saved defaults. Specifically: `selection_summary`
+    /// is exactly `"{harness:?} · "` followed by
+    /// `selection_summary_without_harness`, which is exactly
+    /// `selection_summary_before_permissions` followed by
+    /// `" · permissions: {permission:?}"`, so no two renderings of one saved
+    /// setup can name different values.
+    #[test]
+    fn selection_summary_without_harness_preserves_the_saved_tail() {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: Some("gpt-6-astra".into()),
+            effort: Some(LaunchEffort::High),
+            permissions: Some(LaunchPermission::Yolo),
+        };
+
+        assert_eq!(
+            selection_summary_before_permissions(&selection),
+            "model: gpt-6-astra · effort: High"
+        );
+        assert_eq!(
+            selection_summary_without_harness(&selection),
+            "model: gpt-6-astra · effort: High · permissions: Yolo"
+        );
+        assert_eq!(
+            selection_summary(&selection),
+            "Codex · model: gpt-6-astra · effort: High · permissions: Yolo"
+        );
     }
 
     /// A partial composer selection must narrow only what the person chose;

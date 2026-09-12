@@ -3301,25 +3301,20 @@ samp {
 
 /* The whole heading-plus-slots band is absent from the DOM (see
    `create_form.rs`'s `recent_launches` guard) whenever no recent matches the
-   current filter, rather than present-but-empty: nothing here reserves space
-   for a band that has nothing to show, and the controls below are free to
-   move up when history is absent and back down again once it returns. Each
-   row keeps its fixed 44px height and 4px gap so a real row's two-line label
-   stays readable and geometry stays predictable WHILE the band exists. */
+   current filter. It is an action shortcut, not a reserved empty region, so
+   the controls below may move when there is nothing to offer. */
 .launch-composer-recents {
   display: grid;
   gap: 4px;
 }
 
-.launch-composer-recents-heading {
-  color: var(--composer-control-fg);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .launch-composer-recent-slots {
   display: grid;
-  gap: 4px;
+  gap: 0;
+  border: 1px solid var(--composer-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--composer-control-bg);
 }
 
 .launch-composer-choice {
@@ -3429,9 +3424,9 @@ samp {
   gap: 2px;
 }
 
-/* A complete recent occupies two lines. Keep adjacent complete setups on the
-   same 4px rhythm as the ordinary three-row recent surface without changing
-   the denser partial-action groups. */
+/* Search results remain the expanded two-line comparison surface. Its 4px
+   rhythm is intentionally independent from ordinary recents, which are now
+   compact one-line launch shortcuts. */
 .launch-composer-search-group.launch-composer-search-recents {
   gap: 4px;
 }
@@ -3485,7 +3480,6 @@ samp {
   font-weight: 400;
 }
 
-.launch-composer-recent-slots > button,
 .launch-composer-browser > button,
 .create-session-form label:has(select) select {
   min-height: 38px;
@@ -3498,26 +3492,75 @@ samp {
 }
 
 .launch-composer-recent-slots > button {
-  height: 44px;
-  min-height: 44px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--composer-control-fg);
   overflow: hidden;
   text-align: left;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-size: 13px;
+  font-weight: 400;
 }
 
-/* A recent changes every structured choice, so its destination and complete
-   selection are separate lines rather than one clipped concatenation. */
+/* A row is a compact launch shortcut. Its leading harness stays readable and
+   the hint stays pinned at the right; the destination and the choice detail
+   in between are the shrinkable items, each ellipsizing on its own (a flex
+   container ignores `text-overflow` on itself, so the spans must carry it),
+   rather than adding a second line that pushes the destination controls
+   farther down the dialog. */
+.launch-composer-recent-harness {
+  flex: none;
+  color: var(--composer-selected-fg);
+  font-weight: 700;
+}
+
 .launch-composer-recent-destination,
 .launch-composer-recent-selection {
-  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--composer-control-fg);
 }
 
 .launch-composer-recent-selection {
-  margin-top: 4px;
+  margin: 0;
   font-size: 12px;
   font-weight: 400;
+}
+
+.launch-composer-recent-hint {
+  display: none;
+  flex: none;
+  margin-left: auto;
+  color: var(--composer-control-fg);
+  font-size: 12px;
+}
+
+.launch-composer-recent-slots > button + button {
+  border-top: 1px solid var(--composer-border);
+}
+
+.launch-composer-recent-slots > button:hover:not(:disabled),
+.launch-composer-recent-slots > button:focus-visible {
+  background: var(--composer-selected-bg);
+  color: var(--composer-selected-fg);
+}
+
+.launch-composer-recent-slots > button:focus-visible {
+  box-shadow: inset 3px 0 0 var(--composer-selected-border);
+}
+
+.launch-composer-recent-slots > button:focus-visible .launch-composer-recent-hint {
+  display: inline;
 }
 
 /* The first controls answer the maintainer's complaint directly: Launch says

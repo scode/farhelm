@@ -1799,6 +1799,50 @@ pub(super) fn CreateSessionForm(
     let catalog_for_harness = catalog_models.clone();
     let catalog_for_search = catalog_models.clone();
     let catalog_for_custom_model = catalog_models.clone();
+    // Pointer activation and Enter both apply exactly the same saved draft.
+    // Enter deliberately submits only AFTER this callback returns: the form's
+    // submit handler owns the intent key and operation lock, so it must remain
+    // the one path that can mint a key for a launch.
+    let apply_recent = Callback::<api::LaunchHistoryEntry, bool>::new({
+        let catalog = catalog_models.clone();
+        let history = history_for_recents.clone();
+        let history_target = current_history_target.clone();
+        move |entry: api::LaunchHistoryEntry| {
+            if !draft_transition_allowed(ops) {
+                return false;
+            }
+            if !admit_history_destination(
+                history_target.clone(),
+                live_destination,
+                remembered_destination,
+                history_activation_attempts,
+            ) {
+                return false;
+            }
+            promote_history_snapshot(offered_history, create_target(), history.clone());
+            let selection = crate::launch_composer::select_recent(&entry);
+            structured_harness.set(Some(selection.harness));
+            structured_model_raw_seed.set(selection.model.clone());
+            structured_model_edited.set(false);
+            structured_model.set(selection.model);
+            custom_model_harness.set(entry.selection.model.as_ref().and_then(|model| {
+                (!catalog.iter().any(|candidate| candidate.id == *model))
+                    .then_some(entry.selection.harness)
+            }));
+            structured_effort.set(selection.effort);
+            structured_permissions.set(selection.permissions);
+            invalidate_directory_browse(
+                browse_generation,
+                browse_request,
+                browse_result,
+                browse_error,
+            );
+            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &entry.cwd);
+            composer_reset_reason.set(None);
+            intent_key.set(None);
+            true
+        }
+    });
     let search_result_groups =
         crate::launch_composer::grouped_search_results(crate::launch_composer::search_results(
             &recent_history,
@@ -2741,80 +2785,76 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
-                // Absent, not merely empty, with no history to offer: an
-                // always-present band used to reserve three 44px tracks so
-                // the controls below it would never jump, but that traded a
-                // near-empty dialog for every first-time host and every
-                // filter that happens to match nothing. Nothing below this
-                // point reserves space for it any more, so a match arriving
-                // later is a layout that grows rather than one that was
-                // secretly already at its full height.
+                // Absent, not merely empty, with no history to offer: a
+                // first-time host or unmatched filter should not make the
+                // composer advertise an empty action group. Nothing below
+                // this point reserves space, so a later match grows the
+                // layout rather than revealing a band that was secretly
+                // already there.
                 if !recent_launches.is_empty() {
                     div { class: "launch-composer-recents",
-                            div { class: "launch-composer-recents-heading", "recent setups" }
+                            span { class: "launch-composer-section-label", "recent setups" }
                             div { class: "launch-composer-recent-slots",
-                            for (entry, summary) in recent_launches.iter().take(3).map(|entry| (
+                            for (entry, summary, before_permissions) in recent_launches.iter().take(3).map(|entry| (
                                 entry,
                                 crate::launch_composer::selection_summary(&entry.selection),
+                                crate::launch_composer::selection_summary_before_permissions(&entry.selection),
                             )) {
                                 button {
                                     r#type: "button",
                                     dir: "ltr",
                                     disabled: busy,
                                     title: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
-                                    // Visual lines are intentionally separate so a
-                                    // long destination cannot consume the launch
-                                    // selection. Give assistive technology the
-                                    // same complete, punctuated label as `title`;
-                                    // concatenating the two spans would lose the
-                                    // delimiter at their DOM boundary.
+                                    // The visible row makes scanning cheaper, but
+                                    // its title and accessible name retain every
+                                    // saved value that the one-line layout may
+                                    // truncate. The punctuated string also keeps
+                                    // adjacent spans from running together for
+                                    // assistive technology.
                                     aria_label: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
                                     onclick: {
                                         let entry = entry.clone();
-                                        let catalog = catalog_models.clone();
-                                        let history = history_for_recents.clone();
-                                        let history_target = current_history_target.clone();
                                         move |_| {
-                                            if !draft_transition_allowed(ops) {
-                                                return;
-                                            }
-                                            if !admit_history_destination(
-                                                history_target.clone(), live_destination,
-                                                remembered_destination, history_activation_attempts,
-                                            ) { return; }
-                                            promote_history_snapshot(
-                                                offered_history,
-                                                create_target(),
-                                                history.clone(),
-                                            );
-                                            let selection = crate::launch_composer::select_recent(&entry);
-                                            structured_harness.set(Some(selection.harness));
-                                            structured_model_raw_seed.set(selection.model.clone());
-                                            structured_model_edited.set(false);
-                                            structured_model.set(selection.model);
-                                            custom_model_harness.set(
-                                                entry.selection.model.as_ref().and_then(|model| {
-                                                    (!catalog.iter().any(|candidate| candidate.id == *model))
-                                                        .then_some(entry.selection.harness)
-                                                }),
-                                            );
-                                            structured_effort.set(selection.effort);
-                                            structured_permissions.set(selection.permissions);
-                                            invalidate_directory_browse(
-                                                browse_generation, browse_request, browse_result, browse_error,
-                                            );
-                                            reseed_cloned_field(
-                                                &mut cwd,
-                                                &mut cwd_raw_seed,
-                                                &mut cwd_edited,
-                                                &entry.cwd,
-                                            );
-                                            composer_reset_reason.set(None);
-                                            intent_key.set(None);
+                                            apply_recent.call(entry.clone());
                                         }
                                     },
+                                    onkeydown: {
+                                        let entry = entry.clone();
+                                        move |evt| {
+                                            // The busy guard lives in `apply_recent`
+                                            // (its `false` return below); only the key
+                                            // itself is filtered here.
+                                            if evt.key() != Key::Enter || evt.is_composing() {
+                                                return;
+                                            }
+                                            // Native button activation would emit a
+                                            // synthetic click after Enter. Suppress it
+                                            // so this row fills and submits once.
+                                            evt.prevent_default();
+                                            if !apply_recent.call(entry.clone()) {
+                                                return;
+                                            }
+                                            document::eval("document.querySelector('.create-session-form[role=\"dialog\"]')?.requestSubmit()");
+                                        }
+                                    },
+                                    span { class: "launch-composer-recent-harness", "{entry.selection.harness:?}" }
+                                    " · "
                                     span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&entry.cwd)} · {selected_host_label}" }
-                                    span { class: "launch-composer-recent-selection", "{display_peer(&summary)}" }
+                                    " · "
+                                    // The permission is spelled here, not by the
+                                    // summary helper, so the one danger-colored
+                                    // word cannot drift from the text around it
+                                    // the way string surgery on a Debug spelling
+                                    // would. Matched on the signal's value.
+                                    span { class: "launch-composer-recent-selection",
+                                        "{display_peer(&before_permissions)} · permissions: "
+                                        if entry.selection.permissions == Some(LaunchPermission::Yolo) {
+                                            span { class: "launch-composer-danger", "yolo" }
+                                        } else {
+                                            "default"
+                                        }
+                                    }
+                                    span { class: "launch-composer-recent-hint", "⏎ launch" }
                                 }
                             }
                             }
