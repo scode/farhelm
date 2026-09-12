@@ -31,6 +31,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a light or dark terminal. Determine whether a small configuration change can reproduce Ghostty's behavior before
   committing to exact parity; matching the palette alone may not explain the difference.
 
+- Add a way to name the session in the "New session" launcher composer. The composer offers host, folder, harness, and
+  model, but no session name field.
+
+- Make the launcher composer compact and put launch/cancel within easy reach. Launch and cancel currently sit at the
+  bottom right, below the fold at typical window sizes, so launching requires scrolling; move them to the very top of
+  the composer. Remove the large empty regions (the area reserved for "recent setups" is mostly blank); even when recent
+  setups or similar lists have content, they must stay compact rather than reserve space.
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
