@@ -48,6 +48,10 @@ const MUSE_EFFORTS: &[LaunchEffort] = &[
     LaunchEffort::High,
     LaunchEffort::Xhigh,
 ];
+/// OpenCode's inspected interactive CLI has no portable effort flag. An empty
+/// catalog vocabulary makes an explicit effort invalid rather than guessing a
+/// translation to a provider-specific variant.
+const OPENCODE_EFFORTS: &[LaunchEffort] = &[];
 
 const CATALOG: &[CatalogModel] = &[
     CatalogModel {
@@ -79,6 +83,26 @@ const CATALOG: &[CatalogModel] = &[
         id: "muse-spark-1.3-contributor",
         harness: LaunchHarness::Muse,
         efforts: MUSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/glm-5.3-flash",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/grok-4.5",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/grok-4.6",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/glm-5.3",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
     },
 ];
 
@@ -121,6 +145,10 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             LaunchHarness::Claude | LaunchHarness::Muse => {
                 argv.extend(["--model".to_string(), model.clone()])
             }
+            LaunchHarness::OpenCode => argv.extend([
+                "--model".to_string(),
+                opencode_model_argument(model)?.to_string(),
+            ]),
         }
     }
     if let Some(effort) = selection.effort {
@@ -136,6 +164,8 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
                 "--reasoning-effort".to_string(),
                 effort.as_cli_arg().to_string(),
             ]),
+            // `validate_selection` has already rejected this combination.
+            LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         }
     }
     if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -143,6 +173,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             match selection.harness {
                 LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
                 LaunchHarness::Claude => "--dangerously-skip-permissions",
+                LaunchHarness::OpenCode => "--auto",
             }
             .to_string(),
         );
@@ -154,6 +185,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             LaunchHarness::Codex => AgentKind::Codex,
             LaunchHarness::Claude => AgentKind::Claude,
             LaunchHarness::Muse => AgentKind::Generic,
+            LaunchHarness::OpenCode => AgentKind::Generic,
         },
         resume_template: None,
         selection,
@@ -165,12 +197,19 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Codex => "codex",
         LaunchHarness::Claude => "claude",
         LaunchHarness::Muse => "muse",
+        LaunchHarness::OpenCode => "opencode",
     }
 }
 
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
+    if selection.harness == LaunchHarness::OpenCode && selection.model.is_none() {
+        return Err("choose an OpenCode model before launching".to_string());
+    }
     if let Some(model) = &selection.model {
         validate_model_id(model)?;
+        if selection.harness == LaunchHarness::OpenCode {
+            opencode_model_argument(model)?;
+        }
         if let Some(known) = CATALOG.iter().find(|entry| entry.id == model) {
             if known.harness != selection.harness {
                 return Err(format!(
@@ -199,6 +238,19 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
     Ok(())
 }
 
+/// Return OpenCode's verified provider-qualified argument without changing
+/// the saved selection. Bare values are Zen model names; a slash therefore
+/// names a provider and must be OpenCode itself.
+fn opencode_model_argument(model: &str) -> Result<String, String> {
+    match model.split_once('/') {
+        None => Ok(format!("opencode/{model}")),
+        Some(("opencode", suffix)) if !suffix.is_empty() => Ok(model.to_string()),
+        Some((provider, _)) => Err(format!(
+            "OpenCode model {model:?} names provider {provider:?}; only the opencode provider is supported"
+        )),
+    }
+}
+
 fn validate_model_id(model: &str) -> Result<(), String> {
     if model.is_empty() {
         return Err("model id cannot be empty".to_string());
@@ -223,6 +275,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Codex => CODEX_EFFORTS,
         LaunchHarness::Claude => CLAUDE_EFFORTS,
         LaunchHarness::Muse => MUSE_EFFORTS,
+        LaunchHarness::OpenCode => OPENCODE_EFFORTS,
     }
 }
 
@@ -320,6 +373,123 @@ mod tests {
                 "--yolo"
             ]
         );
+
+        let opencode = LaunchSelection {
+            harness: LaunchHarness::OpenCode,
+            model: Some("opencode/grok-4.6".to_string()),
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+        };
+        let compiled = compile(opencode).expect("OpenCode's documented flags compile");
+        assert_eq!(compiled.agent_kind, AgentKind::Generic);
+        assert_eq!(
+            shell_words::split(&compiled.invocation).unwrap(),
+            ["opencode", "--model", "opencode/grok-4.6", "--auto"]
+        );
+    }
+
+    /// OpenCode launches must name Zen explicitly. This prevents a changed
+    /// local OpenCode configuration from silently choosing a model Farhelm's
+    /// durable selection never recorded.
+    #[test]
+    fn opencode_requires_a_zen_model_and_normalizes_only_its_argv() {
+        assert!(
+            compile(selection(LaunchHarness::OpenCode))
+                .unwrap_err()
+                .contains("choose an OpenCode model")
+        );
+
+        let bare = LaunchSelection {
+            harness: LaunchHarness::OpenCode,
+            model: Some("private-zen-model".to_string()),
+            effort: None,
+            permissions: None,
+        };
+        let compiled = compile(bare.clone()).expect("bare Zen model");
+        assert_eq!(
+            compiled.selection, bare,
+            "the selection records typed intent"
+        );
+        assert_eq!(
+            shell_words::split(&compiled.invocation).unwrap(),
+            ["opencode", "--model", "opencode/private-zen-model"]
+        );
+
+        let other_provider = LaunchSelection {
+            model: Some("anthropic/claude".to_string()),
+            ..bare
+        };
+        assert!(
+            compile(other_provider)
+                .unwrap_err()
+                .contains("only the opencode provider")
+        );
+    }
+
+    /// The OpenCode CLI's `--auto` option is a permission policy, not an
+    /// effort mechanism; a stale structured selection must not invent one.
+    #[test]
+    fn opencode_refuses_an_unsupported_effort() {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::OpenCode,
+            model: Some("opencode/glm-5.3".to_string()),
+            effort: Some(LaunchEffort::High),
+            permissions: None,
+        };
+
+        assert!(
+            compile(selection)
+                .unwrap_err()
+                .contains("does not include effort")
+        );
+    }
+
+    /// The four suggestions are the release offering, not a default model or
+    /// a provider discovery result. Each must compile without effort or an
+    /// implicit permission override.
+    #[test]
+    fn opencode_catalog_contains_exactly_the_four_zen_suggestions() {
+        let ids = [
+            "opencode/glm-5.3-flash",
+            "opencode/grok-4.5",
+            "opencode/grok-4.6",
+            "opencode/glm-5.3",
+        ];
+        let offered: Vec<_> = super::catalog()
+            .iter()
+            .filter(|row| row.harness == LaunchHarness::OpenCode)
+            .collect();
+        assert_eq!(offered.iter().map(|row| row.id).collect::<Vec<_>>(), ids);
+        for row in offered {
+            assert!(row.efforts.is_empty());
+            let compiled = compile(LaunchSelection {
+                model: Some(row.id.to_string()),
+                ..selection(LaunchHarness::OpenCode)
+            })
+            .expect("every suggested model compiles");
+            assert_eq!(
+                shell_words::split(&compiled.invocation).unwrap(),
+                ["opencode", "--model", row.id]
+            );
+        }
+    }
+
+    /// Provider qualification must not turn shell-sensitive custom model
+    /// text into syntax or rewrite the intent later used by clone/history.
+    #[test]
+    fn opencode_custom_qualification_preserves_one_literal_argument() {
+        for model in ["custom'42;$literal", "opencode/custom'42;$literal"] {
+            let input = LaunchSelection {
+                model: Some(model.to_string()),
+                ..selection(LaunchHarness::OpenCode)
+            };
+            let compiled = compile(input.clone()).expect("literal custom Zen model");
+            assert_eq!(compiled.selection, input);
+            assert_eq!(
+                shell_words::split(&compiled.invocation).unwrap(),
+                ["opencode", "--model", "opencode/custom'42;$literal"]
+            );
+        }
     }
 
     /// A custom model remains one literal argv element even when it needs

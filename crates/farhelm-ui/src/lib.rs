@@ -376,6 +376,9 @@ pub enum LaunchHarness {
     Codex,
     Claude,
     Muse,
+    /// OpenCode's generic integration has no captured conversation or
+    /// synthesized resume command, despite being a first-class composer row.
+    OpenCode,
 }
 
 /// A literal reasoning effort understood by the selected harness.

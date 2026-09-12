@@ -842,31 +842,34 @@ maintainer-confirmed decisions. Provisioning a supervisor does not establish tru
 check is that the connection is still the CURRENT one for that host row, since registry rows outlive the machines behind
 them. Version 14 replaced session-list pagination with a bounded whole-list reply, and version 15 carries helm-resolved
 launch bundles and upward profile resolution. The historical paragraph below describes why 13 was current at the time;
-later released additions took the wire to 18. Version 16 introduced the durable optional structured launch snapshot
+later released additions took the wire to 19. Version 16 introduced the durable optional structured launch snapshot
 carried with a create and `SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a
 browser-owned compiler input; old sessions remain absent rather than being reconstructed from a command. Version 17 adds
 `BrowseDirectory` and `DirectoryListing`: the helm routes one authenticated, connection-incarnation-guarded request to
 the chosen supervisor, which expands `~` from its own recorded home, canonicalizes the requested directory, and returns
 only a sorted bounded immediate child-directory listing plus parent and truncation state. Neither the helm nor the
 client reads the target filesystem. Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder
-history to the destination the target supervisor actually accepted. The following 13 paragraph is historical context,
-not the current protocol version; the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
-`Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added
-additively within the version rather than as version bumps of their own — which was possible ONLY because 13 itself had
-not yet shipped when they landed, still being developed on this branch with no released build speaking it yet. That is a
-one-time allowance for a version still in flight, not a standing license to keep adding to 13 after it ships; once a
-protocol version has shipped, a wire-shape addition needs a version of its own, same as any other. The same allowance
-covers the one thing in 13 that is not an addition at all: `AgentSession::host` became `Option<String>`, so a reply
-carrying a row the helm just mutated or created can say "there is a session here but no host name I can vouch for"
-instead of encoding that as an empty string indistinguishable from a real value. A decoder built against 13 EARLIER IN
-ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not stretch to cover it under any
-reading — so it is allowed here only because nothing released speaks 13 yet. It must not be carried forward the same way
-once 13 ships: the identical edit made afterwards needs a version of its own. Each verb is routed and recorded through
-the exact same `sessions.rs` functions the corresponding REST route uses — `route_session`, the client call and
-`record_session` for the lifecycle three, and `do_create_session` (the shared internal function `POST /api/sessions` was
-refactored onto) for the creating two. So a refusal that comes out of the SHARED operation — an unknown session, a
-disconnected host, a title the owning supervisor rejects — is the identical sentence the UI would have shown, and a
-session an agent creates is seeded into the helm's cache and published exactly as one the create dialog made.
+history to the destination the target supervisor actually accepted. Version 19 adds OpenCode to the structured-harness
+enum. A supervisor must retain that snapshot alongside the resolved invocation, so an older peer that cannot decode the
+new enum value refuses the connection rather than silently losing the selection. The following 13 paragraph is
+historical context, not the current protocol version; the frozen changelog stops at 11. Version 13 also carries
+`AgentVerb::Rename`/`Stop`/ `Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by
+`AgentReply::Created`), all added additively within the version rather than as version bumps of their own — which was
+possible ONLY because 13 itself had not yet shipped when they landed, still being developed on this branch with no
+released build speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to
+keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own,
+same as any other. The same allowance covers the one thing in 13 that is not an addition at all: `AgentSession::host`
+became `Option<String>`, so a reply carrying a row the helm just mutated or created can say "there is a session here but
+no host name I can vouch for" instead of encoding that as an empty string indistinguishable from a real value. A decoder
+built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not
+stretch to cover it under any reading — so it is allowed here only because nothing released speaks 13 yet. It must not
+be carried forward the same way once 13 ships: the identical edit made afterwards needs a version of its own. Each verb
+is routed and recorded through the exact same `sessions.rs` functions the corresponding REST route uses —
+`route_session`, the client call and `record_session` for the lifecycle three, and `do_create_session` (the shared
+internal function `POST /api/sessions` was refactored onto) for the creating two. So a refusal that comes out of the
+SHARED operation — an unknown session, a disconnected host, a title the owning supervisor rejects — is the identical
+sentence the UI would have shown, and a session an agent creates is seeded into the helm's cache and published exactly
+as one the create dialog made.
 
 The equivalence covers that shared path and stops there, deliberately, in two places. The relay adds a doorway check of
 its own (`validate_agent_verb`) that the REST surface has no counterpart for, since only the relay puts an
@@ -1230,7 +1233,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   `Deleted`, and ids whose current names differ from the snapshot become `Renamed`. Profile writes are last-write-wins
   and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no resume template. They
   use the ordinary terminal launch path and generic activity classifier, without per-agent hooks or
-  conversation-identity capture.
+  conversation-identity capture. OpenCode is a structured harness only: its release catalog holds four Zen model IDs,
+  requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its
+  empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
+  provider-specific effort or conversation lifecycle contract.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
   existence are not user management surface — but its alias is user-editable on the same terms as any other host's. It

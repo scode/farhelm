@@ -19,10 +19,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Add OpenCode support, initially assuming OpenCode Zen is the provider. Fixing the provider lets OpenCode fit the
-  existing "harness + model" model. Initially limit models to GLM 5.3 Flash, Grok 4.5, Grok 4.6, and GLM 5.3. Support
-  for multiple providers is deferred to future work.
-
 - Investigate and fix scrolling backward becoming unreliable while an agent is actively emitting output. Frequently, the
   terminal appears split somewhere around the middle: the upper portion freezes while the lower portion keeps scrolling
   upward as new output arrives. Scrolling up does not restore normal behavior; after output stops, scrolling eventually

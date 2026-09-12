@@ -1768,9 +1768,13 @@ pub(super) fn CreateSessionForm(
             effort: structured_effort(),
             permissions: structured_permissions(),
         };
-        (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
-            "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
-        )
+        if harness == LaunchHarness::OpenCode && selection.model.is_none() {
+            Some("choose an OpenCode model before launching")
+        } else {
+            (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
+                "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
+            )
+        }
     });
     // Peer-owned values remain separate directional runs. A single formatted
     // summary lets a strong RTL host, folder, or model reorder neighboring
@@ -1899,6 +1903,11 @@ pub(super) fn CreateSessionForm(
                         effort: *structured_effort.peek(),
                         permissions: *structured_permissions.peek(),
                     };
+                    if harness == LaunchHarness::OpenCode && selection.model.is_none() {
+                        error.set(Some("choose an OpenCode model before launching".to_string()));
+                        ops.release();
+                        return;
+                    }
                     if !crate::launch_composer::selection_is_compatible(
                         &selection,
                         &catalog_for_submit,
@@ -2881,6 +2890,7 @@ pub(super) fn CreateSessionForm(
                             (LaunchHarness::Codex, "Codex"),
                             (LaunchHarness::Claude, "Claude"),
                             (LaunchHarness::Muse, "Muse"),
+                            (LaunchHarness::OpenCode, "OpenCode"),
                         ] {
                             button {
                                 r#type: "button",
@@ -2965,6 +2975,7 @@ pub(super) fn CreateSessionForm(
                 div { class: "launch-composer-choice launch-composer-model-choice",
                     span { "model" }
                     div { class: "launch-composer-options",
+                        if structured_harness() != Some(LaunchHarness::OpenCode) {
                         button {
                             r#type: "button",
                             class: if structured_model.read().is_none() { "selected" } else { "" },
@@ -2989,6 +3000,7 @@ pub(super) fn CreateSessionForm(
                                 "✓"
                             }
                             "harness default"
+                        }
                         }
                         // Before choosing a harness, ownership remains in
                         // the label. Once chosen, narrow this stable catalog
@@ -3100,6 +3112,7 @@ pub(super) fn CreateSessionForm(
                         }
                     }
                 }
+                if structured_harness() != Some(LaunchHarness::OpenCode) {
                 div { class: "launch-composer-choice launch-composer-effort-choice",
                     span { "effort" }
                     div { class: "launch-composer-options",
@@ -3141,6 +3154,7 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                     }
+                }
                 }
                 div { class: "launch-composer-choice launch-composer-permissions-choice",
                     span { "permissions" }

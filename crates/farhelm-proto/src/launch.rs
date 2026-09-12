@@ -2,7 +2,9 @@
 //!
 //! This module intentionally records choices, not inferred runtime facts. A
 //! missing model, effort, or permission flag means that the selected harness
-//! receives no corresponding argument and decides its own default. The
+//! receives no corresponding argument and decides its own default. OpenCode
+//! is the exception: the helm requires an explicit model so local provider
+//! configuration cannot override Farhelm's Zen-only contract. The
 //! supervisor later stores the same value beside the resolved argv so clone
 //! and history can describe what the user chose without attempting to parse a
 //! command line back into a structured launch.
@@ -22,6 +24,9 @@ pub enum LaunchHarness {
     Codex,
     Claude,
     Muse,
+    /// OpenCode's terminal UI, intentionally kept on the generic runtime
+    /// integration because Farhelm does not capture or resume its sessions.
+    OpenCode,
 }
 
 /// An explicit reasoning-effort value requested from a structured harness.
@@ -74,6 +79,9 @@ pub enum LaunchPermission {
 /// `model` remains a literal identifier so a release catalog can recognize
 /// supported IDs while still allowing the explicit custom-model escape hatch.
 /// It is never a shell fragment or a sequence of command-line arguments.
+/// The wire shape permits an absent model for harness defaults; the helm
+/// rejects that absence for OpenCode. Provider qualification belongs only to
+/// compiled argv, so persisted intent retains the identifier the user entered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
@@ -92,14 +100,14 @@ mod tests {
     #[test]
     fn omitted_optional_choices_round_trip_as_none() {
         let selection = LaunchSelection {
-            harness: LaunchHarness::Muse,
+            harness: LaunchHarness::OpenCode,
             model: None,
             effort: None,
             permissions: None,
         };
 
         let json = serde_json::to_value(&selection).expect("serialize launch selection");
-        assert_eq!(json["harness"], "muse");
+        assert_eq!(json["harness"], "open_code");
         assert!(json["model"].is_null());
         assert!(json["effort"].is_null());
         assert!(json["permissions"].is_null());
