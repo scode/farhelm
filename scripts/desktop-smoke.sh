@@ -101,7 +101,18 @@ for tool in Xvfb xdotool openbox import convert curl python3 tmux dx; do
   fi
 done
 
-PORT="${DESKTOP_SMOKE_PORT:-7493}"
+# Ask the kernel for a free loopback port rather than defaulting to a fixed
+# one: other agents run this harness on the same machine, and a fixed default
+# (7493, once) made two concurrent runs collide at the app's bind. The pick is
+# released before the app binds it, so a loss is possible but loud (the
+# embedded helm fails its bind with "Address already in use" and the app exits
+# through its ordinary fallback path, so the leg that launched it fails on
+# readiness) and the window is milliseconds. DESKTOP_SMOKE_PORT still forces a
+# specific port for a human who wants to point a browser at the run.
+free_port() {
+  python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+}
+PORT="${DESKTOP_SMOKE_PORT:-$(free_port)}" || { echo "FAIL: could not pick a free port" >&2; exit 1; }
 API="http://127.0.0.1:$PORT"
 DISP="" # assigned once Xvfb reports its allocated display number, below
 
@@ -1019,9 +1030,16 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   # applies here: a global path like `/nonexistent/tmux` could exist on
   # some machine and defeat the point. A different port than the main
   # launch's, since that app has only just been asked to close and its
-  # listener may still be draining.
+  # listener may still be draining. Under a forced DESKTOP_SMOKE_PORT the
+  # neighbor keeps the old predictable shape; otherwise it is picked the
+  # way the main port was, since PORT+1 next to an ephemeral pick is no
+  # more likely to be free than any other number.
   ANSWERING_BAD_TMUX="$X/answering-bad-tmux/tmux"
-  ANSWERING_PORT=$((PORT + 1))
+  if [ -n "${DESKTOP_SMOKE_PORT:-}" ]; then
+    ANSWERING_PORT=$((PORT + 1))
+  else
+    ANSWERING_PORT="$(free_port)" || fail "could not pick a free port for the answering-supervisor leg"
+  fi
   ANSWERING_DESKTOP_LOG="$X/answering-desktop.log"
   DISPLAY=$DISP \
     FARHELM_TMUX="$ANSWERING_BAD_TMUX" \

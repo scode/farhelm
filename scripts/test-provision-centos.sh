@@ -70,7 +70,6 @@ farhelm_payload="$cargo_target_dir/$target_triple/debug/farhelm"
 # cache instead of re-running dnf.
 image=farhelm-centos-ci:stream9
 container_user=farhelm
-ssh_alias=farhelm-centos-target
 # The one test that dials the destination. Deliberately narrow: a broader
 # filter would pull in the localhost and direct-local cases, which correctly
 # SKIP where no local user manager exists — and this script treats a skip as a
@@ -78,11 +77,22 @@ ssh_alias=farhelm-centos-target
 test_filter=provisioning::tests::provisioning_and_update_over_ssh_preserve_an_operable_session
 
 ssh_config="$HOME/.ssh/config"
-config_begin="# BEGIN farhelm-centos-ci (scripts/test-provision-centos.sh)"
-config_end="# END farhelm-centos-ci"
 
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-centos-ci.XXXXXX")
 container=""
+# The alias the test dials is PER RUN, suffixed with the run directory's
+# random tail, and so are the markers that fence its block in `~/.ssh/config`.
+# `~/.ssh/config` is shared by every checkout this user runs this script from,
+# and a fixed alias meant a second concurrent run (another agent on the same
+# machine) silently repointed the first run's destination at its own container
+# and then deleted the block on exit, so the first run's test dialed a host
+# that no longer existed. The prefix stays the same so a human can still find
+# and remove every block this script ever wrote.
+ssh_alias_prefix=farhelm-centos-target
+ssh_alias="$ssh_alias_prefix-${run_dir##*.}"
+config_begin_prefix="# BEGIN farhelm-centos-ci"
+config_begin="$config_begin_prefix $ssh_alias (scripts/test-provision-centos.sh)"
+config_end="# END farhelm-centos-ci $ssh_alias"
 # Whether this run had to create `~/.ssh/config`. If it did, and scrubbing the
 # block leaves it empty, the file goes too — a machine that had no ssh config
 # before this ran should have none after.
@@ -97,10 +107,52 @@ created_ssh_config=no
 # port that no longer answers.
 # --------------------------------------------------------------------------
 
+# Every write to `~/.ssh/config` is a read-modify-write through a scratch
+# file, and every run on this machine shares that one file. Without a lock,
+# run B can snapshot the config in the instant after run A truncated it and
+# before A refilled it, and B's write-back then drops A's stanza (A's test
+# dials a name that no longer resolves) or the user's own stanzas. The lock
+# is an flock on a fixed file next to the config, held only across the
+# sweep-and-write at setup and the removal at teardown, never across the
+# test itself. Where flock(1) is missing the writes go ahead unlocked, as
+# they always did; the loss is a narrow race, not a wrong result.
+#
+# The fd is unlocked explicitly before it is closed, because children
+# spawned while it is open inherit the open file description and closing
+# only this shell's fd would leave a still-running child holding the lock.
+ssh_config_lock="$HOME/.ssh/.farhelm-centos-ci.lock"
+ssh_config_locked=no
+lock_ssh_config() {
+  [ "$ssh_config_locked" = no ] || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  exec 8>>"$ssh_config_lock"
+  flock -w 60 8 || {
+    echo "another run has held $ssh_config_lock for over a minute; giving up" >&2
+    return 1
+  }
+  ssh_config_locked=yes
+}
+unlock_ssh_config() {
+  [ "$ssh_config_locked" = yes ] || return 0
+  flock -u 8
+  exec 8>&-
+  ssh_config_locked=no
+}
+
+# Remove one alias's block: this run's own by default, or the alias named by
+# `$1`. Only exact markers match, so a concurrent run's block (a different
+# alias, hence different markers) is left alone. Callers hold the ssh config
+# lock; this function does not take it, so that the setup sweep can remove
+# several blocks under one acquisition.
 remove_ssh_config_block() {
+  local begin="$config_begin" end="$config_end"
+  if [ -n "${1:-}" ]; then
+    begin="$config_begin_prefix $1 (scripts/test-provision-centos.sh)"
+    end="# END farhelm-centos-ci $1"
+  fi
   test -f "$ssh_config" || return 0
   scrubbed="$run_dir/ssh-config.scrubbed"
-  awk -v begin="$config_begin" -v end="$config_end" '
+  awk -v begin="$begin" -v end="$end" '
     $0 == begin { skip = 1; next }
     $0 == end   { skip = 0; next }
     !skip       { print }
@@ -119,7 +171,15 @@ cleanup() {
   if [ -n "$container" ]; then
     docker rm -f "$container" >/dev/null 2>&1 || true
   fi
-  remove_ssh_config_block || true
+  # A failure inside the locked setup section arrives here with the lock
+  # still held; lock_ssh_config is a no-op in that case, and the unlock
+  # afterwards releases either acquisition.
+  if lock_ssh_config; then
+    remove_ssh_config_block || true
+    unlock_ssh_config || true
+  else
+    echo "skipping ssh config cleanup: could not take $ssh_config_lock" >&2
+  fi
   rm -rf "$run_dir"
   exit "$status"
 }
@@ -238,11 +298,49 @@ done
 echo "== teaching this user's ssh about the target"
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
-# Scrub first, create second — and in that order, because the scrub is what
-# makes this idempotent (a run killed before its trap fired leaves a block
-# naming a port that is now gone) and it also deletes a config this script
-# created, which the creation below has to happen after rather than before.
-remove_ssh_config_block
+# Held from the stale sweep through this run's own stanza landing in the file:
+# the two are one logical edit, and the keyscan between them is fast.
+lock_ssh_config
+# Scrub stale blocks first, create second — and in that order, because the
+# scrub can delete a config this script created, which the creation below has
+# to happen after rather than before. A block is stale when the identity file
+# it names is gone: a run killed before its trap fired leaves a block naming a
+# port that no longer answers, and its run directory (where the key lived) is
+# what a reboot or a /tmp cleaner removes. A block whose key still exists may
+# belong to a run in another checkout that is live right now, and is left
+# alone; this run's own alias cannot be in the file yet, so nothing here ever
+# touches a live block.
+if [ -f "$ssh_config" ]; then
+  while read -r stale_alias; do
+    [ -n "$stale_alias" ] || continue
+    identity=$(awk -v begin="$config_begin_prefix $stale_alias (scripts/test-provision-centos.sh)" \
+      -v end="# END farhelm-centos-ci $stale_alias" '
+      $0 == begin { inside = 1; next }
+      $0 == end   { inside = 0; next }
+      inside && $1 == "IdentityFile" { print $2; exit }
+    ' "$ssh_config")
+    if [ -z "$identity" ] || [ ! -e "$identity" ]; then
+      echo "   removing stale ssh config block for $stale_alias"
+      remove_ssh_config_block "$stale_alias"
+    fi
+  done <<EOF
+$(awk -v prefix="$config_begin_prefix " -v alias_prefix="$ssh_alias_prefix-" \
+  'index($0, prefix) == 1 && index($4, alias_prefix) == 1 { print $4 }' "$ssh_config")
+EOF
+  # Before aliases were per run, the block carried no alias in its markers. A
+  # machine that ran that version and was then killed mid-run still has one of
+  # those; nothing dials its alias any more, so it is always stale.
+  if grep -qxF "$config_begin_prefix (scripts/test-provision-centos.sh)" "$ssh_config"; then
+    echo "   removing the pre-per-run-alias ssh config block"
+    scrubbed="$run_dir/ssh-config.scrubbed"
+    awk -v begin="$config_begin_prefix (scripts/test-provision-centos.sh)" -v end="# END farhelm-centos-ci" '
+      $0 == begin { skip = 1; next }
+      $0 == end   { skip = 0; next }
+      !skip       { print }
+    ' "$ssh_config" >"$scrubbed"
+    cat "$scrubbed" >"$ssh_config"
+  fi
+fi
 if [ ! -e "$ssh_config" ]; then
   created_ssh_config=yes
   # ssh refuses a group- or world-writable config, and the default umask on
@@ -281,6 +379,7 @@ test -s "$run_dir/known_hosts" || {
   cat "$ssh_config"
 } >"$run_dir/ssh-config.new"
 cat "$run_dir/ssh-config.new" >"$ssh_config"
+unlock_ssh_config
 
 # Readiness is TWO conditions, and the second is the one that matters. ssh
 # answering only proves sshd is up; provisioning additionally needs pam_systemd

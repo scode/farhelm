@@ -14,12 +14,18 @@
 import { defineConfig, devices } from "@playwright/test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { harnessStackPort, STACK_PORT_ENV } from "./stack-port";
 import {
   AUTH_STORAGE_STATE_PATH,
   harnessAuthorizationHeaders,
 } from "./tests/helpers/device-auth";
 
 const authorizationHeaders = harnessAuthorizationHeaders();
+// Chosen once per run and pinned through the environment; see stack-port.ts
+// for why a fixed port was a collision between concurrent runs and why the
+// choice cannot live in start-stack.sh.
+const stackPort = harnessStackPort();
+const stackBaseURL = `http://127.0.0.1:${stackPort}`;
 const testsDir = join(__dirname, "tests");
 
 /** Preserve Playwright's recursive spec discovery while assigning one file per project. */
@@ -94,7 +100,7 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   use: {
-    baseURL: "http://127.0.0.1:7434",
+    baseURL: stackBaseURL,
     // These two options are one credential in two browser transports.
     // Playwright injects `use` options into the request fixture and into
     // manual browser.newContext() calls as well as its default page context,
@@ -135,9 +141,15 @@ export default defineConfig({
   ],
   webServer: {
     command: "bash ./start-stack.sh",
+    // The stack script is a shell child with no view of this module, so the
+    // port it must bind reaches it the same way it reaches the workers.
+    env: { [STACK_PORT_ENV]: String(stackPort) },
     // The API correctly answers 401 before global setup has exchanged the
     // token. The public static bundle is therefore the readiness probe.
-    url: "http://127.0.0.1:7434/",
+    url: `${stackBaseURL}/`,
+    // A port that already answers is someone else's stack (another agent's
+    // run on this machine), never this run's; refuse it rather than test
+    // against a helm whose token this run does not hold.
     reuseExistingServer: false,
     stdout: "pipe",
     stderr: "pipe",
