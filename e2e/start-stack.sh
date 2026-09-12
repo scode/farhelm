@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Boot the real stack for Playwright: TWO supervisors (each with its own
-# private tmux) + helm (loopback :7434) + one fake-agent session, then run
-# the helm in the foreground so Playwright's webServer can watch it.
+# private tmux) + helm (loopback, on the port FARHELM_E2E_PORT names) + one
+# fake-agent session, then run the helm in the foreground so Playwright's
+# webServer can watch it.
+#
+# The port is an INPUT, never chosen here: Playwright needs baseURL and its
+# readiness URL before it starts this script, so playwright.config.ts picks a
+# free port (or takes an explicit FARHELM_E2E_PORT) and forwards it through
+# webServer.env. Running this script by hand means setting the variable
+# yourself; a missing one is refused below rather than defaulted, because a
+# default is exactly the fixed port that let two concurrent runs collide.
 #
 # The helm takes no session or transport flags any more (PLAN_M6.md item
 # 5): it drives every host in its registry, and the machine this script
@@ -55,6 +63,25 @@ test -f "$dist/index.html" || {
   echo "missing web dist — run dx build first" >&2
   exit 1
 }
+
+# Validated as a bare port number before it can reach an argv or a URL. The
+# empty case gets its own message because it is the one a person running this
+# script outside Playwright will hit.
+port="${FARHELM_E2E_PORT:-}"
+test -n "$port" || {
+  echo "FARHELM_E2E_PORT is unset — playwright.config.ts sets it; running by hand means choosing one yourself" >&2
+  exit 1
+}
+# The length bound matters as well as the charset: `test -gt` on a digit
+# string too long for an integer errors out rather than comparing, and an
+# error there would read as "in range".
+case "$port" in
+  *[!0-9]* | '' | ??????*) echo "FARHELM_E2E_PORT must be a TCP port number, got '$port'" >&2; exit 1 ;;
+esac
+if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+  echo "FARHELM_E2E_PORT is out of range: $port" >&2
+  exit 1
+fi
 
 # Reap runs that died without their trap (a SIGKILL, a crashed shell).
 # The sweep lives in the farhelm-teststate crate so there is exactly one
@@ -273,12 +300,12 @@ token="$("$bin" helm token show --state-dir "$state")" || exit 1
 # private tmux server orphaned after every run.
 FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" "$bin" helm run \
   --state-dir "$state" \
-  --port 7434 \
+  --port "$port" \
   --ui-dist "$dist" \
   --ensure-hosts "$ensure" 9>&- &
 helm_pid=$!
 
-base="http://127.0.0.1:7434"
+base="http://127.0.0.1:$port"
 auth_header="$state/harness-auth-header"
 
 # Exchange once for the curl-based setup path. The browser uses its own

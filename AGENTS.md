@@ -360,6 +360,35 @@ morning. Nothing in normal development needs the live install — the test suite
 from temporary state directories, and stopping a transient `farhelm-<uuid>-*.scope` unit that belongs to such a test is
 fine.
 
+# Sharing the machine with other agents
+
+Several agents work on this project at once, on this machine, as the same unix user, each in its own checkout or jj
+workspace. The harnesses are built so that concurrent runs do not collide: every test picks its ports from the kernel
+(the Rust e2e harness binds port 0, the Playwright config and the desktop smoke ask for a free port per run, the CentOS
+script lets docker choose), state lives in per-run random directories under `/tmp` addressed by private tmux and
+supervisor sockets, systemd scopes and units carry a UUID, and the CentOS script's ssh alias is suffixed per run. Do not
+reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a fixed ssh alias in
+a harness; when a harness genuinely needs a stable name, derive it from the run's own random directory.
+
+What is NOT isolated, and what follows from it:
+
+- One agent per checkout or workspace. Playwright's stack-info and auth files, `.ci-tmux/`, `.ci-nextest/`, and the dx
+  output under `target/` are per checkout, and `scripts/build-tmux-assets.sh` deletes and rebuilds its python
+  environment under `target/` without a lock. Two agents in one tree race on all of them. Sibling checkouts and
+  `jj workspace` directories are the supported shape; a shared `CARGO_TARGET_DIR` across workspaces is fine for cargo
+  (it locks) but not for the dx and tmux-asset builds: the desktop smoke serializes its own cargo and dx builds behind
+  `/tmp/fh-build.lock`, and nothing serializes the rest. (Fixed lock files like that one, and the CentOS script's lock
+  next to the ssh config, are the exception the fixed-path rule allows: a lock exists to be shared, and it names no
+  state.)
+- Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
+  `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*` or `fh-e2e.*` directory holding a live
+  flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already reaps dead runs
+  from any checkout, guarded by the flock, so nothing needs killing by hand.
+- The `systemd --user` manager and the CPU are shared. Timing budgets, the transient-scope availability probe, and the
+  RSS measurement in `terminal_backpressure` assume a quiet machine, and another agent's battery is exactly the load
+  FLAKES.md records as tripping them. A failure under that load is an environment event: keep the retained run, re-run
+  narrowly when the machine is quieter, and do not log it as a flake or a regression on one observation.
+
 # lore/
 
 `lore/` holds historical artifacts — decision records written when the decision was made. It is not part of the codebase
