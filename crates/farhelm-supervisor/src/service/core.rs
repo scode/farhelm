@@ -53,8 +53,8 @@ use crate::store::{
 use crate::tmux::{AGENT_WINDOW_OPTION, PaneProbe, PaneState, TAB_WINDOW_OPTION, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ErrorKind, ProfileExistence, RestartMode, RestartOffer, SessionInfo, SessionStatus,
-    SourceProfile, TabInfo,
+    AgentKind, ControlMsg, ErrorKind, Frame, ProfileExistence, RestartMode, RestartOffer,
+    SessionInfo, SessionStatus, SourceProfile, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -64,6 +64,39 @@ use std::time::Duration;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
+
+/// A bounded, canonical view of one directory on the supervisor host.
+///
+/// Browser clients receive complete child paths because those are the only
+/// values that can later be submitted unchanged to create. Entries whose
+/// names cannot cross the UTF-8/control-character path boundary are omitted.
+pub(crate) struct DirectoryBrowse {
+    pub(crate) cwd: String,
+    pub(crate) parent: Option<String>,
+    pub(crate) children: Vec<String>,
+    pub(crate) truncated: bool,
+}
+
+/// The number of usable immediate child directories one browse reply may
+/// carry. This is a presentation bound, separate from the scan budget below:
+/// a directory full of ordinary files must not make an otherwise small reply
+/// expensive to produce.
+const DIRECTORY_BROWSE_CAP: usize = 200;
+/// The most directory entries one request may inspect before reporting a
+/// partial result. `read_dir` has no useful promise about ordering, so this
+/// counts every entry, including files and names we cannot represent. Once
+/// this scan is exhausted, the sorted answer is deterministic only for the
+/// scanned candidates; a different filesystem enumeration may have exposed a
+/// different subset, and `truncated` must say so.
+const DIRECTORY_BROWSE_SCAN_CAP: usize = 1_024;
+/// A single path must fit comfortably within both the protocol's bounded
+/// string handling and the composer's one-line controls.
+const DIRECTORY_BROWSE_FIELD_BYTES: usize = 4_096;
+/// The largest complete directory-listing frame the supervisor will put on
+/// the wire. This counts JSON escaping, the tagged-control-message envelope,
+/// the worst-case request id, and the fixed frame header — not merely path
+/// text — because quoted and backslash-heavy legal names expand on the wire.
+const DIRECTORY_BROWSE_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// The longest a single attachment may stay paused before the supervisor
 /// detaches it with [`farhelm_proto::DETACH_REASON_STALLED`].
@@ -1062,6 +1095,13 @@ impl StateDirOwnership {
 /// waiting for replies.
 const HANDLER_ADMISSION_PERMITS: usize = 8;
 
+/// The actual filesystem operations behind directory browsing may remain in
+/// the kernel after the caller has received its timeout reply. This smaller,
+/// supervisor-wide pool owns a permit until each blocking operation returns,
+/// so timed-out requests cannot turn into an unbounded population of stuck
+/// filesystem workers.
+const DIRECTORY_BROWSE_WORKER_PERMITS: usize = 2;
+
 /// A classified request failure: attached at the few call sites that
 /// actually know *why* a request failed (bad cwd, unparseable invocation,
 /// ...), and recovered later by `error_kind` to pick the `ControlMsg::Error`
@@ -1221,6 +1261,7 @@ pub(crate) fn create_fingerprint(
                 agent_kind,
                 resume_template,
                 source_profile: None,
+                ..
             },
         ) => serde_json::to_string(&(
             cwd,
@@ -1239,6 +1280,7 @@ pub(crate) fn create_fingerprint(
                 agent_kind,
                 resume_template,
                 source_profile: None,
+                ..
             },
         ) => serde_json::to_string(&(
             "parented_raw",
@@ -1256,6 +1298,7 @@ pub(crate) fn create_fingerprint(
                 agent_kind,
                 resume_template,
                 source_profile: Some(source_profile),
+                ..
             },
         ) => serde_json::to_string(&(
             "resolved_profile",
@@ -1267,6 +1310,48 @@ pub(crate) fn create_fingerprint(
             resume_template.as_deref(),
             source_profile.id.as_str(),
             source_profile.name.as_str(),
+        )),
+        // Structured input is already a resolved bundle. Its discriminant
+        // keeps the frozen raw/profile encodings byte-for-byte stable while
+        // binding both the user selection and the exact command it became.
+        (
+            parent,
+            CreateMode::Structured {
+                invocation,
+                agent_kind,
+                resume_template: None,
+                selection,
+            },
+        ) => serde_json::to_string(&(
+            "structured_launch_v1",
+            parent,
+            cwd,
+            invocation,
+            title,
+            crate::store::agent_kind_column(*agent_kind),
+            selection,
+        )),
+        // A selectorless structured spawn preserves the parent's stored
+        // resume bundle. It is a distinct fingerprint because the same
+        // explicit selection with a different durable resume argv is a
+        // different create intent.
+        (
+            parent,
+            CreateMode::Structured {
+                invocation,
+                agent_kind,
+                resume_template: Some(resume_template),
+                selection,
+            },
+        ) => serde_json::to_string(&(
+            "structured_launch_v2",
+            parent,
+            cwd,
+            invocation,
+            title,
+            crate::store::agent_kind_column(*agent_kind),
+            resume_template,
+            selection,
         )),
     }
     .expect("a fingerprint of strings and options always serializes")
@@ -1640,6 +1725,9 @@ struct LaunchRequest {
     /// precondition), and every refusal from validation is one a keyed
     /// create records and replays verbatim.
     source_profile: Option<ProfileSnapshot>,
+    /// The user-selected structured launch, if this was compiled by the
+    /// helm. It is carried as data, never inferred from `invocation`.
+    launch: Option<farhelm_proto::LaunchSelection>,
 }
 
 /// The launch inputs retained after a create's wire shape is fingerprinted.
@@ -1683,6 +1771,20 @@ pub(crate) enum CreateMode {
         agent_kind: Option<AgentKind>,
         resume_template: Option<Vec<String>>,
         source_profile: Option<ProfileSnapshot>,
+        launch: Option<farhelm_proto::LaunchSelection>,
+    },
+    /// A helm-compiled structured launch. The selection is retained beside
+    /// the resolved invocation so future lifecycle operations never have to
+    /// reverse-engineer user intent from shell syntax.
+    Structured {
+        invocation: String,
+        agent_kind: AgentKind,
+        /// The source's durable resume bundle when a structured launch is
+        /// inherited. A freshly helm-compiled selection leaves this absent,
+        /// allowing the established integration derivation; copying a parent
+        /// must instead preserve the bundle that parent actually stored.
+        resume_template: Option<Vec<String>>,
+        selection: farhelm_proto::LaunchSelection,
     },
 }
 
@@ -3346,6 +3448,11 @@ pub struct Supervisor {
     /// globally would buy nothing and would entangle unrelated
     /// connections' teardowns.
     pub(crate) admission: Arc<tokio::sync::Semaphore>,
+    /// Bounds filesystem workers independently from request replies. A
+    /// request may time out and release its handler permit while its blocking
+    /// `stat`/directory read continues; the worker keeps this permit until
+    /// the operating system returns control.
+    pub(crate) directory_browse_workers: Arc<tokio::sync::Semaphore>,
     /// The periodic ticker's OWN bound, deliberately disjoint from
     /// `admission` (PLAN_M6_75.md item 1's review found the shared version
     /// to be a SPEC violation).
@@ -3602,6 +3709,219 @@ pub struct SupervisorStartup {
 }
 
 impl Supervisor {
+    /// Read immediate child directories on this supervisor's filesystem.
+    ///
+    /// This is deliberately a nonrecursive browse operation. It expands `~`
+    /// using this daemon's resolved home and canonicalizes the accepted
+    /// directory, which gives history a verified path identity without ever
+    /// resolving a remote path on the helm or browser machine.
+    pub(crate) async fn browse_directory(&self, cwd: &str) -> anyhow::Result<DirectoryBrowse> {
+        // A timed-out caller can drop its request buffer while the worker is
+        // still blocked in the filesystem. Copy the expanded path before
+        // spawning so the detached worker never borrows that caller state.
+        let cwd = expand_tilde_cwd(cwd, self.user_home.as_deref())?.into_owned();
+        Self::run_directory_browse_worker(Arc::clone(&self.directory_browse_workers), move || {
+            Self::browse_directory_blocking(&cwd)
+        })
+        .await
+    }
+
+    /// Start one blocking browse operation under the pool that represents
+    /// actual filesystem work, rather than the caller waiting for a reply.
+    ///
+    /// The returned future may be cancelled by a reply deadline. The spawned
+    /// task is intentionally detached in that case, retaining `permit` until
+    /// the operating system returns from `work`; that preserves the worker
+    /// cap during a wedged mount.
+    async fn run_directory_browse_worker<F>(
+        workers: Arc<tokio::sync::Semaphore>,
+        work: F,
+    ) -> anyhow::Result<DirectoryBrowse>
+    where
+        F: FnOnce() -> anyhow::Result<DirectoryBrowse> + Send + 'static,
+    {
+        let permit = workers
+            .acquire_owned()
+            .await
+            .context("directory browse worker pool unexpectedly closed")?;
+        // The blocking task deliberately owns `permit`. A caller timeout
+        // drops this awaiter, not the started OS operation, so the permit
+        // remains unavailable until the filesystem returns. That is the
+        // distinction that makes the worker cap a real bound rather than a
+        // limit on merely waiting for work.
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            work()
+        })
+        .await
+        .context("directory browse worker panicked")?
+    }
+
+    /// Read a single directory level on a worker that owns one browse permit.
+    ///
+    /// Blocking filesystem calls cannot be force-cancelled safely by Tokio. The
+    /// caller may stop awaiting this function after its reply deadline, while
+    /// the permit captured by the surrounding worker remains held through every
+    /// `metadata`, canonicalization, and directory-read call below.
+    fn browse_directory_blocking(cwd: &str) -> anyhow::Result<DirectoryBrowse> {
+        Self::ensure_browse_cwd_usable(cwd)?;
+        let canonical = std::fs::canonicalize(cwd)
+            .with_context(|| format!("canonicalizing directory {cwd}"))?;
+        let cwd = canonical
+            .to_str()
+            .filter(|path| !path.chars().any(char::is_control))
+            .context("the selected directory is not a representable UTF-8 path")?
+            .to_string();
+        if cwd.len() > DIRECTORY_BROWSE_FIELD_BYTES {
+            anyhow::bail!("the selected directory path exceeds the browse field limit");
+        }
+        let parent = canonical
+            .parent()
+            .and_then(Path::to_str)
+            .filter(|path| !path.chars().any(char::is_control))
+            .filter(|path| path.len() <= DIRECTORY_BROWSE_FIELD_BYTES)
+            .map(str::to_string);
+        let entries =
+            std::fs::read_dir(&canonical).with_context(|| format!("reading directory {cwd}"))?;
+        let mut candidates = Vec::new();
+        let mut truncated = false;
+        let mut scanned = 0_usize;
+        for entry in entries {
+            let entry = entry.context("reading directory entry")?;
+            scanned += 1;
+            if scanned > DIRECTORY_BROWSE_SCAN_CAP {
+                truncated = true;
+                break;
+            }
+            if !entry
+                .file_type()
+                .context("reading directory entry type")?
+                .is_dir()
+            {
+                continue;
+            }
+            let path = entry.path();
+            let Some(path) = path
+                .to_str()
+                .filter(|path| !path.chars().any(char::is_control))
+            else {
+                continue;
+            };
+            if path.len() > DIRECTORY_BROWSE_FIELD_BYTES {
+                truncated = true;
+                continue;
+            }
+            candidates.push(path.to_string());
+        }
+        let (children, truncated) =
+            Self::select_directory_browse_children(candidates, &cwd, parent.as_deref(), truncated);
+        Ok(DirectoryBrowse {
+            cwd,
+            parent,
+            children,
+            truncated,
+        })
+    }
+
+    /// Return the sorted bounded prefix of one already-scanned candidate set.
+    ///
+    /// This intentionally does not promise a globally stable prefix for a
+    /// directory larger than [`DIRECTORY_BROWSE_SCAN_CAP`]. The caller may
+    /// have received different candidates from two legal filesystem
+    /// enumerations before the scan cap stopped it. Given the same
+    /// representable candidates, however, sorting before both response caps
+    /// makes the returned prefix independent of their enumeration order.
+    fn select_directory_browse_children(
+        mut candidates: Vec<String>,
+        cwd: &str,
+        parent: Option<&str>,
+        mut truncated: bool,
+    ) -> (Vec<String>, bool) {
+        candidates.sort_unstable();
+        let mut children = Vec::new();
+        for child in candidates {
+            if children.len() == DIRECTORY_BROWSE_CAP {
+                truncated = true;
+                break;
+            }
+            children.push(child);
+            if Self::directory_listing_wire_bytes(cwd, parent, &children)
+                > DIRECTORY_BROWSE_RESPONSE_BYTES
+            {
+                children.pop();
+                truncated = true;
+                break;
+            }
+        }
+        (children, truncated)
+    }
+
+    /// Count the exact framing shape a directory-listing reply will use.
+    ///
+    /// Browse work runs before its handler knows the request id, so this uses
+    /// the longest legal decimal id and `false`, whose spelling is one byte
+    /// longer than the truncated form. The result is therefore a conservative
+    /// bound for every real reply while still measuring serde's JSON escaping
+    /// and the protocol envelope at the boundary clients actually receive.
+    fn directory_listing_wire_bytes(cwd: &str, parent: Option<&str>, children: &[String]) -> usize {
+        let frame = Frame::control(&ControlMsg::DirectoryListing {
+            req_id: u64::MAX,
+            cwd: cwd.to_string(),
+            parent: parent.map(str::to_string),
+            children: children.to_vec(),
+            truncated: false,
+        });
+        // `Frame::encoded_len` excludes only the four-byte length prefix;
+        // include it because this is a budget on bytes sent, not on JSON.
+        frame.encoded_len() + std::mem::size_of::<u32>()
+    }
+
+    /// Validate a browse path inside the worker that will also touch it.
+    ///
+    /// Keeping this validation beside the following canonicalization prevents a
+    /// timeout from releasing the worker permit between two filesystem calls.
+    /// Create and restart retain their asynchronous validator because their work
+    /// has different lifecycle and cancellation rules.
+    fn ensure_browse_cwd_usable(cwd: &str) -> anyhow::Result<()> {
+        if !Path::new(cwd).is_absolute() {
+            return Err(RequestError::new(
+            ErrorKind::InvalidRequest,
+            format!(
+                "working directory is not absolute: {cwd} (a relative path would resolve against the supervisor process, not the client)"
+            ),
+        )
+        .into());
+        }
+        match std::fs::metadata(cwd) {
+            Ok(metadata) if metadata.is_dir() => Ok(()),
+            Ok(_) => Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("working directory is not a directory: {cwd}"),
+            )
+            .into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("working directory does not exist: {cwd}"),
+            )
+            .into()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotADirectory | std::io::ErrorKind::InvalidInput
+                ) =>
+            {
+                Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("working directory is not usable: {cwd} ({error})"),
+                )
+                .into())
+            }
+            Err(error) => {
+                Err(error).with_context(|| format!("reading working directory metadata for {cwd}"))
+            }
+        }
+    }
+
     /// Production constructor: the launch shim is this very process's
     /// binary. Test harnesses must NOT use this — their `current_exe` is
     /// the libtest runner, not farhelm — and use `new_with_exe` instead.
@@ -3884,6 +4204,9 @@ impl Supervisor {
             farhelm_exe,
             farhelm_exe_str,
             admission: Arc::new(tokio::sync::Semaphore::new(HANDLER_ADMISSION_PERMITS)),
+            directory_browse_workers: Arc::new(tokio::sync::Semaphore::new(
+                DIRECTORY_BROWSE_WORKER_PERMITS,
+            )),
             sampling_admission: Arc::new(tokio::sync::Semaphore::new(SAMPLING_ADMISSION_PERMITS)),
             timeouts,
             seams,
@@ -4490,7 +4813,13 @@ impl Supervisor {
                         last_activity_at: row.last_activity_at,
                         creation_seq: Some(row.creation_seq),
                         cwd: row.cwd,
+                        // This was accepted while the session was created.
+                        // Reload must carry it forward, not resolve the
+                        // display spelling again after a symlink may move.
+                        canonical_cwd: row.canonical_cwd.clone(),
                         invocation: row.invocation,
+                        resume_template: snapshot.resume_template.clone(),
+                        launch: row.launch,
                         // Placeholder only: `ListSessions` recomputes
                         // `status` fresh from tmux plus the recorded
                         // outcome on every reply (see `session_status`),
@@ -5012,6 +5341,7 @@ impl Supervisor {
                     agent_kind: None,
                     resume_template: None,
                     source_profile: None,
+                    launch: None,
                 },
                 title,
                 cols,
@@ -5067,13 +5397,32 @@ impl Supervisor {
             cols,
             rows,
         } = inputs;
-        let (invocation, agent_kind, resume_template, source_profile) = match mode {
+        let (invocation, agent_kind, resume_template, source_profile, launch) = match mode {
             CreateMode::Raw {
                 invocation,
                 agent_kind,
                 resume_template,
                 source_profile,
-            } => (invocation, agent_kind, resume_template, source_profile),
+                launch,
+            } => (
+                invocation,
+                agent_kind,
+                resume_template,
+                source_profile,
+                launch,
+            ),
+            CreateMode::Structured {
+                invocation,
+                agent_kind,
+                resume_template,
+                selection,
+            } => (
+                invocation,
+                Some(agent_kind),
+                resume_template,
+                None,
+                Some(selection),
+            ),
         };
         // `~` expansion happens here, as the first half of the cwd check,
         // in the one function every NEW create flows through — unkeyed,
@@ -5230,6 +5579,7 @@ impl Supervisor {
             snapshot,
             canonical_cwd,
             source_profile,
+            launch,
         })
     }
 
@@ -5354,6 +5704,7 @@ impl Supervisor {
             canonical_cwd: row.canonical_cwd.unwrap_or_else(|| row.cwd.clone()),
             cwd: row.cwd,
             source_profile: row.source_profile,
+            launch: row.launch,
         })
     }
 
@@ -5666,7 +6017,10 @@ impl Supervisor {
                     last_activity_at: row.last_activity_at,
                     creation_seq: Some(row.creation_seq),
                     cwd: row.cwd,
+                    canonical_cwd: row.canonical_cwd,
                     invocation: row.invocation,
+                    resume_template: snapshot.resume_template.clone(),
+                    launch: row.launch,
                     status: SessionStatus::Unknown,
                     annotation: None,
                     // Vocabulary only for now — see PLAN_M4.md step 4 for
@@ -5844,6 +6198,7 @@ impl Supervisor {
             snapshot,
             canonical_cwd,
             source_profile,
+            launch,
         } = request;
         // Reassigned on the retry-takeover path below, from the value that
         // transaction actually committed: a rename that landed between the
@@ -5934,6 +6289,7 @@ impl Supervisor {
                 creation_seq: 0,
                 cwd: cwd.to_string(),
                 invocation: invocation.clone(),
+                launch: launch.clone(),
                 tmux_name: tmux_name.clone(),
                 pane: String::new(),
                 outcome: LastOutcome::Launching,
@@ -6066,6 +6422,7 @@ impl Supervisor {
                         creation_seq: 0,
                         cwd: cwd.to_string(),
                         invocation: invocation.clone(),
+                        launch: launch.clone(),
                         tmux_name: tmux_name.clone(),
                         // Not known until tmux has created the session —
                         // see `StoredSession::pane`.
@@ -6268,7 +6625,13 @@ impl Supervisor {
             last_activity_at: created_at,
             creation_seq: Some(creation_seq),
             cwd: cwd.to_string(),
+            // Keep the user-facing spelling above. This separate fact is
+            // the directory create actually accepted and persists with the
+            // row, so helm history never needs to resolve the path itself.
+            canonical_cwd: Some(canonical_cwd.clone()),
             invocation: invocation.clone(),
+            resume_template: snapshot.resume_template.clone(),
+            launch,
             // Create-time placeholder, deliberately NOT a live status:
             // `SessionCreated`'s own docs say creation establishes that
             // the session and terminal exist, not that the agent's later
@@ -7685,7 +8048,10 @@ impl Supervisor {
                 .load(std::sync::atomic::Ordering::Relaxed),
             creation_seq: entry.info.creation_seq,
             cwd: entry.info.cwd.clone(),
+            canonical_cwd: entry.info.canonical_cwd.clone(),
             invocation: entry.info.invocation.clone(),
+            resume_template: entry.snapshot.resume_template.clone(),
+            launch: entry.info.launch.clone(),
             // Deliberately not a fabricated live status: the pane exists, but
             // whether the agent's own `exec` inside it succeeds is a
             // separate question this reply cannot answer. `ListSessions`
@@ -10218,6 +10584,480 @@ pub(crate) mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
+    /// Browsing is a host-side discovery operation, so its canonical answer
+    /// must be bounded and must expand `~` from the supervisor seam rather
+    /// than from the test process or whichever helm later calls it.
+    #[farhelm_testtrace::test]
+    async fn directory_browse_expands_home_and_bounds_immediate_children() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("home directory");
+        let selected = home.path().join("selected");
+        std::fs::create_dir(&selected).expect("selected directory");
+        for index in 0..=DIRECTORY_BROWSE_CAP {
+            std::fs::create_dir(selected.join(format!("child-{index:03}")))
+                .expect("child directory");
+        }
+        std::fs::write(selected.join("ordinary-file"), b"not a directory").expect("ordinary file");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                user_home: Some(home.path().to_path_buf()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+
+        let listing = sup.browse_directory("~/selected").await.expect("browse");
+
+        assert_eq!(
+            listing.cwd,
+            selected
+                .canonicalize()
+                .expect("canonical path")
+                .to_string_lossy()
+        );
+        assert_eq!(listing.children.len(), DIRECTORY_BROWSE_CAP);
+        assert!(
+            listing.truncated,
+            "the 201st child must make the bound visible"
+        );
+        assert!(listing.children.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(
+            listing
+                .children
+                .iter()
+                .all(|child| !child.ends_with("ordinary-file"))
+        );
+        assert_eq!(listing.parent.as_deref(), home.path().to_str());
+    }
+
+    /// A browse reply with no child directories must still stop reading a
+    /// file-heavy directory. This is the case the returned-directory cap
+    /// cannot observe: without a separate scan budget, every file is skipped
+    /// and the loop continues to EOF while holding a shared handler slot.
+    #[farhelm_testtrace::test]
+    async fn directory_browse_bounds_file_heavy_scans() {
+        let state = StateDir::new();
+        let directory = tempfile::tempdir().expect("directory to browse");
+        for index in 0..=DIRECTORY_BROWSE_SCAN_CAP {
+            std::fs::write(
+                directory.path().join(format!("file-{index:04}")),
+                b"ordinary file",
+            )
+            .expect("create ordinary file");
+        }
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams::default(),
+        )
+        .await
+        .expect("supervisor");
+
+        let listing = sup
+            .browse_directory(directory.path().to_str().expect("UTF-8 path"))
+            .await
+            .expect("bounded browse");
+
+        assert!(
+            listing.children.is_empty(),
+            "the fixture contains no directories"
+        );
+        assert!(
+            listing.truncated,
+            "reaching the scan budget reports that the browser did not inspect the whole directory"
+        );
+    }
+
+    /// Wire budgeting must count the representation sent to the helm, not the
+    /// raw UTF-8 in a path. Quotes and backslashes are legal directory-name
+    /// bytes but each needs a JSON escape, so this fixture would fit the old
+    /// raw-string arithmetic while overflowing a 64-KiB encoded reply.
+    #[farhelm_testtrace::test]
+    async fn directory_browse_bounds_escaped_directory_listing_reply() {
+        let directory = tempfile::tempdir().expect("directory to browse");
+        let escaped_name = r#"\\\""#.repeat(60);
+        let mut child_names = Vec::new();
+        for index in 0..DIRECTORY_BROWSE_CAP {
+            let child_name = format!("{escaped_name}-{index:03}");
+            let child = directory.path().join(&child_name);
+            std::fs::create_dir(&child).expect("quote-heavy child directory");
+            child_names.push(child_name);
+        }
+        let cwd = directory.path().to_str().expect("UTF-8 path");
+        let first = Supervisor::browse_directory_blocking(cwd).expect("bounded browse");
+        let canonical_cwd = Path::new(&first.cwd);
+        let raw_string_total = first.cwd.len()
+            + first.parent.as_ref().map_or(0, String::len)
+            + child_names
+                .iter()
+                .map(|child_name| {
+                    canonical_cwd
+                        .join(child_name)
+                        .to_str()
+                        .expect("canonical fixture paths are UTF-8")
+                        .len()
+                        + 4
+                })
+                .sum::<usize>();
+
+        assert!(
+            raw_string_total < DIRECTORY_BROWSE_RESPONSE_BYTES,
+            "the old raw-text accounting would have accepted this fixture"
+        );
+        assert!(
+            first.children.len() < DIRECTORY_BROWSE_CAP,
+            "encoded escaping, not the entry cap, must truncate this reply"
+        );
+        assert!(first.truncated, "the omitted escaped names must be visible");
+        let frame = Frame::control(&ControlMsg::DirectoryListing {
+            req_id: u64::MAX,
+            cwd: first.cwd.clone(),
+            parent: first.parent.clone(),
+            children: first.children.clone(),
+            truncated: first.truncated,
+        });
+        let mut wire = Vec::new();
+        frame
+            .encode(&mut wire)
+            .expect("the bounded directory listing must encode");
+        assert!(
+            wire.len() <= DIRECTORY_BROWSE_RESPONSE_BYTES,
+            "the complete reply, including the frame prefix, must stay inside the browse budget"
+        );
+    }
+
+    /// Sorting applies after scanning, so it can make a capped reply stable
+    /// for one candidate set but cannot recover entries an exhausted
+    /// filesystem enumeration never returned. These pure inputs isolate the
+    /// former guarantee from `read_dir`'s deliberately unspecified order.
+    #[farhelm_testtrace::test]
+    fn sorted_scanned_candidates_apply_item_and_byte_limits() {
+        let item_candidates: Vec<_> = (0..=DIRECTORY_BROWSE_CAP)
+            .map(|index| format!("/fixture/item-{index:03}"))
+            .collect();
+        let mut reversed_items = item_candidates.clone();
+        reversed_items.reverse();
+        let (items_forward, items_forward_truncated) =
+            Supervisor::select_directory_browse_children(item_candidates, "/fixture", None, false);
+        let (items_reverse, items_reverse_truncated) =
+            Supervisor::select_directory_browse_children(reversed_items, "/fixture", None, false);
+        assert_eq!(items_forward, items_reverse);
+        assert_eq!(items_forward.len(), DIRECTORY_BROWSE_CAP);
+        assert!(items_forward_truncated && items_reverse_truncated);
+
+        let escaped_component = r#"\\\""#.repeat(100);
+        let byte_candidates: Vec<_> = (0..DIRECTORY_BROWSE_CAP)
+            .map(|index| format!("/fixture/{escaped_component}-{index:03}"))
+            .collect();
+        let mut reversed_bytes = byte_candidates.clone();
+        reversed_bytes.reverse();
+        let (bytes_forward, bytes_forward_truncated) =
+            Supervisor::select_directory_browse_children(byte_candidates, "/fixture", None, false);
+        let (bytes_reverse, bytes_reverse_truncated) =
+            Supervisor::select_directory_browse_children(reversed_bytes, "/fixture", None, false);
+        assert_eq!(bytes_forward, bytes_reverse);
+        assert!(
+            bytes_forward.len() < DIRECTORY_BROWSE_CAP,
+            "the encoded-byte cap, rather than the item cap, must select this prefix"
+        );
+        assert!(bytes_forward_truncated && bytes_reverse_truncated);
+    }
+
+    /// A reply deadline must not free capacity that its blocking filesystem
+    /// worker still consumes. Otherwise each timeout would let the next
+    /// request start another stuck `stat` or directory read, eventually
+    /// defeating the very bound meant to contain an unavailable mount.
+    #[farhelm_testtrace::test]
+    async fn timed_out_browse_keeps_its_worker_permit_until_blocking_work_returns() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::{future::Future, pin::Pin, task::Poll};
+
+        /// The first poll consumes a completed async future, so that result
+        /// cannot remain in the pending collection. Keeping the two states
+        /// distinct lets the test report an unexpected admission only after
+        /// it has released and observed every worker it owns.
+        enum FirstContenderPoll<F: Future + ?Sized> {
+            Pending(Pin<Box<F>>),
+            Ready(F::Output),
+        }
+
+        /// Poll one contender exactly once and retain whichever state that
+        /// poll observed. Tokio futures, like ordinary async blocks, may not
+        /// be polled after `Ready`; the explicit split makes that ownership
+        /// rule visible in the failure path this test is trying to exercise.
+        async fn capture_first_contender_poll<F: Future + ?Sized>(
+            mut contender: Pin<Box<F>>,
+        ) -> FirstContenderPoll<F> {
+            let result = std::future::poll_fn(|cx| match contender.as_mut().poll(cx) {
+                Poll::Pending => Poll::Ready(None),
+                Poll::Ready(result) => Poll::Ready(Some(result)),
+            })
+            .await;
+            match result {
+                Some(result) => FirstContenderPoll::Ready(result),
+                None => FirstContenderPoll::Pending(contender),
+            }
+        }
+
+        const CALLER_TIMEOUT: Duration = Duration::from_millis(30);
+        const READINESS_TIMEOUT: Duration = Duration::from_secs(1);
+        type BrowseTimeout = Result<anyhow::Result<DirectoryBrowse>, tokio::time::error::Elapsed>;
+        type ContenderFuture = dyn Future<Output = BrowseTimeout> + Send;
+        let workers = Arc::new(tokio::sync::Semaphore::new(DIRECTORY_BROWSE_WORKER_PERMITS));
+        let started = Arc::new(AtomicUsize::new(0));
+        let (started_tx, mut started_rx) = mpsc::unbounded_channel();
+        let (finished_tx, mut finished_rx) = mpsc::unbounded_channel();
+        let mut releases = Vec::new();
+        let mut timed_callers = Vec::new();
+
+        for worker in 0..DIRECTORY_BROWSE_WORKER_PERMITS {
+            let (release, wait_for_release) = std::sync::mpsc::channel();
+            releases.push(release);
+            let worker_started = Arc::clone(&started);
+            let worker_pool = Arc::clone(&workers);
+            let started_tx = started_tx.clone();
+            let finished_tx = finished_tx.clone();
+            timed_callers.push(tokio::spawn(async move {
+                tokio::time::timeout(
+                    CALLER_TIMEOUT,
+                    Supervisor::run_directory_browse_worker(worker_pool, move || {
+                        worker_started.fetch_add(1, Ordering::SeqCst);
+                        started_tx
+                            .send(worker)
+                            .expect("test still observes worker readiness");
+                        wait_for_release
+                            .recv()
+                            .expect("test must release every controlled worker");
+                        finished_tx
+                            .send(worker)
+                            .expect("test still observes worker completion");
+                        Ok(DirectoryBrowse {
+                            cwd: format!("/held-{worker}"),
+                            parent: None,
+                            children: Vec::new(),
+                            truncated: false,
+                        })
+                    }),
+                )
+                .await
+            }));
+        }
+        drop(started_tx);
+        drop(finished_tx);
+
+        let mut initial_starts = Vec::new();
+        for _ in 0..DIRECTORY_BROWSE_WORKER_PERMITS {
+            initial_starts.push(tokio::time::timeout(READINESS_TIMEOUT, started_rx.recv()).await);
+        }
+
+        // Poll each contender ourselves. A pending result means it reached
+        // semaphore acquisition while both actual blocking closures held the
+        // production-sized budget; a scheduler yield could not establish that.
+        let mut contenders: Vec<Pin<Box<ContenderFuture>>> = Vec::new();
+        for contender in 0..3 {
+            let contender_pool = Arc::clone(&workers);
+            let contender_started = Arc::clone(&started);
+            contenders.push(Box::pin(async move {
+                tokio::time::timeout(
+                    CALLER_TIMEOUT,
+                    Supervisor::run_directory_browse_worker(contender_pool, move || {
+                        contender_started.fetch_add(1, Ordering::SeqCst);
+                        Ok(DirectoryBrowse {
+                            cwd: format!("/contender-{contender}"),
+                            parent: None,
+                            children: Vec::new(),
+                            truncated: false,
+                        })
+                    }),
+                )
+                .await
+            }));
+        }
+        // This controlled ready future is the exceptional admission result
+        // the real contenders must never produce while both permits are held.
+        // It proves that reporting the observation cannot repoll it or skip
+        // orderly worker cleanup on the error path.
+        contenders.push(Box::pin(std::future::ready(Ok(Ok(DirectoryBrowse {
+            cwd: "/controlled-ready".to_string(),
+            parent: None,
+            children: Vec::new(),
+            truncated: false,
+        })))));
+        let mut pending_contenders = Vec::new();
+        let mut ready_contender_results = Vec::new();
+        for contender in contenders {
+            match capture_first_contender_poll(contender).await {
+                FirstContenderPoll::Pending(contender) => pending_contenders.push(contender),
+                FirstContenderPoll::Ready(result) => ready_contender_results.push(result),
+            }
+        }
+        let timed_results = {
+            let mut results = Vec::new();
+            for caller in timed_callers {
+                results.push(tokio::time::timeout(READINESS_TIMEOUT, caller).await);
+            }
+            results
+        };
+        let contender_results = {
+            let mut results = Vec::new();
+            for contender in pending_contenders {
+                results.push(tokio::time::timeout(READINESS_TIMEOUT, contender).await);
+            }
+            results
+        };
+        let permits_held_before_release = workers.available_permits();
+        let starts_before_release = started.load(Ordering::SeqCst);
+
+        // Release first, before evaluating any failed observation. These are
+        // real blocking threads, so a failing assertion must not strand one
+        // and poison a later test in this process.
+        let release_results: Vec<_> = releases
+            .into_iter()
+            .map(|release| release.send(()))
+            .collect();
+        let mut completions = Vec::new();
+        for _ in 0..DIRECTORY_BROWSE_WORKER_PERMITS {
+            completions.push(tokio::time::timeout(READINESS_TIMEOUT, finished_rx.recv()).await);
+        }
+
+        // Fill both recovered slots at once. Their explicit started signals
+        // prove two permits became reusable, rather than one request merely
+        // slipping through after a delayed worker return.
+        let (reuse_started_tx, mut reuse_started_rx) = mpsc::unbounded_channel();
+        let mut reuse_releases = Vec::new();
+        let mut reusable_callers = Vec::new();
+        for worker in 0..DIRECTORY_BROWSE_WORKER_PERMITS {
+            let (release, wait_for_release) = std::sync::mpsc::channel();
+            reuse_releases.push(release);
+            let worker_pool = Arc::clone(&workers);
+            let worker_started = Arc::clone(&started);
+            let reuse_started_tx = reuse_started_tx.clone();
+            reusable_callers.push(tokio::spawn(async move {
+                Supervisor::run_directory_browse_worker(worker_pool, move || {
+                    worker_started.fetch_add(1, Ordering::SeqCst);
+                    reuse_started_tx
+                        .send(worker)
+                        .expect("test still observes reused capacity");
+                    wait_for_release
+                        .recv()
+                        .expect("test must release reused capacity");
+                    Ok(DirectoryBrowse {
+                        cwd: format!("/reused-{worker}"),
+                        parent: None,
+                        children: Vec::new(),
+                        truncated: false,
+                    })
+                })
+                .await
+            }));
+        }
+        drop(reuse_started_tx);
+        let mut reuse_starts = Vec::new();
+        for _ in 0..DIRECTORY_BROWSE_WORKER_PERMITS {
+            reuse_starts
+                .push(tokio::time::timeout(READINESS_TIMEOUT, reuse_started_rx.recv()).await);
+        }
+        let reuse_release_results: Vec<_> = reuse_releases
+            .into_iter()
+            .map(|release| release.send(()))
+            .collect();
+        let reuse_results = tokio::time::timeout(READINESS_TIMEOUT, async {
+            let mut results = Vec::new();
+            for caller in reusable_callers {
+                results.push(caller.await);
+            }
+            results
+        })
+        .await;
+        let held_workers_cleaned_before_ready_report = release_results.iter().all(Result::is_ok)
+            && completions
+                .iter()
+                .all(|completion| matches!(completion, Ok(Some(_))))
+            && reuse_starts
+                .iter()
+                .all(|start| matches!(start, Ok(Some(_))))
+            && reuse_release_results.iter().all(Result::is_ok)
+            && matches!(reuse_results, Ok(ref results) if results.iter().all(|result| matches!(result, Ok(Ok(_)))));
+
+        assert!(
+            initial_starts
+                .iter()
+                .all(|start| matches!(start, Ok(Some(_)))),
+            "every held worker must report that its blocking closure began"
+        );
+        assert!(
+            contender_results.len() == 3,
+            "only the three actual contenders may remain pending after their first poll"
+        );
+        assert!(
+            timed_results
+                .iter()
+                .all(|result| matches!(result, Ok(Ok(Err(_))))),
+            "every held caller must time out while its blocking closure retains the permit"
+        );
+        assert!(
+            contender_results
+                .iter()
+                .all(|result| matches!(result, Ok(Err(_)))),
+            "every queued contender must time out instead of starting filesystem work"
+        );
+        assert!(
+            held_workers_cleaned_before_ready_report,
+            "the controlled ready result may be reported only after held workers release, finish, and prove both slots reusable"
+        );
+        assert_eq!(
+            ready_contender_results.len(),
+            1,
+            "the controlled early completion must survive until cleanup finishes"
+        );
+        assert!(
+            matches!(ready_contender_results.as_slice(), [Ok(Ok(_))]),
+            "the retained early completion must be available for the post-cleanup error assertion"
+        );
+        assert_eq!(
+            permits_held_before_release, 0,
+            "timed-out callers must leave both permits with their blocking closures"
+        );
+        assert_eq!(
+            starts_before_release, DIRECTORY_BROWSE_WORKER_PERMITS,
+            "no contender may start another blocking closure while the held workers remain admitted"
+        );
+        assert!(
+            release_results.iter().all(Result::is_ok),
+            "every held worker must receive its cleanup release"
+        );
+        assert!(
+            completions
+                .iter()
+                .all(|completion| matches!(completion, Ok(Some(_)))),
+            "every controlled blocking worker must return after cleanup releases it"
+        );
+        assert!(
+            reuse_starts
+                .iter()
+                .all(|start| matches!(start, Ok(Some(_)))),
+            "both permits must admit new blocking work after the held closures return"
+        );
+        assert!(
+            reuse_release_results.iter().all(Result::is_ok),
+            "every reused worker must receive its cleanup release"
+        );
+        assert!(
+            matches!(reuse_results, Ok(results) if results.iter().all(|result| matches!(result, Ok(Ok(_))))),
+            "reused workers must join successfully after their releases"
+        );
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            DIRECTORY_BROWSE_WORKER_PERMITS * 2,
+            "only the held and post-release workers may ever enter blocking work"
+        );
+    }
+
     /// A session entry with the given terminal and recorded outcome, for
     /// the entry-replacement tests below and the classification tests in
     /// `service::status` — which are about how those two inputs combine,
@@ -10233,7 +11073,10 @@ pub(crate) mod tests {
                 last_activity_at: 1_700_000_000,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
+                canonical_cwd: None,
                 invocation: "agent".to_string(),
+                resume_template: None,
+                launch: None,
                 status: SessionStatus::default(),
                 annotation: None,
                 restart_offer: RestartOffer::default(),
@@ -10756,6 +11599,7 @@ pub(crate) mod tests {
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
+                        launch: None,
                         tmux_name: tmux_name.to_string(),
                         pane: String::new(),
                         outcome: LastOutcome::Launching,
@@ -10907,6 +11751,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-scoped".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -10992,6 +11837,7 @@ pub(crate) mod tests {
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "claude".to_string(),
+                        launch: None,
                         tmux_name: format!("fh-{id}"),
                         pane: String::new(),
                         outcome: LastOutcome::Exited {
@@ -11110,6 +11956,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "claude".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-{doomed}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
@@ -11200,6 +12047,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
@@ -11276,6 +12124,7 @@ pub(crate) mod tests {
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
+                        launch: None,
                         tmux_name,
                         pane: pane.clone(),
                         outcome: LastOutcome::Running,
@@ -11374,6 +12223,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -11465,6 +12315,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-1".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -11544,6 +12395,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-does-not-exist".to_string(),
                     pane: "%0".to_string(),
                     outcome: LastOutcome::Running,
@@ -11696,6 +12548,7 @@ pub(crate) mod tests {
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
+                launch: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -11806,6 +12659,7 @@ pub(crate) mod tests {
                             id: "prof-1".to_string(),
                             name: "Profile One".to_string(),
                         }),
+                        launch: None,
                     },
                     Some("t"),
                 ),
@@ -11820,6 +12674,7 @@ pub(crate) mod tests {
                         agent_kind: None,
                         resume_template: None,
                         source_profile: None,
+                        launch: None,
                     },
                     Some("t"),
                 ),
@@ -11872,6 +12727,7 @@ pub(crate) mod tests {
                     agent_kind: None,
                     resume_template: None,
                     source_profile: None,
+                    launch: None,
                 },
                 None,
             ),
@@ -11883,6 +12739,7 @@ pub(crate) mod tests {
                     agent_kind: None,
                     resume_template: None,
                     source_profile: None,
+                    launch: None,
                 },
                 None,
             ),
@@ -11900,6 +12757,7 @@ pub(crate) mod tests {
                         id: "prof-1".to_string(),
                         name: "Profile".to_string(),
                     }),
+                    launch: None,
                 },
                 None,
             ),
@@ -11914,6 +12772,7 @@ pub(crate) mod tests {
                         id: "prof-1".to_string(),
                         name: "Profile".to_string(),
                     }),
+                    launch: None,
                 },
                 None,
             ),
@@ -11944,6 +12803,7 @@ pub(crate) mod tests {
                 resume_template: resume_template
                     .map(|template| template.iter().map(ToString::to_string).collect()),
                 source_profile: None,
+                launch: None,
             },
             title,
         )
@@ -11971,6 +12831,7 @@ pub(crate) mod tests {
                     id: profile_id.to_string(),
                     name: profile_name.to_string(),
                 }),
+                launch: None,
             },
             title,
         )
@@ -12026,10 +12887,39 @@ pub(crate) mod tests {
                     agent_kind: None,
                     resume_template: None,
                     source_profile: None,
+                    launch: None,
                 },
                 None,
             ),
             r#"["parented_raw","parent-1","/work","agent",null,null,null]"#
+        );
+    }
+
+    /// Structured fingerprints are pinned separately because their snapshot
+    /// is part of the durable meaning of an idempotency key.
+    #[farhelm_testtrace::test]
+    fn the_structured_fingerprint_encoding_is_pinned() {
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: Some("gpt-6-astra".to_string()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+        };
+        assert_eq!(
+            create_fingerprint(
+                Some("parent-1"),
+                "/work",
+                &CreateMode::Structured {
+                    invocation: "codex -m gpt-6-astra -c model_reasoning_effort=high --yolo"
+                        .to_string(),
+                    agent_kind: AgentKind::Codex,
+                    resume_template: None,
+                    selection,
+                },
+                Some("title"),
+            ),
+            r#"["structured_launch_v1","parent-1","/work","codex -m gpt-6-astra -c model_reasoning_effort=high --yolo","title","codex",{"harness":"codex","model":"gpt-6-astra","effort":"high","permissions":"yolo"}]"#,
+            "changing the encoding would permanently reject a matching retry after upgrade"
         );
     }
 
@@ -12195,6 +13085,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -12364,6 +13255,7 @@ pub(crate) mod tests {
                         agent_kind: None,
                         resume_template: None,
                         source_profile: None,
+                        launch: None,
                     },
                     title: Some("t".to_string()),
                     cols: 80,
@@ -12413,6 +13305,7 @@ pub(crate) mod tests {
                         agent_kind: None,
                         resume_template: Some(vec!["claude".to_string(), "--continue".to_string()]),
                         source_profile: None,
+                        launch: None,
                     },
                     title: None,
                     cols: 80,
@@ -12456,6 +13349,7 @@ pub(crate) mod tests {
                     agent_kind: None,
                     resume_template: None,
                     source_profile: None,
+                    launch: None,
                 },
                 title: None,
                 cols: 80,
@@ -12508,6 +13402,7 @@ pub(crate) mod tests {
                     agent_kind: None,
                     resume_template: None,
                     source_profile: None,
+                    launch: None,
                 },
                 title: None,
                 cols: 80,
@@ -12584,6 +13479,7 @@ pub(crate) mod tests {
                             agent_kind: None,
                             resume_template: None,
                             source_profile: None,
+                            launch: None,
                         },
                         title: None,
                         cols: 80,
@@ -12677,6 +13573,7 @@ pub(crate) mod tests {
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
             source_profile: None,
+            launch: None,
             title: None,
             cols: 80,
             rows: 24,
@@ -13081,6 +13978,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -13166,6 +14064,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-ended".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -13278,6 +14177,7 @@ pub(crate) mod tests {
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     source_profile: None,
+                    launch: None,
                     title: Some(title.clone()),
                     cols: 80,
                     rows: 24,
@@ -13326,6 +14226,7 @@ pub(crate) mod tests {
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
+                launch: None,
                 title: Some("🚀 デモ project — a normal title".to_string()),
                 cols: 80,
                 rows: 24,
@@ -13385,6 +14286,7 @@ pub(crate) mod tests {
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
+                launch: None,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -13460,6 +14362,7 @@ pub(crate) mod tests {
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
             source_profile: None,
+            launch: None,
             title: Some(title.to_string()),
             cols: 80,
             rows: 24,
@@ -13672,6 +14575,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -13764,6 +14668,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -14083,6 +14988,7 @@ pub(crate) mod tests {
                         agent_kind: Some(AgentKind::Generic),
                         resume_template: None,
                         source_profile: None,
+                        launch: None,
                     },
                     title: None,
                     cols: 80,
@@ -14182,6 +15088,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -14285,6 +15192,7 @@ pub(crate) mod tests {
             creation_seq: 0,
             cwd: cwd.clone(),
             invocation: "agent".to_string(),
+            launch: None,
             tmux_name: "fh-stranded".to_string(),
             pane: String::new(),
             outcome: LastOutcome::Launching,
@@ -14342,6 +15250,7 @@ pub(crate) mod tests {
                     },
                     canonical_cwd: cwd.clone(),
                     source_profile: None,
+                    launch: None,
                 },
                 &Reserved::Retry(Box::new(reservation)),
             )
@@ -14427,6 +15336,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "''".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,
@@ -14648,6 +15558,7 @@ pub(crate) mod tests {
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: "fh-stranded".to_string(),
                     pane: String::new(),
                     outcome: LastOutcome::Launching,

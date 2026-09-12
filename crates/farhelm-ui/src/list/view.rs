@@ -30,9 +30,22 @@ use crate::{ApiBase, HostId, Session};
 use super::create_form::{CreatePrefill, CreateSessionForm, CreateTarget, prefill_from};
 use super::row::SessionRow;
 use super::shared::{
-    DeleteTarget, HostOption, OpenHost, RowState, effective_create_host, host_options,
-    session_locality,
+    DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host, host_options,
+    matching_host_option, session_locality,
 };
+
+/// Return keyboard focus to the persistent control that opened the composer.
+///
+/// Closing removes the dialog's focused descendant. Without an explicit
+/// handoff, browsers commonly leave focus on the document body, so the next
+/// Tab starts at an arbitrary page edge instead of continuing from New. The
+/// selector is constant application markup and does not interpolate peer
+/// text.
+fn focus_new_session_button() {
+    document::eval(
+        "document.querySelector('.new-session-button')?.focus({ preventScroll: true });",
+    );
+}
 
 /// The shared preference (SPEC.md, Session list) as this page holds it:
 /// the chosen list order, last user-selected session, and compact-row choice,
@@ -372,14 +385,15 @@ fn clone_is_refused(
 #[component]
 pub(crate) fn ListView(
     on_open: EventHandler<Session>,
-    /// The currently selected session's host — SPEC.md's first create-
+    /// The currently selected session's destination — SPEC.md's first create-
     /// default clause, supplied by `App` because only it knows the
     /// selection. `None` when nothing is selected (or the selected
     /// session predates per-host metadata), which falls back to the
     /// helm's own host. Carries the install identity the session row
     /// reported beside the row id, so the default can notice a retarget
-    /// or adopt landing between selection and create — see [`OpenHost`].
-    open_host: Option<OpenHost>,
+    /// or adopt landing between selection and create. The folder comes from
+    /// that same snapshot even when sidebar filtering hides the selected row.
+    open_destination: Option<OpenDestination>,
     /// The SHARED live-operation token (see `ops`'s module docs): owned by
     /// `AppBody` rather than created here, because the selected session's
     /// view claims the same token for its own restart/archive — a private
@@ -444,6 +458,9 @@ pub(crate) fn ListView(
     /// touch this counter at all.
     layout_epoch: ReadSignal<u64>,
 ) -> Element {
+    let open_host = open_destination
+        .as_ref()
+        .map(|destination| destination.host.clone());
     let base = use_context::<ApiBase>().0;
     // The helm's shared preference, already read by `PreferencesGate` —
     // this component never mounts before it has (see `SharedPreferences`).
@@ -720,6 +737,10 @@ pub(crate) fn ListView(
     // below, so an ordinary "new session" open never inherits a stale
     // clone's fields.
     let mut clone_prefill = use_signal(|| None::<CreatePrefill>);
+    // An ordinary New inherits only the selected session's directory. It is
+    // intentionally separate from clone prefill: no title, host, profile,
+    // command, or structured launch choice is implied by this convenience.
+    let mut ordinary_new_cwd = use_signal(|| None::<String>);
     // The page-local host query carried by listing reads. The selector changes
     // only this field, so archive exclusion and every retired API dimension
     // stay at their `SessionFilter` defaults.
@@ -2219,6 +2240,24 @@ pub(crate) fn ListView(
                         return;
                     }
                     let opening = !show_create();
+                    if opening {
+                        let current_hosts = host_options.clone();
+                        let current_target = effective_create_host(
+                            &current_hosts,
+                            *chosen_host.peek(),
+                            open_host.as_ref(),
+                        );
+                        ordinary_new_cwd.set(
+                            open_destination.as_ref().and_then(|destination| {
+                                // Confirm the entire inherited destination;
+                                // a remote path cannot follow the host fallback
+                                // onto this machine after an installation change.
+                                matching_host_option(&destination.host, &current_hosts)
+                                    .filter(|host| Some(host.id) == current_target)
+                                    .map(|_| destination.cwd.clone())
+                            }),
+                        );
+                    }
                     if !opening {
                         // Closing the dialog discards its host choice with
                         // every other draft it holds. The signal lives up here
@@ -2234,6 +2273,7 @@ pub(crate) fn ListView(
                         // silently reopen pre-filled from whatever row was
                         // last cloned.
                         clone_prefill.set(None);
+                        ordinary_new_cwd.set(None);
                     }
                     show_create.set(opening);
                 },
@@ -2246,14 +2286,24 @@ pub(crate) fn ListView(
             // the draft and still provides its existing cancellation action.
             if show_create() {
                 CreateSessionForm {
-                    hosts: host_options,
-                    open_host,
+                    hosts: host_options.clone(),
+                    open_host: open_host.clone(),
                     hosts_loaded: hosts.read().hosts().is_some(),
                     chosen_host,
                     create_target,
                     catalog: profiles,
                     ops,
+                    initial_cwd: ordinary_new_cwd(),
                     prefill: clone_prefill(),
+                    on_cancel: move |_| {
+                        // A cancelled composer must not carry its destination
+                        // or clone provenance into the next fresh launch.
+                        chosen_host.set(None);
+                        clone_prefill.set(None);
+                        ordinary_new_cwd.set(None);
+                        show_create.set(false);
+                        focus_new_session_button();
+                    },
                     on_created: move |session: Session| {
                         // Creation is a user-initiated selection too.
                         remember_selection(&created_base, preferences, &session.id);
@@ -2263,7 +2313,9 @@ pub(crate) fn ListView(
                         // explicit cancellation path does.
                         chosen_host.set(None);
                         clone_prefill.set(None);
+                        ordinary_new_cwd.set(None);
                         on_open.call(session);
+                        focus_new_session_button();
                     },
                 }
             }

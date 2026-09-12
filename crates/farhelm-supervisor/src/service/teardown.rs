@@ -862,6 +862,7 @@ mod tests {
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "claude".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
                     outcome: LastOutcome::Running,

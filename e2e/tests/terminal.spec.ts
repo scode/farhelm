@@ -41,6 +41,7 @@ import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator } from "@playwright/test";
 import {
   createSession,
+  forgetAutoSelect,
   listSessions,
   openRowMenu,
   pinAutoSelect,
@@ -203,19 +204,25 @@ test("list renders the session row with title, cwd, invocation, and the status t
   await expect(row.locator(".status-badge")).toHaveText(expected.status.state);
 });
 
-// The create form's working-directory field defaults to "~"
-// (BUGS_BURNDOWN.md issue 2): the common create needs no typing, and the
-// literal "~" is what gets sent — the supervisor expands it against the
-// TARGET host's home, which is why a host-independent default is possible
-// at all. Pinned as the field's actual initial value (not a placeholder)
-// because the decision was specifically "what you see is what is sent";
-// a regression to an empty-but-hinted field would pass a weaker check.
-test("the create form prefills the working directory with ~", async ({ page }) => {
+// Home is the New fallback when no session supplies a destination. An empty
+// listing and cleared selection establish that premise explicitly: the real
+// stack's shared session would otherwise seed its working directory. Assert
+// the actual field value, since an empty input with a home placeholder does
+// not establish what Launch would send to the target supervisor.
+test("the create form prefills the working directory with ~ when no session is selected", async ({ page }) => {
+  await forgetAutoSelect(page);
+  await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ sessions: [], total: 0, matching: 0, truncated: false }),
+  }));
   await page.goto("/");
+  await expect(page.locator(".session-count")).toHaveText("0 sessions");
+  await expect(page.locator("#terminal")).toHaveCount(0);
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
-  await expect(form.locator('input[type="text"]').nth(0)).toHaveValue("~");
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
 });
 
 // Keyboard activation (PLAN_M2.md step 7: rows must be
@@ -1591,9 +1598,17 @@ test("create form inputs opt out of autocomplete, autocorrect, autocapitalize, a
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
 
-  const inputs = form.locator('input[type="text"]');
-  await expect(inputs).toHaveCount(3);
-  for (let i = 0; i < 3; i++) {
+  // Pin the new composer fields by meaning, then inspect every text/search
+  // input, including the collapsed legacy and advanced fields. Counting the
+  // former form's three inputs would test its layout rather than this policy.
+  await expect(form.getByLabel("folder", { exact: true })).toHaveCount(1);
+  await expect(form.getByPlaceholder("custom model id")).toHaveCount(1);
+  await expect(form.getByLabel("title (optional)", { exact: true })).toHaveCount(1);
+  await expect(form.getByRole("combobox", { name: "search folders, harnesses, and models" })).toHaveCount(1);
+  const inputs = form.locator('input[type="text"], input[type="search"]');
+  const inputCount = await inputs.count();
+  expect(inputCount).toBeGreaterThanOrEqual(4);
+  for (let i = 0; i < inputCount; i++) {
     const input = inputs.nth(i);
     await expect(input).toHaveAttribute("autocomplete", "off");
     await expect(input).toHaveAttribute("autocorrect", "off");

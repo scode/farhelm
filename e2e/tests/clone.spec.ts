@@ -20,6 +20,7 @@ import {
   type SessionRow,
 } from "./helpers/fleet";
 import { stackScratchDir } from "./helpers/scratch";
+import { attachSession, termText, waitForTermText } from "./helpers/term";
 
 /** Find one session by its opaque server id, independent of title changes. */
 function row(page: Page, id: string) {
@@ -47,6 +48,121 @@ async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
   const body = await response.json();
   return body.id as string;
 }
+
+/**
+ * Edit clone title through the visible advanced control.
+ *
+ * Raw/profile clones retain their title in the collapsed disclosure. Opening
+ * it here keeps the clone regression on the real modal interaction path;
+ * direct ordinal fills would make a hidden input look usable to a person.
+ */
+async function fillCloneTitle(form: Locator, title: string) {
+  const advanced = form.locator("details.launch-composer-advanced");
+  if ((await advanced.getAttribute("open")) === null) {
+    await advanced.locator("summary").click();
+  }
+  await form.getByLabel("title (optional)").fill(title);
+}
+
+/**
+ * A GUI clone carries a structured parent all the way to a ready successor.
+ *
+ * The parent is created through the real API so the browser cannot seed its
+ * own source state. Clone must copy every explicit launch choice into the
+ * mounted dialog without posting; only the visible Launch click may create
+ * the child. The stack-owned `codex` wrapper records its generation and argv
+ * immediately before `exec`, which distinguishes the child's process from
+ * the parent's terminal history even if a later replay retains both.
+ */
+test("a structured GUI clone pre-fills without launching, then starts its ready successor", async ({
+  page,
+  request,
+}) => {
+  const local = await localHostId(request);
+  const cwd = stackScratchDir("structured-gui-clone-");
+  const title = `structured-gui-clone-${Date.now()}`;
+  const selection = {
+    harness: "codex",
+    model: "gpt-6-astra",
+    effort: "high",
+    permissions: "yolo",
+  };
+  let parentId: string | undefined;
+  let childId: string | undefined;
+  try {
+    const created = await request.post("/api/sessions", {
+      data: { cwd, title, host: local, launch: selection },
+    });
+    expect(created.ok(), `creating structured parent: ${await created.text()}`).toBe(true);
+    const parent = await created.json();
+    parentId = parent.id;
+    expect(parent.launch).toEqual(selection);
+
+    await page.goto("/");
+    const source = row(page, parentId);
+    await expect(source).toBeVisible({ timeout: 20_000 });
+    let createPosts = 0;
+    const countCreates = (issued: import("@playwright/test").Request) => {
+      if (issued.method() === "POST" && new URL(issued.url()).pathname === "/api/sessions") {
+        createPosts += 1;
+      }
+    };
+    page.on("request", countCreates);
+    try {
+      await openRowMenu(source);
+      await source.locator(".session-row-clone").click();
+      const form = page.locator(".create-session-form");
+      await expect(form).toBeVisible();
+      await expect(form.locator(".create-session-host")).toHaveValue(String(local));
+      // The search field and recent-folder group also mention “folder”; the
+      // composer input is the one control whose literal value becomes the
+      // successor destination.
+      await expect(form.locator('input[aria-label="folder"]')).toHaveValue(cwd);
+      await expect(form.getByLabel("selected launch choices")).toContainText("Codex");
+      await expect(form.getByLabel("selected launch choices")).toContainText("gpt-6-astra");
+      await expect(form.getByLabel("selected launch choices")).toContainText("high");
+      await expect(form.getByLabel("selected launch choices")).toContainText("Yolo");
+      expect(createPosts, "opening and inspecting a clone must not launch it").toBe(0);
+
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/sessions",
+        ),
+        form.locator(".create-session-submit").click(),
+      ]);
+      expect(response.request().postDataJSON().launch).toEqual(selection);
+      const child = await response.json();
+      childId = child.id;
+      expect(childId).not.toBe(parentId);
+      expect(child.launch).toEqual(selection);
+    } finally {
+      page.off("request", countCreates);
+    }
+
+    // The create reply is admission evidence. Re-reading both the live detail
+    // route and the fleet list makes the persisted projection a separate
+    // assertion rather than trusting that reply to have been painted back.
+    const detail = await request.get(`/api/sessions/${childId}`);
+    expect(detail.ok(), `reading structured successor: ${await detail.text()}`).toBe(true);
+    expect((await detail.json()).launch).toEqual(selection);
+    const listed = await request.get("/api/sessions");
+    expect(listed.ok(), `listing structured successor: ${await listed.text()}`).toBe(true);
+    const live = (await listed.json()).sessions.find((session: any) => session.id === childId);
+    expect(live, "the admitted child must be present in the live listing").toBeTruthy();
+    expect(live.launch).toEqual(selection);
+
+    await attachSession(page, childId);
+    await waitForTermText(page, `STRUCTURED-LAUNCH-GENERATION:${childId}:1`, 20_000);
+    const output = await termText(page);
+    expect(output).toContain("STRUCTURED-LAUNCH-ARGV: -m gpt-6-astra");
+    expect(output).toContain("model_reasoning_effort=high");
+    expect(output).toContain("--yolo");
+    await waitForTermText(page, "FAKE-AGENT READY", 20_000);
+  } finally {
+    if (childId) await cleanupSession(request, childId);
+    if (parentId) await cleanupSession(request, parentId);
+  }
+});
 
 test("clone pre-fills the create form from a profile-backed row, and the edited copy leaves the original untouched", async ({
   page,
@@ -161,20 +277,19 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
 });
 
 /**
- * The generation latch that lets an already-open form reseed (`create_form
- * .rs`'s `prefill_applied`) proven behaviorally: cloning row B while the
- * form opened by row A's clone is still on screen must replace EVERY
- * field, not merely the ones B's own values happen to differ on, and
- * cloning the SAME row a second time must restore the full prefill rather
- * than being a silent no-op because a prefill was already showing.
+ * Each clone must restore every prefilled field, including when the same row
+ * is cloned again after an intervening edit. The composer is a real modal,
+ * so a row menu behind it is deliberately unreachable; this test closes and
+ * remounts the draft between clone actions through the only user-reachable
+ * route. It covers remount seeding, while renderer-free generation tests own
+ * reseeding an already-mounted component.
  *
- * The pure `is_fresh_clone`-style unit coverage this used to rely on only
- * proved the generation COMPARISON, never that Dioxus actually reruns the
- * effect and repaints every signal without unmounting the form — this is
- * the real regression for a broken generation bump, a missed reactive
- * dependency, or a reseed that only overwrote some of the fields.
+ * Pure generation checks cannot show whether Dioxus re-seeds the visible
+ * signals on each dialog mount. The assertions below keep that renderer
+ * contract covered without making the modal leak pointer access to its
+ * obscured sidebar.
  */
-test("cloning a second row without closing the form replaces every field, and re-cloning it restores that", async ({
+test("each clone restores every field after an intervening draft edit", async ({
   page,
   request,
 }) => {
@@ -216,10 +331,13 @@ test("cloning a second row without closing the form replaces every field, and re
     // to an assertion that only checked the fields B's clone changes.
     await form.locator('input[type="text"]').nth(0).fill("/tmp/edited-in-between");
     await form.locator('input[type="text"]').nth(1).fill("sleep 999");
-    await form.locator('input[type="text"]').nth(2).fill("edited in between");
+    await fillCloneTitle(form, "edited in between");
 
-    // Clone row B WITHOUT closing the form: a new generation must reseed
-    // the still-mounted form wholesale.
+    // A modal keeps its obscured sidebar inert. Cancel this edited draft
+    // before selecting row B; reopening must still replace every field with
+    // B's prefill rather than retaining A's edits in component state.
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
     await expect(form.locator(".create-session-host")).toHaveValue(String(local));
@@ -227,11 +345,13 @@ test("cloning a second row without closing the form replaces every field, and re
     await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(titleB);
     await expect(form.locator('input[type="text"]').nth(1)).toHaveValue(FAKE_AGENT);
 
-    // Edit again, then clone B a SECOND time — a same-row reclone, which
-    // still bumps the generation and must restore the full prefill rather
-    // than being a no-op because B's own prefill was already on screen.
+    // Edit again, close, then clone B a second time. A later mount of the
+    // same source must not restore the abandoned draft merely because its
+    // prefill resembles the previous clone.
     await form.locator('input[type="text"]').nth(0).fill("/tmp/edited-again");
-    await form.locator('input[type="text"]').nth(2).fill("edited again");
+    await fillCloneTitle(form, "edited again");
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
     await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(cwdB);
@@ -250,10 +370,10 @@ test("cloning a second row without closing the form replaces every field, and re
 /**
  * `clone_prefill` is stored above the create form so it survives while the
  * form stays open (`list::view::ListView`), which leaves it exactly two
- * cleanup paths: cancelling through the "new session" toggle, and a
- * successful create. Either one skipped, or ordered wrong, would let the
- * NEXT unrelated "new session" open silently inherit a clone's host,
- * directory, title, and agent while looking like an ordinary fresh create.
+ * cleanup paths: cancelling through the dialog action, and a successful
+ * create. Either one skipped, or ordered wrong, would let the NEXT ordinary
+ * New inherit clone-only title and agent state. Its directory remains the
+ * deliberate ordinary-New context: the currently selected session's folder.
  */
 test("closing a clone without submitting, or submitting it, both leave the next New Session with fresh defaults", async ({
   page,
@@ -278,27 +398,31 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     await expect(source).toBeVisible({ timeout: 20_000 });
 
     const form = page.locator(".create-session-form");
-    const assertFreshDefaults = async () => {
+    const assertFreshDefaults = async (expectedCwd: string) => {
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-      await expect(form.locator('input[type="text"]').nth(0)).toHaveValue("~");
-      await expect(form.locator('input[type="text"]').nth(1)).toHaveValue("");
-      await expect(form.locator('input[type="text"]').nth(2)).toHaveValue("");
+      await expect(form.getByLabel("working directory")).toHaveValue(expectedCwd);
+      await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      await expect(form.locator(".create-session-submit")).toBeDisabled();
     };
 
-    // (a) Clone, then cancel through the "new session" toggle — the one
-    // path that actually clears `clone_prefill` on a form the user backs
-    // out of. Reopening must show the ordinary blank-form defaults, not
-    // the cancelled clone's fields.
+    // (a) Clone, then cancel through the dialog action. The modal keeps its
+    // opener behind an inert backdrop, so that visible Cancel control is the
+    // user-reachable route that clears `clone_prefill`. Reopening must show
+    // ordinary structured choices, not the cancelled clone's title or
+    // agent. The selected source row still deliberately supplies its folder.
     await openRowMenu(source);
     await source.locator(".session-row-clone").click();
     await expect(form).toBeVisible();
     await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(sourceCwd);
-    await newSessionButton.click();
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await newSessionButton.click();
-    await assertFreshDefaults();
-    await newSessionButton.click();
+    await assertFreshDefaults(sourceCwd);
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
 
     // (b) Clone, submit it successfully, then reopen: the same fresh
@@ -312,7 +436,7 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     await expect(row(page, cloneId)).toBeVisible({ timeout: 20_000 });
 
     await newSessionButton.click();
-    await assertFreshDefaults();
+    await assertFreshDefaults(newCwd);
   } finally {
     if (cloneId) await cleanupSession(request, cloneId);
     if (session) await cleanupSession(request, session.id);

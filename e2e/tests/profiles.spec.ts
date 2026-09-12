@@ -1,6 +1,6 @@
 // Agent profiles in a real browser: the app bar's helm-wide CRUD popup, the
-// create dialog's shared picker and its ask-don't-guess
-// fallback, and SPEC.md's snapshot rule as the session list shows it.
+// create dialog's explicit compatibility-picker transition, and SPEC.md's
+// snapshot rule as the session list shows it.
 //
 // A per-area spec of its own, per this milestone's convention (see
 // feed.spec.ts's and sidebar.spec.ts's headers). Its helpers are the shared
@@ -24,16 +24,11 @@
 //
 // ## Every test cleans its profiles up, and registers them before asserting
 //
-// Cleanup is not tidiness. A successful profile-backed create writes that
-// helm's REMEMBERED DEFAULT, which every later create dialog — in this file and
-// in every other spec — then answers for. Neither outcome is neutral: a LIVE
-// remembered profile is preselected (so the command field is disabled), and a
-// DELETED one leaves the dialog selecting nothing and blocking the create until
-// somebody answers. Both would break a spec that means to type a command, which
-// is why every create helper in this suite now states "custom command"
-// explicitly rather than relying on whatever the stack was left in — and why
-// these fixtures still clean up after themselves, so what is left behind is at
-// least a state the suite has a name for.
+// Cleanup is not tidiness. A successful profile-backed create writes the
+// helm's remembered default for compatibility callers. Ordinary New never
+// adopts that value, but profile tests deliberately enter the legacy surface
+// before making a choice; keeping fixtures isolated proves that transition is
+// explicit rather than accidentally relying on persistent helm state.
 //
 // Registration happens as soon as the object EXISTS server-side, before any
 // assertion about the page — a repaint that never happens must not leak a
@@ -60,6 +55,7 @@ import {
 import type { FeedStub } from "./helpers/fleet";
 import { sharedSessionRow } from "./helpers/terminal-suite";
 import { recordPage } from "./helpers/timeline";
+import { waitForSessionReady } from "./helpers/terminal-readiness";
 
 /** The value of the picker's placeholder — `profiles::UNRESOLVED_VALUE`, the
  * option a dialog shows while nothing is selected and a create is blocked. */
@@ -260,10 +256,30 @@ async function beginHeldProfileSave(page: Page, profile: ProfileRow) {
   };
 }
 
-/** Open the create dialog and wait for its agent picker. */
+/**
+ * Open the legacy surface deliberately before testing profile behavior.
+ *
+ * Ordinary New begins in the structured composer, where a remembered profile
+ * must never select an agent behind the user's back. Profile tests therefore
+ * take the same explicit route a person must take before observing the
+ * compatibility picker they are about to exercise.
+ */
 async function openCreateDialog(page: Page) {
   await page.locator(".new-session-button").click();
+  await expect(page.locator(".create-session-form")).toBeVisible({ timeout: 20_000 });
+  await page.locator(".create-session-form").getByRole("button", { name: "other / command" }).click();
   await expect(page.locator(".create-session-profile")).toBeVisible({ timeout: 20_000 });
+}
+
+/**
+ * Fill the optional title through its disclosure rather than by a fragile
+ * text-input ordinal. The composer keeps uncommon launch settings collapsed,
+ * so an interaction test must deliberately expose this control before using
+ * it just as a keyboard or pointer user would.
+ */
+async function fillAdvancedTitle(form: Locator, title: string) {
+  await form.locator("details.launch-composer-advanced summary").click();
+  await form.getByLabel("title (optional)").fill(title);
 }
 
 /** Wait until the picker offers one profile from the shared helm catalog. */
@@ -1489,21 +1505,15 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * The create dialog defaults to the profile a session was last created from
-   * in the helm catalog — SPEC.md's creation rule, first half.
+   * Ordinary New must not resurrect a remembered legacy profile.
    *
-   * The remembered default is the HELM's own state, written only by a
-   * successful profile-backed create, so the fixture makes one through the
-   * API: this test is about what the dialog does with that memory, not about
-   * how it is recorded.
-   *
-   * The disabled command field is asserted alongside, because it is the
-   * user-visible half of the wire's mutual exclusion: a create names either an
-   * invocation or a profile and is refused for naming both, so a live field
-   * beside a selected profile would invite typing a command that is not what
-   * launches.
+   * The helm retains that profile for compatibility callers, but the launch
+   * composer begins with no structured harness and requires an explicit
+   * alternate-mode choice. The fixture records a real profile-backed session
+   * so a passing assertion proves the absence is a UI decision, not merely an
+   * empty catalog.
    */
-  test("the create dialog preselects the profile last used in the helm", async ({
+  test("ordinary New does not select the profile last used in the helm", async ({
     page,
     request,
   }) => {
@@ -1518,14 +1528,17 @@ test.describe("agent profiles", () => {
     created.push(session.id);
 
     await listWithStubbedFeed(page);
-    await openCreateDialog(page);
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-profile")).toBeDisabled();
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
 
-    await expect(page.locator(".create-session-profile")).toHaveValue(profile.id, {
-      timeout: 20_000,
-    });
-    await expect(page.locator(".create-session-profile-note")).toHaveCount(0);
-    await expect(page.locator(".create-session-form input[type=\"text\"]").nth(1)).toBeDisabled();
-    await expect(page.locator(".create-session-submit")).toBeEnabled();
+    await form.getByRole("button", { name: "other / command" }).click();
+    await expect(form.locator(".create-session-profile")).toHaveValue("");
+    await expect(form.locator(".create-session-profile")).not.toHaveValue(profile.id);
+    await form.locator(".create-session-profile").selectOption(profile.id);
+    await expect(form.locator(".create-session-submit")).toBeEnabled();
   });
 
   /**
@@ -1575,21 +1588,14 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * A remembered profile that no longer exists selects NOTHING and BLOCKS the
-   * create until the user answers — SPEC.md's ask-don't-guess rule, and the
-   * half of it that is easy to lose.
+   * A deleted remembered profile cannot override the deliberate command mode.
    *
-   * Two substitutions are ruled out here, and the second is the one that hid
-   * behind a friendly-looking fallback: quietly choosing another profile, and
-   * quietly reverting to the command field — which is not empty, because a
-   * user who typed a command before picking a profile still has it there.
-   * Either would launch something nobody selected from a dialog whose own note
-   * says nothing is.
-   *
-   * The catalog is deliberately NOT empty when this runs, so preselecting
-   * nothing is a choice rather than the only option available.
+   * The structured composer no longer restores a legacy default at ordinary
+   * New. This fixture still creates the stale helm state so the test proves
+   * that entering the compatibility surface remains an explicit command
+   * choice even when the catalog contains a surviving profile.
    */
-  test("a deleted last-used profile blocks the create until an agent is chosen", async ({
+  test("a deleted last-used profile does not override explicit command mode", async ({
     page,
     request,
   }) => {
@@ -1616,22 +1622,12 @@ test.describe("agent profiles", () => {
     await openCreateDialog(page);
     await waitForOption(page, survivor.id);
 
-    await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED);
-    await expect(page.locator(".create-session-profile-note")).toContainText("no longer exists");
-    await expect(
-      page.locator(".create-session-submit"),
-      "a dialog that cannot say what it would launch must not be submittable",
-    ).toBeDisabled();
-    // The survivor is OFFERED rather than chosen: the dialog has profiles
-    // available and still picks none.
+    await expect(page.locator(".create-session-profile")).toHaveValue("");
+    await expect(page.locator(".create-session-submit")).toBeEnabled();
+    // The survivor remains offered, but the button that entered this surface
+    // explicitly selected the command path rather than a remembered profile.
     await expect(page.locator(`.create-session-profile option[value="${survivor.id}"]`))
       .toHaveCount(1);
-
-    // Choosing the command path explicitly is one of the two ways out, and it
-    // unblocks the dialog — which is what makes the block a question rather
-    // than a dead end.
-    await page.locator(".create-session-profile").selectOption("");
-    await expect(page.locator(".create-session-submit")).toBeEnabled();
     await expect(page.locator(".create-session-form input[type=\"text\"]").nth(1)).toBeEnabled();
   });
 
@@ -1720,7 +1716,7 @@ test.describe("agent profiles", () => {
     // Directory and title only: the command field is inert while a profile is
     // selected, which is the point — the profile says what runs.
     await form.locator('input[type="text"]').nth(0).fill("/tmp");
-    await form.locator('input[type="text"]').nth(2).fill(title);
+    await fillAdvancedTitle(form, title);
     await form.locator('button[type="submit"]').click();
 
     // Registered as soon as the session exists, before the view is asserted
@@ -1763,11 +1759,12 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * A successful profile-backed create fences the retained remembered default
-   * before the dialog can reopen. The new form waits for the explicit refresh
-   * instead of consuming the previous default and latching the wrong choice.
+   * A successful profile-backed create never makes a later ordinary New select
+   * that profile. The test holds the refresh that records the remembered
+   * default, which proves the explicit command path stays authoritative on
+   * either side of that late catalog reply.
    */
-  test("reopening after a profile create waits for its fresh remembered default", async ({
+  test("reopening after a profile create keeps ordinary New unselected", async ({
     page,
     request,
   }) => {
@@ -1803,7 +1800,7 @@ test.describe("agent profiles", () => {
     const form = page.locator(".create-session-form");
     await page.locator(".create-session-profile").selectOption(chosen.id);
     await form.locator('input[type="text"]').nth(0).fill("/tmp");
-    await form.locator('input[type="text"]').nth(2).fill(`default-created-${stamp}`);
+    await fillAdvancedTitle(form, `default-created-${stamp}`);
     hold = true;
     const [response] = await Promise.all([
       page.waitForResponse(
@@ -1815,12 +1812,16 @@ test.describe("agent profiles", () => {
     created.push(createdSession.id as string);
 
     await expect(page.locator(".create-session-form")).toHaveCount(0, { timeout: 20_000 });
-    await openCreateDialog(page);
-    await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED);
+    await page.locator(".new-session-button").click();
+    await expect(page.locator(".create-session-form")).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".create-session-submit")).toBeDisabled();
+    await page.locator(".create-session-form").getByRole("button", { name: "other / command" }).click();
+    await expect(page.locator(".create-session-profile")).toHaveValue("");
+    await expect(page.locator(".create-session-submit")).toBeEnabled();
 
     release!();
-    await expect(page.locator(".create-session-profile")).toHaveValue(chosen.id, {
+    await waitForOption(page, chosen.id);
+    await expect(page.locator(".create-session-profile")).toHaveValue("", {
       timeout: 20_000,
     });
   });
@@ -1860,7 +1861,7 @@ test.describe("agent profiles", () => {
 
     const form = page.locator(".create-session-form");
     await form.locator('input[type="text"]').nth(0).fill("/nonexistent/definitely/not/here");
-    await form.locator('input[type="text"]').nth(2).fill(`key-session-${stamp}`);
+    await fillAdvancedTitle(form, `key-session-${stamp}`);
     await page.locator(".create-session-profile").selectOption(first.id);
 
     await form.locator('button[type="submit"]').click();
@@ -2385,19 +2386,12 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * A dialog that is ASKING does not stop asking because another client's
-   * create supplied a new remembered default.
-   *
-   * Staged with the dialog in the unresolved state deliberately: an explicit
-   * choice would pass this test before the fix as well as after, because a
-   * choice is what the old consumption check looked for. What it could not
-   * represent is a dialog whose first catalog answered "the profile you last
-   * used is gone" — that leaves NO choice behind, so every later refresh
-   * re-consulted the default, and another client creating a session would
-   * quietly select a profile under someone reading the question. The latch is
-   * what makes the first answer the answer.
+   * An explicit command choice does not turn into a remembered profile when
+   * another client changes the catalog default. A fresh default is useful to
+   * compatibility callers, but it must never revise a launch intent already
+   * expressed in this dialog.
    */
-  test("a dialog that is asking keeps asking when the remembered default moves", async ({
+  test("an explicit command choice survives a remembered default move", async ({
     page,
     request,
   }) => {
@@ -2419,8 +2413,8 @@ test.describe("agent profiles", () => {
     const feed = await listWithStubbedFeed(page);
     await openCreateDialog(page);
     await waitForOption(page, survivor.id);
-    await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED);
-    await expect(page.locator(".create-session-submit")).toBeDisabled();
+    await expect(page.locator(".create-session-profile")).toHaveValue("");
+    await expect(page.locator(".create-session-submit")).toBeEnabled();
 
     // Another client creates from the SURVIVOR, which makes it this host's
     // remembered default — a profile that resolves, so a dialog still
@@ -2437,15 +2431,14 @@ test.describe("agent profiles", () => {
     feed.notify(2);
 
     // The page re-reads the catalog on that notice (the option list is proof
-    // it did) — and the question is still the question.
+    // it did) while preserving the command choice.
     await expect(page.locator(`.create-session-profile option[value="${survivor.id}"]`))
       .toHaveCount(1, { timeout: 20_000 });
     await expect(
       page.locator(".create-session-profile"),
-      "the first catalog decided, once; a later default is not this dialog's answer",
-    ).toHaveValue(UNRESOLVED);
-    await expect(page.locator(".create-session-submit")).toBeDisabled();
-    await expect(page.locator(".create-session-profile-note")).toBeVisible();
+      "a later default is not this dialog's explicit command choice",
+    ).toHaveValue("");
+    await expect(page.locator(".create-session-submit")).toBeEnabled();
   });
 
   /**
@@ -2475,7 +2468,7 @@ test.describe("agent profiles", () => {
     await waitForOption(page, second.id);
     const form = page.locator(".create-session-form");
     await form.locator('input[type="text"]').nth(0).fill("/nonexistent/definitely/not/here");
-    await form.locator('input[type="text"]').nth(2).fill(`turn-session-${stamp}`);
+    await fillAdvancedTitle(form, `turn-session-${stamp}`);
     await page.locator(".create-session-profile").selectOption(first.id);
 
     // Both events dispatched from ONE evaluation, with no chance for a render
@@ -2528,16 +2521,18 @@ test.describe("agent profiles", () => {
 
     await listWithStubbedFeed(page);
     const bodies = await watchCreateBodies(page);
-    await openCreateDialog(page);
-    await expect(page.locator(".create-session-profile")).toHaveValue(UNRESOLVED, {
-      timeout: 20_000,
-    });
+    await page.locator(".new-session-button").click();
+    const form = page.locator(".create-session-form");
+    await expect(form).toBeVisible({ timeout: 20_000 });
     await expect(
-      page.locator(".create-session-submit"),
-      "a dialog that cannot say what it would launch must not be submittable",
+      form.locator(".create-session-submit"),
+      "the structured surface has no harness while its catalog reply is pending",
     ).toBeDisabled();
 
-    const form = page.locator(".create-session-form");
+    // This path is usable before a catalog reply precisely because it is a
+    // direct, explicit command decision rather than a default to wait for.
+    await form.getByRole("button", { name: "other / command" }).click();
+    await expect(page.locator(".create-session-profile")).toHaveValue("");
     const command = `${FAKE_AGENT} --late-default-test`;
     await form.locator('input[type="text"]').nth(1).fill(command);
     await expect(page.locator(".create-session-submit")).toBeEnabled();
@@ -2548,7 +2543,7 @@ test.describe("agent profiles", () => {
     await expect(form.locator('input[type="text"]').nth(1)).toHaveValue(command);
 
     await form.locator('input[type="text"]').nth(0).fill("/nonexistent/late-default-test");
-    await form.locator('input[type="text"]').nth(2).fill(`late-default-${Date.now()}`);
+    await fillAdvancedTitle(form, `late-default-${Date.now()}`);
     await form.locator(".create-session-submit").click();
     await expect.poll(() => bodies.length, { timeout: 20_000 }).toBe(1);
     expect(bodies[0].profile_id, "command mode must not send the late default id").toBeUndefined();
@@ -3148,6 +3143,15 @@ test.describe("agent profiles", () => {
     try {
       const editor = await second.newPage();
       await editor.goto("/");
+      // This test measures the profile feed, not opening during terminal
+      // reveal. Settle the editor's initial selection before clicking the
+      // popup: its pending autofocus can otherwise win between the click
+      // and popup mount, preventing the profile operation from starting.
+      const selected = editor.locator('.session-row[data-session-selected="true"]');
+      await expect(selected).toHaveCount(1, { timeout: 20_000 });
+      const selectedId = await selected.getAttribute("data-session-id");
+      expect(selectedId).not.toBeNull();
+      await waitForSessionReady(editor, selectedId!);
       await openProfiles(editor);
       const editing = profileRow(editor, profile.id);
       await expect(editing).toBeVisible({ timeout: 20_000 });

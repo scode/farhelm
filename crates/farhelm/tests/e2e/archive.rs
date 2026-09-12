@@ -37,6 +37,7 @@ async fn create_profile_child(
             intent_key: None,
             agent_kind: Some(profile.agent_kind),
             resume_template: profile.resume_template.clone(),
+            launch: None,
             source_profile: Some(ProfileSnapshot {
                 id: profile.id.clone(),
                 name: profile.name.clone(),

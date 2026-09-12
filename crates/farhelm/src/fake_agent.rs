@@ -722,10 +722,11 @@ fn record_agent(
         "\x1b[1;32mfake-agent\x1b[0m starting (script=record)\r"
     )?;
     // The launch's own argv, echoed so a restart test can assert what was
-    // actually RUN rather than inferring it from a side effect. Joined with
-    // single spaces: no test needs to recover the original word boundaries,
-    // and every value these tests look for (a conversation id) contains no
-    // whitespace. `std::env::args()` is the process's REAL argv, so this
+    // actually RUN rather than inferring it from a side effect. Shell-word
+    // quoting preserves every argv boundary, including a custom model identifier
+    // containing quote or shell metacharacter bytes. Terminal replay can still
+    // wrap the line; readers reconstruct it before splitting shell words.
+    // `std::env::args()` is the process's REAL argv, so this
     // includes whatever the supervisor appended past `--script`/
     // `--record-home` — the per-launch hook flags such as `--settings
     // <json>` — which clap's `FakeAgent::extra` catch-all accepts but never
@@ -737,7 +738,7 @@ fn record_agent(
     writeln!(
         out,
         "FAKE-AGENT ARGV:{}\r",
-        std::env::args().collect::<Vec<_>>().join(" ")
+        shell_words::join(std::env::args())
     )?;
 
     // The record this fixture owns. Created lazily on the first line — its

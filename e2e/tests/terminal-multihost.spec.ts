@@ -2933,16 +2933,14 @@ test.describe("multi-host", () => {
     }
   });
 
-  // PLAN_M6.md names this one: a create against a host that is not connected
-  // is a PRECONDITION FAILURE — a visible error naming the host's state, and
-  // no session anywhere.
+  // A create against a host that is not connected is a local precondition
+  // failure. The disabled control keeps a request from reaching the helm;
+  // the API's matching refusal is covered at its request boundary elsewhere.
   //
   // The host is registered for real (a destination nothing answers at)
-  // rather than mocked, because what is under test is the helm's refusal
-  // reaching the form. The row's data attribute proves the stable wire
-  // phase, while the visible refusal must carry the corresponding humanized
-  // wording.
-  test("create-on-unreachable-refused: the helm's words in place, and no session", async ({
+  // rather than mocked. This test owns the local form precondition: a
+  // non-connected selected host disables submit, so no create reaches helm.
+  test("create-on-unreachable-refused: disabled locally, and no session", async ({
     page,
     request,
   }) => {
@@ -2952,6 +2950,7 @@ test.describe("multi-host", () => {
     });
     expect(added.ok(), `registering a host that is down: ${await added.text()}`).toBe(true);
     const down = (await added.json()).id;
+    let createPosts = 0;
 
     try {
       await page.goto("/");
@@ -2965,6 +2964,7 @@ test.describe("multi-host", () => {
 
       await page.locator(".new-session-button").click();
       const form = page.locator(".create-session-form");
+      await form.getByRole("button", { name: "other / command" }).click();
       await form.locator(".create-session-host").selectOption(String(down));
       // Command mode explicitly, as `fillCreateForm` does and for the same
       // reason. A host change now preserves any profile choice, so this reset
@@ -2972,20 +2972,24 @@ test.describe("multi-host", () => {
       await form.locator(".create-session-profile").selectOption("");
       await form.locator('input[type="text"]').nth(0).fill("/tmp");
       await form.locator('input[type="text"]').nth(1).fill(FAKE_AGENT_INVOCATION);
-      await form.locator('input[type="text"]').nth(2).fill(title);
-      await form.locator('button[type="submit"]').click();
+      await form.locator("details.launch-composer-advanced summary").click();
+      await form.getByLabel("title (optional)").fill(title);
+      await page.route("**/api/sessions", async (route) => {
+        if (route.request().method() === "POST") createPosts += 1;
+        await route.continue();
+      });
+      const submit = form.locator('button[type="submit"]');
+      await expect(submit).toBeDisabled();
+      await expect(form.locator(".create-session-host-note")).toContainText(
+        "the selected host is unavailable; choose a connected host before launching",
+      );
+      expect(createPosts, "an unavailable host disables submit before any create POST").toBe(0);
 
-      const error = form.locator(".create-session-error");
-      await expect(error).toBeVisible({ timeout: 30_000 });
-      // The helm's own sentence: the host's state named, and nothing
-      // queued for when it comes back (SPEC.md v1 refuses rather than
-      // deferring).
-      await expect(error).toContainText(`host ${down} is`);
-      await expect(error).toContainText("refused");
-      // And no session anywhere — a precondition failure creates nothing.
+      // No session anywhere — an unavailable destination is never queued.
       const listing = await (await request.get("/api/sessions")).json();
       expect(listing.sessions.filter((s: any) => s.title === title)).toHaveLength(0);
     } finally {
+      await page.unroute("**/api/sessions").catch(() => {});
       await cleanUpSessionsTitled(request, title);
       await request.delete(`/api/hosts/${down}`).catch(() => {});
     }

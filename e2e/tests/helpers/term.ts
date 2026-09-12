@@ -77,8 +77,8 @@ export async function attachSession(page: Page, id: string): Promise<void> {
  * required because every caller needs a known title, including the explicit
  * empty-title case. Filling and submitting stay separate because callers need
  * to inspect the form while a request is pending or after it fails. Selecting
- * the custom-command option makes the helper independent of a deleted profile
- * that a shared stack might otherwise retain as its last-used choice.
+ * the explicit legacy command path makes the helper independent of a deleted
+ * profile that a shared stack might otherwise retain as its last-used choice.
  */
 export async function fillCreateForm(
   page: Page,
@@ -87,18 +87,20 @@ export async function fillCreateForm(
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
   await expect(form).toBeVisible();
+  await form.getByRole("button", { name: "other / command" }).click();
   // The agent picker is told, explicitly, that this create means the command
-  // below. It is not a formality: the dialog defaults to the target host's
-  // last-used profile, and when that profile has since been DELETED — which
-  // is the state any run that exercised profiles leaves the shared stack in —
-  // it selects nothing at all and blocks the create until someone answers
-  // (SPEC.md's ask-don't-guess). Saying "custom command" here is what a user
-  // in that state would do, and it makes this helper independent of whatever
-  // the last profile-backed create left behind.
+  // below. It is not a formality: only the legacy surface accepts an
+  // arbitrary command, and it must say so before the command field becomes
+  // the request's source of intent. This also makes the helper independent of
+  // whatever profile-backed create a shared stack last recorded.
   await form.locator(".create-session-profile").selectOption("");
   await form.locator('input[type="text"]').nth(0).fill(cwd);
   await form.locator('input[type="text"]').nth(1).fill(invocation);
-  await form.locator('input[type="text"]').nth(2).fill(title);
+  // Title is deliberately secondary launch metadata. Open its disclosure as
+  // a person would, rather than filling the hidden input by ordinal and
+  // turning a real interaction helper into a DOM-only shortcut.
+  await form.locator("details.launch-composer-advanced summary").click();
+  await form.getByLabel("title (optional)").fill(title);
   return form;
 }
 

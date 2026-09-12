@@ -48,13 +48,14 @@
 
 use crate::manager;
 use crate::{
-    AppState, CreateExtras, SupervisorClient, SupervisorError, aggregate, http_error, store,
+    AppState, CreateExtras, SupervisorClient, SupervisorError, aggregate, http_error, launches,
+    store,
 };
 use anyhow::Context;
 use axum::extract::{Path as AxPath, Query, State};
 use axum::response::IntoResponse;
 use farhelm_proto::{ErrorKind, ProfileSnapshot};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
@@ -122,6 +123,115 @@ pub(crate) struct ListQuery {
     /// It is not a filter. It changes the sequence, never the membership, so
     /// neither count in the reply moves with it.
     sort: Option<String>,
+}
+
+/// The selected host for composer suggestions. History is never inferred
+/// from a registry row alone: this handler reuses the live connection claim
+/// so a disconnected or retargeted host cannot silently donate paths from a
+/// previous installation.
+#[derive(Deserialize)]
+pub(crate) struct LaunchHistoryQuery {
+    host: store::HostId,
+}
+
+/// Shared structured and folder suggestions, scoped to one verified host.
+#[derive(Serialize)]
+pub(crate) struct LaunchHistoryBody {
+    launches: Vec<store::LaunchHistoryEntry>,
+    folders: Vec<store::FolderHistoryEntry>,
+}
+
+/// A browser request to inspect one directory on the selected host.
+#[derive(Deserialize)]
+pub(crate) struct BrowseDirectoryReq {
+    host: store::HostId,
+    cwd: String,
+    expected_incarnation: Option<u64>,
+}
+
+/// The bounded host-side result returned to the composer.
+#[derive(serde::Serialize)]
+pub(crate) struct BrowseDirectoryBody {
+    cwd: String,
+    parent: Option<String>,
+    children: Vec<String>,
+    truncated: bool,
+}
+
+/// POST /api/browse-directory asks the selected supervisor, never the helm,
+/// to list an immediate directory level.
+pub(crate) async fn browse_directory(
+    State(state): State<Arc<AppState>>,
+    axum::Json(req): axum::Json<BrowseDirectoryReq>,
+) -> impl IntoResponse {
+    let (claim, client) = match host_client(&state, req.host) {
+        Ok(target) => target,
+        Err(error) => return http_error(error),
+    };
+    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
+        return http_error(error);
+    }
+    match client.browse_directory(&req.cwd).await {
+        Ok((cwd, parent, children, truncated)) => {
+            if let Some(identity) = claim.identity.as_deref()
+                && let Err(error) = state
+                    .store
+                    .refine_folder_history(claim.host, identity, &req.cwd, &cwd)
+                    .await
+            {
+                // Browsing is still a correct supervisor answer when local
+                // suggestion maintenance loses a race with host adoption.
+                // The identity-scoped next create/browse will repair it.
+                tracing::warn!(host = claim.host, %error, "could not refine browsed folder history");
+            }
+            axum::Json(BrowseDirectoryBody {
+                cwd,
+                parent,
+                children,
+                truncated,
+            })
+            .into_response()
+        }
+        Err(error) => http_error(error),
+    }
+}
+
+/// GET /api/launch-catalog returns the release-owned choices the helm will
+/// validate and compile for structured creates.
+///
+/// It is deliberately independent of host reachability: this is a property
+/// of the helm build, while a later create remains guarded against the host
+/// connection that the user selected.
+pub(crate) async fn launch_catalog() -> impl IntoResponse {
+    axum::Json(launches::catalog())
+}
+
+/// GET /api/launch-history returns reusable successful-create history for a
+/// currently connected host.
+pub(crate) async fn launch_history(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<LaunchHistoryQuery>,
+) -> impl IntoResponse {
+    let (claim, _) = match host_client(&state, query.host) {
+        Ok(target) => target,
+        Err(error) => return http_error(error),
+    };
+    let Some(identity) = claim.identity else {
+        return axum::Json(LaunchHistoryBody {
+            launches: Vec::new(),
+            folders: Vec::new(),
+        })
+        .into_response();
+    };
+    match tokio::try_join!(
+        state.store.launch_history(claim.host, &identity),
+        state.store.folder_history(claim.host, &identity),
+    ) {
+        Ok((launches, folders)) => {
+            axum::Json(LaunchHistoryBody { launches, folders }).into_response()
+        }
+        Err(error) => http_error(error),
+    }
 }
 
 /// Build the merged view's predicate from one request's query string, or
@@ -507,6 +617,10 @@ pub(crate) struct CreateReq {
     /// remembered default (see [`create_session`]): "last used" means a
     /// session was actually created from it, not that a picker was opened.
     profile_id: Option<String>,
+    /// Explicit launch-composer intent. The helm compiles this into the
+    /// existing resolved invocation before contacting a supervisor, so the
+    /// supervisor never needs a vendor catalog or a command parser.
+    launch: Option<farhelm_proto::LaunchSelection>,
     title: Option<String>,
     /// Which registered host to create on — a `HostView::id` from
     /// `GET /api/hosts` (PLAN_M6.md item 5).
@@ -1067,6 +1181,26 @@ pub(crate) async fn do_create_session(
                         agent_kind,
                         resume_template,
                         source_profile: None,
+                        launch: None,
+                    },
+                )
+                .await?;
+            (session, None)
+        }
+        CreateMode::Structured(compiled) => {
+            let session = client
+                .create_session_with_extras(
+                    &cwd,
+                    &compiled.invocation,
+                    title,
+                    cols,
+                    rows,
+                    CreateExtras {
+                        intent_key,
+                        agent_kind: Some(compiled.agent_kind),
+                        resume_template: compiled.resume_template.clone(),
+                        source_profile: None,
+                        launch: Some(compiled.selection.clone()),
                     },
                 )
                 .await?;
@@ -1099,6 +1233,7 @@ pub(crate) async fn do_create_session(
                             id: profile.id,
                             name: profile.name,
                         }),
+                        launch: None,
                     },
                 )
                 .await?;
@@ -1123,6 +1258,7 @@ pub(crate) async fn do_create_session(
                             id: profile.id,
                             name: profile.name,
                         }),
+                        launch: None,
                     },
                 )
                 .await?;
@@ -1147,6 +1283,7 @@ pub(crate) async fn do_create_session(
                             id: profile.id.clone(),
                             name: profile.name.clone(),
                         }),
+                        launch: None,
                     },
                 )
                 .await?;
@@ -1163,6 +1300,31 @@ pub(crate) async fn do_create_session(
         accept_result(&session)?;
     }
     record_session(state, claim, &session).await;
+    // Suggestions are a convenience written only after the session exists.
+    // A database failure here must not turn a successful supervisor create
+    // into an HTTP error that tempts the caller to submit it again.
+    if let Some(identity) = claim.identity.as_deref() {
+        match state
+            .store
+            .record_create_history_with_paths(
+                claim.host,
+                identity,
+                &session,
+                session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
+                &cwd,
+            )
+            .await
+        {
+            Ok(true) => state.manager.events().bump(),
+            Ok(false) => {}
+            Err(error) => warn!(
+                host = claim.host,
+                session = %manager::peer_text(&session.id),
+                error = %error,
+                "could not record post-create launch history"
+            ),
+        }
+    }
     // The remembered default is written only after the resolved create
     // succeeds. A reply that unexpectedly names no source profile writes
     // nothing: inventing an id would make the next dialog preselect a profile
@@ -1175,6 +1337,10 @@ pub(crate) async fn do_create_session(
             .as_ref()
             .map(|profile| profile.id.clone()),
         CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
+        // Structured launches are independent of the legacy profile selector,
+        // so a successful create must not change that selector's remembered
+        // default.
+        CreateMode::Structured(_) => None,
     };
     if let Some(profile_id) = remembered {
         remember_default_profile(state, claim.host, &profile_id, &session).await;
@@ -1247,6 +1413,10 @@ pub(crate) type CreatedSessionCheck =
 /// edit between keyed retries is correctly treated as a changed request.
 pub(crate) enum CreateMode {
     Raw(String),
+    /// A release-catalog-validated launch composer selection. This stays
+    /// distinct from raw mode until the resolved bundle and user intent have
+    /// both crossed the supervisor boundary.
+    Structured(crate::launches::CompiledLaunch),
     Profile(String),
     ProfileName(String),
     /// A profile and identity index produced by one caller-owned catalog
@@ -1314,6 +1484,21 @@ pub(crate) async fn mode_from_source(
     source: &farhelm_proto::SessionInfo,
     policy: DanglingProfilePolicy,
 ) -> anyhow::Result<CreateMode> {
+    if let Some(selection) = source.launch.clone() {
+        // Clone/replace retain the source's frozen bundle. Recompiling it
+        // through today's catalog could change an older selection before a
+        // person has reviewed and submitted it again.
+        return Ok(CreateMode::Structured(crate::launches::CompiledLaunch {
+            invocation: source.invocation.clone(),
+            agent_kind: match selection.harness {
+                farhelm_proto::LaunchHarness::Codex => farhelm_proto::AgentKind::Codex,
+                farhelm_proto::LaunchHarness::Claude => farhelm_proto::AgentKind::Claude,
+                farhelm_proto::LaunchHarness::Muse => farhelm_proto::AgentKind::Generic,
+            },
+            resume_template: source.resume_template.clone(),
+            selection,
+        }));
+    }
     let Some(snapshot) = &source.source_profile else {
         return Ok(CreateMode::Raw(source.invocation.clone()));
     };
@@ -1356,21 +1541,27 @@ pub(crate) async fn mode_from_source(
 /// the caller believes it chose. The refusal names the fields so the caller
 /// knows which half to remove.
 fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
-    match (req.invocation.take(), req.profile_id.take()) {
-        (Some(_), Some(_)) => Err(anyhow::Error::new(SupervisorError {
+    match (
+        req.invocation.take(),
+        req.profile_id.take(),
+        req.launch.take(),
+    ) {
+        (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
+            Err(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: "a create names exactly one of invocation, profile, or launch: each is a \
+                      complete selector and there is no honest way to merge two of them"
+                    .to_string(),
+            }))
+        }
+        (None, None, None) => Err(anyhow::Error::new(SupervisorError {
             kind: ErrorKind::InvalidRequest,
-            message: "a create names either an invocation or a profile, never both: a profile \
-                      already says what to run, and there is no honest way to merge the two"
-                .to_string(),
-        })),
-        (None, None) => Err(anyhow::Error::new(SupervisorError {
-            kind: ErrorKind::InvalidRequest,
-            message: "a create must name either an invocation or a profile; this body names \
+            message: "a create must name an invocation, profile, or launch; this body names \
                       neither, so there is nothing to launch"
                 .to_string(),
         })),
-        (Some(invocation), None) => Ok(CreateMode::Raw(invocation)),
-        (None, Some(_)) if req.agent_kind.is_some() || req.resume_template.is_some() => {
+        (Some(invocation), None, None) => Ok(CreateMode::Raw(invocation)),
+        (None, Some(_), None) if req.agent_kind.is_some() || req.resume_template.is_some() => {
             Err(anyhow::Error::new(SupervisorError {
                 kind: ErrorKind::InvalidRequest,
                 message: "a profile-backed create cannot also send agent_kind or \
@@ -1380,7 +1571,25 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
                     .to_string(),
             }))
         }
-        (None, Some(profile_id)) => Ok(CreateMode::Profile(profile_id)),
+        (None, Some(profile_id), None) => Ok(CreateMode::Profile(profile_id)),
+        (None, None, Some(selection)) => {
+            if req.agent_kind.is_some() || req.resume_template.is_some() {
+                return Err(anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::InvalidRequest,
+                    message: "a structured launch cannot also send agent_kind or resume_template: \
+                              the composer owns its resolved bundle"
+                        .to_string(),
+                }));
+            }
+            crate::launches::compile(selection)
+                .map(CreateMode::Structured)
+                .map_err(|message| {
+                    anyhow::Error::new(SupervisorError {
+                        kind: ErrorKind::InvalidRequest,
+                        message,
+                    })
+                })
+        }
     }
 }
 
@@ -2044,11 +2253,10 @@ pub(crate) async fn do_replace_session(
             cols: default_cols(),
             rows: default_rows(),
             intent_key,
-            // `SessionInfo` (the only view this route has of the source)
-            // carries neither field — see `clone_for_agent`'s own "KNOWN
-            // GAP" doc for why a raw source's integration overrides cannot
-            // be forwarded here either, and why fixing that is not local to
-            // this function.
+            // Raw/profile compatibility overrides still have no durable
+            // projection on `SessionInfo`. A structured source is different:
+            // `mode_from_source` carries its recorded template inside the
+            // structured mode, where `do_create_session` forwards it.
             agent_kind: None,
             resume_template: None,
             // Unlike an ordinary REST create, replace DOES have a session an

@@ -233,7 +233,7 @@ impl HostOption {
 /// the session row named, plus the install identity it named alongside it.
 ///
 /// Snapshotted from the `Session` at selection time (see `AppBody`'s
-/// `open_host` wiring), so `identity` says which INSTALL the user was
+/// `open_destination` wiring), so `identity` says which INSTALL the user was
 /// looking at when they selected — which is exactly what
 /// [`default_create_host`] compares against the registry as it stands at
 /// create time. `identity`'s two `None` layers keep the wire's two
@@ -249,7 +249,7 @@ impl OpenHost {
     /// the row reported, snapshotted together at selection time.
     ///
     /// This is THE production adapter from a `Session` to the create
-    /// default's input: `AppBody` calls it on the selected session, and
+    /// default's input: [`OpenDestination::of_session`] calls it for AppBody, and
     /// [`default_create_host`] compares what it produces. It exists as a
     /// named function (rather than an inline struct literal at the call
     /// site) so a test can pin that the identity actually rides along — an
@@ -261,6 +261,27 @@ impl OpenHost {
         Some(OpenHost {
             id: session.host?,
             identity: session.host_identity.clone(),
+        })
+    }
+}
+
+/// The open session's destination, independent of the sidebar's current filter.
+///
+/// Keep the folder beside the installation claim that makes it safe to inherit.
+/// A filtered or truncated sidebar can omit the selected row without closing its
+/// terminal, so that projection cannot supply half of this snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OpenDestination {
+    pub(crate) host: OpenHost,
+    pub(crate) cwd: String,
+}
+
+impl OpenDestination {
+    /// Snapshot both destination fields from the same selected session.
+    pub(crate) fn of_session(session: &Session) -> Option<Self> {
+        Some(Self {
+            host: OpenHost::of_session(session)?,
+            cwd: session.cwd.clone(),
         })
     }
 }
@@ -638,7 +659,7 @@ pub(super) mod tests {
     /// above stays green, which is exactly how the #156 residual would
     /// quietly come back.
     ///
-    /// [`OpenHost::of_session`] is what `AppBody` calls on the selected
+    /// [`OpenDestination::of_session`] is what `AppBody` calls on the selected
     /// session; [`host_options`] is what `ListView` reduces the host
     /// catalog through. Each is asserted on the fields the comparison
     /// reads: id + identity (+ the identity-mismatch disqualifier on the
@@ -648,14 +669,17 @@ pub(super) mod tests {
         let mut session = row_specimen("sess");
         session.host = Some(7);
         session.host_identity = Some(Some("install-7".to_string()));
-        let open = OpenHost::of_session(&session).expect("a hosted session adapts");
+        session.cwd = "/selected/project".to_string();
+        let destination = OpenDestination::of_session(&session).expect("a hosted session adapts");
+        assert_eq!(destination.cwd, "/selected/project");
+        let open = destination.host;
         assert_eq!(open.id, 7);
         assert_eq!(open.identity, Some(Some("install-7".to_string())));
 
         let mut hostless = row_specimen("sess");
         hostless.host = None;
         assert_eq!(
-            OpenHost::of_session(&hostless),
+            OpenDestination::of_session(&hostless),
             None,
             "a session naming no host binds no default"
         );

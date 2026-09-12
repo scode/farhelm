@@ -77,8 +77,9 @@
 //!
 use crate::aggregate::host_display_name;
 use anyhow::Context;
-use farhelm_proto::{SessionInfo, SessionStatus};
+use farhelm_proto::{LaunchSelection, SessionInfo, SessionStatus};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -91,6 +92,58 @@ use subtle::ConstantTimeEq;
 /// newest credentials leaves ample room for ordinary use while preventing a
 /// leaked bootstrap token from growing helm.db without bound.
 pub(crate) const MAX_DEVICE_SESSIONS: usize = 64;
+
+/// Keep suggestions useful without letting routine creates grow helm.db
+/// forever. The same bounded window supplies recency and frequency; callers
+/// must never turn an idempotent replay into a second record.
+pub(crate) const MAX_LAUNCH_HISTORY: i64 = 100;
+
+/// Return whether one durable history key is newer under the SQL order.
+///
+/// Every reader uses descending numeric keys with an ascending session-id
+/// tie-break. Keeping the inverse tie direction here prevents an apparently
+/// harmless Rust tuple comparison from admitting rows that SQL immediately
+/// evicts at an equal timestamp or sequence.
+fn history_order_is_newer(candidate: (i64, i64, &str), boundary: (i64, i64, &str)) -> bool {
+    candidate.0 > boundary.0
+        || (candidate.0 == boundary.0
+            && (candidate.1 > boundary.1
+                || (candidate.1 == boundary.1 && candidate.2 < boundary.2)))
+}
+
+/// A reusable structured launch, tied to the installation that accepted it.
+///
+/// This is deliberately not a snapshot of every session field: title and
+/// conversation identity are session-specific, while destination and the
+/// explicit composer selection are reusable intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LaunchHistoryEntry {
+    pub host: HostId,
+    /// The destination identity accepted with this particular create. A
+    /// missing value belongs to a legacy row whose display spelling is the
+    /// only durable fact; folder suggestions must never fill it in later.
+    pub canonical_cwd: Option<String>,
+    pub cwd: String,
+    pub selection: LaunchSelection,
+    pub created_at: i64,
+    /// `None` preserves the protocol's legacy timestamp/id ordering fact.
+    pub creation_seq: Option<u64>,
+}
+
+/// A durable folder suggestion. The display spelling remains what the user
+/// submitted while canonical identity is kept separately for deduplication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FolderHistoryEntry {
+    pub host: HostId,
+    pub canonical_cwd: String,
+    /// A successful create proved this canonical path. `false` identifies a
+    /// legacy spelling that a later browse may refine without rewriting any
+    /// accepted-create fact.
+    pub canonical_proven: bool,
+    pub display_cwd: String,
+    pub created_at: i64,
+    pub creation_seq: Option<u64>,
+}
 
 /// How long a query waits on `SQLITE_BUSY` before giving up.
 ///
@@ -108,7 +161,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 25;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -1602,11 +1655,90 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  last_selected TEXT,
                  compact       INTEGER CHECK (compact IN (0, 1))
              ) STRICT;
+             -- Successful structured creates are reusable only for the
+             -- installation that actually accepted them. The stored
+             -- identity makes a retargeted host start with an empty history
+             -- instead of offering directories or launch choices from the
+             -- machine it replaced.
+             CREATE TABLE launch_history (
+                 host_id       INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 session_id    TEXT NOT NULL,
+                 created_at    INTEGER NOT NULL,
+                 creation_seq  INTEGER,
+                 ordering_kind INTEGER NOT NULL,
+                 ordering_value INTEGER NOT NULL,
+                 cwd           TEXT NOT NULL,
+                 canonical_cwd TEXT,
+                 launch_json   TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX launch_history_recent
+                 ON launch_history (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             -- This is the admission memory for every create mode. Folder
+             -- history cannot use a folder key for this job because a retry
+             -- of an old session may name the same folder and must not move
+             -- it to the front.
+             CREATE TABLE create_history_sessions (
+                 host_id       INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 session_id    TEXT NOT NULL,
+                 creation_seq  INTEGER,
+                 created_at    INTEGER NOT NULL,
+                 ordering_kind INTEGER NOT NULL,
+                 ordering_value INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX create_history_sessions_recent
+                 ON create_history_sessions (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             -- A compact, durable lower watermark for admissions evicted
+             -- from the bounded window. It prevents an old replay from
+             -- resurrecting a folder or launch after its session-id row was
+             -- reclaimed.
+             CREATE TABLE create_history_cutoffs (
+                 host_id          INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity    TEXT NOT NULL,
+                 cutoff_kind      INTEGER NOT NULL,
+                 cutoff_value     INTEGER NOT NULL,
+                 cutoff_session_id TEXT NOT NULL,
+                 cutoff_created_at INTEGER NOT NULL,
+                 fallback_cutoff_created_at INTEGER NOT NULL,
+                 fallback_cutoff_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             -- Folder suggestions deliberately survive session deletion, but
+             -- not a host identity change. Canonical paths are populated by
+             -- host-side browsing; create-time entries use accepted cwd.
+             CREATE TABLE folder_history (
+                 host_id       INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 canonical_cwd TEXT NOT NULL,
+                 canonical_proven INTEGER NOT NULL CHECK (canonical_proven IN (0, 1)),
+                 display_cwd   TEXT NOT NULL,
+                 created_at    INTEGER NOT NULL,
+                 creation_seq  INTEGER,
+                 ordering_kind INTEGER NOT NULL,
+                 ordering_value INTEGER NOT NULL,
+                 ordering_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, canonical_cwd)
+             ) STRICT;
+             CREATE INDEX folder_history_recent
+                 ON folder_history (host_id, host_identity, ordering_kind DESC, ordering_value DESC, ordering_session_id ASC);
+             -- A sequence-less supervisor observation switches this whole
+             -- partition to the protocol's timestamp/id fallback. Keeping
+             -- that state separate from a cutoff means it exists before the
+             -- first eviction and survives a temporarily empty window.
+             CREATE TABLE create_history_partitions (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 fallback_order INTEGER NOT NULL CHECK (fallback_order IN (0, 1)),
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
              {SESSION_SEEN_SCHEMA}
              -- Must equal SCHEMA_VERSION exactly — see the Rust comment
              -- above this whole `execute_batch` call for what goes wrong
              -- when the two drift.
-             PRAGMA user_version = 18;",
+             PRAGMA user_version = 25;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2039,6 +2171,264 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 18")?;
         version = 18;
+    }
+    if version == 18 {
+        // Existing helms never recorded reusable structured choices or
+        // canonical folder facts. Empty history is the only honest
+        // migration: parsing cached raw invocations would manufacture
+        // selections and make migration timing affect suggestions.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS launch_history (
+                 host_id       INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 session_id    TEXT NOT NULL,
+                 created_at    INTEGER NOT NULL,
+                 creation_seq  INTEGER NOT NULL,
+                 cwd           TEXT NOT NULL,
+                 launch_json   TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX IF NOT EXISTS launch_history_recent
+                 ON launch_history (host_id, host_identity, creation_seq DESC, session_id ASC);
+             CREATE TABLE IF NOT EXISTS folder_history (
+                 host_id       INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 canonical_cwd TEXT NOT NULL,
+                 display_cwd   TEXT NOT NULL,
+                 created_at    INTEGER NOT NULL,
+                 creation_seq  INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, canonical_cwd)
+             ) STRICT;
+             CREATE INDEX IF NOT EXISTS folder_history_recent
+                 ON folder_history (host_id, host_identity, creation_seq DESC, canonical_cwd ASC);
+             PRAGMA user_version = 19;",
+        )
+        .context("migrating helm.db to schema version 19")?;
+        version = 19;
+    }
+    if version == 19 {
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS create_history_sessions (
+                 host_id       INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 session_id    TEXT NOT NULL,
+                 creation_seq  INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX IF NOT EXISTS create_history_sessions_recent
+                 ON create_history_sessions (host_id, host_identity, creation_seq DESC, session_id ASC);
+             PRAGMA user_version = 21;",
+        )
+        .context("migrating helm.db to schema version 21")?;
+        version = 21;
+    }
+    if version == 20 {
+        // Existing admissions predate an ordering key. They remain replay
+        // suppressors until the bounded window fills, then the ordinary
+        // eviction below retires them in deterministic session-id order.
+        tx.execute_batch(
+            "ALTER TABLE create_history_sessions
+                 ADD COLUMN creation_seq INTEGER NOT NULL DEFAULT 0;
+             CREATE INDEX create_history_sessions_recent
+                 ON create_history_sessions (host_id, host_identity, creation_seq DESC, session_id ASC);
+             PRAGMA user_version = 21;",
+        )
+        .context("migrating helm.db to schema version 21")?;
+        version = 21;
+    }
+    if version == 21 {
+        // Existing bounded admissions have no durable knowledge of rows
+        // already evicted, so they begin with an empty watermark. New
+        // evictions populate it transactionally with the same ordering the
+        // admission window uses.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS create_history_cutoffs (
+                 host_id          INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity    TEXT NOT NULL,
+                 cutoff_sequence  INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             PRAGMA user_version = 22;",
+        )
+        .context("migrating helm.db to schema version 22")?;
+        version = 22;
+    }
+    if version == 22 {
+        // Schema 22's admission rows discarded both legacy timestamps and
+        // identities from partitions retired before the current host. There
+        // is no honest way to reconstruct either fact. Drop that bounded,
+        // convenience-only history rather than invent an arrival order or
+        // let a replacement installation retain predecessor suggestions.
+        // New rows carry one explicit total-order key: sequenced observations
+        // sort after legacy observations; legacy peers use `(created_at,
+        // session_id)`. Keeping the discriminator in every table lets the
+        // durable cutoff reject an evicted replay under the same order.
+        tx.execute_batch(
+            "DROP TABLE launch_history;
+             DROP TABLE folder_history;
+             DROP TABLE create_history_sessions;
+             DROP TABLE create_history_cutoffs;
+             DROP TABLE IF EXISTS create_history_partitions;
+             CREATE TABLE launch_history (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                 created_at INTEGER NOT NULL, creation_seq INTEGER,
+                 ordering_kind INTEGER NOT NULL, ordering_value INTEGER NOT NULL,
+                 cwd TEXT NOT NULL, launch_json TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX launch_history_recent ON launch_history
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             CREATE TABLE create_history_sessions (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                 creation_seq INTEGER, created_at INTEGER NOT NULL,
+                 ordering_kind INTEGER NOT NULL, ordering_value INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX create_history_sessions_recent ON create_history_sessions
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             CREATE TABLE create_history_cutoffs (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, cutoff_kind INTEGER NOT NULL,
+                 cutoff_value INTEGER NOT NULL, cutoff_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             CREATE TABLE folder_history (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, canonical_cwd TEXT NOT NULL,
+                 display_cwd TEXT NOT NULL, created_at INTEGER NOT NULL,
+                 creation_seq INTEGER, ordering_kind INTEGER NOT NULL,
+                 ordering_value INTEGER NOT NULL, ordering_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, canonical_cwd)
+             ) STRICT;
+             CREATE INDEX folder_history_recent ON folder_history
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, canonical_cwd ASC);
+             PRAGMA user_version = 23;",
+        )
+        .context("migrating helm.db to schema version 23")?;
+        version = 23;
+    }
+    if version == 23 {
+        // History is bounded convenience data. Schema 23 cannot express the
+        // partition-wide fallback mode or distinguish a browse-refined
+        // legacy folder from a supervisor-proven create, and an evicted
+        // cutoff lacks the timestamp needed to change modes honestly. Reset
+        // all four projections together instead of inventing either fact.
+        tx.execute_batch(
+            "DROP TABLE launch_history;
+             DROP TABLE folder_history;
+             DROP TABLE create_history_sessions;
+             DROP TABLE create_history_cutoffs;
+             DROP TABLE IF EXISTS create_history_partitions;
+             CREATE TABLE launch_history (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                 created_at INTEGER NOT NULL, creation_seq INTEGER,
+                 ordering_kind INTEGER NOT NULL, ordering_value INTEGER NOT NULL,
+                 cwd TEXT NOT NULL, canonical_cwd TEXT, launch_json TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX launch_history_recent ON launch_history
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             CREATE TABLE create_history_sessions (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                 creation_seq INTEGER, created_at INTEGER NOT NULL,
+                 ordering_kind INTEGER NOT NULL, ordering_value INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX create_history_sessions_recent ON create_history_sessions
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             CREATE TABLE create_history_cutoffs (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, cutoff_kind INTEGER NOT NULL,
+                 cutoff_value INTEGER NOT NULL, cutoff_session_id TEXT NOT NULL,
+                 cutoff_created_at INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             CREATE TABLE folder_history (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, canonical_cwd TEXT NOT NULL,
+                 canonical_proven INTEGER NOT NULL CHECK (canonical_proven IN (0, 1)),
+                 display_cwd TEXT NOT NULL, created_at INTEGER NOT NULL,
+                 creation_seq INTEGER, ordering_kind INTEGER NOT NULL,
+                 ordering_value INTEGER NOT NULL, ordering_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, canonical_cwd)
+             ) STRICT;
+             CREATE INDEX folder_history_recent ON folder_history
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, canonical_cwd ASC);
+             CREATE TABLE create_history_partitions (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 fallback_order INTEGER NOT NULL CHECK (fallback_order IN (0, 1)),
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             PRAGMA user_version = 24;",
+        )
+        .context("migrating helm.db to schema version 24")?;
+        version = 24;
+    }
+    if version == 24 {
+        // A schema-24 sequence cutoff remembers only the timestamp attached
+        // to its sequence frontier. That is not a fallback frontier when
+        // clocks and sequences disagree, so reset this bounded convenience
+        // data rather than let an order switch resurrect an old create.
+        tx.execute_batch(
+            "DROP TABLE launch_history;
+             DROP TABLE folder_history;
+             DROP TABLE create_history_sessions;
+             DROP TABLE create_history_cutoffs;
+             DROP TABLE create_history_partitions;
+             CREATE TABLE launch_history (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                 created_at INTEGER NOT NULL, creation_seq INTEGER,
+                 ordering_kind INTEGER NOT NULL, ordering_value INTEGER NOT NULL,
+                 cwd TEXT NOT NULL, canonical_cwd TEXT, launch_json TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX launch_history_recent ON launch_history
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             CREATE TABLE create_history_sessions (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                 creation_seq INTEGER, created_at INTEGER NOT NULL,
+                 ordering_kind INTEGER NOT NULL, ordering_value INTEGER NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, session_id)
+             ) STRICT;
+             CREATE INDEX create_history_sessions_recent ON create_history_sessions
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
+             CREATE TABLE create_history_cutoffs (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, cutoff_kind INTEGER NOT NULL,
+                 cutoff_value INTEGER NOT NULL, cutoff_session_id TEXT NOT NULL,
+                 cutoff_created_at INTEGER NOT NULL,
+                 fallback_cutoff_created_at INTEGER NOT NULL,
+                 fallback_cutoff_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             CREATE TABLE folder_history (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL, canonical_cwd TEXT NOT NULL,
+                 canonical_proven INTEGER NOT NULL CHECK (canonical_proven IN (0, 1)),
+                 display_cwd TEXT NOT NULL, created_at INTEGER NOT NULL,
+                 creation_seq INTEGER, ordering_kind INTEGER NOT NULL,
+                 ordering_value INTEGER NOT NULL, ordering_session_id TEXT NOT NULL,
+                 PRIMARY KEY (host_id, host_identity, canonical_cwd)
+             ) STRICT;
+             CREATE INDEX folder_history_recent ON folder_history
+                 (host_id, host_identity, ordering_kind DESC, ordering_value DESC, ordering_session_id ASC);
+             CREATE TABLE create_history_partitions (
+                 host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                 host_identity TEXT NOT NULL,
+                 fallback_order INTEGER NOT NULL CHECK (fallback_order IN (0, 1)),
+                 PRIMARY KEY (host_id, host_identity)
+             ) STRICT;
+             PRAGMA user_version = 25;",
+        )
+        .context("migrating helm.db to schema version 25")?;
+        version = 25;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -3443,6 +3833,10 @@ impl HelmStore {
     /// The remembered default profile is NOT purged. Adoption replaces one
     /// host's installation identity, while the preference is a helm-wide
     /// singleton with no ownership relationship to that host or its cache.
+    /// The predecessor's create-history partitions ARE purged with its
+    /// cache: their identity key prevents accidental display on the
+    /// successor, but retaining every retired identity would make repeated
+    /// replacements grow the helm database forever.
     ///
     /// A STALE `expected_old` (the stored value has already moved on — a
     /// second adoption, or a first contact that landed first) is refused as
@@ -3510,6 +3904,19 @@ impl HelmStore {
                 rusqlite::params![host],
             )
             .context("purging the superseded identity's cached sessions")?;
+            for table in [
+                "launch_history",
+                "folder_history",
+                "create_history_sessions",
+                "create_history_cutoffs",
+                "create_history_partitions",
+            ] {
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE host_id = ?1 AND host_identity <> ?2"),
+                    rusqlite::params![host, new],
+                )
+                .with_context(|| format!("purging retired identity partitions from {table}"))?;
+            }
             tx.commit().context("committing identity adoption")?;
             Ok(())
         })
@@ -4067,6 +4474,594 @@ impl HelmStore {
         })
         .await
         .context("remember session task panicked")?
+    }
+
+    /// Record one accepted create for composer suggestions.
+    ///
+    /// The primary key is the supervisor-issued session id, not request
+    /// arrival time. A keyed replay therefore changes neither recency nor
+    /// frequency, and recording this best-effort fact can never make a
+    /// completed create look failed to its caller.
+    pub async fn record_create_history(
+        &self,
+        host: HostId,
+        identity: &str,
+        entry: &SessionInfo,
+    ) -> anyhow::Result<bool> {
+        // A cached/replayed legacy row has no supervisor-proven canonical
+        // fact. Its spelling is still a safe distinct key, unlike resolving
+        // it on the helm's filesystem, which may name another machine.
+        let folder_identity = entry.canonical_cwd.as_deref().unwrap_or(&entry.cwd);
+        self.record_create_history_with_paths(host, identity, entry, folder_identity, &entry.cwd)
+            .await
+    }
+
+    /// Record a successful create with its target-verified identity and the
+    /// spelling the caller actually submitted.
+    ///
+    /// The supervisor returns its accepted canonical identity in
+    /// `entry.canonical_cwd`, while the caller supplies `display_cwd` from
+    /// the original request. `entry.cwd` remains the accepted session path,
+    /// so it cannot recover a submitted `~` spelling after expansion. Both
+    /// explicit arguments are durable facts: canonical identity prevents
+    /// aliases from becoming separate folders, and display spelling lets a
+    /// later search find the path the person recognizes. When the canonical
+    /// fact is absent, callers pass the display spelling as a distinct key;
+    /// the helm must never resolve it itself.
+    pub async fn record_create_history_with_paths(
+        &self,
+        host: HostId,
+        identity: &str,
+        entry: &SessionInfo,
+        canonical_cwd: &str,
+        display_cwd: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_string();
+        let entry = entry.clone();
+        let canonical_cwd = canonical_cwd.to_string();
+        let display_cwd = display_cwd.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning create-history transaction")?;
+            let current: Option<Option<String>> = tx
+                .query_row(
+                    "SELECT host_identity FROM hosts WHERE id = ?1",
+                    rusqlite::params![host],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("reading history host identity")?;
+            let Some(current) = current else {
+                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+            };
+            if current.as_deref() != Some(identity.as_str()) {
+                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                    host,
+                    expected: identity,
+                    actual: current,
+                }));
+            }
+
+            let sequence = entry
+                .creation_seq
+                .map(i64::try_from)
+                .transpose()
+                .context("creation sequence exceeds SQLite's signed integer range")?;
+            let prior_fallback: bool = tx
+                .query_row(
+                    "SELECT fallback_order FROM create_history_partitions
+                     WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, identity],
+                    |row| row.get::<_, i64>(0).map(|value| value != 0),
+                )
+                .optional()
+                .context("reading create-history ordering mode")?
+                .unwrap_or(false);
+            let fallback_order = prior_fallback || sequence.is_none();
+            let ordering_kind = i64::from(!fallback_order);
+            let ordering_value = if fallback_order { entry.created_at } else { sequence.expect("sequenced mode has a sequence") };
+            let cutoff: Option<(i64, i64, String)> = tx
+                .query_row(
+                    "SELECT CASE WHEN ?3 THEN 0 ELSE cutoff_kind END,
+                            CASE WHEN ?3 THEN fallback_cutoff_created_at ELSE cutoff_value END,
+                            CASE WHEN ?3 THEN fallback_cutoff_session_id ELSE cutoff_session_id END
+                     FROM create_history_cutoffs
+                     WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, identity, fallback_order],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .context("reading create-history eviction cutoff")?;
+            if cutoff.is_some_and(|(kind, value, session_id)| !history_order_is_newer(
+                (ordering_kind, ordering_value, entry.id.as_str()),
+                (kind, value, session_id.as_str()),
+            )) {
+                // The session-id row was deliberately reclaimed from the
+                // bounded admission window. Letting this old observation
+                // back in would resurrect history that the window evicted.
+                tx.commit().context("committing ignored old create history")?;
+                return Ok(false);
+            }
+
+            // Decide whether this observation can enter the bounded window
+            // before touching either user-facing projection. An older reply
+            // may arrive after newer creates have filled the window; writing
+            // it and immediately evicting it would falsely announce a
+            // history change and briefly give its aliases a durable home.
+            let eviction_boundary: Option<(i64, i64, String)> = tx
+                .query_row(
+                    "SELECT CASE WHEN ?4 THEN 0 ELSE ordering_kind END,
+                            CASE WHEN ?4 THEN created_at ELSE ordering_value END,
+                            session_id FROM create_history_sessions
+                     WHERE host_id = ?1 AND host_identity = ?2
+                     ORDER BY CASE WHEN ?4 THEN 0 ELSE ordering_kind END DESC,
+                              CASE WHEN ?4 THEN created_at ELSE ordering_value END DESC,
+                              session_id ASC
+                     LIMIT 1 OFFSET ?3",
+                    rusqlite::params![host, identity, MAX_LAUNCH_HISTORY - 1, fallback_order],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .context("reading create-history admission boundary")?;
+            if let Some((boundary_kind, boundary_value, boundary_session_id)) = eviction_boundary {
+                let older_than_boundary = !history_order_is_newer(
+                    (ordering_kind, ordering_value, entry.id.as_str()),
+                    (boundary_kind, boundary_value, boundary_session_id.as_str()),
+                );
+                if older_than_boundary {
+                    tx.commit()
+                        .context("committing ignored out-of-window create history")?;
+                    return Ok(false);
+                }
+            }
+            let admitted = tx
+                .execute(
+                    "INSERT INTO create_history_sessions
+                     (host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                     ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
+                    rusqlite::params![host, identity, entry.id, entry.created_at, sequence, ordering_kind, ordering_value],
+                )
+                .context("claiming create-history admission")?
+                != 0;
+            if !admitted {
+                tx.commit().context("committing replayed create history")?;
+                return Ok(false);
+            }
+            tx.execute(
+                "INSERT INTO create_history_partitions (host_id, host_identity, fallback_order)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT (host_id, host_identity) DO UPDATE SET
+                     fallback_order = excluded.fallback_order",
+                rusqlite::params![host, identity, i64::from(fallback_order)],
+            )
+            .context("recording accepted create-history ordering mode")?;
+            if fallback_order && !prior_fallback {
+                // `None` means no sequence provenance can order this
+                // partition. The newly admitted legacy row switches every
+                // retained projection and eviction frontier together.
+                for table in ["create_history_sessions", "launch_history", "folder_history"] {
+                    tx.execute(
+                        &format!(
+                            "UPDATE {table} SET ordering_kind = 0, ordering_value = created_at
+                             WHERE host_id = ?1 AND host_identity = ?2"
+                        ),
+                        rusqlite::params![host, identity],
+                    )
+                    .with_context(|| format!("switching {table} to fallback history order"))?;
+                }
+                tx.execute(
+                    "UPDATE create_history_cutoffs
+                     SET cutoff_kind = 0, cutoff_value = cutoff_created_at
+                     WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, identity],
+                )
+                .context("switching create-history cutoff to fallback order")?;
+            }
+
+            let folder_changed = tx
+                .execute(
+                    "INSERT INTO folder_history (
+                         host_id, host_identity, canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq, ordering_kind, ordering_value, ordering_session_id
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                     ON CONFLICT (host_id, host_identity, canonical_cwd) DO UPDATE SET
+                         display_cwd = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
+                              OR (excluded.ordering_kind = folder_history.ordering_kind
+                                  AND (excluded.ordering_value > folder_history.ordering_value
+                                       OR (excluded.ordering_value = folder_history.ordering_value
+                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
+                             THEN excluded.display_cwd ELSE folder_history.display_cwd END,
+                         canonical_proven = MAX(folder_history.canonical_proven, excluded.canonical_proven),
+                         created_at = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
+                              OR (excluded.ordering_kind = folder_history.ordering_kind
+                                  AND (excluded.ordering_value > folder_history.ordering_value
+                                       OR (excluded.ordering_value = folder_history.ordering_value
+                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
+                             THEN excluded.created_at ELSE folder_history.created_at END,
+                         creation_seq = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
+                              OR (excluded.ordering_kind = folder_history.ordering_kind
+                                  AND (excluded.ordering_value > folder_history.ordering_value
+                                       OR (excluded.ordering_value = folder_history.ordering_value
+                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
+                             THEN excluded.creation_seq ELSE folder_history.creation_seq END,
+                         ordering_kind = MAX(folder_history.ordering_kind, excluded.ordering_kind),
+                         ordering_value = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
+                              OR (excluded.ordering_kind = folder_history.ordering_kind
+                                  AND (excluded.ordering_value > folder_history.ordering_value
+                                       OR (excluded.ordering_value = folder_history.ordering_value
+                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
+                             THEN excluded.ordering_value ELSE folder_history.ordering_value END,
+                         ordering_session_id = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
+                              OR (excluded.ordering_kind = folder_history.ordering_kind
+                                  AND (excluded.ordering_value > folder_history.ordering_value
+                                       OR (excluded.ordering_value = folder_history.ordering_value
+                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
+                             THEN excluded.ordering_session_id ELSE folder_history.ordering_session_id END
+                     WHERE excluded.ordering_kind > folder_history.ordering_kind
+                        OR (excluded.ordering_kind = folder_history.ordering_kind
+                            AND (excluded.ordering_value > folder_history.ordering_value
+                                 OR (excluded.ordering_value = folder_history.ordering_value
+                                     AND excluded.ordering_session_id < folder_history.ordering_session_id)))
+                        OR excluded.canonical_proven > folder_history.canonical_proven",
+                    rusqlite::params![
+                        host,
+                        identity,
+                        &canonical_cwd,
+                        i64::from(entry.canonical_cwd.is_some()),
+                        &display_cwd,
+                        entry.created_at,
+                        sequence,
+                        ordering_kind,
+                        ordering_value,
+                        entry.id,
+                    ],
+                )
+                .context("recording created folder")?
+                != 0;
+
+            let launch_changed = if let Some(selection) = &entry.launch {
+                let selection = serde_json::to_string(selection)
+                    .context("serializing structured launch history")?;
+                tx.execute(
+                    "INSERT INTO launch_history (
+                         host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, cwd, canonical_cwd, launch_json
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                     ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
+                    rusqlite::params![
+                        host,
+                        identity,
+                        entry.id,
+                        entry.created_at,
+                        sequence,
+                        ordering_kind,
+                        ordering_value,
+                        &display_cwd,
+                        entry.canonical_cwd.as_deref(),
+                        selection,
+                    ],
+                )
+                .context("recording structured launch")?
+                    != 0
+            } else {
+                false
+            };
+
+            // Find the newest row that will be evicted before deleting it.
+            // Persisting this lower watermark is what keeps a delayed replay
+            // from re-admitting an observation after its id row has been
+            // reclaimed to honor the window bound.
+            let evicted_cutoff: Option<(i64, i64, String, i64)> = tx
+                .query_row(
+                    "SELECT ordering_kind, ordering_value, session_id, created_at FROM create_history_sessions
+                     WHERE host_id = ?1 AND host_identity = ?2
+                     ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC
+                     LIMIT 1 OFFSET ?3",
+                    rusqlite::params![host, identity, MAX_LAUNCH_HISTORY],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .optional()
+                .context("finding the create-history eviction cutoff")?;
+            if let Some((cutoff_kind, cutoff_value, cutoff_session_id, cutoff_created_at)) = evicted_cutoff {
+                tx.execute(
+                    "INSERT INTO create_history_cutoffs
+                     (host_id, host_identity, cutoff_kind, cutoff_value, cutoff_session_id, cutoff_created_at,
+                      fallback_cutoff_created_at, fallback_cutoff_session_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?5)
+                     ON CONFLICT (host_id, host_identity) DO UPDATE SET
+                         cutoff_kind = excluded.cutoff_kind,
+                         cutoff_value = excluded.cutoff_value,
+                         cutoff_session_id = excluded.cutoff_session_id,
+                         cutoff_created_at = excluded.cutoff_created_at,
+                         fallback_cutoff_created_at = CASE
+                             WHEN excluded.fallback_cutoff_created_at > create_history_cutoffs.fallback_cutoff_created_at
+                               OR (excluded.fallback_cutoff_created_at = create_history_cutoffs.fallback_cutoff_created_at
+                                   AND excluded.fallback_cutoff_session_id < create_history_cutoffs.fallback_cutoff_session_id)
+                             THEN excluded.fallback_cutoff_created_at
+                             ELSE create_history_cutoffs.fallback_cutoff_created_at END,
+                         fallback_cutoff_session_id = CASE
+                             WHEN excluded.fallback_cutoff_created_at > create_history_cutoffs.fallback_cutoff_created_at
+                               OR (excluded.fallback_cutoff_created_at = create_history_cutoffs.fallback_cutoff_created_at
+                                   AND excluded.fallback_cutoff_session_id < create_history_cutoffs.fallback_cutoff_session_id)
+                             THEN excluded.fallback_cutoff_session_id
+                             ELSE create_history_cutoffs.fallback_cutoff_session_id END
+                     WHERE excluded.cutoff_kind > create_history_cutoffs.cutoff_kind
+                        OR (excluded.cutoff_kind = create_history_cutoffs.cutoff_kind
+                            AND (excluded.cutoff_value > create_history_cutoffs.cutoff_value
+                                 OR (excluded.cutoff_value = create_history_cutoffs.cutoff_value
+                                     AND excluded.cutoff_session_id < create_history_cutoffs.cutoff_session_id)))",
+                    rusqlite::params![host, identity, cutoff_kind, cutoff_value, cutoff_session_id, cutoff_created_at],
+                )
+                .context("recording create-history eviction cutoff")?;
+            }
+
+            // Folder history is independently bounded, but structured rows
+            // are projections of the admission window. A raw create can
+            // therefore evict a structured setup and its frequency weight.
+            tx.execute(
+                "DELETE FROM launch_history
+                 WHERE host_id = ?1 AND host_identity = ?2
+                   AND NOT EXISTS (
+                       SELECT 1 FROM create_history_sessions AS admission
+                       WHERE admission.host_id = launch_history.host_id
+                         AND admission.host_identity = launch_history.host_identity
+                         AND admission.session_id = launch_history.session_id
+                   )",
+                rusqlite::params![host, identity],
+            )
+            .context("evicting old structured launch records")?;
+            tx.execute(
+                "DELETE FROM folder_history WHERE rowid IN (
+                     SELECT rowid FROM folder_history
+                     WHERE host_id = ?1 AND host_identity = ?2
+                     ORDER BY ordering_kind DESC, ordering_value DESC, ordering_session_id ASC
+                     LIMIT -1 OFFSET ?3
+                 )",
+                rusqlite::params![host, identity, MAX_LAUNCH_HISTORY],
+            )
+            .context("evicting old folder records")?;
+            tx.execute(
+                "DELETE FROM create_history_sessions WHERE rowid IN (
+                     SELECT rowid FROM create_history_sessions
+                     WHERE host_id = ?1 AND host_identity = ?2
+                     ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC
+                     LIMIT -1 OFFSET ?3
+                 )",
+                rusqlite::params![host, identity, MAX_LAUNCH_HISTORY],
+            )
+            .context("evicting old create-history admissions")?;
+            tx.execute(
+                "DELETE FROM launch_history
+                 WHERE host_id = ?1 AND host_identity = ?2
+                   AND NOT EXISTS (
+                       SELECT 1 FROM create_history_sessions AS admission
+                       WHERE admission.host_id = launch_history.host_id
+                         AND admission.host_identity = launch_history.host_identity
+                         AND admission.session_id = launch_history.session_id
+                   )",
+                rusqlite::params![host, identity],
+            )
+            .context("removing structured projections evicted from the admission window")?;
+            tx.commit().context("committing create history")?;
+            Ok(folder_changed || launch_changed)
+        })
+        .await
+        .context("record create history task panicked")?
+    }
+
+    /// Refine a stored folder's canonical identity after a host-side browse.
+    ///
+    /// Creates preserve the literal directory the user submitted because it
+    /// is the useful display spelling. Only the supervisor can resolve that
+    /// spelling through the target filesystem, so a later browse moves the
+    /// same observation under its canonical deduplication key without
+    /// inventing a newer create.
+    pub async fn refine_folder_history(
+        &self,
+        host: HostId,
+        identity: &str,
+        display_cwd: &str,
+        canonical_cwd: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_string();
+        let display_cwd = display_cwd.to_string();
+        let canonical_cwd = canonical_cwd.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut conn = conn.lock().expect("helm db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning folder-refinement transaction")?;
+            // A prior launch may already have reached this canonical path by
+            // another spelling. Move the newer observation's presentation
+            // and ordering onto that row before dropping the alias, rather
+            // than updating a primary key into a uniqueness conflict. The
+            // canonical row is the durable deduplication identity; its
+            // display spelling always belongs to the newest launch users can
+            // still choose from the composer.
+            tx.execute(
+                "UPDATE folder_history AS canonical
+                     SET display_cwd = alias.display_cwd,
+                     created_at = alias.created_at,
+                     creation_seq = alias.creation_seq,
+                     ordering_kind = alias.ordering_kind,
+                     ordering_value = alias.ordering_value,
+                     ordering_session_id = alias.ordering_session_id
+                 FROM folder_history AS alias
+                 WHERE canonical.host_id = ?2
+                   AND canonical.host_identity = ?3
+                   AND canonical.canonical_cwd = ?1
+                   AND alias.host_id = canonical.host_id
+                   AND alias.host_identity = canonical.host_identity
+                   AND alias.display_cwd = ?4
+                   AND alias.canonical_cwd <> ?1
+                   AND alias.canonical_proven = 0
+                   AND canonical.canonical_proven = 0
+                   AND (alias.ordering_kind > canonical.ordering_kind
+                        OR (alias.ordering_kind = canonical.ordering_kind
+                            AND (alias.ordering_value > canonical.ordering_value
+                                 OR (alias.ordering_value = canonical.ordering_value
+                                     AND alias.ordering_session_id < canonical.ordering_session_id))))",
+                rusqlite::params![canonical_cwd, host, identity, display_cwd],
+            )
+            .context("merging a refined folder with its canonical history")?;
+            tx.execute(
+                "DELETE FROM folder_history
+                 WHERE host_id = ?2 AND host_identity = ?3 AND display_cwd = ?4
+                   AND canonical_cwd <> ?1
+                   AND canonical_proven = 0
+                   AND EXISTS (
+                       SELECT 1 FROM folder_history AS canonical
+                       WHERE canonical.host_id = ?2
+                         AND canonical.host_identity = ?3
+                         AND canonical.canonical_cwd = ?1
+                   )",
+                rusqlite::params![canonical_cwd, host, identity, display_cwd],
+            )
+            .context("removing a merged folder alias")?;
+            tx.execute(
+                "UPDATE folder_history SET canonical_cwd = ?1
+                 WHERE host_id = ?2 AND host_identity = ?3 AND display_cwd = ?4
+                   AND canonical_cwd <> ?1 AND canonical_proven = 0
+                   AND NOT EXISTS (
+                       SELECT 1 FROM folder_history AS existing
+                       WHERE existing.host_id = ?2 AND existing.host_identity = ?3
+                         AND existing.canonical_cwd = ?1
+                   )",
+                rusqlite::params![canonical_cwd, host, identity, display_cwd],
+            )
+            .context("refining an unambiguous browsed folder identity")?;
+            tx.commit().context("committing folder refinement")?;
+            Ok(())
+        })
+        .await
+        .context("folder refinement task panicked")?
+    }
+
+    /// Read reusable structured launches for one still-matching installation.
+    ///
+    /// Corrupt historical JSON is skipped rather than made into a malformed
+    /// API result. The next successful record can still evict it through the
+    /// normal bounded window.
+    pub async fn launch_history(
+        &self,
+        host: HostId,
+        identity: &str,
+    ) -> anyhow::Result<Vec<LaunchHistoryEntry>> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<LaunchHistoryEntry>> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT cwd, canonical_cwd, launch_json, created_at, creation_seq
+                     FROM launch_history
+                     WHERE host_id = ?1 AND host_identity = ?2
+                     ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC",
+                )
+                .context("preparing structured launch history read")?;
+            let rows = stmt
+                .query_map(rusqlite::params![host, identity], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                })
+                .context("reading structured launch history")?;
+            let mut entries = Vec::new();
+            for row in rows {
+                let (cwd, canonical_cwd, json, created_at, creation_seq) =
+                    row.context("decoding structured launch history row")?;
+                let Ok(selection) = serde_json::from_str(&json) else {
+                    tracing::warn!(host, "a stored launch-history selection no longer decodes");
+                    continue;
+                };
+                let creation_seq = match creation_seq {
+                    Some(sequence) => match u64::try_from(sequence) {
+                        Ok(sequence) => Some(sequence),
+                        Err(_) => {
+                            tracing::warn!(host, "a stored launch-history sequence is negative");
+                            continue;
+                        }
+                    },
+                    None => None,
+                };
+                entries.push(LaunchHistoryEntry {
+                    host,
+                    canonical_cwd,
+                    cwd,
+                    selection,
+                    created_at,
+                    creation_seq,
+                });
+            }
+            Ok(entries)
+        })
+        .await
+        .context("launch history task panicked")?
+    }
+
+    /// Read folder suggestions for one still-matching installation.
+    pub async fn folder_history(
+        &self,
+        host: HostId,
+        identity: &str,
+    ) -> anyhow::Result<Vec<FolderHistoryEntry>> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<FolderHistoryEntry>> {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq
+                     FROM folder_history
+                     WHERE host_id = ?1 AND host_identity = ?2
+                     ORDER BY ordering_kind DESC, ordering_value DESC, ordering_session_id ASC",
+                )
+                .context("preparing folder history read")?;
+            let rows = stmt
+                .query_map(rusqlite::params![host, identity], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)? != 0,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                })
+                .context("reading folder history")?;
+            let mut entries = Vec::new();
+            for row in rows {
+                let (canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq) =
+                    row.context("decoding folder history row")?;
+                let creation_seq = match creation_seq {
+                    Some(sequence) => match u64::try_from(sequence) {
+                        Ok(sequence) => Some(sequence),
+                        Err(_) => {
+                            tracing::warn!(host, "a stored folder-history sequence is negative");
+                            continue;
+                        }
+                    },
+                    None => None,
+                };
+                entries.push(FolderHistoryEntry {
+                    host,
+                    canonical_cwd,
+                    canonical_proven,
+                    display_cwd,
+                    created_at,
+                    creation_seq,
+                });
+            }
+            Ok(entries)
+        })
+        .await
+        .context("folder history task panicked")?
     }
 
     /// Drop ONE session from a host's cache slice — the delete's counterpart
@@ -4808,6 +5803,72 @@ mod tests {
         (dir, store)
     }
 
+    /// Count the four history tables without exposing a production-only
+    /// diagnostics API. Bound tests use this to prove that one accepted
+    /// create transaction leaves every durable projection in lockstep.
+    fn history_counts(store: &HelmStore, host: HostId, identity: &str) -> (i64, i64, i64, i64) {
+        let conn = store.conn.lock().expect("helm db mutex poisoned");
+        let count = |table: &str| {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE host_id = ?1 AND host_identity = ?2"),
+                rusqlite::params![host, identity],
+                |row| row.get(0),
+            )
+            .expect("count history partition")
+        };
+        (
+            count("create_history_sessions"),
+            count("create_history_cutoffs"),
+            count("launch_history"),
+            count("folder_history"),
+        )
+    }
+
+    /// Plant one complete history partition through SQLite for cleanup tests.
+    ///
+    /// Production code can never create history for an identity other than a
+    /// host's current one. These tests need precisely that unreachable residue
+    /// to prove migration and adoption sweep every durable table rather than
+    /// merely hiding old suggestions at read time.
+    fn seed_retired_history_partition(
+        store: &HelmStore,
+        host: HostId,
+        identity: &str,
+        selection: &LaunchSelection,
+    ) {
+        let stale_json = serde_json::to_string(selection).expect("serialize selection");
+        let conn = store.conn.lock().expect("helm db mutex poisoned");
+        conn.execute(
+            "INSERT INTO create_history_sessions
+             (host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value)
+             VALUES (?1, ?2, 'stale', 1, 1, 1, 1)",
+            rusqlite::params![host, identity],
+        )
+        .expect("seed retired admission");
+        conn.execute(
+            "INSERT INTO create_history_cutoffs
+             (host_id, host_identity, cutoff_kind, cutoff_value, cutoff_session_id, cutoff_created_at,
+              fallback_cutoff_created_at, fallback_cutoff_session_id)
+             VALUES (?1, ?2, 1, 0, 'old', 1, 1, 'old')",
+            rusqlite::params![host, identity],
+        )
+        .expect("seed retired cutoff");
+        conn.execute(
+            "INSERT INTO launch_history
+             (host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, cwd, canonical_cwd, launch_json)
+             VALUES (?1, ?2, 'stale', 1, 1, 1, 1, '/stale', '/stale', ?3)",
+            rusqlite::params![host, identity, &stale_json],
+        )
+        .expect("seed retired structured projection");
+        conn.execute(
+            "INSERT INTO folder_history
+             (host_id, host_identity, canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq, ordering_kind, ordering_value, ordering_session_id)
+             VALUES (?1, ?2, '/stale', 1, '/stale', 1, 1, 1, 1, 'stale')",
+            rusqlite::params![host, identity],
+        )
+        .expect("seed retired folder projection");
+    }
+
     /// A minimal, valid [`SessionInfo`] for a given id/creation time —
     /// mirrors `client.rs`'s own test helper of the same shape, since both
     /// modules need "a session that round-trips" and neither needs the
@@ -4822,7 +5883,10 @@ mod tests {
             last_activity_at: created_at,
             creation_seq: None,
             cwd: format!("/{id}"),
+            canonical_cwd: None,
             invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
             status: farhelm_proto::SessionStatus::Running,
             annotation: None,
             restart_offer: farhelm_proto::RestartOffer::default(),
@@ -4875,6 +5939,1094 @@ mod tests {
             "helper assumes a freshly added host with no prior identity"
         );
         host
+    }
+
+    /// A replay of a successful structured create is the same session, not a
+    /// second observation. It must leave both the reusable launch and the
+    /// folder's recency untouched.
+    #[tokio::test]
+    async fn create_history_admits_each_structured_session_once() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "history.example", "identity-a").await;
+        let entry = SessionInfo {
+            creation_seq: Some(7),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: Some("gpt-6-astra".to_string()),
+                effort: Some(farhelm_proto::LaunchEffort::High),
+                permissions: None,
+            }),
+            ..session("created", 100)
+        };
+        assert!(
+            store
+                .record_create_history(host, "identity-a", &entry)
+                .await
+                .expect("first admission")
+        );
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &entry)
+                .await
+                .expect("replay admission"),
+            "the same supervisor session must not inflate history"
+        );
+        assert_eq!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read"),
+            vec![LaunchHistoryEntry {
+                host,
+                canonical_cwd: None,
+                cwd: "/created".to_string(),
+                selection: entry.launch.clone().expect("selection"),
+                created_at: 100,
+                creation_seq: Some(7),
+            }]
+        );
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read")
+                .len(),
+            1,
+            "the associated folder is admitted by the same session boundary"
+        );
+    }
+
+    /// The accepted-create reply supplies canonical identity while the
+    /// suggestion still shows the spelling the user originally entered.
+    #[tokio::test]
+    async fn accepted_canonical_cwd_separates_folder_identity_from_display_path() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "folders.example", "identity-a").await;
+        let entry = SessionInfo {
+            cwd: "/submitted-alias/project".to_string(),
+            canonical_cwd: Some("/resolved/project".to_string()),
+            creation_seq: Some(4),
+            ..session("alias-session", 100)
+        };
+        store
+            .record_create_history(host, "identity-a", &entry)
+            .await
+            .expect("record the supervisor's accepted path facts");
+
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read folders"),
+            vec![FolderHistoryEntry {
+                host,
+                canonical_cwd: "/resolved/project".to_string(),
+                canonical_proven: true,
+                display_cwd: entry.cwd,
+                created_at: 100,
+                creation_seq: Some(4),
+            }],
+            "deduplication uses the supervisor-accepted identity while the composer presents the submitted spelling"
+        );
+    }
+
+    /// Each reusable launch keeps the destination the supervisor accepted at
+    /// its own create boundary. A single folder suggestion cannot represent
+    /// two aliases, nor can a later create through a repointed spelling
+    /// rewrite an older launch's fact.
+    #[tokio::test]
+    async fn launch_history_keeps_each_accepted_alias_and_destination() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "aliases.example", "identity-a").await;
+        let selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        let first = SessionInfo {
+            cwd: "/link-a/project".to_string(),
+            canonical_cwd: Some("/real/project".to_string()),
+            creation_seq: Some(1),
+            launch: Some(selection.clone()),
+            ..session("link-a", 1)
+        };
+        let second = SessionInfo {
+            cwd: "/link-b/project".to_string(),
+            canonical_cwd: Some("/real/project".to_string()),
+            creation_seq: Some(2),
+            launch: Some(selection.clone()),
+            ..session("link-b", 2)
+        };
+        let repointed = SessionInfo {
+            cwd: "/link-a/project".to_string(),
+            canonical_cwd: Some("/other/project".to_string()),
+            creation_seq: Some(3),
+            launch: Some(selection),
+            ..session("link-a-repointed", 3)
+        };
+        for entry in [&first, &second, &repointed] {
+            assert!(
+                store
+                    .record_create_history(host, "identity-a", entry)
+                    .await
+                    .expect("admit accepted create")
+            );
+        }
+        // Browsing sees the spelling's current target, but cannot change the
+        // accepted-create row now that its identity was proven.
+        store
+            .refine_folder_history(host, "identity-a", &first.cwd, "/browse-now")
+            .await
+            .expect("refine browse suggestion");
+        let launches = store
+            .launch_history(host, "identity-a")
+            .await
+            .expect("read launches");
+        assert_eq!(
+            launches
+                .iter()
+                .map(|entry| (entry.cwd.as_str(), entry.canonical_cwd.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("/link-a/project", Some("/other/project")),
+                ("/link-b/project", Some("/real/project")),
+                ("/link-a/project", Some("/real/project")),
+            ],
+            "each historical launch projects its own accepted destination"
+        );
+        assert!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read folders")
+                .iter()
+                .all(|folder| folder.canonical_cwd != "/browse-now"),
+            "browse must not rewrite a supervisor-proven folder fact"
+        );
+    }
+
+    /// Refining an alias must merge with an existing canonical row instead
+    /// of failing the folder-history primary key update. The later launch
+    /// remains the suggestion because history order describes what the user
+    /// did most recently, not which spelling happened to be browsed last.
+    #[tokio::test]
+    async fn browse_refinement_merges_an_alias_with_existing_canonical_history() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "folders.example", "identity-a").await;
+        let alias = SessionInfo {
+            cwd: "/alias/project".to_string(),
+            canonical_cwd: None,
+            creation_seq: Some(4),
+            ..session("alias-session", 100)
+        };
+        let canonical = SessionInfo {
+            cwd: "/resolved/project".to_string(),
+            canonical_cwd: None,
+            creation_seq: Some(5),
+            ..session("canonical-session", 101)
+        };
+        store
+            .record_create_history(host, "identity-a", &alias)
+            .await
+            .expect("record aliased launch");
+        store
+            .record_create_history(host, "identity-a", &canonical)
+            .await
+            .expect("record canonical launch");
+
+        store
+            .refine_folder_history(host, "identity-a", &alias.cwd, &canonical.cwd)
+            .await
+            .expect("merge the alias into its existing canonical folder");
+
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read merged folders"),
+            vec![FolderHistoryEntry {
+                host,
+                canonical_cwd: canonical.cwd.clone(),
+                canonical_proven: false,
+                display_cwd: canonical.cwd,
+                created_at: 101,
+                creation_seq: Some(5),
+            }],
+            "one canonical history row keeps the latest launch's useful spelling and ordering"
+        );
+    }
+
+    /// A legacy reply can update the presentation for a known folder, but it
+    /// cannot revoke the proof that an accepted create established its target.
+    /// Otherwise a later browse would treat missing legacy provenance as
+    /// permission to rewrite a destination that was already verified.
+    #[tokio::test]
+    async fn legacy_folder_update_cannot_downgrade_a_proven_destination() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "proven-folders.example", "identity-a").await;
+        let proven = SessionInfo {
+            cwd: "/submitted-link".to_string(),
+            canonical_cwd: Some("/real/project".to_string()),
+            creation_seq: Some(1),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+            }),
+            ..session("proven", 1)
+        };
+        let newer_legacy = SessionInfo {
+            // This is the same stored canonical key, but the old reply does
+            // not carry the fact that made that key authoritative.
+            cwd: "/real/project".to_string(),
+            canonical_cwd: None,
+            creation_seq: Some(2),
+            ..session("legacy", 2)
+        };
+        for entry in [&proven, &newer_legacy] {
+            assert!(
+                store
+                    .record_create_history(host, "identity-a", entry)
+                    .await
+                    .expect("record folder observation")
+            );
+        }
+        store
+            .refine_folder_history(host, "identity-a", &newer_legacy.cwd, "/browse-now")
+            .await
+            .expect("browse known folder");
+
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read folders"),
+            vec![FolderHistoryEntry {
+                host,
+                canonical_cwd: "/real/project".to_string(),
+                canonical_proven: true,
+                display_cwd: newer_legacy.cwd,
+                created_at: 2,
+                creation_seq: Some(2),
+            }],
+            "a newer legacy presentation must not authorize a browse rewrite of a proven destination"
+        );
+        assert_eq!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read launches")[0]
+                .canonical_cwd
+                .as_deref(),
+            Some("/real/project"),
+            "the accepted launch retains its own destination independently of folder suggestions"
+        );
+    }
+
+    /// Accepted canonical proof is independent of arrival recency. A newer
+    /// legacy observation still owns the folder suggestion's spelling and
+    /// order, but an older admitted create must make that canonical key
+    /// unavailable for later browse refinement.
+    #[tokio::test]
+    async fn older_proven_create_promotes_a_newer_legacy_folder() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "proof-promotion.example", "identity-a").await;
+        let newer_legacy = SessionInfo {
+            cwd: "/real/project".to_string(),
+            canonical_cwd: None,
+            creation_seq: Some(2),
+            ..session("legacy-newer", 2)
+        };
+        let older_proven = SessionInfo {
+            cwd: "/submitted-link".to_string(),
+            canonical_cwd: Some("/real/project".to_string()),
+            creation_seq: Some(1),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+            }),
+            ..session("proven-older", 1)
+        };
+        for entry in [&newer_legacy, &older_proven] {
+            store
+                .record_create_history(host, "identity-a", entry)
+                .await
+                .expect("admit observation while the window has room");
+        }
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read promoted folder"),
+            vec![FolderHistoryEntry {
+                host,
+                canonical_cwd: "/real/project".into(),
+                canonical_proven: true,
+                display_cwd: newer_legacy.cwd.clone(),
+                created_at: 2,
+                creation_seq: Some(2)
+            }],
+            "proof promotion must preserve the newer legacy suggestion"
+        );
+        store
+            .refine_folder_history(host, "identity-a", &newer_legacy.cwd, "/browse-now")
+            .await
+            .expect("browse protected folder");
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read protected folder")[0]
+                .canonical_cwd,
+            "/real/project",
+            "browse cannot rewrite a key established by an admitted accepted create"
+        );
+        assert_eq!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read accepted launch")[0]
+                .canonical_cwd
+                .as_deref(),
+            Some("/real/project"),
+            "folder refinement cannot change the per-launch accepted fact"
+        );
+    }
+
+    /// Folder refinement must use the same complete order as history reads.
+    /// A timestamp tie is decided by the smaller session id, and transferring
+    /// only part of that key would let a later tie or folder pruning rank a
+    /// display spelling from one observation with another observation's id.
+    #[tokio::test]
+    async fn browse_refinement_transfers_the_complete_equal_timestamp_ordering_key() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "folder-ties.example", "identity-a").await;
+        let alias = SessionInfo {
+            cwd: "/a-link".to_string(),
+            canonical_cwd: None,
+            creation_seq: None,
+            ..session("a000", 10)
+        };
+        let target = SessionInfo {
+            cwd: "/z-target".to_string(),
+            canonical_cwd: None,
+            creation_seq: None,
+            ..session("z000", 10)
+        };
+        for entry in [&alias, &target] {
+            assert!(
+                store
+                    .record_create_history(host, "identity-a", entry)
+                    .await
+                    .expect("record equal-time legacy folder")
+            );
+        }
+        store
+            .refine_folder_history(host, "identity-a", &alias.cwd, &target.cwd)
+            .await
+            .expect("merge alias into target");
+
+        let later_tie = SessionInfo {
+            cwd: target.cwd.clone(),
+            canonical_cwd: None,
+            creation_seq: None,
+            ..session("b000", 10)
+        };
+        store
+            .record_create_history(host, "identity-a", &later_tie)
+            .await
+            .expect("admit a distinct tied create");
+        for index in 0..98 {
+            let entry = SessionInfo {
+                cwd: format!("/other-{index:03}"),
+                canonical_cwd: None,
+                creation_seq: None,
+                // These rows are newer than `a000`, so the final admission
+                // actually prunes the oldest target row instead of being
+                // refused at the full-window boundary.
+                ..session(&format!("0{index:03}"), 10)
+            };
+            assert!(
+                store
+                    .record_create_history(host, "identity-a", &entry)
+                    .await
+                    .expect("fill tied folder window")
+            );
+        }
+
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read refined folders")
+                .iter()
+                .find(|folder| folder.canonical_cwd == target.cwd),
+            Some(&FolderHistoryEntry {
+                host,
+                canonical_cwd: target.cwd,
+                canonical_proven: false,
+                display_cwd: alias.cwd,
+                created_at: 10,
+                creation_seq: None,
+            }),
+            "the lexically smallest id remains the target row's complete key after merge, later upsert, and pruning"
+        );
+    }
+
+    /// A registry row can be retargeted without changing its numeric id.
+    /// History must follow the installation identity instead, otherwise a
+    /// newly contacted successor would inherit launch suggestions from the
+    /// machine it replaced.
+    #[tokio::test]
+    async fn retargeted_host_starts_with_empty_create_history() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "history-before.example", "identity-a").await;
+        let entry = SessionInfo {
+            creation_seq: Some(1),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+            }),
+            ..session("before-retarget", 100)
+        };
+        store
+            .record_create_history(host, "identity-a", &entry)
+            .await
+            .expect("record original install history");
+
+        store
+            .update_ssh_destination(host, "history-after.example")
+            .await
+            .expect("retarget host");
+        let outcome = store
+            .record_first_contact(host, &dialed_as(&store, host).await, "identity-b")
+            .await
+            .expect("observe successor identity");
+        assert_eq!(
+            outcome,
+            FirstContactOutcome::Mismatch {
+                recorded: "identity-a".to_string(),
+                reported: "identity-b".to_string(),
+            },
+            "the replacement must be shown before the explicit adoption"
+        );
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-a",
+                "identity-b",
+            )
+            .await
+            .expect("adopt successor identity");
+        assert!(
+            store
+                .launch_history(host, "identity-b")
+                .await
+                .expect("read successor history")
+                .is_empty(),
+            "the replacement installation starts without the predecessor's launches"
+        );
+        assert!(
+            store
+                .folder_history(host, "identity-b")
+                .await
+                .expect("read successor folders")
+                .is_empty(),
+            "folder suggestions have the same identity boundary"
+        );
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read retired history")
+                .is_empty()
+                && store
+                    .folder_history(host, "identity-a")
+                    .await
+                    .expect("read retired folders")
+                    .is_empty(),
+            "adoption must reclaim predecessor history rather than merely hide it behind a new identity"
+        );
+    }
+
+    /// Admission does not imply recency. When the bounded window is full,
+    /// an older newly-observed session is immediately the deterministic
+    /// eviction candidate instead of displacing a newer suggestion.
+    #[tokio::test]
+    async fn create_history_evicts_by_creation_sequence_before_arrival_order() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "eviction.example", "identity-a").await;
+        let selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
+            let entry = SessionInfo {
+                creation_seq: Some(sequence),
+                launch: Some(selection.clone()),
+                ..session(&format!("session-{sequence:03}"), sequence as i64)
+            };
+            assert!(
+                store
+                    .record_create_history(host, "identity-a", &entry)
+                    .await
+                    .expect("admit sequenced create")
+            );
+        }
+        let old = SessionInfo {
+            creation_seq: Some(0),
+            launch: Some(selection),
+            ..session("late-old", 999)
+        };
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &old)
+                .await
+                .expect("reject old observation"),
+            "an out-of-window reply must not perturb a bounded history before it is discarded"
+        );
+        let launches = store
+            .launch_history(host, "identity-a")
+            .await
+            .expect("read");
+        assert_eq!(launches.len(), MAX_LAUNCH_HISTORY as usize);
+        assert!(
+            launches.iter().all(|entry| entry.cwd != "/late-old"),
+            "arrival after newer records must not make an old create recent"
+        );
+        assert_eq!(launches[0].creation_seq, Some(MAX_LAUNCH_HISTORY as u64));
+        assert_eq!(
+            launches
+                .last()
+                .expect("bounded history has entries")
+                .creation_seq,
+            Some(1)
+        );
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &old)
+                .await
+                .expect("an evicted create is a durable ignored replay"),
+            "an old replay must not resurrect history after its admission row is reclaimed"
+        );
+    }
+
+    /// Raw creates share the admission window with structured creates.
+    ///
+    /// This prevents a one-time structured setup from surviving as a
+    /// suggestion after later raw launches have evicted its unique session
+    /// record; frequency is derived from these surviving projections.
+    #[tokio::test]
+    async fn raw_creates_evict_structured_projections_from_the_shared_window() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "window.example", "identity-a").await;
+        let structured = SessionInfo {
+            creation_seq: Some(1),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+            }),
+            ..session("structured", 1)
+        };
+        assert!(
+            store
+                .record_create_history(host, "identity-a", &structured)
+                .await
+                .expect("admit structured create")
+        );
+        for sequence in 2..=101 {
+            let raw = SessionInfo {
+                creation_seq: Some(sequence),
+                ..session(&format!("raw-{sequence}"), sequence as i64)
+            };
+            assert!(
+                store
+                    .record_create_history(host, "identity-a", &raw)
+                    .await
+                    .expect("admit raw create")
+            );
+        }
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read projections")
+                .is_empty()
+        );
+        assert_eq!(
+            history_counts(&store, host, "identity-a"),
+            (100, 1, 0, 100),
+            "the shared window, its cutoff, structured projection, and separately bounded folders all have their documented sizes"
+        );
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &structured)
+                .await
+                .expect("reject evicted replay")
+        );
+    }
+
+    /// An eviction cutoff is durable admission state, not an in-memory hint.
+    ///
+    /// Reopening between eviction and retry exercises the failure mode where
+    /// a reclaimed primary-key row would otherwise let an old create rebuild
+    /// its structured projection and inflate frequency.
+    #[tokio::test]
+    async fn evicted_create_replay_stays_rejected_after_reopen() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        let host = host_with_identity(&store, "reopen.example", "identity-a").await;
+        let selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Muse,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        let first = SessionInfo {
+            creation_seq: Some(1),
+            launch: Some(selection.clone()),
+            ..session("first", 1)
+        };
+        store
+            .record_create_history(host, "identity-a", &first)
+            .await
+            .expect("admit first create");
+        for sequence in 2..=101 {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: Some(sequence),
+                        ..session(&format!("later-{sequence}"), sequence as i64)
+                    },
+                )
+                .await
+                .expect("fill the admission window");
+        }
+        drop(store);
+        let reopened = HelmStore::open(&path).await.expect("reopen store");
+        assert!(
+            !reopened
+                .record_create_history(host, "identity-a", &first)
+                .await
+                .expect("consult durable cutoff"),
+            "the replay cannot recreate an evicted structured setup"
+        );
+        assert!(
+            reopened
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read structured projections")
+                .is_empty()
+        );
+    }
+
+    /// Legacy observations retain their protocol fallback rather than a
+    /// synthetic sequence. The deliberately reversed arrival order proves
+    /// timestamp/id order, not receipt order, decides the retained window.
+    #[tokio::test]
+    async fn legacy_history_uses_timestamp_and_id_order_across_reopen() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        let host = host_with_identity(&store, "legacy.example", "identity-a").await;
+        for index in (1..=100).rev() {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: None,
+                        ..session(&format!("legacy-{index:03}"), index)
+                    },
+                )
+                .await
+                .expect("admit a legacy create");
+        }
+        let oldest = SessionInfo {
+            creation_seq: None,
+            ..session("legacy-000", 0)
+        };
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &oldest)
+                .await
+                .expect("refuse a late old legacy create")
+        );
+        drop(store);
+        let reopened = HelmStore::open(&path).await.expect("reopen store");
+        assert!(
+            !reopened
+                .record_create_history(host, "identity-a", &oldest)
+                .await
+                .expect("keep the legacy cutoff after reopen")
+        );
+    }
+
+    /// Equal timestamp ties use the same ID direction at admission, read,
+    /// eviction, and the reopened cutoff. This catches a natural Rust tuple
+    /// comparison, whose ascending IDs disagree with SQL's ascending-ID
+    /// newest-first read order.
+    #[tokio::test]
+    async fn legacy_equal_timestamp_cutoff_uses_the_sql_id_direction() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        let host = host_with_identity(&store, "legacy-ties.example", "identity-a").await;
+        for index in 1..=100 {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: None,
+                        ..session(&format!("b{index:03}"), 10)
+                    },
+                )
+                .await
+                .expect("fill equal-timestamp legacy window");
+        }
+        let newer = SessionInfo {
+            creation_seq: None,
+            ..session("a000", 10)
+        };
+        let older = SessionInfo {
+            creation_seq: None,
+            ..session("z000", 10)
+        };
+        assert!(
+            store
+                .record_create_history(host, "identity-a", &newer)
+                .await
+                .expect("admit lexically earlier tie")
+        );
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &older)
+                .await
+                .expect("refuse lexically later tie")
+        );
+        drop(store);
+        let reopened = HelmStore::open(&path).await.expect("reopen cutoff");
+        assert!(
+            !reopened
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: None,
+                        ..session("b100", 10)
+                    }
+                )
+                .await
+                .expect("evicted tie stays refused after reopen")
+        );
+    }
+
+    /// One legacy observation switches a mixed partition to timestamp/ID
+    /// order. A later high sequence is therefore not allowed to displace a
+    /// newer legacy timestamp merely because the sequence exists.
+    #[tokio::test]
+    async fn legacy_observation_switches_mixed_history_to_timestamp_order() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "mixed-order.example", "identity-a").await;
+        for sequence in 1..=100 {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: Some(sequence),
+                        ..session(&format!("sequenced-{sequence:03}"), sequence as i64)
+                    },
+                )
+                .await
+                .expect("admit sequenced history");
+        }
+        let legacy = SessionInfo {
+            creation_seq: None,
+            ..session("legacy-new", 10_000)
+        };
+        assert!(
+            store
+                .record_create_history(host, "identity-a", &legacy)
+                .await
+                .expect("legacy timestamp enters after mode switch")
+        );
+        let stale_sequence = SessionInfo {
+            creation_seq: Some(10_000),
+            ..session("sequence-old-time", 0)
+        };
+        assert!(
+            !store
+                .record_create_history(host, "identity-a", &stale_sequence)
+                .await
+                .expect("old timestamp cannot exploit a present sequence")
+        );
+    }
+
+    /// An order switch must retain a fallback frontier for every prior
+    /// eviction, not reinterpret the timestamp attached to the newest
+    /// sequence eviction. A clock-disordered early create is the regression:
+    /// it was evicted by sequence but would look recent by timestamp alone.
+    #[tokio::test]
+    async fn fallback_switch_rejects_a_clock_disordered_evicted_replay_after_reopen() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        let host = host_with_identity(&store, "dual-frontier.example", "identity-a").await;
+        let selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        let early = SessionInfo {
+            creation_seq: Some(1),
+            launch: Some(selection),
+            ..session("clock-ahead", 10_000)
+        };
+        store
+            .record_create_history(host, "identity-a", &early)
+            .await
+            .expect("admit clock-disordered create");
+        for sequence in 2..=102 {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: Some(sequence),
+                        ..session(&format!("sequence-{sequence:03}"), sequence as i64)
+                    },
+                )
+                .await
+                .expect("evict by sequence");
+        }
+        let legacy = SessionInfo {
+            creation_seq: None,
+            ..session("legacy-switch", 20_000)
+        };
+        assert!(
+            store
+                .record_create_history(host, "identity-a", &legacy)
+                .await
+                .expect("switch to fallback order")
+        );
+        drop(store);
+        let reopened = HelmStore::open(&path)
+            .await
+            .expect("reopen fallback frontier");
+        assert!(
+            !reopened
+                .record_create_history(host, "identity-a", &early)
+                .await
+                .expect("reject old replay after fallback switch"),
+            "the previously evicted structured session cannot regain frequency by its clock"
+        );
+        let (retained_before_replay, admissions_before_replay) = {
+            let conn = reopened.conn.lock().expect("helm db mutex poisoned");
+            let retained: (i64, i64, String, i64, String) = conn
+                .query_row(
+                    "SELECT cutoff_kind, cutoff_value, cutoff_session_id,
+                            fallback_cutoff_created_at, fallback_cutoff_session_id
+                     FROM create_history_cutoffs WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, "identity-a"],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )
+                .expect("read retained dual cutoff");
+            let admissions: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM create_history_sessions WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, "identity-a"],
+                    |row| row.get(0),
+                )
+                .expect("count retained admissions");
+            (retained, admissions)
+        };
+        assert!(
+            !reopened
+                .record_create_history(host, "identity-a", &early)
+                .await
+                .expect("repeat rejected replay"),
+            "the replay remains a refusal after inspecting the persisted frontier"
+        );
+        let (retained_after_replay, admissions_after_replay) = {
+            let conn = reopened.conn.lock().expect("helm db mutex poisoned");
+            let retained: (i64, i64, String, i64, String) = conn
+                .query_row(
+                    "SELECT cutoff_kind, cutoff_value, cutoff_session_id,
+                            fallback_cutoff_created_at, fallback_cutoff_session_id
+                     FROM create_history_cutoffs WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, "identity-a"],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
+                    },
+                )
+                .expect("read unchanged dual cutoff");
+            let admissions: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM create_history_sessions WHERE host_id = ?1 AND host_identity = ?2",
+                    rusqlite::params![host, "identity-a"],
+                    |row| row.get(0),
+                )
+                .expect("count unchanged admissions");
+            (retained, admissions)
+        };
+        assert_eq!(retained_after_replay, retained_before_replay);
+        assert_eq!(admissions_after_replay, admissions_before_replay);
+        assert!(
+            reopened
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read surviving structured history")
+                .iter()
+                .all(|entry| entry.cwd != early.cwd)
+        );
+    }
+
+    /// A write failure after projection inserts rolls back the whole create
+    /// history transaction, including the admission cutoff it was about to
+    /// advance. A real SQLite trigger keeps this test at the production SQL
+    /// boundary rather than teaching the store a failure-only branch.
+    #[tokio::test]
+    async fn create_history_sql_failure_rolls_back_admission_projections_and_cutoff() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "rollback.example", "identity-a").await;
+        let selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &SessionInfo {
+                        creation_seq: Some(sequence),
+                        launch: Some(selection.clone()),
+                        ..session(&format!("before-{sequence}"), sequence as i64)
+                    },
+                )
+                .await
+                .expect("fill the admission window");
+        }
+        let before = history_counts(&store, host, "identity-a");
+        {
+            let conn = store.conn.lock().expect("helm db mutex poisoned");
+            conn.execute_batch(
+                "CREATE TRIGGER fail_history_eviction BEFORE DELETE ON create_history_sessions
+                 BEGIN SELECT RAISE(ABORT, 'injected history eviction failure'); END;",
+            )
+            .expect("install post-projection failure trigger");
+        }
+        let _error = store
+            .record_create_history(
+                host,
+                "identity-a",
+                &SessionInfo {
+                    creation_seq: Some(101),
+                    launch: Some(selection),
+                    ..session("rejected-by-trigger", 101)
+                },
+            )
+            .await
+            .expect_err("the trigger aborts admission after projections were staged");
+        assert_eq!(
+            history_counts(&store, host, "identity-a"),
+            before,
+            "no admission, projection, or cutoff survives the failed transaction"
+        );
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .expect("read rolled-back history")
+                .iter()
+                .all(|entry| entry.cwd != "/rejected-by-trigger")
+        );
+    }
+
+    /// Adoption removes every retired partition, not only its immediately
+    /// preceding identity. This models schema-21 residue and then performs a
+    /// second adoption to keep that invariant true as identities advance.
+    #[tokio::test]
+    async fn repeated_adoption_purges_all_retired_history_partitions() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "adopt-history.example", "identity-a").await;
+        let selection = LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        for identity in ["retired-one", "retired-two"] {
+            seed_retired_history_partition(&store, host, identity, &selection);
+        }
+        let dialed = dialed_as(&store, host).await;
+        store
+            .adopt_identity(host, &dialed, "identity-a", "identity-b")
+            .await
+            .expect("adopt first successor");
+        for identity in ["identity-a", "retired-one", "retired-two"] {
+            assert_eq!(history_counts(&store, host, identity), (0, 0, 0, 0));
+        }
+        assert_eq!(
+            recorded_identity(&store, host).await.as_deref(),
+            Some("identity-b"),
+            "the first adoption must commit its successor identity beside the purge"
+        );
+
+        // This is the first successor's ordinary partition by the time a
+        // second replacement is confirmed. The next adoption must remove it
+        // along with every residue planted before the first replacement.
+        seed_retired_history_partition(&store, host, "identity-b", &selection);
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-b",
+                "identity-c",
+            )
+            .await
+            .expect("adopt second successor");
+        for identity in ["identity-a", "retired-one", "retired-two", "identity-b"] {
+            assert_eq!(
+                history_counts(&store, host, identity),
+                (0, 0, 0, 0),
+                "the second adoption leaves no retired {identity:?} partition in any history table"
+            );
+        }
+        assert_eq!(
+            recorded_identity(&store, host).await.as_deref(),
+            Some("identity-c"),
+            "the second adoption must commit its successor identity beside the purge"
+        );
     }
 
     /// The configuration a host currently carries — what a real caller
@@ -5875,6 +8027,157 @@ mod tests {
             migrated.unwrap(),
             fresh.unwrap(),
             "the migration ladder and the fresh-create path must agree on the final schema"
+        );
+    }
+
+    /// Schemas 23 and 24 replace every history table because schema 22 cannot say
+    /// how to order legacy observations or which old partitions belong to a
+    /// successor install. The registry is still authoritative, so migration
+    /// must discard only that unrecoverable convenience state and leave the
+    /// retained host immediately able to admit new history.
+    #[farhelm_testtrace::test]
+    async fn history_schema_migrations_discard_schema_22_history_while_preserving_the_host_registry()
+     {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        let host = {
+            let store = HelmStore::open(&path).await.expect("create current schema");
+            let host = host_with_identity(&store, "schema-22@host", "identity-kept").await;
+            drop(store);
+            host
+        };
+
+        // Build this fixture at the raw SQLite boundary. Reversing only the
+        // four history tables makes it an exact schema-22 predecessor while
+        // leaving the current registry row as the migration must find it.
+        {
+            let conn = Connection::open(&path).expect("reopen raw schema-22 fixture");
+            conn.execute_batch(
+                "DROP TABLE launch_history;
+                 DROP TABLE folder_history;
+                 DROP TABLE create_history_sessions;
+                 DROP TABLE create_history_cutoffs;
+                 DROP TABLE create_history_partitions;
+                 CREATE TABLE launch_history (
+                     host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                     host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                     created_at INTEGER NOT NULL, creation_seq INTEGER NOT NULL,
+                     cwd TEXT NOT NULL, launch_json TEXT NOT NULL,
+                     PRIMARY KEY (host_id, host_identity, session_id)
+                 ) STRICT;
+                 CREATE INDEX launch_history_recent
+                     ON launch_history (host_id, host_identity, creation_seq DESC, session_id ASC);
+                 CREATE TABLE folder_history (
+                     host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                     host_identity TEXT NOT NULL, canonical_cwd TEXT NOT NULL,
+                     display_cwd TEXT NOT NULL, created_at INTEGER NOT NULL,
+                     creation_seq INTEGER NOT NULL,
+                     PRIMARY KEY (host_id, host_identity, canonical_cwd)
+                 ) STRICT;
+                 CREATE INDEX folder_history_recent
+                     ON folder_history (host_id, host_identity, creation_seq DESC, canonical_cwd ASC);
+                 CREATE TABLE create_history_sessions (
+                     host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                     host_identity TEXT NOT NULL, session_id TEXT NOT NULL,
+                     creation_seq INTEGER NOT NULL,
+                     PRIMARY KEY (host_id, host_identity, session_id)
+                 ) STRICT;
+                 CREATE INDEX create_history_sessions_recent
+                     ON create_history_sessions (host_id, host_identity, creation_seq DESC, session_id ASC);
+                 CREATE TABLE create_history_cutoffs (
+                     host_id INTEGER NOT NULL REFERENCES hosts (id) ON DELETE CASCADE,
+                     host_identity TEXT NOT NULL, cutoff_sequence INTEGER NOT NULL,
+                     PRIMARY KEY (host_id, host_identity)
+                 ) STRICT;
+                 PRAGMA user_version = 22;",
+            )
+            .expect("replace current history with the schema-22 shape");
+            conn.execute(
+                "INSERT INTO create_history_sessions (host_id, host_identity, session_id, creation_seq)
+                 VALUES (?1, 'identity-kept', 'old-admission', 1)",
+                rusqlite::params![host],
+            )
+            .expect("seed schema-22 admission");
+            conn.execute(
+                "INSERT INTO create_history_cutoffs (host_id, host_identity, cutoff_sequence)
+                 VALUES (?1, 'identity-kept', 1)",
+                rusqlite::params![host],
+            )
+            .expect("seed schema-22 cutoff");
+            conn.execute(
+                "INSERT INTO launch_history
+                 (host_id, host_identity, session_id, created_at, creation_seq, cwd, launch_json)
+                 VALUES (?1, 'identity-kept', 'old-launch', 1, 1, '/old', '{}')",
+                rusqlite::params![host],
+            )
+            .expect("seed schema-22 structured projection");
+            conn.execute(
+                "INSERT INTO folder_history
+                 (host_id, host_identity, canonical_cwd, display_cwd, created_at, creation_seq)
+                 VALUES (?1, 'identity-kept', '/old', '/old', 1, 1)",
+                rusqlite::params![host],
+            )
+            .expect("seed schema-22 folder projection");
+        }
+
+        let migrated = HelmStore::open(&path)
+            .await
+            .expect("migrate schema 22 through the current history schema");
+        assert_eq!(
+            history_counts(&migrated, host, "identity-kept"),
+            (0, 0, 0, 0),
+            "the committed migration discards every old history and cutoff row together"
+        );
+        let retained = migrated
+            .list_hosts()
+            .await
+            .expect("read retained registry row")
+            .into_iter()
+            .find(|row| row.id == host)
+            .expect("schema migration must not delete the host registry row");
+        assert_eq!(retained.destination.as_deref(), Some("schema-22@host"));
+        assert_eq!(retained.host_identity.as_deref(), Some("identity-kept"));
+        let version: i64 = migrated
+            .conn
+            .lock()
+            .expect("helm db mutex poisoned")
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read migrated schema version");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "the history replacement and its version stamp commit together"
+        );
+
+        let fresh = HelmStore::open(&dir.path().join("fresh-current-schema.db"))
+            .await
+            .expect("create fresh schema 23");
+        assert_eq!(
+            schema_objects(&migrated.conn.lock().expect("helm db mutex poisoned")),
+            schema_objects(&fresh.conn.lock().expect("helm db mutex poisoned")),
+            "the history migrations recreate the exact current tables and indexes after discarding schema-22 history"
+        );
+
+        let admitted = SessionInfo {
+            creation_seq: Some(2),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: None,
+            }),
+            ..session("post-migration", 2)
+        };
+        assert!(
+            migrated
+                .record_create_history(host, "identity-kept", &admitted)
+                .await
+                .expect("admit a new create through the migrated tables"),
+            "the retained host registry can immediately begin a new history window"
+        );
+        assert_eq!(
+            history_counts(&migrated, host, "identity-kept"),
+            (1, 0, 1, 1),
+            "the post-migration admission uses the recreated admission and projection tables"
         );
     }
 
@@ -9440,6 +11743,7 @@ mod tests {
         let info = SessionInfo {
             parent: Some("parent-7".to_string()),
             cwd: "/home/Me/src/Farhelm".to_string(),
+            canonical_cwd: None,
             title: "Refactor the Drain".to_string(),
             status: SessionStatus::Waiting,
             source_profile: Some(SourceProfile {

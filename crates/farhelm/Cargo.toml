@@ -68,6 +68,10 @@ libc.workspace = true
 # supervisor then parses; a hand-rolled escaper would make a fixture bug
 # look like a parser bug (fake_agent.rs).
 serde_json.workspace = true
+# The built-in fake agent emits a shell-word-safe argv witness for the e2e
+# harness. Keeping this regular dependency lets the shipped multi-call test
+# fixture and its integration-test binary use one serialization rule.
+shell-words.workspace = true
 # `farhelm helm setup` publishes each unit file through a uniquely named,
 # exclusively created staging file in the unit directory (setup.rs). A
 # predictable staging name is a symlink target and a race between two
@@ -96,7 +100,6 @@ farhelm-testtrace.workspace = true
 # a second, worse thing to maintain. Loopback only, so no TLS backend is
 # needed and the workspace's default-feature-less reqwest is enough.
 reqwest.workspace = true
-shell-words.workspace = true
 # The e2e listing-poll tests run on Tokio's virtual clock. Their timeout
 # assertions must not depend on a loaded machine scheduling real sleeps, and
 # `test-util` keeps that test-only support out of the shipped binary.

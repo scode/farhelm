@@ -609,6 +609,33 @@ async fn a_symlinked_or_dotted_working_directory_still_correlates() {
     // good measure — three different ways of naming the same directory.
     let spelled = link.join(".").join("");
     let session = record_session(&h, &fixtures, &spelled, "claude").await;
+    assert_eq!(
+        session.cwd,
+        spelled.to_string_lossy(),
+        "the create reply keeps the accepted display spelling instead of replacing it"
+    );
+    assert_eq!(
+        session.canonical_cwd.as_deref(),
+        Some(canonical.to_string_lossy().as_ref()),
+        "the create reply carries the separate canonical identity"
+    );
+    let listed = h
+        .client
+        .list_sessions()
+        .await
+        .expect("list the created session")
+        .sessions
+        .into_iter()
+        .find(|candidate| candidate.id == session.id)
+        .expect("the created session remains listed");
+    assert_eq!(
+        listed.cwd, session.cwd,
+        "listing keeps the display spelling"
+    );
+    assert_eq!(
+        listed.canonical_cwd, session.canonical_cwd,
+        "listing carries the accepted canonical identity without resolving again"
+    );
     let snapshot = snapshot_of(&h, &session.id).await;
     assert_eq!(
         snapshot.canonical_cwd.as_deref(),
@@ -1148,6 +1175,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     creation_seq: 0,
                     cwd: work.path().to_string_lossy().into_owned(),
                     invocation: "agent".to_string(),
+                    launch: None,
                     tmux_name: format!("fh-extra-{i}"),
                     pane: String::new(),
                     outcome: LastOutcome::Exited {
