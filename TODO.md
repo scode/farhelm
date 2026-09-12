@@ -39,6 +39,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   black; one selected treatment reused everywhere; Launch the only saturated fill; yolo in the danger color wherever it
   is shown. The drawn resting state is 960 by 488 px.
 
+- Stop the whole app scrolling. After the recent UI changes, a wheel or trackpad scroll that lands over the top of the
+  window, or over the thin bar between the terminal and the sidebar, scrolls the entire app contents and exposes the
+  black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
+  must not.
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
@@ -418,6 +423,15 @@ Deferred work, with its original triggers:
   the cost of resume needing an explicit `tl sbx resume` (plain ssh refuses a suspended sandbox) and, today, an sshd
   session leak that defeats idle-suspend until the leaked sessions are reaped (evidence in the lore entry; worth
   reporting upstream).
+
+- Replace xterm.js with libghostty via WebAssembly, assessed 2026-09-12 in `lore/2026-09-12-libghostty-assessment.md`.
+  Native libghostty on macOS is ruled out there: it owns its own PTY and renders into an NSView, neither of which fits a
+  WebSocket-fed terminal inside a webview. The WASM route through `coder/ghostty-web` (xterm.js-compatible API over the
+  upstream wasm) is plausible but not a drop-in: `onBinary`, `parser.registerOscHandler`, `buffer.active`, and `refresh`
+  are missing, its `write` parses synchronously so the backpressure model in SPEC_impl.md has to be re-derived, and the
+  upstream wasm ships only on the rolling `tip` release with nothing stable to pin. Medium to high effort; the payoff is
+  dropping the scroll-freeze workaround and getting Ghostty's own grapheme and SGR handling. First step is a one- or
+  two-day spike mounting ghostty-web in the island under WebKit.
 
 ## Unbucketized
 
