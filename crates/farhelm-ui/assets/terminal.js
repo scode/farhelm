@@ -3096,6 +3096,14 @@
           paused: false,
           pauseCount: 0,
           resumeCount: 0,
+          // How many times `refreshIfScrolledBack` actually issued a
+          // `term.refresh()` (not merely how many times it was called —
+          // the throttle and the tail guard both skip most calls). A
+          // regression test for the scroll-freeze workaround can assert
+          // this advances instead of only asserting on its OUTCOME, since
+          // "the viewport happened to stay correct" and "the workaround
+          // engaged" are different claims.
+          scrolledRefreshCount: 0,
           // The catch-up phase's own observability (PLAN_M5.md's testing
           // decisions). The acceptance is deliberately NOT "sample the
           // scroll position and hope" — sampling can miss frames between
@@ -3161,6 +3169,100 @@
         // worth one log line, not a spammy one per byte past the mark.
         const BACKLOG_SANITY_BOUND = 32 * 1024 * 1024;
         let sanityWarned = false;
+
+        // Workaround for an observed, reproduced defect in vendored
+        // xterm.js 6.0.0. The vendored bundle stays byte-identical to
+        // upstream (SPEC_impl.md, "Terminal widget: xterm.js island",
+        // records this as the one deliberate constraint on it), so this
+        // compensates from the outside instead:
+        // `e2e/tests/terminal-scroll-freeze.spec.ts` scrolls a real
+        // terminal back mid-flood and shows the painted DOM going stale
+        // — rendered rows disagree with `term.buffer.active` and stay
+        // that way — for two shapes: a plain flood once scrollback is
+        // already full, and output confined to a DECSTBM scroll region.
+        //
+        // What is established, read directly from the bundle: once
+        // scrollback is full and the user is scrolled back,
+        // `BufferService.scroll` decrements `buffer.ydisp` by one for
+        // EVERY evicted line (its `isUserScrolling && isFull` branch);
+        // separately, the parser's per-write repaint
+        // (`InputHandler.parse`'s epilogue) maps each dirty screen row
+        // into a viewport row by adding `(ybase - ydisp)` and stops
+        // requesting a refresh once that offset reaches `rows` — so a
+        // row whose offset from the active screen exceeds the viewport
+        // height is never asked to repaint by that path. A throttled,
+        // unconditional full-row `term.refresh()` while scrolled away
+        // from the tail makes the reproduction pass. The exact
+        // xterm-internal step that actually leaves the DOM holding stale
+        // content — as opposed to merely not being told to repaint it —
+        // is NOT established from source; do not treat the mechanism
+        // above as a complete explanation, and do not replace it with a
+        // different invented one without new evidence.
+        //
+        // Throttled (rather than once per write) because a fast producer
+        // calls this on every completed `term.write()` — checking on the
+        // hot path is cheap, but actually issuing a refresh is not free,
+        // and nothing is gained by repainting far faster than a human
+        // eye or the display's own refresh rate could show anyway. 50ms
+        // itself is a judgment call, not a measurement: about three
+        // display frames of worst-case staleness on a viewport whose
+        // buffer content is static, weighed against a full-row DOM
+        // rebuild per refresh.
+        // Gated on actually being scrolled away from the tail so a
+        // terminal following live output (the overwhelming common case)
+        // pays nothing beyond the guard check itself. A write landing
+        // inside an already-open window is not simply dropped — see
+        // `armTrailingScrolledRefresh` below — so the worst case is one
+        // throttle window of staleness, not "until the next write or a
+        // user scroll".
+        const SCROLLED_REFRESH_THROTTLE_MS = 50;
+        let lastScrolledRefreshAt = 0;
+        // The one deferred repaint a throttle-window write can still owe
+        // once the window ends; see `armTrailingScrolledRefresh`.
+        let trailingScrolledRefreshTimer = null;
+
+        /**
+         * Guarantee the write that got skipped by the leading-edge
+         * throttle above still gets its repaint once the current window
+         * ends, rather than waiting for the NEXT write (which may never
+         * come if output stops) or a user scroll. At most one timer is
+         * armed at a time: a write that lands while one is already
+         * pending changes nothing — the existing timer already promises
+         * a repaint no later than the window this write itself falls
+         * inside, so a second timer would only repeat that promise.
+         *
+         * Re-checks "still away from the tail" and `alive` at FIRE time,
+         * not at arm time: the viewport can return to the tail (or the
+         * island can be torn down) during the deferred window, and
+         * refreshing a terminal that is no longer scrolled back — or no
+         * longer exists — would be wasted or unsafe work for no benefit.
+         */
+        function armTrailingScrolledRefresh() {
+          if (trailingScrolledRefreshTimer !== null) return;
+          const remaining = SCROLLED_REFRESH_THROTTLE_MS - (performance.now() - lastScrolledRefreshAt);
+          trailingScrolledRefreshTimer = setTimeout(() => {
+            trailingScrolledRefreshTimer = null;
+            if (!alive) return;
+            const buffer = term.buffer.active;
+            if (buffer.viewportY === buffer.baseY) return;
+            lastScrolledRefreshAt = performance.now();
+            term.refresh(0, term.rows - 1);
+            testHook.scrolledRefreshCount++;
+          }, Math.max(0, remaining));
+        }
+
+        function refreshIfScrolledBack() {
+          const buffer = term.buffer.active;
+          if (buffer.viewportY === buffer.baseY) return;
+          const now = performance.now();
+          if (now - lastScrolledRefreshAt < SCROLLED_REFRESH_THROTTLE_MS) {
+            armTrailingScrolledRefresh();
+            return;
+          }
+          lastScrolledRefreshAt = now;
+          term.refresh(0, term.rows - 1);
+          testHook.scrolledRefreshCount++;
+        }
 
         // ------------------------------------------------------------
         // Catch-up buffering (PLAN_M5.md item 5; this file's header
@@ -3483,6 +3585,11 @@
               testHook.resumeCount++;
               sendControl("resume");
             }
+            // See `refreshIfScrolledBack`'s own docs: each completed
+            // write is exactly the moment new content may have landed
+            // without the DOM having been asked to repaint it, so this
+            // is where the compensating refresh belongs.
+            refreshIfScrolledBack();
             if (onWritten) onWritten();
           });
           // Exactly once per crossing: `paused` blocks every repeat check
@@ -3697,6 +3804,13 @@
           alive = false;
           clearIdleTimer();
           clearHeartbeat();
+          // The trailing scrolled-refresh timer's own callback checks
+          // `alive` first, so a late fire is already a no-op; clearing it
+          // here only stops a dead island from holding a pending timer.
+          if (trailingScrolledRefreshTimer !== null) {
+            clearTimeout(trailingScrolledRefreshTimer);
+            trailingScrolledRefreshTimer = null;
+          }
         };
         // Test-only (e2e/tests/terminal-replay-rename.spec.ts): resume a catch-up phase
         // held open by `replayControls`'s `holdMarker`, applying whatever

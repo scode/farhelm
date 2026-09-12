@@ -379,6 +379,17 @@ SPEC.md's no-public-relay, no-third-party-services posture and the loopback depl
 the Dioxus tree. PTY bytes flow WebSocket → `term.write()` directly, bypassing Dioxus state entirely. Dioxus owns
 everything around the terminal (tabs, status, dialogs), not the terminal's content path.
 
+Vendored xterm.js 6.0.0 has an observed, reproduced defect (`terminal-scroll-freeze.spec.ts` pins it): a scrolled-back
+viewport can paint stale rows during sustained output, both once scrollback is already full and when output is confined
+to a DECSTBM scroll region. What is established from the bundle: `BufferService.scroll` decrements `ydisp` by one per
+evicted line while scrolled back with the buffer full, and the parser's per-write repaint maps dirty screen rows to
+viewport rows via `(ybase - ydisp)`, skipping the refresh once that offset reaches the row count. On their own both are
+correct behavior (the viewport's lines do not change under either), so they rule out the per-write path as the repainter
+rather than explain the stale DOM; the exact xterm-internal step that leaves stale content is not established from
+source. `terminal.js` compensates with a throttled, unconditional `term.refresh()` while the viewport sits away from the
+tail, rather than patching the vendored bundle. The bundle is deliberately never patched: keeping the vendored file
+byte-identical to upstream is what makes its provenance checkable and a future version bump a plain swap.
+
 JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js sets it as
 xterm's `fontFamily` — but it is no longer terminal-only: `app.css`'s `--font-ui` token (see the design-tokens paragraph
 above) applies the identical vendored face to the rest of the chrome, so the whole app reads as one typeface. Chrome and
