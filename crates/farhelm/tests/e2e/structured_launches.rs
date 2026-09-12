@@ -72,6 +72,7 @@ impl FakeHarness {
                     LaunchHarness::Codex => "codex",
                     LaunchHarness::Claude => "claude",
                     LaunchHarness::Muse => "muse",
+                    LaunchHarness::OpenCode => "opencode",
                 })
                 .to_string_lossy()
                 .into_owned(),
@@ -88,7 +89,7 @@ impl FakeHarness {
         if let Some(model) = &selection.model {
             match selection.harness {
                 LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
-                LaunchHarness::Claude | LaunchHarness::Muse => {
+                LaunchHarness::Claude | LaunchHarness::Muse | LaunchHarness::OpenCode => {
                     argv.extend(["--model".to_string(), model.clone()])
                 }
             }
@@ -106,6 +107,7 @@ impl FakeHarness {
                     "--reasoning-effort".to_string(),
                     effort.as_cli_arg().to_string(),
                 ]),
+                LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             }
         }
         if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -113,6 +115,7 @@ impl FakeHarness {
                 match selection.harness {
                     LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
                     LaunchHarness::Claude => "--dangerously-skip-permissions",
+                    LaunchHarness::OpenCode => "--auto",
                 }
                 .to_string(),
             );
@@ -121,7 +124,7 @@ impl FakeHarness {
     }
 }
 
-/// Create the three named fixture entry points without changing PATH.
+/// Create the named fixture entry points without changing PATH.
 ///
 /// Each wrapper emits a monotonic, per-harness generation before handing its
 /// original argv to the shipped fake-agent binary. A restart can retain old
@@ -131,7 +134,7 @@ impl FakeHarness {
 pub(crate) fn fake_harness() -> FakeHarness {
     let bin = farhelm_teststate::tempdir().expect("fixture executable directory");
     let home = farhelm_teststate::tempdir().expect("structured launch agent home");
-    for name in ["codex", "claude", "muse"] {
+    for name in ["codex", "claude", "muse", "opencode"] {
         let executable = bin.path().join(name);
         let counter = bin.path().join(format!("{name}.generation"));
         std::fs::write(
@@ -191,6 +194,9 @@ fn agent_kind(selection: &LaunchSelection) -> AgentKind {
         // Muse deliberately remains a Generic runtime integration: it has no
         // conversation-resume contract for this release.
         LaunchHarness::Muse => AgentKind::Generic,
+        // OpenCode has the same generic lifecycle: no captured conversation
+        // means a restart cannot honestly synthesize a resume command.
+        LaunchHarness::OpenCode => AgentKind::Generic,
     }
 }
 
@@ -428,7 +434,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
     if let Some(model) = &selection.model {
         let model_flag = match selection.harness {
             LaunchHarness::Codex => "-m",
-            LaunchHarness::Claude | LaunchHarness::Muse => "--model",
+            LaunchHarness::Claude | LaunchHarness::Muse | LaunchHarness::OpenCode => "--model",
         };
         assert!(
             words.windows(2).any(|pair| pair == [model_flag, model]),
@@ -440,11 +446,13 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Codex => format!("model_reasoning_effort={}", effort.as_cli_arg()),
             LaunchHarness::Claude => effort.as_cli_arg().to_string(),
             LaunchHarness::Muse => effort.as_cli_arg().to_string(),
+            LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         };
         let flag = match selection.harness {
             LaunchHarness::Codex => "-c",
             LaunchHarness::Claude => "--effort",
             LaunchHarness::Muse => "--reasoning-effort",
+            LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         };
         assert!(
             words
@@ -457,6 +465,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
         let flag = match selection.harness {
             LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
             LaunchHarness::Claude => "--dangerously-skip-permissions",
+            LaunchHarness::OpenCode => "--auto",
         };
         assert!(
             words.iter().any(|word| word == flag),
@@ -520,13 +529,31 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
         },
+        LaunchSelection {
+            harness: LaunchHarness::OpenCode,
+            model: Some("opencode/grok-4.6".to_string()),
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+        },
     ];
 
     let mut explicit_muse_id = None;
+    let mut explicit_opencode_id = None;
     for selection in explicit {
         let created = launch(&h, &fixture, selection.clone()).await;
         assert_eq!(created.launch, Some(selection.clone()));
-        assert_forwarded(&observed_argv(&h, &created.id, 2).await, &selection);
+        // OpenCode appears only in the explicit cases. Its first wrapper
+        // process is therefore generation 1, while the other explicit
+        // cases follow a default launch of the same harness.
+        let initial_generation = if selection.harness == LaunchHarness::OpenCode {
+            1
+        } else {
+            2
+        };
+        assert_forwarded(
+            &observed_argv(&h, &created.id, initial_generation).await,
+            &selection,
+        );
 
         let live = wait_for_live_status(&h.client, &created.id, 30).await;
         assert_eq!(live.launch, Some(selection.clone()));
@@ -545,6 +572,14 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
                 live.restart_offer,
                 farhelm_proto::RestartOffer::FreshOnly,
                 "Muse remains Generic and fresh-only; this fixture must not invent resume support"
+            );
+        }
+        if selection.harness == LaunchHarness::OpenCode {
+            explicit_opencode_id = Some(created.id.clone());
+            assert_eq!(
+                live.restart_offer,
+                farhelm_proto::RestartOffer::FreshOnly,
+                "OpenCode remains Generic and fresh-only; this fixture must not invent resume support"
             );
         }
     }
@@ -569,6 +604,29 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
     assert_forwarded(
         &observed_argv(&h, &muse.id, 3).await,
         muse.launch.as_ref().unwrap(),
+    );
+
+    // OpenCode carries a structured selection through the same persistence
+    // path, but it deliberately has no conversation identity to resume.
+    let opencode_id = explicit_opencode_id.expect("the explicit OpenCode case was created");
+    let opencode = h
+        .client
+        .list_sessions()
+        .await
+        .expect("list explicit sessions")
+        .sessions
+        .into_iter()
+        .find(|session| session.id == opencode_id)
+        .expect("the explicitly created OpenCode session is listed");
+    let restarted = h
+        .client
+        .restart_session(&opencode.id, RestartMode::Fresh, true)
+        .await
+        .expect("fresh-restart the ready OpenCode process");
+    assert_eq!(restarted.launch, opencode.launch);
+    assert_forwarded(
+        &observed_argv(&h, &opencode.id, 2).await,
+        opencode.launch.as_ref().unwrap(),
     );
 }
 

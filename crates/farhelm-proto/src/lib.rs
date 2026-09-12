@@ -87,7 +87,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
-/// Within version 18 the additive discipline of every prior version
+/// Within version 19 the additive discipline of every prior version
 /// continues to apply, with version 9's sharper reading intact: new
 /// optional fields with decode defaults are fine WHEN ignoring one is
 /// harmless; a field whose omission changes behavior, a new tagged variant,
@@ -164,7 +164,12 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// identity. An older helm silently ignoring it would retain and merge a
 /// different history, so this is not the harmless optional-field case.
 ///
-/// `protocol_version_is_pinned_at_18` (renamed at every bump since `_at_4`)
+/// Version 19 adds OpenCode to [`LaunchHarness`]. The harness lives in a
+/// structured create and session snapshot, so an older supervisor could not
+/// decode its new enum tag. Refusing this version mismatch is preferable to
+/// accepting a create whose durable launch provenance has been lost.
+///
+/// `protocol_version_is_pinned_at_19` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -176,7 +181,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -3925,8 +3930,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_18() {
-        assert_eq!(PROTOCOL_VERSION, 18);
+    fn protocol_version_is_pinned_at_19() {
+        assert_eq!(PROTOCOL_VERSION, 19);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump

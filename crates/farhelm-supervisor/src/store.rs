@@ -2333,6 +2333,7 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
             farhelm_proto::LaunchHarness::Codex => farhelm_proto::AgentKind::Codex,
             farhelm_proto::LaunchHarness::Claude => farhelm_proto::AgentKind::Claude,
             farhelm_proto::LaunchHarness::Muse => farhelm_proto::AgentKind::Generic,
+            farhelm_proto::LaunchHarness::OpenCode => farhelm_proto::AgentKind::Generic,
         };
         if row.agent_kind != expected_kind {
             anyhow::bail!(

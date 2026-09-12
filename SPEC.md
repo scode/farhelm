@@ -146,6 +146,13 @@ Muse support uses `muse` and `muse --yolo` with generic activity status. The yol
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
 recognition are not implemented; no Muse integration kind is implied by the presence of its built-in profiles.
 
+OpenCode is a structured harness, not a built-in profile. Its Zen model is required: Farhelm suggests
+`opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, and `opencode/glm-5.3`, while the custom-model field
+also accepts a bare Zen model name or an `opencode/<model>` value. A bare value is passed as `opencode/<model>`; another
+provider prefix is refused. OpenCode has no offered effort choices. Its default permission mode adds no flag, and YOLO
+uses OpenCode's `--auto`, which auto-approves only permissions not explicitly denied. OpenCode uses generic activity
+status with no hooks, conversation capture/resume, or waiting-state recognition.
+
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
 Linux helm drives Mac agents. Reaching a remote helm's web UI takes a user-managed SSH port forward, and obtaining or
@@ -179,12 +186,13 @@ Session creation is one action, not a wizard. Only the working directory is fund
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, and Muse launches carry a
-  harness plus optional model, effort, and YOLO permission choices; absent optional choices mean the selected harness's
-  defaults and omit their flags. The helm owns the released model catalog and validates every structured choice, so the
-  browser never turns a model identifier into an argv fragment. A known model identifies its owning harness; a custom
-  model needs an explicit harness. Replacing a harness clears only choices that are incompatible with it. Model and
-  effort are optional, permissions begin at the harness default, and an invalid combination cannot launch.
+- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, and OpenCode launches
+  carry a harness plus model, effort, and YOLO permission choices where that harness supports them; absent optional
+  choices mean the selected harness's defaults and omit their flags. OpenCode is the explicit exception: it requires a
+  model and offers no effort choice. The helm owns the released model catalog and validates every structured choice, so
+  the browser never turns a model identifier into an argv fragment. A known model identifies its owning harness; a
+  custom model needs an explicit harness. Replacing a harness clears only choices that are incompatible with it. An
+  invalid combination cannot launch.
 - Legacy agent profile or arbitrary command: an explicit secondary creation surface. Existing callers, profiles, and
   their helm-wide last-used profile behavior remain compatible, but New does not silently choose a remembered profile.
   Values from this surface cannot affect a structured request, or its idempotency key. The helm owns the remembered

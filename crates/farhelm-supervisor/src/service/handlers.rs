@@ -248,6 +248,7 @@ fn create_mode(
             LaunchHarness::Codex => AgentKind::Codex,
             LaunchHarness::Claude => AgentKind::Claude,
             LaunchHarness::Muse => AgentKind::Generic,
+            LaunchHarness::OpenCode => AgentKind::Generic,
         };
         if agent_kind != Some(expected_kind) {
             return Err("a structured launch's harness and agent_kind disagree".to_string());
@@ -394,6 +395,7 @@ async fn resolve_create_selector(
                     LaunchHarness::Codex => AgentKind::Codex,
                     LaunchHarness::Claude => AgentKind::Claude,
                     LaunchHarness::Muse => AgentKind::Generic,
+                    LaunchHarness::OpenCode => AgentKind::Generic,
                 };
                 return Ok(CreateMode::Structured {
                     invocation: parent.invocation,

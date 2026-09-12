@@ -154,6 +154,7 @@ pub(crate) fn search_results(
         LaunchHarness::Codex,
         LaunchHarness::Claude,
         LaunchHarness::Muse,
+        LaunchHarness::OpenCode,
     ] {
         if format!("{harness:?}")
             .to_ascii_lowercase()
@@ -371,12 +372,16 @@ pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
 ///
 /// Unknown model IDs are valid custom IDs once the person has selected their
 /// owning harness. They cannot have model-specific effort constraints locally,
-/// so this only applies the harness-wide vocabulary; the helm validates the
-/// final request again.
+/// so this applies the harness-wide vocabulary and OpenCode's required-model
+/// rule. The helm validates the final request again, including Zen provider
+/// syntax for custom OpenCode IDs.
 pub(crate) fn selection_is_compatible(
     selection: &LaunchSelection,
     catalog: &[LaunchCatalogModel],
 ) -> bool {
+    if selection.harness == LaunchHarness::OpenCode && selection.model.is_none() {
+        return false;
+    }
     let known_model = selection
         .model
         .as_ref()
