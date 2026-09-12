@@ -679,3 +679,19 @@ retain deadline, save-settlement and focus receipts without treating a persisten
 Class: fixture-premise
 
 Cause: unknown
+
+## 2026-09-12 — `a popup-created profile is offered on every host` editor-fill race closed (e2e/tests/profiles.spec.ts)
+
+The editor-focus fixture race recorded on 2026-09-05 never recurred after #417 converted this test to `openNewProfile`,
+which waits for the editor's name field to own focus before either field is filled. A confirmation batch
+`2fe38e66-080b-4cbe-b4fb-2eac4d0ee3a7` ran the exact test twenty times on clean
+`073d0bb907612afaf33c09dc1a199c456a2c9014`, both engines, one worker and zero retries: all forty executions passed.
+Focus-event traces are retained by the existing `recordPage` calls in `openNewProfile` and `openProfiles`. The run used
+an 18-CPU Ubuntu 24.04 Linux host with pinned tmux 3.7c, executable SHA256
+`b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, ambient `FARHELM_*` names scrubbed
+and the recorder supplying `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Disposition: closed; the
+TODO.md entry is removed. The separate popup-close observation in this same test stays open in TODO.md.
+
+Class: fixture-premise
+
+Cause: established

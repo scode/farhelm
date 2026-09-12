@@ -136,16 +136,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Establish which layer owns these detached children and verify cleanup on cancellation without touching other stacks.
   This is an observed harness limitation; the exact cleanup mechanism responsible has not been established.
 
-- Correct the editor-focus fixture in `a popup-created profile is offered on every host`, in
-  `e2e/tests/profiles.spec.ts`. In the final Chromium run at `6903cf90`, on the worker shape and pin documented under
-  "Difficult deflake" without extra load, invocation was filled while an editor handoff was still pending. The trace
-  shows text appended to the name, an empty required invocation field, and no POST to the profile route; the catalog
-  wait timed out without a save being sent. A pinned candidate batch failed this case on its first attempt. An exact
-  baseline batch on untouched `d71a87fb`, with `--repeat-each=20 --max-failures=1 --workers=1`, failed after one pass.
-  This fixture race predates the popup outside-focus correction and remains unresolved. Apply the existing
-  editor-name-focus precondition before filling fields, repeat both engines, and retain focus-event traces. Do not add
-  retries or widen the catalog wait. FLAKES.md retains the shared history with the separate inert-click product defect.
-
 ### Difficult deflake
 
 The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
