@@ -1,0 +1,36 @@
+# Known flakes the deflake sweep excludes, one test per line, in the
+# `deflake/bin/deflake` TestId line format:
+#   nextest <binary id> <full test name>      # <slug naming the TODO.md entry>
+#   playwright <spec file> <leaf title>       # <slug naming the TODO.md entry>
+#   phase <phase name>                        # <slug naming the TODO.md entry>
+# A comment starts at a `#` at the start of the line or after two or more
+# spaces; a `#` after one space is part of a Playwright title.
+# Every entry pairs with a TODO.md Deflake entry; when that entry is removed,
+# remove this line in the same PR. See deflake/SPEC.md.
+#
+# Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
+nextest farhelm-helm provisioning::tests::local_provisioning_and_update_preserve_a_running_session  # provisioning-attach-race
+playwright auth.spec.ts rotation logs out an open client and drops its feed and terminal sockets  # rotation-recovery-cascade
+playwright profiles.spec.ts Tab leaving the document preserves busy dismissal intent  # profiles-focus-premise
+playwright profiles.spec.ts a profile edited in another browser reaches this one over the real feed  # profiles-popup-focus-initial
+playwright profiles.spec.ts the profiles popup border box stays inside a constrained viewport  # profiles-webkit-initial-focus
+playwright profiles.spec.ts a popup-created profile is offered on every host  # profiles-popup-close-lost
+playwright sidebar.spec.ts the sidebar app bar stays pinned while the session list scrolls  # sidebar-scroll-teardown-timeout
+playwright sidebar.spec.ts aliasing a remote host renames it everywhere but the details view  # sidebar-route-fetch-disposed
+playwright terminal-multihost.spec.ts a failed removal stays visible with details collapsed  # host-removal-details-toggle
+playwright sidebar.spec.ts composer path actions keep typing inert and browse the selected remote host  # composer-browse-log-timeout
+playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
+playwright terminal-tabs.spec.ts a tab list past the island cap is listed in full but only partly attached  # tab-cap-closed-socket
+playwright terminal-flood.spec.ts real backspace erases; real ctrl-c kills the fake agent  # backspace-ctrlc-session-deletion
+playwright profiles.spec.ts an outside click overrides a delayed opening focus commit  # profiles-outside-click-deadline
+playwright profiles.spec.ts stale focus-out classifiers cannot clear newer obligations  # profiles-stubfeed-socket-missing
+playwright sidebar.spec.ts opening the actions menu enters it, and Tab leaves it  # sidebar-menu-arrowdown-miss
+playwright terminal-flood.spec.ts a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays  # flood-stall-zero-pauses
+nextest farhelm::e2e session_lifecycle::non_utf8_terminal_output_survives_live_stream  # non-utf8-marker-missing
+nextest farhelm::e2e terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled  # backpressure-rss-attribution
+nextest farhelm::e2e session_rename::a_renamed_title_survives_a_supervisor_restart  # rename-supervisor-ownership-race
+nextest farhelm::e2e launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail  # sentinel-unlink-surviving-file
+nextest farhelm::e2e replay_marker::a_tmux_pause_catch_up_replays_without_a_marker  # forced-pause-client-parsing
+nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment  # forced-pause-client-parsing
+nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane  # forced-pause-client-parsing
+nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state  # forced-pause-client-parsing
