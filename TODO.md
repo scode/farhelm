@@ -302,6 +302,22 @@ Deferred work, with its original triggers:
   resume. Settle the composition, editor, and migration behavior when this is picked up; keep it out of the immediate
   fix.
 
+- Reconsider agent parent/child relationships: either remove them or make them useful. Current parent tracking is
+  optional, and fleet `agent create`/`clone` do not record the asking session, so the parent filter cannot reliably
+  answer which sessions an agent created. This is largely unused complexity today; assess whether useful tracking is
+  worth keeping before extending it. The current limitation is explicitly accepted in SPEC.md.
+
+- Close the cross-host execution hole in agent-requested session creation and cloning, then remove their temporary
+  exception from the host-isolation policy. These operations currently let a remote host cause arbitrary execution on
+  another host; this is explicitly accepted temporarily to defer redesign, not permission to add more such operations.
+  Preserve the eventual ability for agents to orchestrate sessions across hosts through an explicitly authorized launch
+  policy, potentially trusted profiles, without letting the requesting host choose arbitrary execution. Include the
+  existing agent/supervisor-originated creation and retry paths: a delayed resubmission must be considered when deciding
+  what launch authority remains valid, including whether a forgotten retry key can launch a session again. Permanent
+  retention of these agent-originated retry records is not required; their replay exposure is accepted pending this
+  work. Do not add further exceptions or infer a waiver of user-initiated GUI request correctness. Cross-host stop,
+  archive, and rename remain intentionally allowed bounded operations.
+
 - Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
   list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is
   not fine".
@@ -415,6 +431,26 @@ Deferred work, with its original triggers:
   reporting upstream).
 
 ## Unbucketized
+
+- Follow up on the [final review synthesis](https://hackmd.io/a2F0fZKqQsSh4anyxFrjlA?type=view). The policy pass covered
+  all 700 substantive findings across seven reviewed areas; its remaining candidates still need current-code validation
+  and a proportionality judgment before implementation. Apply the maintainer-confirmed decisions in SPEC.md rather than
+  treating the original findings as an approved fix list. The reviews predate subsequent development; retain their
+  qualifications and check their recorded commit before relying on a claim.
+
+  Raw findings are preserved in the private brain's Markdown mirrors below. The
+  [artifact index](https://github.com/scode/brain/blob/main/personal/farhelm-risk-review-artifacts.md) also links the
+  original Claude artifacts and the risk ranking. Access requires the maintainer's brain permissions.
+
+  | Reviewed area                                | Raw findings                                                                                    |
+  | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+  | Agent upcall relay and session credentials   | [Area 1](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-1-agent-relay.md)      |
+  | Release supply chain and remote provisioning | [Area 2](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-2-supply-chain.md)     |
+  | Process kill sweep                           | [Area 3](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-3-kill-sweep.md)       |
+  | Helm HTTP and WebSocket authentication       | [Area 4](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-4-auth-edge.md)        |
+  | Supervisor core                              | [Area 5](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-5-supervisor-core.md)  |
+  | Persistence and schema migration             | [Area 6](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-6-schema-migration.md) |
+  | tmux control-mode parsing and streaming      | [Area 7](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-7-control-mode.md)     |
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
   supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never

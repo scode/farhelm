@@ -28,20 +28,32 @@ is 128 bits of entropy.
 The browser keeps the device secret in `localStorage` under `farhelm.device-secret` and presents it explicitly on every
 protected edge: REST requests carry `Authorization: Bearer <secret>`, and WebSocket upgrades offer two subprotocols,
 `farhelm` and `farhelm-device-<secret>`. The helm selects only `farhelm` in the upgrade response, so the credential is
-never reflected back. Middleware (`require_device_session` in `crates/farhelm-helm/src/auth.rs`) sits on every `/api`
-route except the exchange itself and the static bundle, as a router layer rather than a per-handler call, so a new route
-cannot forget it. A WebSocket upgrade is authenticated by subprotocol only and a REST request by the header only;
-neither accepts the other's transport. No cookie is set, read, or honored anywhere. (The `device_sessions.cookie_hash`
-column name is a fossil from the design this replaced; it holds the device-secret digest.)
+never reflected back. Middleware (`require_device_session` in `crates/farhelm-helm/src/auth.rs`) protects the API
+operations. Token exchange and the narrowly scoped desktop-webview OPTIONS preflights are intentionally public; the
+preflights return an inert 204. Static UI serving is public and separate from protected API operations. Router-layer
+ordering establishes these boundaries, so a new route must preserve them. The middleware selects subprotocol
+authentication when the request carries `Upgrade: websocket`, and Bearer-header authentication otherwise; this is a
+request-header predicate, not a restriction inferred from the matched route. Either path requires a valid device secret.
+No cookie is set, read, or honored anywhere. (The `device_sessions.cookie_hash` column name is a fossil from the design
+this replaced; it holds the device-secret digest.)
 
-Rotation (`farhelm helm token rotate`) replaces the web token and deletes every `device_sessions` row in one
-transaction, then broadcasts a process-local revocation that every live terminal and event-feed socket is selecting on;
-those sockets drop and detach from the supervisor. Sockets subscribe to that broadcast before their handshake is
-admitted, so a rotation cannot land in the gap between "authenticated" and "listening for revocation". When a helm is
-serving, the CLI hands the rotation to it over a private unix socket in the 0700 state directory (peer uid checked) so
-the running process is the one that both commits and revokes; when none is, the CLI rotates in the database directly,
-and a lifetime `flock` keeps the two from racing. After rotation every existing device secret 401s and the browser shows
-the token prompt again.
+Rotation (`farhelm helm token rotate`) prevents new requests from authenticating with the old web token or device
+credentials. Requests already admitted, including attachment uploads, may finish; rotation is not cancellation or
+rollback of work in progress and does not stop running agent sessions. Existing terminal and event-feed connections may
+remain usable (including terminal input) or close. Both outcomes are explicitly acceptable; prefer the simpler
+implementation, without adding machinery solely to guarantee either outcome. Reconnecting is a new authentication
+attempt and requires a current credential. These are product guarantees; the socket behavior below describes the current
+implementation, not a required revocation guarantee for established connections.
+
+The current implementation replaces the web token and deletes every `device_sessions` row in one transaction, then
+broadcasts a process-local revocation that every live terminal and event-feed socket is selecting on; those sockets drop
+and detach from the supervisor. Sockets subscribe to that broadcast before their handshake is admitted, so a rotation
+cannot land in the gap between "authenticated" and "listening for revocation". When a helm is serving, the CLI hands the
+rotation to it over a private unix socket in the 0700 state directory. The CLI checks the server's peer UID; the server
+relies on the private directory to exclude other users rather than checking each accepted peer's UID. The running
+process is the one that both commits and revokes; when none is, the CLI rotates in the database directly, and a lifetime
+`flock` keeps the two from racing. After rotation new requests using an old device secret receive a 401, and the browser
+prompts for the token again when it encounters that authentication failure.
 
 The desktop app is a variation on the same flow, not a different one. It embeds the helm, reads the web token straight
 out of `helm.db` (same user, same machine), and holds two device sessions: one for its native reqwest client, kept in
@@ -73,16 +85,19 @@ execution there through an injection — can read the device secret out of `loca
 SPEC_impl.md is that this adds little, because such a script can already call every API the secret authorizes from
 inside the page; the credential is full authority and nothing is gated behind a second factor, so the injection has the
 authority whether or not it can read the bytes. What HttpOnly would still have prevented is _exfiltration_: with
-`localStorage`, an injection can send the secret out and the attacker then holds a standalone credential that works from
-any client until the next rotation, rather than only for as long as their script runs in the user's tab. That is the
-residual, and it is why every path from untrusted text into the DOM (session titles, cwds, host and provisioning output,
-anything a terminal can turn into a link) has to be treated as a security boundary rather than a rendering concern.
+`localStorage`, an injection can send the secret out and the attacker then holds a standalone credential that can
+authenticate new requests from any client until rotation or eviction from the 64 retained enrollments, rather than only
+for as long as their script runs in the user's tab. That is the residual, and it is why every path from untrusted text
+into the DOM (session titles, cwds, host and provisioning output, anything a terminal can turn into a link) has to be
+treated as a security boundary rather than a rendering concern.
 
-Other properties of the current design, stated without judgment: device secrets never expire and are revoked only by
-rotation, which revokes all of them at once (there is no per-device revocation); the exchange endpoint is public and
-unthrottled; the web token is the same value forever until someone rotates it; and the device secret is transmitted in
-the clear on every request, which is acceptable only because the edge is loopback-only and the spec forbids binding
-anything else.
+Other properties of the current design, stated without judgment: device secrets have no time-based expiry; rotation
+revokes all of them at once, and retaining only the 64 newest enrollments also invalidates older credentials for
+subsequent authentication (there is no user-facing per-device revocation). The helm is intended for a handful of
+browser/desktop clients; reauthentication friction beyond a few tens of enrollments is acceptable. The exchange endpoint
+is public and unthrottled; the web token is the same value forever until someone rotates it; and the device secret is
+transmitted in the clear on every request, which is acceptable only because the edge is loopback-only and the spec
+forbids binding anything else.
 
 ### The gap the browser path does not close, and the position taken on it
 

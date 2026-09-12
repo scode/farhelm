@@ -290,19 +290,20 @@ Mark read/unread and stop close the menu as soon as the handler accepts the choi
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. Rename and
 in-place confirmations retain their panel so the user can finish the interaction.
 
-Clone (the row menu's newest item) reuses the create form rather than a second submit path: the click builds a
-`CreatePrefill` snapshot of the row's `Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic
-generation the list view mints per click. A `use_effect` inside the form compares that generation against the last one
-it applied and reseeds every field — including the raw invocation, for a profile-backed clone too, since that value is
-the seed for custom-command mode while profile mode displays the selected profile's own invocation — whenever the two
-disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a row reseed a
-second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not overwrite an edit
-in progress. The profile choice is trusted only when the row's own profile snapshot is `Present` — the catalog still
-holds that id under the SAME name — which is deliberately STRICTER than an ordinary create's remembered-default rule (an
-id that merely still exists, under a new name, is not evidence that cloning it again is what today's catalog would still
-offer); every other answer falls back to the raw command. Trusting the id at all is still a snapshot decision, not a
-live one: submitting a profile-backed clone resolves that id against whatever definition the catalog holds at that
-moment, exactly like any other profile-backed create.
+Clone reuses the create form rather than a second submit path: the click builds a `CreatePrefill` snapshot of the row's
+`Session` and hands it to the SAME `CreateSessionForm`, tagged with a monotonic generation the list view mints per
+click. A `use_effect` inside the form compares that generation against the last one it applied and reseeds the form
+whenever the two disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a
+row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
+overwrite an edit in progress. A structured source seeds the composer from its stored declarative selection, preserving
+omitted harness defaults rather than parsing the compiled invocation. A legacy source also seeds the raw invocation for
+custom-command mode, including when profile mode is selected and displays the selected profile's invocation. For legacy
+sources, the profile choice is used only when the row's own profile snapshot is `Present` — the catalog still holds that
+id under the SAME name — which is deliberately STRICTER than an ordinary create's remembered-default rule (an id that
+merely still exists, under a new name, is not evidence that cloning it again is what today's catalog would still offer);
+every other answer falls back to the raw command. Trusting the id at all is still a snapshot decision, not a live one:
+submitting a profile-backed clone resolves that id against whatever definition the catalog holds at that moment, exactly
+like any other profile-backed create.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
@@ -316,11 +317,12 @@ stays open. A row that names no host at all (a session from a helm too old to re
 rather than retried. An explicit host interaction takes the host decision away from automatic reconciliation for the
 rest of that clone generation.
 
-Agent seeding is separate. The form reads the source choice against the one helm-owned catalog, which applies to every
-host: a `Present` profile is selected once the live catalog confirms its id, while every other source state falls back
-to the source session's raw invocation. A delayed or unconfirmable host does not suppress that choice, and later host
-binding or withdrawal does not change it. An explicit agent or command interaction is authoritative for the rest of the
-clone generation, so neither a late catalog read nor a late host read can overwrite it.
+Agent seeding is separate from host selection. Structured sources retain their stored launch selection. For legacy
+sources, the form reads the source choice against the one helm-owned catalog, which applies to every host: a `Present`
+profile is selected once the live catalog confirms its id, while every other source state falls back to the source
+session's raw invocation. A delayed or unconfirmable host does not suppress that choice, and later host binding or
+withdrawal does not change it. An explicit agent or command interaction is authoritative for the rest of the clone
+generation, so neither a late catalog read nor a late host read can overwrite it.
 
 A clone's working directory, invocation and title are peer-relayed text (SPEC.md's clone rule copies them off another
 session, and a remote supervisor under `--ssh` is the one this client does not control) going into editable controls, so
@@ -481,6 +483,11 @@ identified by its durable pane record first, with the marker as the recovery aid
 tabs have no durable record at all and are rediscovered from their markers alone, because a pane's own processes inherit
 `TMUX` and can conjure windows a positional scan would adopt. The user's own tmux usage and config are untouched.
 
+Arbitrary changes to this private server's configuration are the local operator's responsibility. Farhelm supports its
+documented pane/window interactions and handles missing objects safely, but does not promise to restore configuration
+after arbitrary same-account changes. This does not relax exact targeting of operations or the helm/GUI's obligation to
+tolerate remote failures; see SPEC.md's maintainer-confirmed decisions.
+
 Farhelm requires tmux at or above a version FLOOR that is, by policy, the exact release the output-client teardown
 regression suite (`scripts/test-tmux-pinned-shutdown.sh`) runs against — 3.7c as of this writing, pinned in
 `.github/release/source-pins.env`, with the supervisor's floor constant tested to equal that pin so the two cannot
@@ -555,23 +562,27 @@ from explicit `resize-window` calls tracking the attached GUI client's dimension
 `window-size manual` on the window it touches, which is where that setting comes from). NOTE: setting
 `window-size manual` globally in the config crashes the tmux 3.4 server outright — the version Ubuntu 24.04 ships — so
 it must stay out of the generated config; the two mechanisms above make it redundant anyway. The supervisor streams raw
-pane output to the client; input goes in as `send-keys -t <pane> -H <hex bytes...>` commands written to the same
-attached control-mode client's stdin that streams that attachment's output. An earlier design tried `load-buffer -` over
-stdin followed by `paste-buffer -d -r` instead, specifically to keep input bytes off a process's argv (see below) — and
-had to be abandoned: verified empirically against tmux 3.7b, `paste-buffer` caret-escapes control bytes on the way into
-the pane (DEL arrives as the two literal characters `^?`, ESC as `^[`, ctrl-C as `^C`), silently breaking backspace,
-arrow keys, and ctrl-C. Keystrokes are not pastes, and no `paste-buffer` flag changes that. `send-keys -H` delivers
-bytes verbatim instead (also verified against 3.7b) and keeps the security property that motivated stdin delivery in the
-first place: hex-encoded input never touches a process's argv, because it rides an _already-running_ process's stdin
-rather than a freshly spawned `tmux send-keys` command's arguments — the earlier concern was a spawned process's argv
-being world-readable via `/proc/<pid>/cmdline`, which matters because input includes credentials typed at agent prompts,
-and that risk never applied to bytes written to a pipe. Each `send-keys` command is chunked at 256 bytes because tmux
-rejects a command carrying on the order of ~1000 arguments as "command too long" and each input byte becomes one hex
-argument. Entirely printable ASCII chunks instead use one quoted `send-keys -l` argument, avoiding per-byte argument
-parsing that otherwise delays large pastes and queues control requests behind them. Quotes, backslashes, dollar signs
-and tildes are escaped for tmux's parser; an explicit `--` prevents leading hyphens from becoming options or overriding
-the target. Control and non-ASCII bytes retain hex delivery. Both forms use the same dedicated no-output input client
-and wait for every command's matching `%end`; errors are never discarded as output notifications. Passthrough sequences
+pane output to the client; input goes in as `send-keys` commands written to a dedicated no-output control client's
+stdin. InputClient owns that client's request/reply stream, separately from the attachment's replay/live OutputStream
+and the session's always-drained SessionSink. Input success means tmux confirmed execution, not merely that a pipe
+accepted the command: ignoring an input error or killing a shared output client during takeover must not silently lose
+input already reported as delivered. An earlier design tried `load-buffer -` over stdin followed by `paste-buffer -d -r`
+instead, specifically to keep input bytes off a process's argv (see below) — and had to be abandoned: verified
+empirically against tmux 3.7b, `paste-buffer` caret-escapes control bytes on the way into the pane (DEL arrives as the
+two literal characters `^?`, ESC as `^[`, ctrl-C as `^C`), silently breaking backspace, arrow keys, and ctrl-C.
+Keystrokes are not pastes, and no `paste-buffer` flag changes that. `send-keys -H` delivers bytes verbatim instead (also
+verified against 3.7b) and keeps the security property that motivated stdin delivery in the first place: hex-encoded
+input never touches a process's argv, because it rides an _already-running_ process's stdin rather than a freshly
+spawned `tmux send-keys` command's arguments — the earlier concern was a spawned process's argv being world-readable via
+`/proc/<pid>/cmdline`, which matters because input includes credentials typed at agent prompts, and that risk never
+applied to bytes written to a pipe. Each `send-keys` command is chunked at 256 bytes and commands are pipelined in
+bounded batches before their ordered replies are read. Entirely printable ASCII chunks use one quoted `send-keys -l`
+argument to avoid per-byte argument parsing during large pastes. Quotes, backslashes, dollar signs and tildes are
+escaped for tmux's parser; an explicit `--` prevents leading hyphens from becoming options or overriding the target.
+Control and non-ASCII chunks use `-H`, with one hex argument per byte. Both forms use the same input client and consume
+command acknowledgements. Command size and batching must stay bounded, including enough room to drain replies without a
+pipe-capacity deadlock. The current constants are not a claim about tmux's exact parser ceiling. Every command's
+`%begin`/`%end` or `%error` reply is consumed by InputClient so command failures reach the caller. Passthrough sequences
 (audited): the control-mode pane-output stream carries `\ePtmux;...\e\\`-wrapped payloads still wrapped, regardless of
 the `allow-passthrough` option — that option only gates forwarding to rendering clients, which Farhelm has none of — so
 the supervisor unwraps passthrough payloads itself before they reach xterm.js. Reconnect replay prefills xterm.js from
@@ -592,6 +603,13 @@ replacement. The matching `%end` for the final refresh block is the cutover: ear
 snapshot, later ones arrive as live output, and `no-output` advances rather than queueing a second copy for delivery.
 Normal-screen replay selects the history snapshot; alternate-screen replay selects the visible snapshot so normal
 history is not mixed into a full-screen app.
+
+The initial foreign-pane filters must be arguments of that same cutover `refresh-client` invocation. Clearing
+`no-output` resets the client's per-pane state, so sending the filters as a separate earlier command silently loses
+them. The first bounded batch rides the cutover; any overflow is explicitly filtered afterwards, when no subsequent
+`no-output` transition will erase it. Late panes use the live filtering path, with a bounded memo to avoid issuing a
+filter command for every output notification. The session sink must keep those filtered panes readable; local dropping
+of foreign bytes remains separate from this reduction in tmux notification traffic.
 
 Setting `pause-after` on that same cutover (M2.5) changes the dialect the client then reads, which the parser must
 handle rather than discard: pane bytes arrive as `%extended-output <pane-id> <age> ... : <data>` instead of `%output`,
@@ -800,39 +818,41 @@ listing's — retry-safe, with no remedy attached — even though the verb aroun
 the read itself rather than inferring it at the classifier, since only the caller knows which of its requests had
 nothing at stake.
 
-The trust boundary is the CONNECTION, not the message. The supervisor authenticates the per-session credential and
+The relay identifies the origin host by its connection. The supervisor authenticates the per-session credential and
 refuses a peer asking as a session it is not; from there the helm accepts the forwarded `session_id`, and the claim that
 the connection it arrived on belongs to that session's host, without re-verification — it never sees the credential, so
-there is nothing on its side to check against. That is sound because a full-authority supervisor connection is the
-helm's own provisioned install, holding complete authority over every session on its host: a helm that could not trust
-it for a fleet-wide read could not route a single operation to it either. What the helm does check is that the
-connection is still the CURRENT one for that host row, since registry rows outlive the machines behind them. The
-historical paragraph below describes why 13 was current at the time; later released additions took the wire to 18.
-Version 16 introduced the durable optional structured launch snapshot carried with a create and `SessionInfo`. The
-snapshot is declarative provenance beside the resolved invocation, never a browser-owned compiler input; old sessions
-remain absent rather than being reconstructed from a command. Version 17 adds `BrowseDirectory` and `DirectoryListing`:
-the helm routes one authenticated, connection-incarnation-guarded request to the chosen supervisor, which expands `~`
-from its own recorded home, canonicalizes the requested directory, and returns only a sorted bounded immediate
-child-directory listing plus parent and truncation state. Neither the helm nor the client reads the target filesystem.
-Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder history to the destination the
-target supervisor actually accepted. The following 13 paragraph is historical context, not the current protocol version;
-the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/ `Archive` and the two creating
-verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added additively within the version rather
-than as version bumps of their own — which was possible ONLY because 13 itself had not yet shipped when they landed,
-still being developed on this branch with no released build speaking it yet. That is a one-time allowance for a version
-still in flight, not a standing license to keep adding to 13 after it ships; once a protocol version has shipped, a
-wire-shape addition needs a version of its own, same as any other. The same allowance covers the one thing in 13 that is
-not an addition at all: `AgentSession::host` became `Option<String>`, so a reply carrying a row the helm just mutated or
-created can say "there is a session here but no host name I can vouch for" instead of encoding that as an empty string
-indistinguishable from a real value. A decoder built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null`
-outright — the running additive rule does not stretch to cover it under any reading — so it is allowed here only because
-nothing released speaks 13 yet. It must not be carried forward the same way once 13 ships: the identical edit made
-afterwards needs a version of its own. Each verb is routed and recorded through the exact same `sessions.rs` functions
-the corresponding REST route uses — `route_session`, the client call and `record_session` for the lifecycle three, and
-`do_create_session` (the shared internal function `POST /api/sessions` was refactored onto) for the creating two. So a
-refusal that comes out of the SHARED operation — an unknown session, a disconnected host, a title the owning supervisor
-rejects — is the identical sentence the UI would have shown, and a session an agent creates is seeded into the helm's
-cache and published exactly as one the create dialog made.
+there is nothing on its side to check against. The host already controls its own sessions, so their credentials do not
+provide containment from that host. Accepting a forwarded session claim does not make the supervisor's messages trusted
+or authorize effects outside the named fleet operations and temporary execution exceptions in SPEC.md's
+maintainer-confirmed decisions. Provisioning a supervisor does not establish trust in its responses. What the helm does
+check is that the connection is still the CURRENT one for that host row, since registry rows outlive the machines behind
+them. Version 14 replaced session-list pagination with a bounded whole-list reply, and version 15 carries helm-resolved
+launch bundles and upward profile resolution. The historical paragraph below describes why 13 was current at the time;
+later released additions took the wire to 18. Version 16 introduced the durable optional structured launch snapshot
+carried with a create and `SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a
+browser-owned compiler input; old sessions remain absent rather than being reconstructed from a command. Version 17 adds
+`BrowseDirectory` and `DirectoryListing`: the helm routes one authenticated, connection-incarnation-guarded request to
+the chosen supervisor, which expands `~` from its own recorded home, canonicalizes the requested directory, and returns
+only a sorted bounded immediate child-directory listing plus parent and truncation state. Neither the helm nor the
+client reads the target filesystem. Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder
+history to the destination the target supervisor actually accepted. The following 13 paragraph is historical context,
+not the current protocol version; the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop`/
+`Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added
+additively within the version rather than as version bumps of their own — which was possible ONLY because 13 itself had
+not yet shipped when they landed, still being developed on this branch with no released build speaking it yet. That is a
+one-time allowance for a version still in flight, not a standing license to keep adding to 13 after it ships; once a
+protocol version has shipped, a wire-shape addition needs a version of its own, same as any other. The same allowance
+covers the one thing in 13 that is not an addition at all: `AgentSession::host` became `Option<String>`, so a reply
+carrying a row the helm just mutated or created can say "there is a session here but no host name I can vouch for"
+instead of encoding that as an empty string indistinguishable from a real value. A decoder built against 13 EARLIER IN
+ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not stretch to cover it under any
+reading — so it is allowed here only because nothing released speaks 13 yet. It must not be carried forward the same way
+once 13 ships: the identical edit made afterwards needs a version of its own. Each verb is routed and recorded through
+the exact same `sessions.rs` functions the corresponding REST route uses — `route_session`, the client call and
+`record_session` for the lifecycle three, and `do_create_session` (the shared internal function `POST /api/sessions` was
+refactored onto) for the creating two. So a refusal that comes out of the SHARED operation — an unknown session, a
+disconnected host, a title the owning supervisor rejects — is the identical sentence the UI would have shown, and a
+session an agent creates is seeded into the helm's cache and published exactly as one the create dialog made.
 
 The equivalence covers that shared path and stops there, deliberately, in two places. The relay adds a doorway check of
 its own (`validate_agent_verb`) that the REST surface has no counterpart for, since only the relay puts an
@@ -890,12 +910,14 @@ session's id and everything done with it afterwards would address something that
 One deliberate difference from `farhelm spawn` is worth stating rather than discovering. Spawn's `intent_key` gets
 `CreateAdmission::Spawn`'s session-lifetime reservation scope, because the create arrives on the asking session's own
 credential. An agent's `create`/`clone` reaches the target supervisor over the HELM's full-authority connection, so the
-key gets the same permanent, interactive scope any other helm-mediated create gets. Session-lifetime scoping is not
-merely unimplemented here — it is not expressible, since the target supervisor may never have heard of the asking
-session. Their selectorless defaults differ too: spawn copies the asking session's exact stored launch bundle on its own
-supervisor and therefore works offline, while the agent verb resolves the helm's one remembered default. Spawn with
-`--agent <name>` is the exception to that offline path: the supervisor sends `ResolveProfile` through the existing
-upward relay, and refuses with the omit-`--agent` remedy when no helm is attached.
+key currently gets the same permanent, interactive scope any other helm-mediated create gets. Permanent retention is not
+a security requirement for these agent-originated requests: SPEC.md's temporary creation/cloning exception also covers
+their existing retry exposure. The current implementation remains described here until a separate retention change is
+made. Session-lifetime scoping is not merely unimplemented here — it is not expressible, since the target supervisor may
+never have heard of the asking session. Their selectorless defaults differ too: spawn copies the asking session's exact
+stored launch bundle on its own supervisor and therefore works offline, while the agent verb resolves the helm's one
+remembered default. Spawn with `--agent <name>` is the exception to that offline path: the supervisor sends
+`ResolveProfile` through the existing upward relay, and refuses with the omit-`--agent` remedy when no helm is attached.
 
 One divergence is worth stating rather than discovering later. A RAW clone — one whose source came from no profile —
 copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
@@ -1055,24 +1077,41 @@ reports a failed listing rather than a silently shortened one.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
   `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket.
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
-  foreground process group, and daemonized descendants escape it. M2 ships the portable sweep: enumerate the pane's
-  descendants by walking /proc PPIDs, unioned with a scan for processes whose environment carries the session's
-  `FARHELM_SESSION_ID` marker (which catches daemons that already reparented to init), then SIGTERM, a short grace,
-  SIGSTOP-quiesce, re-enumerate, SIGKILL — with process start-time validation so a recycled pid is never signaled.
-  `systemd-run --user --scope` cgroup scopes layer on top as the Linux hardening (M3): where a functional systemd user
-  manager exists — probed once by actually running a trivial transient scope and then showing, killing, and confirming
-  the collection of it, not by `which`, and through absolute binary paths so a login shell's `$PATH` cannot substitute
-  what the probe approved — each launch is wrapped in its own generation-named scope (audited on systemd 255: the
-  wrapper execs in place, so the pane's process tree, exit codes, and liveness checks see exactly the unwrapped shape),
-  the per-launch SELECTION is recorded durably as a boolean while the unit name is re-derived from session id plus
-  generation at every use (a stored name would let a tampered row aim a kill at another session's unit), and stop kills
-  through the scope first — SIGTERM, the same grace the sweep gives, SIGKILL, then confirming the unit was actually
-  collected, because `systemctl kill` returning only proves delivery. The sweep ALWAYS runs afterwards as the backstop,
-  and is the whole mechanism where no user manager exists — a missing manager never degrades stop below the sweep's
-  guarantees, and neither does a broken one: the sweep's verdict is the answer, and the scope's troubles are diagnostic.
-  A wrapper that fails runs before the shim can write its exec-failure sentinel, so the supervisor classifies that shape
-  (a launch spec nothing ever consumed, on a dead pane, for a scoped launch) as **error** rather than letting it
-  masquerade as a plain exit.
+  foreground process group, and daemonized descendants escape it. The portable sweep combines the pane's descendant tree
+  with environment-marker selection through the platform process API. Every marker selection requires the matching
+  `FARHELM_SESSION_ID`. Stop and restart select the agent's `FARHELM_AGENT_ID`; archive and delete select the whole
+  session, including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing
+  legacy case with neither kind marker. These are process-ownership hints, not authenticated credentials or a promise of
+  indefinite historical compatibility. Launch boundaries scrub the opposite kind's marker so nested supervisors do not
+  misclassify a new agent as an outer tab's process.
+
+  The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
+  confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
+  and signal syscall atomic or guarantee globally unique start timestamps. `systemd-run --user --scope` cgroup scopes
+  layer on top as the Linux hardening (M3): where a functional systemd user manager exists — probed once by actually
+  running a trivial transient scope and then showing, killing, and confirming the collection of it, not by `which`, and
+  through absolute binary paths so a login shell's `$PATH` cannot substitute what the probe approved — each launch is
+  wrapped in its own generation-named scope (audited on systemd 255: the wrapper execs in place, so the pane's process
+  tree, exit codes, and liveness checks see exactly the unwrapped shape), the per-launch SELECTION is recorded durably
+  as a boolean while the unit name is re-derived from session id plus generation at every use (a stored name would let a
+  tampered row aim a kill at another session's unit), and stop kills through the scope first — SIGTERM, the same grace
+  the sweep gives, SIGKILL, then confirming the unit was actually collected, because `systemctl kill` returning only
+  proves delivery. The sweep ALWAYS runs afterwards as the backstop, and is the whole mechanism where no user manager
+  exists — a missing manager never degrades stop below the sweep's guarantees, and neither does a broken one: the
+  sweep's verdict is the answer, and the scope's troubles are diagnostic. A wrapper that fails runs before the shim can
+  write its exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever consumed, on a
+  dead pane, for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
+
+  Terminal tabs also receive separate scopes, named from the session and tab IDs. Archive and Delete collect those units
+  both from tmux-discovered tabs and independently from the systemd manager using the session-specific tab-unit glob.
+  The second source preserves a cleanup handle when tmux no longer supplies tab IDs. A manager enumeration failure is
+  distinct from having no usable manager; it can refuse Archive or Delete before the portable sweep.
+
+  Containment starts at the agent launch, after login-shell initialization: the cgroup wrapper and the shim's
+  environment markers deliberately exclude services started by shell startup files. A detached startup-file service may
+  belong to the user's ambient login environment and need not be reaped on session teardown. A child that remains in the
+  pane's process tree can still be found by the ordinary descendant walk; this is an exclusion from guaranteed cleanup,
+  not a promise that every startup-file child survives.
 
   **What the cgroup does and does not promise.** It targets ACCIDENTAL daemonization — the dev server, MCP server, or
   build watcher that double-forks and execs away its environment marker, which is exactly the shape the sweep provably
@@ -1191,15 +1230,18 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   most one local row, uniqueness of an SSH row's destination among SSH rows, and — see below — at most one row claiming
   any given host identity.
 - A host alias is nullable display data: when set it replaces the derived SSH destination or local `this machine` label.
-  Setting one is checked against every OTHER host's current display name, alias or derived — a stored alias is arbitrary
-  text with no uniqueness index of its own, so this is the only check that can catch it colliding with anything. Every
-  write that instead touches a DESTINATION (registering, retargeting, or clearing an alias to restore the derived name)
-  is checked only against other hosts' current ALIASES: destination-versus-destination collisions are already the
-  `hosts_ssh_destination` partial unique index's job, so checking against every display name there would just re-detect
-  what the index already refuses, under the wrong error. Skipping the destination-side check entirely, though, would let
-  a registration, a retarget, or a clear reintroduce the exact ambiguous name an alias write had just been refused for.
-  The alias rides the manager's host snapshot with the destination and connection state, so session rows, single-session
-  reads, and agent relay views derive one coherent name without each joining the registry.
+  Input is trimmed; an empty result clears the alias. Nonempty aliases reject control characters and are limited to 64
+  Unicode characters. The browser mirrors these syntax checks, while the helm owns collision checks and remains the
+  authority for accepting the write. Setting one is checked against every OTHER host's current display name, alias or
+  derived — a stored alias is arbitrary text with no uniqueness index of its own, so this is the only check that can
+  catch it colliding with anything. Every write that instead touches a DESTINATION (registering, retargeting, or
+  clearing an alias to restore the derived name) is checked only against other hosts' current ALIASES:
+  destination-versus-destination collisions are already the `hosts_ssh_destination` partial unique index's job, so
+  checking against every display name there would just re-detect what the index already refuses, under the wrong error.
+  Skipping the destination-side check entirely, though, would let a registration, a retarget, or a clear reintroduce the
+  exact ambiguous name an alias write had just been refused for. The alias rides the manager's host snapshot with the
+  destination and connection state, so session rows, single-session reads, and agent relay views derive one coherent
+  name without each joining the registry.
 - A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
   minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
   silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact
@@ -1474,10 +1516,13 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   print it. Browser auth exchanges it once for a random 128-bit device secret returned in the response body; the browser
   keeps that secret in origin-scoped localStorage, whose origin includes the loopback port, and sends it explicitly as a
   Bearer credential on REST requests and a credential-bearing WebSocket subprotocol during upgrades. The helm stores
-  only the device secret's SHA-256 hash, and rotation deletes all device sessions. This deliberately gives up HttpOnly:
-  script execution in the authenticated origin can read the secret, but such a script can already drive the same API,
-  while port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The
-  loopback Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
+  only the device secret's SHA-256 hash, and rotation deletes all device credential rows, rejecting their use on new
+  requests. Already-admitted HTTP requests may finish. The current implementation also closes terminal and event-feed
+  sockets on rotation; SPEC.md permits either closing or retaining those existing connections, so preserving that
+  behavior is not a reason to add cancellation machinery elsewhere. This deliberately gives up HttpOnly: script
+  execution in the authenticated origin can read the secret, but such a script can already drive the same API, while
+  port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The loopback
+  Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge.
 - The native app embeds farhelm-helm in-process; the Linux helm is the same code behind `farhelm helm run`. The local
   supervisor is a separate process either way — the app discovers one that already answers and leaves it alone, or
   starts `farhelm supervisor run` from its sibling binary and owns that child for its own lifetime.
@@ -1730,8 +1775,11 @@ Artifacts land under temporary names in their final flat directories and are ato
 version directories or `current` symlinks: a failed transfer leaves the installed file intact, while a running binary
 keeps its old inode until the explicit supervisor restart. Hash checks skip identical payloads and unit files are
 written only when their content differs, so rerunning provisioning converges from wherever an earlier run stopped.
-Matching content also repairs mode drift, and provisioning creates or repairs its directories with explicit modes; the
-supervisor state directory is private to its user (`0700`).
+Matching content also repairs installed-file mode drift. Provisioning may create directories with explicit modes and
+repair permissions on directories dedicated to Farhelm; the supervisor state directory is private to its user (`0700`).
+Existing shared directories, including a shared executable directory or the systemd user-unit directory, must retain
+their permissions. If those permissions prevent installation, report the obstacle rather than changing them. This
+ownership restriction is maintainer-confirmed policy; existing provisioning paths still require assessment against it.
 
 The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
 supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an
