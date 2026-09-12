@@ -1652,6 +1652,21 @@ impl TmuxDriver {
     /// - `default-terminal xterm-256color`: what xterm.js actually is;
     ///   inner apps probe $TERM.
     ///   Live query filtering is documented in `tmux/query_strip.rs`.
+    /// - `window-style fg/bg`: the colors tmux reports when a pane program
+    ///   asks OSC 10/11 for its foreground and background. The supervisor's
+    ///   control-mode client has no terminal of its own to relay the query
+    ///   to, so without this tmux answers from its defaults and a program
+    ///   deciding "light or dark?" guesses against what the browser paints.
+    ///   The values are the xterm.js theme's (`assets/terminal-theme.js`);
+    ///   the stream guard test pins the reply bytes so the two cannot drift.
+    /// - `terminal-features xterm-256color:RGB`: only matters for a human
+    ///   who attaches to the private server from a real terminal. The
+    ///   control-mode stream the supervisor reads carries a pane's 24-bit
+    ///   SGR bytes verbatim whether or not this is set, so it changes
+    ///   nothing on Farhelm's own path; it is here so a manual attach shows
+    ///   the same colors rather than a 256-color approximation.
+    ///   Like every line here, both reach FRESH servers only; a server the
+    ///   supervisor adopted keeps its old answers until it is restarted.
     /// - `escape-time 0`: tmux waits after a lone ESC byte to see whether
     ///   an escape sequence follows. The default is 500ms before tmux 3.5
     ///   and 10ms from 3.5 on — half a second of visibly laggy Esc
@@ -1693,6 +1708,8 @@ impl TmuxDriver {
             "set -s exit-empty off\n\
              set -s escape-time 0\n\
              set -s default-terminal 'xterm-256color'\n\
+             set -as terminal-features ',xterm-256color:RGB'\n\
+             setw -g window-style 'fg=#ffffff,bg=#282c34'\n\
              set -g status off\n\
              set -g prefix None\n\
              set -g history-limit {HISTORY_LIMIT}\n\
@@ -4343,6 +4360,8 @@ mod tests {
                 "set -s exit-empty off\n\
                  set -s escape-time 0\n\
                  set -s default-terminal 'xterm-256color'\n\
+                 set -as terminal-features ',xterm-256color:RGB'\n\
+                 setw -g window-style 'fg=#ffffff,bg=#282c34'\n\
                  set -g status off\n\
                  set -g prefix None\n\
                  set -g history-limit {HISTORY_LIMIT}\n\

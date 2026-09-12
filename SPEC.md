@@ -431,7 +431,8 @@ Notifications (desktop or otherwise) are explicitly out of v1. The status column
 The real TUI is the primary and, in v1, the only interaction surface. Typing goes straight to the agent's terminal;
 whatever the agent renders is what you see. There is no composer, no message abstraction, no send button in v1.
 
-- Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here.
+- Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here. The
+  default palette, foreground, and background are Ghostty's defaults, and launched agents see `COLORTERM=truecolor`.
 - Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,
   in every terminal tab alike, agent and shell. Single-write delivery is part of the promise, not an implementation
   detail: a lone ESC arriving in its own read is indistinguishable from the Escape key to line editors that disambiguate

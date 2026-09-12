@@ -765,7 +765,8 @@ pub fn exec_launch_spec_with_seam(
 }
 
 /// Build the final agent command, including Farhelm's private launch
-/// contract, without disturbing the login shell's inherited environment.
+/// contract and the truecolor capability agents need to match the browser.
+/// The inherited environment remains untouched outside this child process.
 fn agent_command(spec: &LaunchSpec) -> std::process::Command {
     let mut command = std::process::Command::new(&spec.argv[0]);
     let inherited_path = std::env::var_os("PATH").unwrap_or_default();
@@ -781,6 +782,7 @@ fn agent_command(spec: &LaunchSpec) -> std::process::Command {
         .env(SESSION_TOKEN_ENV_VAR, &spec.session_token)
         .env(SUPERVISOR_SOCK_ENV_VAR, &spec.supervisor_sock)
         .env(AGENT_ID_ENV_VAR, &spec.session_id)
+        .env("COLORTERM", "truecolor")
         .env_remove(TAB_ID_ENV_VAR);
     command
 }
@@ -1309,6 +1311,10 @@ mod tests {
         assert_eq!(
             env.get(SUPERVISOR_SOCK_ENV_VAR).and_then(Option::as_deref),
             Some("/run/user/1000/farhelm.sock")
+        );
+        assert_eq!(
+            env.get("COLORTERM").and_then(Option::as_deref),
+            Some("truecolor")
         );
         assert_eq!(env.get(TAB_ID_ENV_VAR), Some(&None));
         assert!(

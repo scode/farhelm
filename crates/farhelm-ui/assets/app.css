@@ -21,8 +21,9 @@
  *
  * Three surface levels and one accent carry the whole layout, and both
  * are design constraints rather than accidents of what the sheet grew.
- * The page ground is the terminal's own black; chrome (sidebar, main
- * header, tab strip) sits one step above it; panels that float over
+ * The page ground is black, and the terminal paints its own surface
+ * (`--terminal-bg`) on top of it; chrome (sidebar, main
+ * header, tab strip) sits one step above the ground; panels that float over
  * chrome — menus, dialogs, forms, bands that interrupt a pane — sit one
  * step above that. The accent is a single blue, and what it may be
  * spent on is a closed list: selection, focus rings, the one filled
@@ -127,15 +128,15 @@
      (`--control-hover-bg`, `--chip-bg`) rather than `--bg-3`/`--bg-4`
      specifically so nothing reads them as a rung on this ladder.
 
-     The ground is pure black because the terminal's is: xterm.js is
-     mounted with no `theme` (terminal.js), so it paints its default
-     #000 and the vendored xterm.css hard-codes the same on
-     `.xterm-viewport`. Any other ground would frame every terminal in a
-     visibly different rectangle, with the seam falling in `.terminal`'s
-     own 4px gutter. The terminal is off-limits to restyling, so the
-     agreement has to be made from this side. */
-  --bg-0: #000; /* GROUND: the page, the terminal's field, and the recessed
-                   well of inputs, selects, and code boxes */
+     The ground stays pure black for the page chrome and recessed input
+     wells. The terminal has its own surface token, matching the xterm theme,
+     so its 4px gutter and viewport do not frame the pane in black. */
+  --bg-0: #000; /* GROUND: the page and recessed well of inputs, selects, and
+                   code boxes */
+  --terminal-bg: #282c34; /* the terminal's surface: the xterm.js theme's
+                             background (assets/terminal-theme.js), mirrored
+                             here so the pane's gutter and viewport match; a
+                             js-test pins the two to the same value */
   --bg-1: #1a1d23; /* RAISED CHROME: the sidebar column and everything in it,
                       the main pane's titlebar, the tab strip, and the quiet
                       bands (stale notice, stale metadata) */
@@ -254,10 +255,11 @@
   --archive: #d08770; /* archive notices and archive-path errors */
   --archived-badge: #b48ead; /* the "archived" marker itself */
 
-  /* Overlay. Black rather than the blue-grey it used to be: the ground
-     is now the terminal's own black, and a veil lighter than the ground
-     would LIFT the reconnecting pane instead of dimming it — which is
-     the floating-rectangle effect the surface levels exist to remove. */
+  /* Overlay. Black rather than the blue-grey it used to be: it lies over
+     the terminal's `--terminal-bg` surface and must be darker than it,
+     because a veil lighter than what it covers would LIFT the reconnecting
+     pane instead of dimming it — which is the floating-rectangle effect
+     the surface levels exist to remove. */
   --scrim: rgba(0, 0, 0, 0.82); /* dims a stale terminal while it reconnects */
 
   /* Elevation. The surface ladder above says which LEVEL a thing sits on;
@@ -446,8 +448,8 @@ samp {
    * it is the honest signal. */
   scrollbar-width: none;
   /* The sidebar is CHROME, not content: it sits one level above the
-     ground the terminal shares with the page, which is the single
-     biggest reason this shell no longer reads as one flat field.
+     page ground, which is the single biggest reason this shell no
+     longer reads as one flat field.
      Everything inside it — rows, hosts panel, banners —
      inherits this level unless it deliberately floats above it.
 
@@ -4123,6 +4125,7 @@ samp {
   position: relative;
   flex: 1;
   min-height: 0;
+  background: var(--terminal-bg);
 }
 
 .terminal-pane {
@@ -4131,6 +4134,7 @@ samp {
   display: flex;
   flex-direction: column;
   visibility: hidden;
+  background: var(--terminal-bg);
 }
 
 .terminal-pane.selected {
@@ -4141,6 +4145,19 @@ samp {
   flex: 1;
   min-height: 0;
   padding: 4px;
+  background: var(--terminal-bg);
+}
+
+/* xterm.css is vendored and shared with the desktop bundle, and it
+   hard-codes `#000` on `.xterm-viewport`. xterm's own theme background lands
+   on the viewport's child scrollable node, not on the viewport itself, so
+   without this override a black frame shows through around the rows. The
+   application owns the override so both clients paint the same surface
+   without modifying the third-party stylesheet; text color needs nothing
+   here because the DOM renderer injects the theme foreground onto
+   `.xterm-rows` itself. */
+.terminal .xterm-viewport {
+  background: var(--terminal-bg);
 }
 
 .status {
