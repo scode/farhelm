@@ -86,18 +86,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `.host-details-toggle`. Preserve route lifetime and host-row state evidence before changing product behavior; the
   failures alone do not establish a composer regression or a confirmed pre-composer cause.
 
-- Investigate `composer path actions keep typing inert and browse the selected remote host`, in
-  `e2e/tests/sidebar.spec.ts`. This fails CONSISTENTLY on this substrate, not intermittently: Chromium run
-  `1024be47-ca56-4651-afd6-a56d01a5c890` timed out on the 5-second predicate waiting for the selected remote
-  supervisor's own log to record the forwarded browse request, and it failed again the same way in runs
-  `2489c509-e3e3-4e9d-b6b5-f860a7fbd565` (both engines) and `ce1a9bec-cf6b-453b-bf1b-61f3e4ec297d` (both engines). An
-  isolated rerun reproduced the identical timeout on both the current tree and, checked out separately, the tree from
-  before the launcher-composer name-field change, five times and three times respectively — establishing this as
-  pre-existing and unrelated to that change, but not establishing its cause; nothing points at flakiness rather than a
-  standing environmental fact. The remote fixture's log file may not be flushed, written to a different path than the
-  test reads, or genuinely never receiving the forwarded request; retain browse-request and remote-log receipts before
-  changing the assertion or the fixture.
-
 - Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
   `7fd44a19-ce3f-42fb-a3df-410da327634a`.
   `stalling one tab's writes pauses only that tab; the agent and a sibling stay
