@@ -52,9 +52,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Investigate `provisioning::tests::local_provisioning_and_update_preserve_a_running_session` in
   `crates/farhelm-helm/src/provisioning.rs`. A recorded workspace run reached the provisioning attach step and timed out
   waiting for the supervisor. It passed in an earlier full run and an exact rerun, then failed again in the next full
-  run. The failure has not been reproduced on a pre-composer baseline, so its cause and provenance remain unresolved.
-  Retain supervisor startup and service-lifecycle evidence before changing the attach deadline. Failed run IDs:
-  `a723e80f-5dbe-4ed2-bd7a-686f50aae672`, `de55db2b-7b22-475a-9465-35212dd8de5a`.
+  run. The failed run's manager had exhausted its active retry window; provisioning nudged a single probe just before
+  the supervisor logged its listening socket. The existing 45-second reprobe cadence exceeds the 30-second attach
+  deadline. This is an evidence-supported startup-race hypothesis in unchanged provisioning/manager behavior, not a
+  baseline reproduction or a confirmed new composer defect. Retain supervisor startup and service-lifecycle evidence
+  before changing the attach deadline. Failed run IDs: `a723e80f-5dbe-4ed2-bd7a-686f50aae672`,
+  `de55db2b-7b22-475a-9465-35212dd8de5a`.
 
 - Investigate intermittent recovery assertions in
   `rotation logs out an open client and drops its feed and terminal
@@ -70,6 +73,35 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `a profile edited in another browser reaches this one over the real feed`. The latter occurs before the separately
   corrected second-client terminal-readiness boundary. Preserve both tests' focus and feed assertions; the new
   observation does not establish a regression in saving profiles or delivering their updates.
+
+- Investigate the separate popup-close observation in `a popup-created profile is offered on every host`, in
+  `e2e/tests/profiles.spec.ts`. Chromium run `45efb275-84b9-4aab-9dd2-550fd45d4e7a` successfully registered the saved
+  profile, then the toggle click in `closeProfiles` left the popup mounted. This occurs before the create picker opens
+  and differs from the older editor-fill race recorded below. Retain save-response, busy-state and pointer/focus
+  receipts before deciding why the close was lost; a registered profile alone does not prove the editor has settled.
+
+- Give the existing scrolling fixture in `the sidebar app bar stays pinned while the session list scrolls`, in
+  `e2e/tests/sidebar.spec.ts`, reliable cleanup ownership. A Chromium full-shard trace passed every scrolling and bar
+  geometry assertion, then exhausted the test's 60-second budget during sequential session teardown. The last DELETE
+  raced disposal of the request context. Preserve the geometry checks and record cleanup separately from a product
+  scrolling failure; do not infer a layout defect from the teardown timeout.
+
+- Investigate the retained host-action fixture failures from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`.
+  WebKit's `aliasing a remote host renames it everywhere but the details view`, in `e2e/tests/sidebar.spec.ts`, tried to
+  read a disposed `route.fetch` response and also failed teardown.
+  `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
+  `.host-details-toggle`. Preserve route lifetime and host-row state evidence before changing product behavior; the
+  failures alone do not establish a composer regression or a confirmed pre-composer cause.
+
+- Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
+  `7fd44a19-ce3f-42fb-a3df-410da327634a`.
+  `stalling one tab's writes pauses only that tab; the agent and a sibling stay
+  live` never established a HIGH_WATER
+  pause within its observation window. `a tab list past the island cap is listed
+  in full but only partly attached` had
+  the expected path and mounted/revealed state but a closed socket at readiness. Retain gate, attachment and
+  close-reason receipts; keep these failures distinct from the existing single-client stall entry, and do not weaken
+  liveness assertions based on a later passing run.
 
 - Make interrupted browser-run cleanup account for the detached `start-stack.sh` fixture servers. Three deliberately
   canceled recorder-backed Playwright shards returned after their runner was terminated while their owned fixture
@@ -164,16 +196,6 @@ is a clean gate.
   does not prove that cause. Retain detach-reason and queue receipts alongside gate send, received bytes, pending
   writes, pauses, replay state, and FLOOD-DONE to distinguish helm backpressure from supervisor stall, producer
   completion, and replay cutover. Do not widen the budget before locating why HIGH_WATER was never reached.
-- Deflake `an over-one-megabyte message does not drop the terminal socket` in `e2e/tests/terminal-flood.spec.ts`,
-  WebKit. The combined run failed its fifteen-second `echo:after-big-message` wait after the socket-open/drained
-  assertion passed. The trace shows steadily growing echoed input and the exact reply arriving at the deadline; the
-  final inner assertion succeeded just after the outer poll timed out. Twenty fresh-stack candidate executions passed,
-  but the same exact test failed on execution thirteen of untouched `d71a87fb`, after twelve passes, on the same
-  four-CPU worker without extra load. This establishes a pre-existing flake. The 1-MiB-plus-one-byte paste becomes 4,097
-  tmux send-key commands; draining the browser socket does not mean the pane has processed them. The poll also returns
-  the whole megabyte-scale terminal buffer. Measure pane processing and marker delivery separately from buffer
-  serialization before choosing a scoped assertion or budget correction. Retain the open-socket, drain, and exact-reply
-  assertions; no timeout increase or product change was made in this pass.
 - Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` in
   `crates/farhelm/tests/e2e/session_lifecycle.rs`. The baseline failed on the fifth exact execution (four passed): READY
   arrived but BINARY-MARKER did not arrive within forty seconds. Earlier command-acknowledgement diagnostics localized
