@@ -57,16 +57,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- Investigate `provisioning::tests::local_provisioning_and_update_preserve_a_running_session` in
-  `crates/farhelm-helm/src/provisioning.rs`. A recorded workspace run reached the provisioning attach step and timed out
-  waiting for the supervisor. It passed in an earlier full run and an exact rerun, then failed again in the next full
-  run. The failed run's manager had exhausted its active retry window; provisioning nudged a single probe just before
-  the supervisor logged its listening socket. The existing 45-second reprobe cadence exceeds the 30-second attach
-  deadline. This is an evidence-supported startup-race hypothesis in unchanged provisioning/manager behavior, not a
-  baseline reproduction or a confirmed new composer defect. Retain supervisor startup and service-lifecycle evidence
-  before changing the attach deadline. Failed run IDs: `a723e80f-5dbe-4ed2-bd7a-686f50aae672`,
-  `de55db2b-7b22-475a-9465-35212dd8de5a`.
-
 - Investigate intermittent recovery assertions in
   `rotation logs out an open client and drops its feed and terminal
   sockets`, in `e2e/tests/auth.spec.ts`. Chromium

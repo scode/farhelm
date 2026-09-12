@@ -742,3 +742,28 @@ one; it holds no port or lock and is out of scope. Disposition: fixed; the TODO.
 Class: harness
 
 Cause: established
+
+## 2026-09-12 — provisioning attach dials through the supervisor restart (crates/farhelm-helm)
+
+`provisioning::tests::local_provisioning_and_update_preserve_a_running_session` failed its first update's
+`attach-supervisor` step in workspace run `de55db2b` after passing standalone twice: the manager had burned its whole
+retry ladder dialing a not-yet-installed supervisor, the update restarted the unit, and the attach step's single
+`retry_now` probe landed before the restarted supervisor listened. Worse than a lost race, the nudge consumed the
+remaining re-probe hold, so the next dial sat a full 45-second cadence out — past the step's 30-second deadline. This
+was a product robustness gap, not a test defect: any slow supervisor restart failed provisioning the same way.
+`AttachSupervisor` now retries with a fresh window (`retry_now_with_fresh_window`, the same evidence class as a registry
+edit), dialing the ladder through the restart latency; the attach deadline is unchanged, and user retry, probes, and
+adopt stay single-probe. One user-visible side effect: the fresh window publishes `Connecting (attempt n)` while it
+dials, for up to 60 seconds — 30 past the attach step's own deadline — where the row previously kept reading
+Unreachable. SPEC.md pins no backoff display, so this is a note, not a conflict. New virtual-clock tests pin the exact
+14-attempt schedule and the mid-ladder recovery (a host back after the immediate dial connects on the next step with no
+further dials). Run `7fce9e61` passed all 182 manager and provisioning lib tests including both heavy real-provisioning
+legs, batch `549113fc` passed the exact local test five times, and run `27ce0af6-00d4-490f-a6dd-263099add19b` passed the
+full 713-test helm lib suite with the added recovery test. All ran on an 18-CPU Ubuntu 24.04 Linux host with pinned tmux
+3.7c, executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`, and ambient
+`FARHELM_*` names scrubbed. Disposition: fixed as a product change out of the Deflake bucket; the TODO.md entry is
+removed.
+
+Class: product
+
+Cause: established
