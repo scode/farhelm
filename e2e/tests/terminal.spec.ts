@@ -1599,11 +1599,11 @@ test("create form inputs opt out of autocomplete, autocorrect, autocapitalize, a
   await expect(form).toBeVisible();
 
   // Pin the new composer fields by meaning, then inspect every text/search
-  // input, including the collapsed legacy and advanced fields. Counting the
-  // former form's three inputs would test its layout rather than this policy.
+  // input, including the hidden legacy fields. Counting the former form's
+  // three inputs would test its layout rather than this policy.
   await expect(form.getByLabel("folder", { exact: true })).toHaveCount(1);
   await expect(form.getByPlaceholder("custom model id")).toHaveCount(1);
-  await expect(form.getByLabel("title (optional)", { exact: true })).toHaveCount(1);
+  await expect(form.getByLabel("name (optional)", { exact: true })).toHaveCount(1);
   await expect(form.getByRole("combobox", { name: "search folders, harnesses, and models" })).toHaveCount(1);
   const inputs = form.locator('input[type="text"], input[type="search"]');
   const inputCount = await inputs.count();
@@ -1648,11 +1648,11 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
       "does not exist",
     );
     // Preserved, not cleared or reset: the same values the user typed.
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(
+    await expect(form.getByLabel("working directory")).toHaveValue(
       "/nonexistent/definitely/not/here",
     );
-    await expect(form.locator('input[type="text"]').nth(1)).toHaveValue("true");
-    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(title);
+    await expect(form.getByLabel("agent command")).toHaveValue("true");
+    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
     // The form itself stayed open (a failed create must not silently
     // close it and strand the user with no visible cause).
     await expect(form).toBeVisible();
@@ -1666,7 +1666,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
     // double-submission guard in `CreateSessionForm`'s `onsubmit` would
     // otherwise leave the control permanently disabled after its first,
     // failed attempt).
-    await form.locator('input[type="text"]').nth(0).fill("/tmp");
+    await form.getByLabel("working directory").fill("/tmp");
     await form.locator('button[type="submit"]').click();
     await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await expect(page.locator(".titlebar .title")).toHaveText(title);

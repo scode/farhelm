@@ -38,7 +38,7 @@ function row(page: Page, id: string) {
  * values into the request.
  */
 async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
-  await form.locator('input[type="text"]').nth(0).fill(cwd);
+  await form.getByLabel("working directory").fill(cwd);
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -50,18 +50,14 @@ async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
 }
 
 /**
- * Edit clone title through the visible advanced control.
+ * Edit a clone's name through its label.
  *
- * Raw/profile clones retain their title in the collapsed disclosure. Opening
- * it here keeps the clone regression on the real modal interaction path;
- * direct ordinal fills would make a hidden input look usable to a person.
+ * The name field sits on the composer's top action row now, so there is no
+ * disclosure left to open — this helper survives only because callers share
+ * one name for "however the clone's name field is reached."
  */
 async function fillCloneTitle(form: Locator, title: string) {
-  const advanced = form.locator("details.launch-composer-advanced");
-  if ((await advanced.getAttribute("open")) === null) {
-    await advanced.locator("summary").click();
-  }
-  await form.getByLabel("title (optional)").fill(title);
+  await form.getByLabel("name (optional)").fill(title);
 }
 
 /**
@@ -209,8 +205,8 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
 
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(originalCwd);
-    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(title);
+    await expect(form.getByLabel("working directory")).toHaveValue(originalCwd);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
     // The row's OWN profile (A) wins the picker over the helm's remembered
     // default (B, moved there by the throwaway session above) — see that
     // fixture's own comment for why the two must differ for this
@@ -218,7 +214,10 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await expect(form.locator(".create-session-profile")).toHaveValue(profileA.id, {
       timeout: 20_000,
     });
-    const command = form.locator('input[type="text"]').nth(1);
+    // Substring match on purpose: this field's accessible name grows a
+    // parenthetical while a profile is selected (asserted via `commandLabel`
+    // below), and both spellings start with "agent command".
+    const command = form.getByLabel("agent command");
     // The label is located from the input upward: a `has` filter rooted at the
     // form can never match, because the inner locator would be re-rooted at
     // each candidate label and the form is not inside its own label.
@@ -243,7 +242,7 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await form.locator(".create-session-profile").selectOption(profileA.id);
 
     const newCwd = stackScratchDir("clone-e2e-");
-    await form.locator('input[type="text"]').nth(0).fill(newCwd);
+    await form.getByLabel("working directory").fill(newCwd);
     const [response] = await Promise.all([
       page.waitForResponse(
         (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -322,15 +321,15 @@ test("each clone restores every field after an intervening draft edit", async ({
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(cwdA);
-    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(titleA);
-    await expect(form.locator('input[type="text"]').nth(1)).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("working directory")).toHaveValue(cwdA);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(titleA);
+    await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
 
     // Edit every field before cloning again — a partial reseed (one field
     // replaced, another left at this edit) would otherwise be invisible
     // to an assertion that only checked the fields B's clone changes.
-    await form.locator('input[type="text"]').nth(0).fill("/tmp/edited-in-between");
-    await form.locator('input[type="text"]').nth(1).fill("sleep 999");
+    await form.getByLabel("working directory").fill("/tmp/edited-in-between");
+    await form.getByLabel("agent command").fill("sleep 999");
     await fillCloneTitle(form, "edited in between");
 
     // A modal keeps its obscured sidebar inert. Cancel this edited draft
@@ -341,21 +340,21 @@ test("each clone restores every field after an intervening draft edit", async ({
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
     await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(cwdB);
-    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(titleB);
-    await expect(form.locator('input[type="text"]').nth(1)).toHaveValue(FAKE_AGENT);
+    await expect(form.getByLabel("working directory")).toHaveValue(cwdB);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
+    await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
 
     // Edit again, close, then clone B a second time. A later mount of the
     // same source must not restore the abandoned draft merely because its
     // prefill resembles the previous clone.
-    await form.locator('input[type="text"]').nth(0).fill("/tmp/edited-again");
+    await form.getByLabel("working directory").fill("/tmp/edited-again");
     await fillCloneTitle(form, "edited again");
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(cwdB);
-    await expect(form.locator('input[type="text"]').nth(2)).toHaveValue(titleB);
+    await expect(form.getByLabel("working directory")).toHaveValue(cwdB);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
 
     const newCwd = stackScratchDir("clone-reseed-e2e-");
     cloneId = await submitClonedCwd(page, form, newCwd);
@@ -417,7 +416,7 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     await openRowMenu(source);
     await source.locator(".session-row-clone").click();
     await expect(form).toBeVisible();
-    await expect(form.locator('input[type="text"]').nth(0)).toHaveValue(sourceCwd);
+    await expect(form.getByLabel("working directory")).toHaveValue(sourceCwd);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await newSessionButton.click();
