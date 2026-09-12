@@ -19,26 +19,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Put the launch composer's Launch and Cancel buttons at the very top of the dialog, where they are the first thing to
-  reach, instead of to the right of the name field. The row moved up once already (from the bottom of a tall dialog),
-  but sharing a row with the name input still parks the primary action in the far corner.
-- Make the launch composer wider and use the space better. At the current width the dialog needs scrolling as soon as a
-  harness is chosen: the model chips wrap into several rows, and the folder, host, harness, and model sections each take
-  a full-width band with a mostly empty label column on the left. The goal is the whole form visible without scrolling
-  on an ordinary desktop window.
-- Apply the launch composer redesign drawn in
-  [this mockup](https://claude.ai/code/artifact/abc26076-022f-4717-ab09-5880ba7708a6), which covers the two entries
-  above and the rest of the look-and-feel pass. Read the mockup, not just this entry: it is an SVG of the whole dialog
-  at rest, the model combobox open, and a footprint comparison, with a numbered key. The substance: Launch is the first
-  control and its label names the harness, host, and folder; Cancel is an outline button beside it; the summary line
-  carries model, effort, and permissions; search stays as the keyboard path and the chips under it go; recent setups
-  become list rows with the harness bold and Enter on the focused row; host and folder collapse into one destination row
-  with a folder combobox; harness stays as chips; model becomes a combobox filtered by the chosen harness; permissions
-  and effort become segmented controls. Everything stays in JetBrains Mono, hierarchy from weight and color; one radius
-  scale (6 px controls, 8 px containers, 12 px dialog); inputs on the composer control background rather than pure
-  black; one selected treatment reused everywhere; Launch the only saturated fill; yolo in the danger color wherever it
-  is shown. The drawn resting state is 960 by 488 px.
-
 - Stop the whole app scrolling. After the recent UI changes, a wheel or trackpad scroll that lands over the top of the
   window, or over the thin bar between the terminal and the sidebar, scrolls the entire app contents and exposes the
   black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself

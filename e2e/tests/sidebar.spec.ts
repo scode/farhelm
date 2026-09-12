@@ -6113,6 +6113,62 @@ test("composer keeps launch and cancel inside the initial viewport at default an
 });
 
 /**
+ * A chosen harness and model are the resting desktop case that previously
+ * pushed the composer past an ordinary window. This pins the mockup's 960px
+ * footprint, proves its content no longer needs the dialog scrollbar at
+ * 1440×900, and keeps both responsive column boundaries observable: the full
+ * dialog stays side by side at 1000px while 700px returns to one column
+ * without making the document horizontally scrollable.
+ */
+test("composer fits a 1440 by 900 window without scrolling once a harness and model are chosen", async ({
+  page,
+  request,
+}) => {
+  await installComposerChoices(page, request, [], [{ id: "fit-model", harness: "codex", efforts: ["high"] }]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.focus();
+  await form.getByRole("option", { name: "fit-model", exact: true }).click();
+  // Premise: the pick landed, the listbox (an absolutely positioned child of
+  // the scroll container) is gone, and the effort strip that only a chosen
+  // harness renders is present. A less populated form would fit trivially.
+  await expect(model).toHaveValue("fit-model");
+  await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
+  await expect(form.locator(".launch-composer-effort-choice")).toBeVisible();
+
+  expect(
+    await form.evaluate((node) => node.scrollHeight <= node.clientHeight),
+    "the populated resting composer must fit inside its own viewport",
+  ).toBe(true);
+  expect((await form.boundingBox())!.width, "the full-width dialog must match the mockup footprint").toBe(960);
+
+  const destination = form.locator(".launch-composer-column-destination");
+  const choices = form.locator(".launch-composer-column-choices");
+  await page.setViewportSize({ width: 1000, height: 900 });
+  // The breakpoint is where the 960px dialog first fits with its margins, so
+  // the width must hold here too, not only at 1440.
+  expect((await form.boundingBox())!.width, "the dialog keeps its full width at the breakpoint").toBe(960);
+  const sideBySideDestination = (await destination.boundingBox())!;
+  const sideBySideChoices = (await choices.boundingBox())!;
+  expect(sideBySideDestination.y, "the full-width dialog keeps its columns aligned at the breakpoint").toBe(sideBySideChoices.y);
+  expect(sideBySideDestination.x, "the full-width dialog keeps its columns distinct at the breakpoint").toBeLessThan(sideBySideChoices.x);
+
+  await page.setViewportSize({ width: 700, height: 900 });
+  const stackedDestination = (await destination.boundingBox())!;
+  const stackedChoices = (await choices.boundingBox())!;
+  expect(stackedDestination.y, "the narrow dialog must place destination before choices").toBeLessThan(stackedChoices.y);
+  expect(stackedDestination.x, "stacked columns must share one left edge").toBe(stackedChoices.x);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+    "the responsive dialog must not widen the document beyond the viewport",
+  ).toBe(true);
+});
+
+/**
  * The empty-history dialog is the case the old fixed-height, reserved-band
  * layout handled worst: a first-time host, or any filter matching nothing,
  * used to pay for a "recent setups" band and its three tracks even though
