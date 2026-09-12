@@ -84,12 +84,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   spec's name-field label, so this reads as the same WebKit initial-focus family recorded above rather than a composer
   regression, but that attribution is not established. Retain focus-event traces before changing the test.
 
-- Investigate the retained host-action fixture failures from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`.
-  WebKit's `aliasing a remote host renames it everywhere but the details view`, in `e2e/tests/sidebar.spec.ts`, tried to
-  read a disposed `route.fetch` response and also failed teardown.
+- Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
   `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
-  `.host-details-toggle`. Preserve route lifetime and host-row state evidence before changing product behavior; the
-  failures alone do not establish a composer regression or a confirmed pre-composer cause.
+  `.host-details-toggle`. Twenty repetitions did not reproduce it. The run's other failure, the sidebar aliasing test's
+  disposed `route.fetch` response, was the WebKit navigation-disposal mechanism and is fixed; this one has no
+  reproduction or established cause. Preserve host-row state evidence before changing product behavior; the failure
+  alone does not establish a composer regression or a confirmed pre-composer cause.
 
 - Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
   `7fd44a19-ce3f-42fb-a3df-410da327634a`.

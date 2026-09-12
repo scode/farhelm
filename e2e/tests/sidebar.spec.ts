@@ -6154,9 +6154,23 @@ test("aliasing a remote host renames it everywhere but the details view", async 
 
   await page.route("**/api/hosts", async (route) => {
     const response = await route.fetch();
-    const body = await response.json();
-    body.hosts = [...body.hosts.filter((host: any) => host.kind === "local"), hostFixture()];
-    await route.fulfill({ response, json: body });
+    try {
+      const body = await response.json();
+      body.hosts = [...body.hosts.filter((host: any) => host.kind === "local"), hostFixture()];
+      await route.fulfill({ response, json: body });
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.includes("Response has been disposed")) {
+        throw err;
+      }
+      // The reloads below abort the page's in-flight hosts poll
+      // mid-interception, and WebKit answers that abort by disposing the
+      // response this handler is reading. There is then no client left to
+      // answer — the refetch on the far side of the navigation re-enters
+      // this handler — so the disposal is the correct outcome, not a
+      // fixture failure. Chromium keeps such requests alive, which is why
+      // this never fired there. Anything else stays loud.
+      return;
+    }
   });
   await page.route(`**/api/hosts/${hostId}/alias`, async (route) => {
     const submitted = route.request().postDataJSON() as { alias: string | null };
