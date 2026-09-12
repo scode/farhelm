@@ -71,18 +71,42 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   retained trace carries network, DOM, and console. Establish provenance before changing authentication behavior or
   recovery assertions.
 
+  Provenance established 2026-09-12, two new reproductions of the missing-sidebar-row shape via recorded hunts (batch
+  `d1859bb8-dc57-4c74-bc41-1c9ca25036cd`): the row is missing because the recovery batch's `/api/sessions?sort=activity`
+  and `/api/hosts` fetches were NEVER SENT — trace network snapshots show `send: -1` from creation until teardown, twice
+  in a row (the feed-handshake re-read batch too), while the same frame's profiles/detail/preferences reads were served
+  in tens of milliseconds throughout, and the reconnected feed and terminal sockets' upgrades themselves queued 4.3s and
+  45s. The helm and supervisor are innocent by logs (both silent through the whole window; supervisor logs preserved
+  from the second reproduction) and every request the helm received was answered. So the stall is in the BROWSER's
+  dispatch of exactly those two fetches, cause not established — what remains unknown is renderer-side network state a
+  Playwright trace does not carry. Note the designed recovery cannot show within the test's own 60s budget: the UI's
+  request timeout is 60s, and only a failed read hands the surface to its retry ladder, so any hung read outlives the
+  test. Next rung: renderer-level receipts in the UI's fetch wrapper (dispatch and completion per request,
+  console-carried) to catch a never-dispatched fetch in the act.
+
 - Investigate the remaining initial profile focus failures in `e2e/tests/profiles.spec.ts`. WebKit failed the editor
   focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus in
   `a profile edited in another browser reaches this one over the real feed`. The latter occurs before the separately
   corrected second-client terminal-readiness boundary. Preserve both tests' focus and feed assertions; the new
   observation does not establish a regression in saving profiles or delivering their updates.
 
+  Recorded hunt 2026-09-12 (batch `daf6d0e1-8081-4caa-85f1-c39624a75d8e`): the two-client feed case reproduced its
+  focus-premise failure 1/20 on WebKit (`toBeFocused` received inactive for 5s while the input sat rendered), trace and
+  screenshots retained in the run; `Tab leaving the document` passed all 40 of its attempts across that hunt. A read of
+  the coordinator's receipts (not a reproduced cause): opening a form's focus request can be consumed as `Unknown` when
+  the 250ms `FOCUS_SETTLE_MS` budget cannot cover the eval round trips on loaded WebKit, which settles into exactly this
+  never-focused state — but no instrumented rerun caught receipts in the act in 25 further attempts, and the
+  fixture-diagnosis history warns against treating that as proven. The test is also named under "Difficult deflake"
+  below.
+
 - Investigate `the profiles popup border box stays inside a constrained viewport`, in `e2e/tests/profiles.spec.ts`.
   WebKit failed its focus premise (`toBeFocused` received inactive) once in browser run
   `ed375214-fa16-4b8f-bcad-00117ff59e97`, a landing-time run of the launcher composer stack rebased onto the OpenCode
   and macOS-header changes; the same run passed the test on Chromium. The launcher change touches only the profiles
   spec's name-field label, so this reads as the same WebKit initial-focus family recorded above rather than a composer
-  regression, but that attribution is not established. Retain focus-event traces before changing the test.
+  regression, but that attribution is not established. Retain focus-event traces before changing the test. A recorded
+  hunt on 2026-09-12 (batch `addd38f4-a637-49b0-86f6-b1bd947876de`) passed all twenty repetitions on both engines —
+  non-reproduction evidence, consistent with the earlier twenty isolated repetitions.
 
 - Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
   `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
@@ -100,6 +124,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the expected path and mounted/revealed state but a closed socket at readiness. Retain gate, attachment and
   close-reason receipts; keep these failures distinct from the existing single-client stall entry, and do not weaken
   liveness assertions based on a later passing run.
+
+  The island-cap shape reproduced 3/20 recorded WebKit repetitions on 2026-09-12 (batch
+  `396d6272-a07d-4bd4-b9f1-6409bc916cc9`, timelines attached in the run): the agent terminal's established socket
+  errored and closed about two seconds into the 32-phantom attach-refusal storm, with NO helm log line for it; every
+  reconnect-ladder attempt after that was refused within milliseconds for the rest of the test, and one past-cap
+  phantom's attach retried on a ladder of its own for 20s. The helm logged only the phantom refusals ("has no terminal
+  tab"); the supervisor's log was silent; what killed the agent attachment is not established.
+
+  The stall test's zero-pause shape also reproduced once in ten recorded repetitions (batch
+  `e5f7f17f-7f24-4118-8559-62a1ea5df624`, then 24 consecutive passes): one tab's socket closed about 1.2 seconds after
+  the flood started — before any HIGH_WATER crossing, with no helm log line — the pause poll then waited its full sixty
+  seconds over a dead socket, and at the supervisor's stall interval the session's other two sockets closed before
+  reconnect ladders that were refused instantly. That is the same early-silent-close signature as the island-cap
+  reproduction, and it is consistent with the helm's outbound side winning the race before the browser could pause, but
+  the closing half's own receipt (detach reason, queue depth) still needs a supervisor-side log from a reproduction —
+  preserve the stack's supervisor logs past teardown when hunting again.
 
 ### Difficult deflake
 
