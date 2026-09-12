@@ -784,3 +784,49 @@ carries network, DOM, and console. Disposition: still open in TODO.md.
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-12 — `profile focus counts delayed evaluations against one deadline` misses its budget on loaded WebKit (e2e/tests/profiles.spec.ts)
+
+WebKit run `897e85bb-47b1-404f-a6cf-5f727048dcfe` (full profiles spec, both engines, one worker, zero retries, recorded
+pinned tmux 3.7c executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`, `LANG=C.UTF-8`,
+ambient `FARHELM_*` scrubbed): the opening focus commit never landed within the 2 s premise wait, so the 2-attempt/250
+ms timing assertions never ran; 119/120 passed. A concurrent full two-engine gate overlapped the run on the same host. A
+recorded narrow `--repeat-each=5` webkit loop on the same tree, run `8e961b39-960a-46f8-b289-0ac548710259`, then passed
+4/5 with the fourth repeat missing the same opening focus commit (`toBeFocused` failed), so the miss reproduces in a
+narrow loop. The test injects 180 ms of evaluation delay against a 250 ms wall-clock budget, leaving about 70 ms for all
+WebKit bridge overhead. No path in this test claims the operation lock, so no control is ever disabled and the
+concurrent disable-blur repair cannot execute here; the miss reads as load, not as a regression from that change.
+Disposition: still open; the TODO entry is left to the maintainer.
+
+Class: budget
+
+Cause: hypothesis
+
+## 2026-09-12 — popup disable-blur dismissal race fixed (e2e/tests/profiles.spec.ts, crates/farhelm-ui/src/app_bar.rs)
+
+Chromium run `45efb275-84b9-4aab-9dd2-550fd45d4e7a` left the popup mounted after the toggle close in
+`a popup-created
+profile is offered on every host` with the profile registered server-side. Batch
+`acc5a4cf-2087-4f2a-a4f0-9c2d4450d927` ran the exact test twenty times per engine with the strengthened fixture premise
+but the product unmodified, reproducing the underlying event twice (attempts 1-2, Chromium): the popup dismissed between
+the save click and the close (form trivially gone, saved row never rendered, failure screenshot shows no popover). The
+mechanism is the product's own busy-disabling: the save claims the operation lock, the focused save button disables,
+focus falls to `body`, and the popup `focusout` listener reported that blur as an ordinary outside intent. When the
+dismissal classifier sampled `body` after the lock released but before completion focus committed, the popup closed and
+killed completion focus with it; the later toggle click then reopened the dismissed popup instead of closing it. The
+listener now ignores a focus-out whose target is disabled (a control that was already disabled cannot hold focus, so any
+such event is a disable-blur), while trusted pointer and Tab provenance report exactly as before. The test pins its
+close to the save completion contract (POST receipt, unmounted form, rendered row) and `closeProfiles` asserts its open
+premise with lock-state receipts. Batch `39f81e52-2277-4e55-b584-9a15c0d48653` ran the exact test twenty times per
+engine with zero failures; run `4627195c-2fb2-472c-8e8c-557400527b2f` passed the whole profiles spec 120/120 on both
+engines with pinned tmux 3.7c executable SHA256 `b58c5c9f6bc31f8a5fa4cfba183b9342b447c3365e0a77a3c21f7ce31a192ce5`,
+`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed. A deterministic pin test
+(`disabling the focused save control does not
+dismiss the popup`) now scripts the disable-blur directly: run
+`d08fc2fa-9de0-4c9c-9474-fa8fb0c34cd6` fails it against the pre-fix bundle (the popup unmounts inside the observation
+window), and batch `23367a9f-dc59-4761-ac1d-3b4ab0c2bee1` passes it twice per engine against the fixed one. Disposition:
+fixed in this PR; the TODO.md entry is removed.
+
+Class: product
+
+Cause: established
