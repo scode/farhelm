@@ -64,6 +64,21 @@ function row(page: Page, id: string) {
 }
 
 /**
+ * Remove ANSI SGR escape sequences from a string.
+ *
+ * tracing-subscriber's fmt layer styles timestamps, levels, and field
+ * names unconditionally — it does not fall back to plain text when stderr
+ * is redirected to a file, which is how the stack keeps each supervisor's
+ * log. Substring assertions against those logs see bytes like
+ * `request <esc>[3mcwd<esc>[0m<esc>[2m=<esc>[0m/tmp/...` and must strip
+ * the styling before matching, or the assertion is unsatisfiable by
+ * construction (the 2026-09-06 browse-receipt failure was exactly that).
+ */
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/**
  * The id of the shared, always-present `e2e-session` fixture
  * (`terminal-suite.ts`'s `resetStack` relaunches it before every spec
  * file), for pinning auto-select away from a test's OWN fixture rows —
@@ -4512,7 +4527,9 @@ test("composer path actions keep typing inert and browse the selected remote hos
   await expect(form.getByRole("button", { name: `${remotePath}/launch`, exact: true }), "the forwarded remote listing must expose its real launch child").toBeVisible();
   const remoteLog = path.join(path.dirname(remotePath), "remote-supervisor.log");
   await expect.poll(
-    () => fs.readFileSync(remoteLog, "utf8").includes(`received directory browse request cwd=${remotePath}`),
+    () =>
+      stripAnsi(fs.readFileSync(remoteLog, "utf8"))
+        .includes(`received directory browse request cwd=${remotePath}`),
     { message: "the selected remote supervisor must independently record the forwarded browse request" },
   ).toBe(true);
   expect(createPosts, "Browse only opens the picker").toBe(0);
