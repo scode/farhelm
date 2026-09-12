@@ -3350,22 +3350,6 @@ samp {
   color: var(--composer-selected-fg);
 }
 
-/* Each option renders the same checkmark slot. `visibility`, rather than
-   conditional text or a pseudo-element, preserves the glyph's real advance
-   on both sides of a selection change. That keeps comparison peers anchored
-   when a choice becomes selected. */
-.launch-composer-option-check {
-  display: inline-block;
-  width: 1.1em;
-  margin-right: 0.25em;
-  visibility: hidden;
-}
-
-.launch-composer-options > button.selected > .launch-composer-option-check {
-  visibility: visible;
-}
-
-
 /* A current catalog can reject an exact snapshot recorded by an earlier
    release. Keep that snapshot readable, then state why Launch is disabled so
    a clone never appears to have silently changed its requested agent. */
@@ -3375,31 +3359,46 @@ samp {
   font-size: 12px;
 }
 
-.launch-composer-more {
-  grid-column: 2;
+/* Compact labels and inline catalog counts keep the repeated choice rows
+   scannable without competing with the choices themselves. */
+.launch-composer-section-label {
+  color: var(--composer-control-fg);
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+/* The field and its "<n> for <Harness>" hint share a row that may wrap: at
+   phone width the hint drops under the field rather than squeezing it. The
+   listbox is positioned against this wrapper, so a wrapped hint moves the
+   list down by one line and nothing else. */
+.launch-composer-model {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.launch-composer-model > input {
+  width: min(100%, 440px);
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--composer-border);
+  border-radius: 6px;
+  background: var(--composer-control-bg);
+  color: var(--composer-control-fg);
+}
+
+.launch-composer-model-hint {
   color: var(--composer-control-fg);
   font-size: 12px;
+  white-space: nowrap;
 }
 
-.launch-composer-more > summary {
-  width: fit-content;
-  cursor: pointer;
-}
-
-.launch-composer-more > input {
-  width: min(100%, 360px);
-  margin-top: 6px;
-}
-
-.launch-composer-search {
-  position: relative;
-}
-
-.launch-composer-search > input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
+/* Model and folder search are the same elevated, keyboard-owned result surface. */
+.launch-composer-listbox,
 .launch-composer-search-results {
   position: absolute;
   z-index: 2;
@@ -3415,6 +3414,85 @@ samp {
   border: 1px solid var(--composer-selected-border);
   border-radius: 8px;
   box-shadow: var(--composer-menu-shadow);
+}
+
+.launch-composer-search {
+  position: relative;
+}
+
+.launch-composer-search > input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.launch-composer-listbox {
+  width: min(100%, 440px);
+}
+
+.launch-composer-listbox > button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--composer-selected-fg);
+  text-align: left;
+}
+
+.launch-composer-listbox > button.selected {
+  background: var(--composer-selected-bg);
+}
+
+/* Pointer feedback without borrowing the navigated row's fill, the same
+   split the search results keep: `.selected` names what Enter will apply,
+   hover only says where the pointer is. */
+.launch-composer-listbox > button:hover:not(.selected) {
+  background: var(--composer-search-hover-bg);
+  box-shadow: inset 0 0 0 1px var(--composer-border);
+}
+
+.launch-composer-listbox > button:last-child {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--composer-border);
+  color: var(--composer-control-fg);
+}
+
+/* Fixed, mutually exclusive choices read as one decision when their buttons
+   share an outer border instead of looking like unrelated actions. */
+.launch-composer-segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1.5px solid var(--composer-border);
+  border-radius: 6px;
+  background: var(--composer-control-bg);
+}
+
+.launch-composer-segmented > button {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--composer-control-fg);
+  font-size: 13px;
+}
+
+.launch-composer-segmented > button + button {
+  border-left: 1px solid var(--composer-border);
+}
+
+.launch-composer-segmented > button.selected {
+  background: var(--composer-selected-bg);
+  color: var(--composer-selected-fg);
+  font-weight: 600;
+}
+
+/* YOLO remains an explicit warning after selection; the selected-state text
+   color must not turn a dangerous choice into an ordinary segment. This rule
+   ties with `button.selected` on specificity and wins by coming later in the
+   sheet, which is why it must stay below that rule. */
+.launch-composer-segmented > button.launch-composer-segment-danger {
+  color: var(--danger);
 }
 
 /* Search headings are semantic group boundaries: partial field actions and
@@ -3661,8 +3739,7 @@ samp {
     gap: 4px;
   }
 
-  .launch-composer-choice-error,
-  .launch-composer-more {
+  .launch-composer-choice-error {
     margin-left: 0;
     grid-column: 1;
   }
