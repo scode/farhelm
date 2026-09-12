@@ -43,8 +43,8 @@ import {
   forceBuildSkew,
   hideSeenState,
   holdReads,
+  listHosts,
   listSessions,
-  openFilterBar,
   openRowMenu,
   observeFeedReaders,
   readFeedReaders,
@@ -52,6 +52,7 @@ import {
   renameSession,
   SESSION_LISTING,
   stubFeed,
+  localHostId,
   waitForFeedReadersSettled,
   waitForFeedReadersWithdrawn,
 } from "./helpers/fleet";
@@ -855,37 +856,41 @@ test.describe("the invalidation feed", () => {
    * "withdraws every UNATTENDED behavior … while anything the user explicitly
    * asks for keeps working" — and both halves have teeth. The test above pins
    * the first; without this one, a page that stood every read down would pass
-   * it perfectly while leaving a skewed user with a search box that does
+   * it perfectly while leaving a skewed user with a host selector that does
    * nothing, which is the failure mode a reviewer would never see because it
    * looks exactly like the rule being obeyed.
    *
    * The classification lives one layer down (`reader::Trigger`) and its unit
    * tests already prove an Explicit demand survives a latched mismatch. What
-   * only a browser can say is that the UI CLASSIFIES a live filter edit that
-   * way: the assertion is a request on the wire carrying the search, and rows
+   * only a browser can say is that the UI CLASSIFIES a host choice that way:
+   * the assertion is a request on the wire carrying the host ID, and rows
    * that changed because of it.
    *
    * The unattended half is asserted in the same test rather than trusted from
    * the one above, because the interesting failure is a fix that reopens the
-   * floodgates — restoring live filtering by ungating reads altogether.
+   * floodgates — restoring unattended reads altogether.
    */
-  test("a skewed page still reads after a live filter edit", async ({ page, request }) => {
+  test("a skewed page still reads after an explicit host choice", async ({ page, request }) => {
     await observeFeedReaders(page);
     const stamp = Date.now();
-    const needle = `skew-needle-${stamp}`;
-    const wanted = await createSession(request, { title: needle });
-    const other = await createSession(request, { title: `skew-haystack-${stamp}` });
+    const local = await localHostId(request);
+    const remote = (await listHosts(request)).find((host) => host.id !== local);
+    expect(remote, "the fixture needs a remote host to prove host membership boundaries").toBeTruthy();
+    const wanted = await createSession(request, { title: `skew-local-${stamp}`, host: local });
+    const other = await createSession(request, { title: `skew-remote-${stamp}`, host: remote!.id });
     created.push(wanted.id, other.id);
+    const localListing = await listSessions(request, `host=${local}`);
+    expect(localListing.sessions.some((session) => session.id === wanted.id)).toBe(true);
+    expect(localListing.sessions.some((session) => session.id === other.id)).toBe(false);
 
     const feed = await stubFeed(page);
     const reads = countReads(page);
     await forceBuildSkew(page, "9.9.9-not-this-bundle");
     await page.goto("/");
-    await openFilterBar(page);
     await expect(page.locator(".build-skew")).toBeVisible({ timeout: 20_000 });
     // The mount read is explicit too (a person navigated here), so the rows
-    // are on screen even under skew — which is what gives the filter below
-    // something to narrow.
+    // are on screen even under skew — which gives the host choice below
+    // membership to distinguish.
     await expect(row(page, wanted.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, other.id)).toBeVisible();
 
@@ -900,25 +905,30 @@ test.describe("the invalidation feed", () => {
       `a skewed page reads nothing on its own; saw ${reads.urls().slice(quiet).join(", ")}`,
     ).toBe(0);
 
-    // And then a person asks.
+    // And then a person asks for one host.
     const before = reads.count("listing");
-    await page.locator(".filter-title").fill(needle);
+    const host = page.locator(".filter-host");
+    await host.focus();
+    await expect(host).toBeFocused();
+    await host.selectOption(String(local));
 
-    await expect(page.locator(".session-row")).toHaveCount(1, { timeout: 20_000 });
+    await expect(page.locator(".session-row")).toHaveCount(localListing.sessions.length, { timeout: 20_000 });
     await expect(row(page, wanted.id)).toBeVisible();
     await expect(row(page, other.id)).toHaveCount(0);
     const asked = reads.urls("listing").slice(before);
     expect(
       asked.length,
-      "a live filter edit under skew must reach the helm, or the search box is decorative",
+      "a host choice under skew must reach the helm",
     ).toBeGreaterThan(0);
     expect(
-      asked.every((url) => new URL(url).searchParams.get("title") === needle),
-      `every read the live edit produced must carry the search; saw ${asked.join(", ")}`,
+      asked.every((url) => new URL(url).searchParams.get("host") === String(local)),
+      `every read the host choice produced must carry the selected ID; saw ${asked.join(", ")}`,
     ).toBe(true);
     // The banner is the helm's own count, so it is the half the page could
     // not have produced by narrowing rows it already held.
-    await expect(page.locator(".session-count")).toHaveText(/^1 matching of \d+ sessions$/);
+    await expect(page.locator(".session-count")).toHaveText(
+      new RegExp(`^${localListing.sessions.length} matching of \\d+ sessions$`),
+    );
     // Still skewed, and still saying so: the read the user asked for is not a
     // reason to forget the mismatch.
     await expect(page.locator(".build-skew")).toBeVisible();

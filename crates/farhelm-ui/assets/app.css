@@ -362,7 +362,7 @@ samp {
   flex-shrink: 0;
   /* x is clipped, y scrolls (shorthand order: x then y). Session and host
    * rows stack and ellipsize per line; their fixed menus escape this
-   * clipping context. The filter controls do too. */
+   * clipping context. */
   overflow: hidden auto;
   /* The sidebar scrolls without a scrollbar. On macOS the overlay scrollbar
    * painted itself over the column's right edge and covered the row menu
@@ -501,6 +501,32 @@ samp {
   color: var(--fg-0);
   font: 12px var(--font-ui);
   padding: 1px 4px;
+}
+
+/* The sidebar keeps its two native selectors visible even for a failed list
+   read. Both may contain long registry labels, so neither gets to impose its
+   intrinsic width on a narrow sidebar. */
+.list-header-controls .filter-host,
+.list-header-controls .sort-select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.list-header-controls .filter-host {
+  flex: 1 1 9em;
+}
+
+/* Keep the new native selector in the same compact visual language as sort
+   without replacing the platform behavior that makes it accessible. */
+.list-header-controls .filter-host,
+.list-header-controls .sort-select {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
 }
 
 /* ===== Main pane titlebar ========================================= */
@@ -2312,8 +2338,7 @@ samp {
 }
 
 .add-host-button,
-.profiles-toggle,
-.filter-toggle {
+.profiles-toggle {
   background: var(--bg-2);
   border-color: var(--border);
   color: var(--fg-0);
@@ -2907,73 +2932,7 @@ samp {
   background: var(--bg-1);
 }
 
-/* ===== Filter and search ========================================== */
-
-/* Filter and search is a fixed popover because the sidebar scrolls and clips
-   ordinary descendants. Its coordinates come only from
-   `filter_popover_placement_style`: a class-level position would leak into
-   the measured state and detach the panel from the header toggle. The count
-   line remains the visible closed-filter announcement, so this surface need
-   not reserve in-flow space while it is closed. */
-.filter-popover {
-  position: fixed;
-  z-index: 20;
-  box-sizing: border-box;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-  width: 288px;
-  max-height: calc(100vh - 16px);
-  overflow-y: auto;
-  padding: 10px 14px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-menu);
-}
-
-.filter-popover label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: var(--fg-1);
-}
-
-.filter-popover .filter-archived {
-  flex-direction: row;
-  align-items: center;
-  padding-bottom: 5px;
-}
-
-.filter-popover .filter-archived input {
-  width: auto;
-}
-
-.filter-popover input,
-.filter-popover select {
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg-0);
-  font: inherit;
-  font-size: 13px;
-  padding: 4px 8px;
-  /* Bounded rather than content-sized: a host name or a typed search term
-     can be long, and a field that grew with it would reflow the whole row
-     as the user types. */
-  max-width: 14em;
-}
-
-.filter-popover .btn {
-  font-size: 13px;
-  padding: 4px 10px;
-}
-
-/* Said in words beside the banner's numbers: a count over an empty box
-   reads as a list that failed to load rather than as a search that found
-   nothing, and the two call for opposite reactions. */
+/* A host-filter result still needs a textual empty state. */
 .filter-empty {
   color: var(--fg-1);
 }

@@ -5,10 +5,8 @@
  *
  * Its own spec file per the convention every area has followed since M6.5
  * (see sidebar.spec.ts's header). The subject is close to filters.spec.ts's
- * and deliberately separate from it: an order and a filter are different
- * dimensions of one request — a filter decides which sessions a listing
- * holds, an order decides in what sequence they arrive — and the control
- * under test here is specifically the one OUTSIDE the filter popover.
+ * and deliberately separate from it: ordering has its own persistence and
+ * whole-list query contracts.
  *
  * ## What these tests are actually checking
  *
@@ -53,10 +51,11 @@ import {
   createSession,
   FeedStub,
   forgetAutoSelect,
+  listHosts,
+  localHostId,
   patchPreferences,
   readPreferences,
   resetPreferences,
-  openFilterBar,
   SESSION_LISTING,
   stubFeed,
 } from "./helpers/fleet";
@@ -69,15 +68,14 @@ function row(page: Page, id: string) {
 /**
  * Load the list with a stubbed, healthy feed.
  *
- * Stubbed for filters.spec.ts's reason: the shared stack's other sessions
+ * Stubbed for the host-selector suite's reason: the shared stack's other sessions
  * keep changing status, every change is a revision bump, and each bump
  * re-reads the list — under assertions about the ORDER of rows, at moments
  * no test chose. A silent feed makes the list change exactly when a test
  * asks it to.
  *
- * Deliberately does NOT open the filter popover. The sort control's whole
- * placement decision is that it is reachable without opening anything, and a
- * helper that opened the bar on the way in would hide a regression that put
+ * The sort control is directly reachable in the sidebar. A helper that
+ * changed another control on the way in would hide a regression that put
  * the control back inside it.
  *
  * The stub is handed back, unlike filters.spec.ts's: the persistence test
@@ -252,11 +250,13 @@ test.describe("session list ordering", () => {
   async function threeOrderedSessions(
     request: APIRequestContext,
     stamp: number,
+    host?: number,
   ): Promise<{ a: string; m: string; z: string }> {
     const first = await createSession(request, {
       title: `sortfix-${stamp}-aaa`,
       cwd: "/tmp",
       invocation: "sleep 300",
+      host,
     });
     created.push(first.id);
     // sleep-ok: cross the server's one-second creation timestamp quantum so UUID tie-breaking cannot choose the fixture's order.
@@ -265,6 +265,7 @@ test.describe("session list ordering", () => {
       title: `sortfix-${stamp}-mmm`,
       cwd: "/tmp",
       invocation: "sleep 300",
+      host,
     });
     created.push(second.id);
     // sleep-ok: give the third fixture a distinct creation second as well; this creates ordering data, not page readiness.
@@ -273,6 +274,7 @@ test.describe("session list ordering", () => {
       title: `sortfix-${stamp}-zzz`,
       cwd: "/tmp",
       invocation: "sleep 300",
+      host,
     });
     created.push(third.id);
     return { a: first.id, m: second.id, z: third.id };
@@ -307,10 +309,6 @@ test.describe("session list ordering", () => {
       expect(sort, "every listing read must name the order it wants").toBe("activity");
     }
     await expect(page.locator(".sort-select")).toHaveValue("activity");
-    // The control is reachable with the filter popover shut, which is the whole
-    // reason it does not live inside it.
-    await expect(page.locator(".filter-popover")).toHaveCount(0);
-
     // Newest first, and for these rows that is both the activity order and
     // the creation order (see the fixture's docstring).
     expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.z, ids.m, ids.a]);
@@ -510,28 +508,38 @@ test.describe("session list ordering", () => {
   });
 
   /**
-   * Order and filter are independent dimensions of one request, and stay
+   * Order and host selection are independent dimensions of one request, and stay
    * that way across a whole session of using both.
    *
    * One flow rather than four tests because the failures worth catching are
-   * about the INTERACTION: a re-sort that dropped the applied filter would
+   * about the INTERACTION: a re-sort that dropped the selected host would
    * silently widen the list while its count still reports matching rows, and
-   * a live filter edit that dropped the order would answer the user's
-   * search in a sequence their control does not name. Both look like a
+   * a host choice that dropped the order would answer in a sequence its
+   * control does not name. Both look like a
    * working list until someone reads the numbers.
    *
-   * Clearing the filter at the end is the other half of the split: "clear"
-   * undoes a narrowing, and the order is not one — a client that lost its
-   * chosen order to a filter reset would have to re-pick it every time it
-   * finished searching.
+   * Returning to ALL is the other half of the split: it widens rows, while
+   * order remains a separate shared preference.
    */
-  test("an order and a filter survive each other, and clearing the filter keeps the order", async ({
+  test("an order and a host choice survive each other, and ALL keeps the order", async ({
     page,
     request,
   }) => {
     const stamp = Date.now();
-    const ids = await threeOrderedSessions(request, stamp);
-    const search = `sortfix-${stamp}-`;
+    const local = await localHostId(request);
+    const remote = (await listHosts(request)).find((host) => host.id !== local);
+    expect(remote, "the fixture needs a remote host to prove a host selection narrows rows").toBeTruthy();
+    const ids = await threeOrderedSessions(request, stamp, local);
+    const decoy = await createSession(request, {
+      title: `sort-host-decoy-${stamp}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+      host: remote!.id,
+    });
+    created.push(decoy.id);
+    const localListing = await (await request.get(`/api/sessions?host=${local}`)).json();
+    expect(localListing.sessions.some((session: { id: string }) => session.id === ids.a)).toBe(true);
+    expect(localListing.sessions.some((session: { id: string }) => session.id === decoy.id)).toBe(false);
 
     const reads = await watchListingReads(page);
     await listWithStubbedFeed(page);
@@ -542,42 +550,48 @@ test.describe("session list ordering", () => {
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.a, ids.m, ids.z]);
 
-    await openFilterBar(page);
-    await page.locator(".filter-title").fill(search);
-    await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
-    await expect(page.locator(".session-row")).toHaveCount(3);
+    const host = page.locator(".filter-host");
+    await host.focus();
+    await expect(host).toBeFocused();
+    await host.selectOption(String(local));
+    await expect(page.locator(".session-count")).toHaveText(
+      new RegExp(`^${localListing.sessions.length} matching of \\d+ sessions$`),
+    );
+    await expect(page.locator(".session-row")).toHaveCount(localListing.sessions.length);
+    await expect(row(page, decoy.id)).toHaveCount(0);
     expect(await orderOf(page, [ids.a, ids.m, ids.z])).toEqual([ids.a, ids.m, ids.z]);
-    const filtered = latestRead(reads);
-    expect(filtered.searchParams.get("sort")).toBe("title");
-    expect(filtered.searchParams.get("title")).toBe(search);
+    const narrowed = latestRead(reads);
+    expect(narrowed.searchParams.get("sort")).toBe("title");
+    expect(narrowed.searchParams.get("host")).toBe(String(local));
 
-    // Re-sorting WHILE filtered: the request has to carry both, and the
+    // Re-sorting while narrowed: the request has to carry both, and the
     // membership and the banner must not move — only the sequence does.
     await page.locator(".sort-select").selectOption("created");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.z, ids.m, ids.a]);
-    await expect(page.locator(".session-count")).toHaveText(/^3 matching of \d+ sessions$/);
-    await expect(page.locator(".session-row")).toHaveCount(3);
+    await expect(page.locator(".session-count")).toHaveText(
+      new RegExp(`^${localListing.sessions.length} matching of \\d+ sessions$`),
+    );
+    await expect(page.locator(".session-row")).toHaveCount(localListing.sessions.length);
     const resorted = latestRead(reads);
     expect(resorted.searchParams.get("sort")).toBe("created");
     expect(
-      resorted.searchParams.get("title"),
-      "changing the order must not clear the filter the list is under",
-    ).toBe(search);
+      resorted.searchParams.get("host"),
+      "changing the order must not clear the selected host",
+    ).toBe(String(local));
 
-    // Clearing the filter widens the list and leaves the order alone. Picking
-    // the sort moved focus out of the popover and closed it, so reopen first.
-    await openFilterBar(page);
-    await page.locator(".filter-clear").click();
+    // Returning to ALL widens the list and leaves the order alone.
+    await host.selectOption("");
     await expect(page.locator(".session-count")).toHaveText(/^\d+ sessions$/);
+    await expect(row(page, decoy.id)).toBeVisible({ timeout: 20_000 });
     await expect(page.locator(".sort-select")).toHaveValue("created");
     await expect
       .poll(() => orderOf(page, [ids.a, ids.m, ids.z]), { timeout: 20_000 })
       .toEqual([ids.z, ids.m, ids.a]);
     const cleared = latestRead(reads);
     expect(cleared.searchParams.get("sort")).toBe("created");
-    expect(cleared.searchParams.has("title")).toBe(false);
+    expect(cleared.searchParams.has("host")).toBe(false);
   });
 
   /**

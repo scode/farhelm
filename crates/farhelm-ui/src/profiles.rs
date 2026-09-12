@@ -562,8 +562,8 @@ pub(crate) fn resolve_agent(
 /// The integration kinds SPEC.md's built-in v1 catalog offers, in the wire's
 /// own spelling.
 ///
-/// Offered as a choice rather than typed, for `list::FILTERABLE_STATUSES`'s
-/// reason: the helm refuses a kind it does not know, and a select
+/// Offered as a choice rather than typed because the helm refuses a kind it
+/// does not know, and a select
 /// cannot produce a typo. `generic` is the explicit spelling of "no
 /// integration" and is listed rather than implied — an absent kind and a
 /// generic one would otherwise be two ways to say the same thing about a

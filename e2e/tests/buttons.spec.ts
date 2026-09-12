@@ -178,17 +178,17 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
 });
 
 /**
- * Sidebar heading controls keep their requested hierarchy and density.
- * Computed paint catches a more-specific selector overriding a shared class;
- * explicit dimensions guard the compact heading size independently of paint.
+ * Sidebar heading buttons keep their requested hierarchy and density.
+ * The permanent native host select is deliberately outside this button-paint
+ * contract; explicit dimensions guard the compact heading size independently.
  */
-test("sidebar heading controls share secondary paint and compact sizing", async ({ page }) => {
+test("sidebar heading buttons share secondary paint and compact sizing", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: "new session" })).toHaveText("new");
   await expect(page.getByRole("button", { name: "add host" })).toHaveText("add");
 
-  const secondary = [".profiles-toggle", ".filter-toggle", ".add-host-button"];
+  const secondary = [".profiles-toggle", ".add-host-button"];
   const styles = await Promise.all(
     secondary.map((selector) =>
       page.locator(selector).evaluate((node) => {
@@ -198,7 +198,6 @@ test("sidebar heading controls share secondary paint and compact sizing", async 
     ),
   );
   expect(styles[1]).toEqual(styles[0]);
-  expect(styles[2]).toEqual(styles[0]);
   const primaryBackground = await page
     .locator(".new-session-button")
     .evaluate((node) => getComputedStyle(node).backgroundColor);

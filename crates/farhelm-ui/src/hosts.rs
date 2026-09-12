@@ -707,9 +707,6 @@ pub(crate) fn HostsPanel(
     /// The session list's own open-menu signal — written (never read) here,
     /// purely to close a session row's menu when a host row's opens.
     mut session_menu_open: Signal<Option<String>>,
-    /// The fixed filter popover must close when details move its session-header
-    /// anchor, just as it did when the former full host panel changed height.
-    mut filter_open: Signal<bool>,
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
@@ -762,7 +759,6 @@ pub(crate) fn HostsPanel(
         adding();
         host_menu_open.set(None);
         session_menu_open.set(None);
-        filter_open.set(false);
     });
 
     // One shared shape for the ordinary host-row mutations: claim the page's
@@ -825,9 +821,6 @@ pub(crate) fn HostsPanel(
         // — would hide it behind the very panel that triggered it. See
         // `on_adopt` just below for the identical reasoning.
         host_menu_open.set(None);
-        if !*details_open.peek() {
-            filter_open.set(false);
-        }
         details_open.set(true);
         let base = retry_base.clone();
         // The started/refused answer is ignored here and in the two verbs
@@ -853,9 +846,6 @@ pub(crate) fn HostsPanel(
         // the identity changed again renders its refusal where the user can
         // actually see it.
         host_menu_open.set(None);
-        if !*details_open.peek() {
-            filter_open.set(false);
-        }
         details_open.set(true);
         let base = adopt_base.clone();
         run(
@@ -962,13 +952,11 @@ pub(crate) fn HostsPanel(
                         // requested state instead of inverting a newer signal.
                         details_open.set(event.checked());
                         // Every row changes height together. A fixed menu is
-                        // measured once, and the filter popover is fixed to
-                        // the session header, so neither can survive that
-                        // reflow with trustworthy geometry.
+                        // measured once, so it cannot survive that reflow
+                        // with trustworthy geometry.
                         host_menu_open.set(None);
                         session_menu_open.set(None);
-                        filter_open.set(false);
-                    },
+                                    },
                     }
                     "details"
                 }
@@ -1080,8 +1068,7 @@ pub(crate) fn HostsPanel(
                                     menu_states: provisioning_menu_states,
                                     trace_shapes: provisioning_trace_shapes,
                                     on_reveal_details: move |_| {
-                                        filter_open.set(false);
-                                        details_open.set(true);
+                                                                        details_open.set(true);
                                         host_menu_open.set(None);
                                         session_menu_open.set(None);
                                     },
@@ -1119,9 +1106,6 @@ pub(crate) fn HostsPanel(
                                 // exactly as it was, not close it out from
                                 // under a click that did nothing.
                                 host_menu_open.set(None);
-                                if !*details_open.peek() {
-                                    filter_open.set(false);
-                                }
                                 details_open.set(true);
                                 destination_draft.set(value);
                                 editing.set(Some((id, field)));
@@ -1148,9 +1132,6 @@ pub(crate) fn HostsPanel(
                                 {
                                     return;
                                 }
-                                if !*details_open.peek() {
-                                    filter_open.set(false);
-                                }
                                 details_open.set(true);
                                 host_menu_open.set(None);
                                 provisioning_action_requests.write().insert(id, operation);
@@ -1164,8 +1145,7 @@ pub(crate) fn HostsPanel(
                                 // open, across BOTH panels" doc.
                                 if !currently {
                                     session_menu_open.set(None);
-                                    filter_open.set(false);
-                                }
+                                                            }
                             },
                             host,
                         }

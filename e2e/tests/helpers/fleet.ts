@@ -990,19 +990,6 @@ export async function openHostsPanel(page: Page): Promise<void> {
 }
 
 /**
- * Open the session list's filter popover if it is not already open — the same
- * on-demand-toggle story as [`openHostsPanel`], for every test that
- * applies, clears, or inspects the session filter.
- */
-export async function openFilterBar(page: Page): Promise<void> {
-  const toggle = page.locator(".filter-toggle");
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click();
-  }
-  await expect(page.locator(".filter-popover")).toBeVisible();
-}
-
-/**
  * Open a session row's actions menu when it is not already open.
  *
  * The sidebar redesign (BUGS_BURNDOWN.md issue 5) moved every per-row
