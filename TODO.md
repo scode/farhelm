@@ -362,15 +362,12 @@ severity.
   '=https' --proto-redir '=https'` on the default path, validate a set base URL like
   `parse_release_base_url`, and name a non-default one in the output. Fence: never delete a foreign collision; an
   operator-selected source is not an attacker; no bundled signatures or URL restrictions.
-- **Small contained items.** `A2-C3`, `A1-C9`, `A6-D26`. Low, trivial. `is_stale_generation`
-  (release_payloads.rs:1020-1024) splits a name at `len - 12` bytes and panics on a non-boundary; the panic is contained
-  by `spawn_blocking` but the `OnceCell` stays uninitialised so every download retries and fails while the entry exists.
-  `safe_cell` (farhelm main.rs:1713-1729) escapes only Cc, so U+2028/U+2029 and bidi controls reach the agent-facing
-  table whose widths are computed after sanitizing. `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the
-  annotation is set only by a user-initiated stop, but archive writes it too. Fix: a boundary-safe split; widen
-  `safe_cell` (ideally one shared predicate with its two siblings) to emit visible `\u{...}` escapes; name both writers
-  in the doc without blessing the archive overwrite. Fence: leave the acceptance checks alone, they are specified
-  policy; no prompt-injection promise.
+- **Small contained items.** `A1-C9`, `A6-D26`. Low, trivial. `safe_cell` (farhelm main.rs:1713-1729) escapes only Cc,
+  so U+2028/U+2029 and bidi controls reach the agent-facing table whose widths are computed after sanitizing.
+  `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the annotation is set only by a user-initiated stop,
+  but archive writes it too. Fix: widen `safe_cell` (ideally one shared predicate with its two siblings) to emit visible
+  `\u{...}` escapes; name both writers in the doc without blessing the archive overwrite. Fence: leave the acceptance
+  checks alone, they are specified policy; no prompt-injection promise.
 
 ### Next: high confidence, needs care
 
