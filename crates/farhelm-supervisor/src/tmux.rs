@@ -2293,20 +2293,23 @@ impl TmuxDriver {
     /// server is gone" and "this one session is gone" both mean the exact
     /// same thing: there is nothing left for `kill_session` to do.
     /// Anything else is a real failure worth surfacing.
+    ///
+    /// The `=` prefix is load-bearing here even more than in
+    /// `has_session`: a bare `-t` target falls back to prefix matching,
+    /// so a session that is ALREADY gone — the exact state this function
+    /// tolerates — would make tmux resolve the name to any other session
+    /// whose name extends it and destroy that one instead, reporting
+    /// success. Generated `fh-<id>` names cannot prefix each other, but
+    /// the private server is not Farhelm's alone: anything running in a
+    /// pane inherits `TMUX` and can create or rename sessions on it.
+    /// The tolerated diagnostics are matched against tmux's raw stderr
+    /// through [`tmux_said_any`], never the rendered error, because the
+    /// rendered chain embeds the target name and a session named after
+    /// one of these phrases would otherwise launder a real failure.
     pub async fn kill_session(&self, name: &str) -> anyhow::Result<()> {
-        match self.run(&["kill-session", "-t", name]).await {
+        match self.run(&["kill-session", "-t", &format!("={name}")]).await {
             Ok(_) => Ok(()),
-            Err(e)
-                if [
-                    "can't find session",
-                    "no current target",
-                    "no server running",
-                ]
-                .iter()
-                .any(|diagnostic| e.to_string().contains(diagnostic)) =>
-            {
-                Ok(())
-            }
+            Err(e) if tmux_said_any(&e, TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS) => Ok(()),
             Err(e) => Err(e),
         }
     }
@@ -2677,15 +2680,12 @@ impl TmuxDriver {
             .await
         {
             Ok(out) => out,
-            Err(e)
-                if [
-                    "can't find session",
-                    "no current target",
-                    "no server running",
-                ]
-                .iter()
-                .any(|diagnostic| e.to_string().contains(diagnostic)) =>
-            {
+            // Matched against tmux's raw stderr, not the rendered chain:
+            // the rendered error embeds the pane target and this driver's
+            // own context, so a state-directory path or session name that
+            // merely mentions one of these phrases must not turn a real
+            // query failure into "the pane is gone".
+            Err(e) if tmux_said_any(&e, TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS) => {
                 return Ok(PaneProbe::Gone);
             }
             Err(e) => return Err(e).context("querying pane process state"),
@@ -2986,6 +2986,22 @@ impl TmuxDriver {
         "can't find session",
         "can't find window",
         "no such window",
+        "no current target",
+        "no server running",
+    ];
+
+    /// The tmux diagnostics that all mean "the session this names is
+    /// already gone" — the tolerated outcomes of [`Self::kill_session`]
+    /// and the [`PaneProbe::Gone`] answer of [`Self::pane_process`].
+    /// Each is the START of a complete standalone tmux message (verified
+    /// empirically on 3.4 and 3.7b): `"can't find session"` when the
+    /// server has other sessions but not this one, `"no current target"`
+    /// when it has none at all, and `"no server running"` when the whole
+    /// private server is gone. Matched with [`tmux_said_any`], so a
+    /// target or path that merely contains one of these phrases never
+    /// counts.
+    const SESSION_ALREADY_GONE_DIAGNOSTICS: &[&str] = &[
+        "can't find session",
         "no current target",
         "no server running",
     ];
@@ -4838,5 +4854,102 @@ mod tests {
             !error.contains("TAB-PANE-TEXT"),
             "the refusal must not carry the sibling's screen either: {error}"
         );
+    }
+
+    /// `kill_session` must never let tmux resolve its target by prefix.
+    /// A bare `-t name` falls back to prefix matching exactly when no
+    /// session has that name — which is the already-gone state
+    /// `kill_session` tolerates — so a vanished `fh-abcd1234` would
+    /// otherwise destroy `fh-abcd1234extra` and report success. The
+    /// neighbour is created directly on the private socket, which is
+    /// what anything holding `TMUX` inside a pane can do. The exact
+    /// name must still kill exactly that session afterwards, so the fix
+    /// is not merely refusing to kill anything.
+    #[farhelm_testtrace::test]
+    async fn kill_session_does_not_prefix_match_a_name_extending_neighbour() {
+        let server = ScratchServer::start().await;
+        server
+            .driver
+            .create_session(
+                "fh-abcd1234extra",
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".into(), "60".into()],
+            )
+            .await
+            .expect("neighbour session");
+        assert!(
+            server
+                .driver
+                .has_session("fh-abcd1234extra")
+                .await
+                .expect("liveness probe"),
+            "test premise: the name-extending neighbour must exist before the kill is attempted"
+        );
+        server
+            .driver
+            .kill_session("fh-abcd1234")
+            .await
+            .expect("a missing session is tolerated, never resolved by prefix");
+        assert!(
+            server
+                .driver
+                .has_session("fh-abcd1234extra")
+                .await
+                .expect("liveness probe"),
+            "the name-extending neighbour must survive a kill of a missing shorter name"
+        );
+        server
+            .driver
+            .kill_session("fh-abcd1234extra")
+            .await
+            .expect("the exact name still kills its own session");
+        assert!(
+            !server
+                .driver
+                .has_session("fh-abcd1234extra")
+                .await
+                .expect("liveness probe")
+        );
+    }
+
+    /// The "session already gone" diagnostics are recognized on tmux's raw
+    /// stderr, anchored at its start, never by searching the rendered error
+    /// chain. The rendered chain embeds the caller's target and this
+    /// driver's own context, so a session name or state-directory path
+    /// that merely mentions a diagnostic would otherwise turn a genuine
+    /// failure into "gone" (for `kill_session`, a silent success; for
+    /// `pane_process`, a false `PaneProbe::Gone`). This is the property
+    /// the substring match this replaced did not have.
+    #[test]
+    fn session_gone_diagnostics_match_raw_stderr_prefixes_only() {
+        let gone = anyhow::Error::new(TmuxCommandFailure {
+            stderr: b"can't find session: fh-abcd1234\n".to_vec(),
+        })
+        .context("killing tmux session fh-abcd1234");
+        assert!(tmux_said_any(
+            &gone,
+            TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
+        ));
+
+        // The phrase appears, but not at the start of tmux's own message:
+        // a target whose text contains a diagnostic is not a diagnostic.
+        let laundered = anyhow::Error::new(TmuxCommandFailure {
+            stderr: b"invalid target: =no server running here\n".to_vec(),
+        });
+        assert!(!tmux_said_any(
+            &laundered,
+            TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
+        ));
+
+        // A rendered error with no tmux stderr behind it never matches,
+        // however much its text resembles a diagnostic.
+        let rendered_only = anyhow::anyhow!("display-message -t %7: can't find session");
+        assert!(!tmux_said_any(
+            &rendered_only,
+            TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
+        ));
     }
 }

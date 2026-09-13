@@ -281,7 +281,14 @@ impl TmuxDriver {
             .arg("-f")
             .arg("no-output")
             .arg("-t")
-            .arg(session)
+            // Exact-name resolution, matching `has_session`, `kill_session`
+            // and the sink. The replay commands that follow are already
+            // session-paired (`={session}:.{pane}`), so a prefix-matched
+            // attach to a stranger's session would fail a moment later
+            // anyway — but it would fail with a "missing pane" error that
+            // blames the wrong thing, and would briefly attach a control
+            // client to a session that is not ours.
+            .arg(format!("={session}"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -2883,5 +2890,56 @@ mod tests {
         );
         assert!(!sink_task.is_finished(), "the sink must still be draining");
         shutdown_test_stream(stream).await;
+    }
+
+    /// The replay client attaches by exact session name. Its follow-up
+    /// commands are session-paired (`={session}:.{pane}`), so a
+    /// prefix-matched attach to a name-extending neighbour would fail
+    /// anyway — but only after briefly attaching a control client to a
+    /// session that is not ours, and with an error blaming a missing pane
+    /// rather than the missing session. Exact resolution makes the attach
+    /// itself the thing that fails, and the open must not succeed.
+    #[farhelm_testtrace::test]
+    async fn replay_attach_does_not_prefix_match_a_name_extending_neighbour() {
+        let server = ScratchServer::start().await;
+        let pane = server
+            .driver
+            .create_session(
+                "fh-abcd1234extra",
+                "/",
+                80,
+                24,
+                &[],
+                &ticking_pane("NEIGHBOUR"),
+            )
+            .await
+            .expect("neighbour session");
+        assert!(
+            server
+                .driver
+                .has_session("fh-abcd1234extra")
+                .await
+                .expect("liveness probe"),
+            "test premise: the name-extending neighbour must exist before the attach is attempted"
+        );
+        let opened = server
+            .driver
+            .open_replay_stream_candidate("fh-abcd1234", &pane)
+            .await;
+        // `is_err()` alone would not distinguish the mechanisms: a
+        // prefix-matched attach also ends in `Err`, one exchange later,
+        // when the session-paired pane listing fails against the intended
+        // name. The fix is that the ATTACH is what fails, so the error
+        // must name that stage and not the later listing.
+        let error = match opened {
+            Ok(_) => panic!(
+                "a missing session must fail the attach rather than resolve to its name-extending neighbour"
+            ),
+            Err(e) => format!("{e:#}"),
+        };
+        assert!(
+            error.contains("control-mode attach") && !error.contains("session pane list"),
+            "the attach itself must be what fails, not a later session-paired command: {error}"
+        );
     }
 }
