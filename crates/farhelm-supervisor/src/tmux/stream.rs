@@ -19,7 +19,7 @@ use anyhow::bail;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
 use tracing::warn;
 
@@ -319,6 +319,7 @@ impl TmuxDriver {
             passthrough: PassthroughDecoder::default(),
             query_strip: QueryStripper::default(),
             query_strip_deadline: None,
+            partial_line_pending: false,
             pane: pane.to_string(),
             session: session.to_string(),
             silenced: HashSet::new(),
@@ -479,6 +480,14 @@ pub struct OutputStream {
     /// neither of which says this pane is still writing. Keeping the deadline
     /// here prevents that unrelated traffic from extending a retained prefix.
     query_strip_deadline: Option<tokio::time::Instant>,
+    /// Whether `line` holds the front of a control line whose read the
+    /// query-strip deadline interrupted. The deadline may fire while tmux is
+    /// mid-line (a notification split across writes), and the flush it
+    /// forces must not cost the bytes already consumed from the reader: the
+    /// next `next_output` call resumes appending to `line` instead of
+    /// clearing it. Only the deadline path sets this; a completed read
+    /// clears it.
+    partial_line_pending: bool,
     /// The one pane this stream speaks for — see the type's own docs for
     /// why a session-wide client needs to know that at all.
     ///
@@ -1061,7 +1070,10 @@ impl OutputStream {
     /// may only abandon this future on a path that tears the whole stream
     /// down (the stall detach does exactly that), never to resume reading
     /// afterwards. That was already the rule; the write only widens what
-    /// breaking it would cost.
+    /// breaking it would cost. The one interruption this method performs
+    /// on ITSELF — the query-strip deadline cutting a line read short — is
+    /// different: it records the partial line (`partial_line_pending`) and
+    /// resumes it on the next call, so no byte is discarded.
     ///
     /// Notifications about ANOTHER pane are chatter here, discarded with
     /// the same indifference as a `%layout-change`. That drop is the
@@ -1076,19 +1088,63 @@ impl OutputStream {
     /// every other.
     pub async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
         loop {
-            if let Some(deadline) = self.query_strip_deadline {
-                match tokio::time::timeout_at(deadline, self.reader.fill_buf()).await {
-                    Ok(result) => {
-                        result?;
-                    }
-                    Err(_) => {
-                        return Ok(Some(OutputEvent::Bytes(self.flush_query_strip())));
+            // The query-strip deadline is an ABSOLUTE bound on how long a
+            // held candidate may wait, and two things conspire to let a
+            // busy control stream slip past it. `timeout_at` polls its
+            // inner future first and consults the clock only when that
+            // future is pending, so while the reader has bytes ready the
+            // deadline is never looked at; and a line split across writes
+            // parks the read mid-line with no bound at all. So: check the
+            // clock before touching the reader, and bound the WHOLE line
+            // read, not just the buffer probe. A deadline that fires
+            // mid-line keeps the partial in `line` (see
+            // `partial_line_pending`) so the next call resumes it.
+            if let Some(deadline) = self.query_strip_deadline
+                && tokio::time::Instant::now() >= deadline
+            {
+                return Ok(Some(OutputEvent::Bytes(self.flush_query_strip())));
+            }
+            if !self.partial_line_pending {
+                self.line.clear();
+            }
+            let n = match self.query_strip_deadline {
+                Some(deadline) => {
+                    match tokio::time::timeout_at(
+                        deadline,
+                        read_control_line(&mut self.reader, &mut self.line),
+                    )
+                    .await
+                    {
+                        Ok(result) => {
+                            self.partial_line_pending = false;
+                            result?
+                        }
+                        Err(_) => {
+                            self.partial_line_pending = !self.line.is_empty();
+                            return Ok(Some(OutputEvent::Bytes(self.flush_query_strip())));
+                        }
                     }
                 }
-            }
-            self.line.clear();
-            let n = read_control_line(&mut self.reader, &mut self.line).await?;
+                None => {
+                    let n = read_control_line(&mut self.reader, &mut self.line).await?;
+                    self.partial_line_pending = false;
+                    n
+                }
+            };
             if n == 0 {
+                // Reachable with a non-empty `line` only through the
+                // resumed partial read: the codec measures a partial
+                // against the buffer length at entry, so a stream that
+                // ends right after the deadline interrupted a line would
+                // otherwise read as a clean end. Keep the codec's own
+                // contract — an unterminated line at EOF is an error that
+                // tells a killed tmux from one that died mid-write.
+                if !self.line.is_empty() {
+                    anyhow::bail!(
+                        "tmux control-mode stream ended with a {}-byte partial line",
+                        self.line.len()
+                    );
+                }
                 let bytes = self.flush_query_strip();
                 return if bytes.is_empty() {
                     Ok(None)
@@ -1669,6 +1725,7 @@ mod tests {
             passthrough: PassthroughDecoder::default(),
             query_strip: QueryStripper::default(),
             query_strip_deadline: None,
+            partial_line_pending: false,
             pane: "%0".to_string(),
             session: "fh-s".to_string(),
             silenced: HashSet::new(),
@@ -1718,6 +1775,7 @@ mod tests {
             passthrough: PassthroughDecoder::default(),
             query_strip: QueryStripper::default(),
             query_strip_deadline: None,
+            partial_line_pending: false,
             pane: "%0".to_string(),
             session: "fh-s".to_string(),
             silenced: HashSet::new(),
@@ -1903,6 +1961,163 @@ mod tests {
         let (stream, event) = read.await.expect("joining idle reader");
         assert_eq!(event, Some(OutputEvent::Bytes(b"\x1b[".to_vec())));
         drop(writer);
+        shutdown_test_stream(stream).await;
+    }
+
+    /// The idle-flush deadline must fire while the control stream is
+    /// mid-line, not only when the reader is parked on an empty pipe.
+    /// The old shape bounded only the buffer probe and then read the line
+    /// with no deadline, so a notification split across writes (tmux may
+    /// split anywhere) held the user's own output past the documented
+    /// 50 ms bound until the rest of some unrelated line arrived. The
+    /// partial line is the second half of the contract: cutting the read
+    /// short must not lose the bytes already consumed, so the unrelated
+    /// line's remainder completes on the next call and the pane's own
+    /// following payload still arrives intact.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn the_idle_flush_fires_mid_line_and_the_partial_line_survives() {
+        let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
+        // The payload line and the first half of an unrelated notification
+        // arrive as ONE write before the reader starts, well under
+        // `PIPE_BUF`, so they reach the reader's buffer together: it sets
+        // the deadline from the payload, reads the partial out of the same
+        // buffer, and parks inside the line read before the clock moves.
+        // Two writes with a yield between would leave whether the partial
+        // had arrived to child-process scheduling, and a partial that had
+        // not arrived makes both old and new code flush an empty line.
+        writer
+            .write_all(b"%output %0 \x1b[\n%window-renamed @0 unre")
+            .await
+            .expect("writing payload and partial control line");
+        writer.flush().await.expect("flushing");
+        let read = tokio::spawn(async move {
+            let event = stream.next_output().await.expect("reading idle flush");
+            (stream, event)
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_millis(60)).await;
+        let (mut stream, event) = read.await.expect("joining idle reader");
+        assert_eq!(
+            event,
+            Some(OutputEvent::Bytes(b"\x1b[".to_vec())),
+            "the held candidate must flush at the deadline even mid-line"
+        );
+        // The premise, asserted where it is visible: the deadline cut a
+        // line read short, so a partial is pending. Without this, a lost
+        // race would let the test pass having never exercised the
+        // interruption or the resume it exists to cover.
+        assert!(
+            stream.partial_line_pending,
+            "the deadline must have interrupted a mid-line read"
+        );
+        // Complete the interrupted line, then send the pane's next payload:
+        // the remainder must be consumed as the tail of the SAME unrelated
+        // line (not misread as a new notification), and the own-pane bytes
+        // must come through unmerged with the flushed candidate.
+        writer
+            .write_all(b"lated\n")
+            .await
+            .expect("writing the rest of the control line");
+        feed_own_payload(&mut writer, b"X").await;
+        writer.flush().await.expect("flushing follow-up");
+        let event = stream.next_output().await.expect("reading follow-up");
+        assert_eq!(event, Some(OutputEvent::Bytes(b"X".to_vec())));
+        assert!(!stream.partial_line_pending);
+        drop(writer);
+        shutdown_test_stream(stream).await;
+    }
+
+    /// The busy-stream half of the same bound: once the deadline has
+    /// passed, the flush must happen even though the reader never runs
+    /// out of bytes. `timeout_at` polls its inner future first and only
+    /// consults the clock when that future is pending, so a stream that
+    /// always has a complete line ready would otherwise never look at the
+    /// deadline; the pre-read clock check is what makes it fire. The
+    /// distinguishing observable is two events versus one: with the check,
+    /// the held candidate flushes alone and the pane's next payload
+    /// follows separately; without it, the reader keeps consuming while
+    /// bytes are available and feeds the payload into the stripper on top
+    /// of the held candidate, emitting them merged.
+    #[farhelm_testtrace::test]
+    async fn the_idle_flush_fires_on_a_busy_stream_once_the_deadline_has_passed() {
+        use tokio::io::AsyncBufReadExt as _;
+        let (mut stream, _command_sink, mut writer) = stream_over_open_pipe();
+        // Everything the reader could consume is written first, and the
+        // premise — bytes are already buffered when the read happens — is
+        // asserted by filling the reader's buffer ourselves. A choreography
+        // through the pipe (park the reader, write, advance the clock) is
+        // not deterministic: the write's own await points let the reader
+        // run and drain the pipe before the clock moves, which is exactly
+        // the interleaving that makes the old code look correct.
+        writer
+            .write_all(b"%window-renamed @0 more\n%layout-change @0 x\n%output %0 X\n")
+            .await
+            .expect("writing the busy tail");
+        writer.flush().await.expect("flushing busy tail");
+        let buffered = stream.reader.fill_buf().await.expect("buffering");
+        assert!(
+            buffered.ends_with(b"%output %0 X\n"),
+            "test premise: the whole tail must be buffered before the read: {buffered:?}"
+        );
+        // A held candidate whose deadline has already passed, armed the way
+        // an own-pane payload would have armed it.
+        assert!(stream.query_strip.feed(b"\x1b[").is_empty());
+        stream.query_strip_deadline = Some(tokio::time::Instant::now());
+        let event = stream
+            .next_output()
+            .await
+            .expect("reading with an expired deadline");
+        assert_eq!(
+            event,
+            Some(OutputEvent::Bytes(b"\x1b[".to_vec())),
+            "the held candidate must flush on its own once the deadline has passed, \
+             even with bytes still available"
+        );
+        let event = stream
+            .next_output()
+            .await
+            .expect("reading the payload after the flush");
+        assert_eq!(event, Some(OutputEvent::Bytes(b"X".to_vec())));
+        drop(writer);
+        shutdown_test_stream(stream).await;
+    }
+
+    /// The two modes this change adds are read from positions 11 and 12
+    /// of the pane-mode expansion, and the whole feature rests on the
+    /// pinned tmux expanding `#{wrap_flag}` and `#{keypad_flag}` there as
+    /// `0`/`1`: a name that expanded to anything else would read as the
+    /// reset state and the bug would be back with green unit tests. So
+    /// this drives a real pane through `ESC[?7l` and `ESC =` and reads the
+    /// modes back through the same replay path production uses.
+    #[farhelm_testtrace::test]
+    async fn wrap_and_keypad_modes_are_read_from_a_real_pane() {
+        let server = ScratchServer::start().await;
+        let argv: Vec<String> = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf 'READY\\033[?7l\\033='; sleep 60".into(),
+        ];
+        let pane = server
+            .driver
+            .create_session("fh-modes", "/", 40, 6, &[], &argv)
+            .await
+            .expect("session");
+        tail_containing(&server.driver, "fh-modes", &pane, "READY").await;
+        let (modes, _prefill, stream) = server
+            .driver
+            .open_replay_stream("fh-modes", &pane)
+            .await
+            .expect("replay stream");
+        assert!(!modes.auto_wrap, "tmux must report wrapping off: {modes:?}");
+        assert!(
+            modes.app_keypad,
+            "tmux must report application keypad on: {modes:?}"
+        );
+        let post = modes.post_content_sequences();
+        assert!(
+            post.contains("\x1b[?7l") && post.contains("\x1b="),
+            "{post:?}"
+        );
         shutdown_test_stream(stream).await;
     }
 
