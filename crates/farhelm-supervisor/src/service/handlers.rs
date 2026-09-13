@@ -1158,6 +1158,11 @@ async fn handle_stop_session(
 /// requested it. The connection-owned task waits only to deliver the reply;
 /// forced connection shutdown may abort that waiter, but cannot interrupt a
 /// process sweep after it has begun or release its admission slot early.
+///
+/// This is the one slow handler that must claim a session fence before it
+/// acquires admission. A retained agent mutation can hold that fence for ten
+/// minutes, and parking eight deletes on the common admission semaphore would
+/// prevent the reply that releases the fence from being dispatched.
 async fn handle_delete_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
@@ -1165,28 +1170,34 @@ async fn handle_delete_session(
     req_id: u64,
     session_id: String,
 ) {
-    let permit = Arc::clone(&sup.admission)
-        .acquire_owned()
-        .await
-        .expect("admission semaphore is never closed");
     let mutation_sup = Arc::clone(sup);
     let mutation_id = session_id.clone();
-    // Spawned before the connection-owned waiter exists: once this returns
-    // a handle, disconnect shutdown can abort reply delivery but not the
-    // teardown or release its admission slot early.
+    // Spawn before waiting on either the retained fence or admission. This
+    // keeps the connection read loop available for unrelated requests while
+    // the delete waits, and the tracked task still owns the permit once the
+    // teardown has actually been admitted.
     let mutation = tokio::spawn(async move {
+        // Claim the fence before admission so a retained mutation does not
+        // consume one of the eight process-wide permits while this delete
+        // waits. The claim is still BEFORE the lifecycle lock, and that order
+        // is load-bearing (see `Supervisor::agent_request_locks`). An asking
+        // session's own credential is validated once, at the top of the
+        // `AgentRequest` handler, and this delete may be racing a mutation
+        // that credential already authorized — a rename, stop, or archive
+        // still in flight up to the helm and back. Waiting here for that fence
+        // to clear means such a mutation always finishes against a session
+        // this delete has not yet torn down, rather than the delete
+        // invalidating the very credential mid-flight.
+        let _agent_fence = mutation_sup.agent_request_locks.claim(&mutation_id).await;
+        // Admission follows the fence deliberately. This task is already
+        // tracked by the connection, so a parked delete remains observable
+        // while its permit is held only for teardown and reply delivery after
+        // the fence clears.
+        let permit = Arc::clone(&mutation_sup.admission)
+            .acquire_owned()
+            .await
+            .expect("admission semaphore is never closed");
         let outcome = async {
-            // Claimed BEFORE the lifecycle lock, and that order is load-
-            // bearing (see `Supervisor::agent_request_locks`). An asking
-            // session's own credential is validated once, at the top of
-            // the `AgentRequest` handler, and this delete may be racing a
-            // mutation that credential already authorized — a rename,
-            // stop, or archive still in flight up to the helm and back.
-            // Waiting here for that fence to clear means such a mutation
-            // always finishes against a session this delete has not yet
-            // torn down, rather than the delete invalidating the very
-            // credential mid-flight.
-            let _agent_fence = mutation_sup.agent_request_locks.claim(&mutation_id).await;
             let _lifecycle = mutation_sup.lifecycle_locks.claim(&mutation_id).await;
             let entry = mutation_sup
                 .sessions
@@ -4786,6 +4797,82 @@ mod tests {
             ),
             "expected a not-found refusal once the fence cleared, got {reply:?}"
         );
+    }
+
+    /// A retained agent fence must not consume the whole handler admission
+    /// pool. Eight deletes are enough to exhaust that pool in the old order,
+    /// so this test holds one fence, parks eight deletes on it, and proves an
+    /// unrelated list still gets a permit and a reply. Releasing the fence
+    /// then proves the parked deletes were waiting on the fence rather than
+    /// lost before dispatch.
+    #[farhelm_testtrace::test]
+    async fn fenced_deletes_do_not_starve_unrelated_handler_admission() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let fence = sup.agent_request_locks.claim("s1").await;
+        let mut deletes = Vec::new();
+
+        for req_id in 1..=8 {
+            deletes.push(
+                dispatch_for_test(
+                    &sup,
+                    ControlMsg::DeleteSession {
+                        req_id,
+                        session_id: "s1".to_string(),
+                    },
+                )
+                .await,
+            );
+        }
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.agent_request_locks.claims_reached_for_test("s1", 9),
+        )
+        .await
+        .expect("all deletes must reach the retained agent fence");
+        assert_eq!(
+            sup.admission.available_permits(),
+            8,
+            "fenced deletes must not consume handler admission permits"
+        );
+
+        let (mut list_tasks, mut list_rx) =
+            dispatch_for_test(&sup, ControlMsg::ListSessions { req_id: 100 }).await;
+        let list_reply = tokio::time::timeout(Duration::from_secs(5), list_rx.recv())
+            .await
+            .expect("unrelated list must be admitted while deletes wait")
+            .expect("unrelated list reply channel closed");
+        let list_reply: ControlMsg = serde_json::from_slice(&list_reply.body).unwrap();
+        assert!(
+            matches!(list_reply, ControlMsg::SessionList { req_id: 100, .. }),
+            "unrelated list must receive its normal reply, got {list_reply:?}"
+        );
+        list_tasks.join_next().await.unwrap().unwrap();
+
+        drop(fence);
+        for (mut delete_tasks, mut delete_rx) in deletes {
+            delete_tasks.join_next().await.unwrap().unwrap();
+            let reply: ControlMsg = serde_json::from_slice(
+                &delete_rx
+                    .recv()
+                    .await
+                    .expect("parked delete reply channel closed")
+                    .body,
+            )
+            .unwrap();
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::Error {
+                        kind: ErrorKind::NotFound,
+                        ..
+                    }
+                ),
+                "parked delete must complete after the fence clears, got {reply:?}"
+            );
+        }
     }
 
     /// Spec: dispatching a MUTATING `AgentRequest` claims the delete fence

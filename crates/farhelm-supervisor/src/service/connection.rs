@@ -968,9 +968,9 @@ pub(crate) fn notify_detached(tx: &mpsc::Sender<Frame>, channel: u32, reason: St
 
 /// Acquire an admission permit and spawn `future` onto `tasks`, holding
 /// the permit for the future's entire lifetime — the one, shared
-/// implementation of the admission-then-spawn pattern every slow
-/// `handle_control` arm (`ListSessions`/`StopSession`/`DeleteSession`)
-/// uses, so the ordering below cannot drift between call sites.
+/// implementation of the admission-then-spawn pattern used by the slow
+/// `handle_control` arms that do not need to wait on a retained agent fence.
+/// Delete has a documented fence-before-admission exception in its handler.
 ///
 /// The permit is acquired HERE, in THIS function's own await — which
 /// means in the CALLER's await point, since this is not itself spawned —
