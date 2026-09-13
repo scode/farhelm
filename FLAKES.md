@@ -842,8 +842,34 @@ tree. Selection `workspace Rust targets` (`cargo nextest run --workspace --exclu
 exclusions); concurrency `4 nextest slots; retries 0` with `--test-threads 4`, on a Linux x86_64 worker. Pinned tmux
 3.7c executable SHA256 `c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient
 `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` present in the test process). Suspected frame interleaving ahead of
-the keepalive Ping under full-suite load; not established. Disposition: open (TODO.md).
+the keepalive Ping under full-suite load; not established. Disposition: fixed — see the 2026-09-13 fix entry below; the
+TODO.md entry is removed in the fix PR.
 
 Class: peer-lifecycle
 
 Cause: hypothesis
+
+## 2026-09-13 — `events::tests::an_unanswered_keepalive_releases_the_subscriber_seat` fixed (crates/farhelm-helm/src/events.rs)
+
+The interleaving was a genuine revision racing the keepalive, and the test's premise was wrong rather than its subject.
+The server resets the idle window on every revision write, so a revision that lands after the handshake read arrives as
+the next frame; the test asserted Ping on the first frame unconditionally. The revision the sweep saw came from the
+local row's connect ladder walking its attempts under the test's clock (the retained trace shows the phase transitions
+mid-test), and a later instrumented run caught a fourth attempt — a ladder restart — landing mid-test the same way. The
+test now settles the ladder first, then pins the same event deterministically: a direct `bump()` after the handshake
+read, the same revision through the same watch channel, read back as exactly `handshake + 1` — which failed the old
+assertion with the sweep's exact signature (`left: 1, right: 9`) in retained run `fca722a5-d691-4ec8-a7f7-94caa1b144f5`.
+An adversarial review of that first fix showed it spent the release window reaching the Ping and reintroduced a network
+round trip whose loopback IO stalled under the paused clock (retained run `37ebc934-e43f-41cd-aa2c-0558ff5ea6e7`: one
+poll attempt, no retry, NOTICE fired). The committed shape instead consumes text revisions across capped intervals, then
+reads the seat through the same counter the endpoint gates on — held after the Ping, free within a bounded silence — so
+a late ladder restart only costs intervals, never correctness, and the caps fail loud past any sane burst. Fixed test
+passed 20/20 recorded repetitions, and the full `events::` module passed 21/21. Tested commit `3d057550` with the
+uncommitted fix (the diff is retained in each manifest's porcelain). Selection `keepalive burst-tolerant test`
+(`cargo nextest run -p farhelm-helm --lib -E` with the exact test); concurrency `4 nextest slots; retries 0`, no tmux (a
+helm unit test), `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed. Disposition: fixed in this PR; the TODO.md entry and the
+`deflake/known-flakes.txt` line are removed.
+
+Class: peer-lifecycle
+
+Cause: established
