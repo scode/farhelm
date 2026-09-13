@@ -47,7 +47,6 @@
 use crate::auth::AuthenticatedSocket;
 use crate::sessions::{default_cols, default_rows, route_session};
 use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream};
-use anyhow::Context;
 use axum::Extension;
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
@@ -299,10 +298,10 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
 
 pub(crate) async fn term_ws(
     State(state): State<Arc<AppState>>,
+    upgrade: WebSocketUpgrade,
     Extension(auth): Extension<AuthenticatedSocket>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
-    upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
     serve_term_upgrade(state, auth, id, q, upgrade, false)
 }
@@ -317,10 +316,10 @@ pub(crate) async fn term_ws(
 /// the ordinary path.
 pub(crate) async fn term_ws_if_unowned(
     State(state): State<Arc<AppState>>,
+    upgrade: WebSocketUpgrade,
     Extension(auth): Extension<AuthenticatedSocket>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
-    upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
     serve_term_upgrade(state, auth, id, q, upgrade, true)
 }
@@ -413,6 +412,11 @@ enum WsClientMsg {
     /// [`PONG_TEXT_MESSAGE`] and never forwarded — see `term_ws`'s docs for
     /// why the answer belongs to this end of the socket.
     Ping,
+    /// Test-only fault injection for exercising the inbound task's panic
+    /// cleanup. It is absent from production builds because malformed client
+    /// input must remain harmless to deployed browser versions.
+    #[cfg(test)]
+    Panic,
 }
 
 /// The fixed wire text for the heartbeat's answer.
@@ -433,8 +437,9 @@ const PONG_TEXT_MESSAGE: &str = r#"{"type":"pong"}"#;
 /// the supervisor ends the attachment (takeover, dead terminal), the
 /// detach notice goes out *before* the close, because a bare close renders
 /// as a generic "connection closed" and SPEC.md requires a takeover to be
-/// visibly a takeover. `detach` runs on every exit path so the supervisor
-/// never keeps an attachment alive for a browser that is gone.
+/// visibly a takeover. `detach` runs on every exit path, including an inbound
+/// task panic, so the supervisor never keeps an attachment alive for a browser
+/// that is gone.
 ///
 /// # Why two tasks
 ///
@@ -643,6 +648,8 @@ async fn serve_term(
                     // would otherwise block every keystroke queued behind
                     // it.
                     Ok(WsClientMsg::Ping) => pong.notify_one(),
+                    #[cfg(test)]
+                    Ok(WsClientMsg::Panic) => panic!("test inbound terminal task panic"),
                     // Unparseable or unknown: ignored on purpose, so a
                     // newer browser bundle talking to an older helm
                     // degrades rather than dropping the terminal.
@@ -694,7 +701,15 @@ async fn serve_term(
 
     let (result, outbound_finished, inbound_finished) = match end {
         SocketEnd::Inbound(result) => {
-            let result = result.context("terminal websocket inbound task panicked")?;
+            // Keep the panic as the returned result, but do not return before
+            // the detach below: the supervisor attachment must be cleaned up
+            // even when the browser-to-supervisor task panics.
+            let result =
+                match result {
+                    Ok(result) => result,
+                    Err(join) => Err(anyhow::Error::new(join)
+                        .context("terminal websocket inbound task panicked")),
+                };
             (result, false, true)
         }
         SocketEnd::Outbound => (Ok(()), true, false),
@@ -768,9 +783,34 @@ async fn settle_outbound(
 mod tests {
     use crate::BUILD_STAMP_HEADER;
     use crate::rest_harness::{self, WsTestClient};
+    use axum::body::to_bytes;
+    use axum::http::{Request, StatusCode};
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
     use farhelm_proto::{ControlMsg, Frame};
     use std::time::Duration;
+    use tower::ServiceExt;
+
+    /// A browser that forgets to request an upgrade must receive Axum's
+    /// ordinary missing-upgrade response, not an internal error naming the
+    /// authentication extension. The authenticated request matters: without
+    /// it, middleware would reject the request before handler extraction.
+    #[farhelm_testtrace::test]
+    async fn an_authenticated_plain_terminal_get_is_not_an_internal_error() {
+        let harness = rest_harness::idle_helm().await;
+        let request = Request::builder()
+            .uri("/api/sessions/sess-1/term")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = harness.router().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = String::from_utf8(to_bytes(response.into_body(), 4096).await.unwrap().to_vec())
+            .unwrap();
+        assert!(
+            !body.contains("AuthenticatedSocket"),
+            "unexpected body: {body}"
+        );
+    }
     /// Every exit shape of a terminal socket's teardown must leave its
     /// outbound drain settled WITHOUT ever polling a spent `JoinHandle`.
     ///
@@ -1117,6 +1157,41 @@ mod tests {
             "the supervisor did not observe terminal detach within the teardown grace — `serve_term` \
              is still pinned on a notice send to a browser that stopped reading"
         );
+    }
+
+    /// A panic in the browser-to-supervisor task must still leave the
+    /// supervisor-side attachment cleaned up. The `panic` message exists only
+    /// in test builds because deployed clients' malformed messages are
+    /// intentionally ignored rather than treated as a fault injection path.
+    #[farhelm_testtrace::test]
+    async fn a_panicking_inbound_task_is_torn_down_by_detach() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let (mut reader, _writer, channel) = peer.unwrap();
+
+        ws.send_text(r#"{"type":"panic"}"#).await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = reader
+                    .read_frame()
+                    .await
+                    .expect("the supervisor connection must remain readable")
+                    .expect("the supervisor connection closed before detach");
+                let message = farhelm_proto::io::parse_control(&frame).unwrap();
+                if matches!(message, ControlMsg::Detach { channel: got } if got == channel) {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("a panicking inbound task must still detach its supervisor attachment");
     }
 
     /// Drive a scripted supervisor peer through an attach, returning the
