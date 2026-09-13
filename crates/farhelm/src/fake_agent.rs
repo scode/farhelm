@@ -187,6 +187,46 @@ pub enum Script {
     /// script's own output — no test-process environment is touched at any
     /// point (see `SupervisorSeams::launch_env`).
     EnvEcho,
+    /// Print a transcript file line by line, then hold a chosen shape on
+    /// screen forever (or exit). The staging fixture for the README hero
+    /// screenshot (`docs/readme-hero/SPEC.md`): each staged session runs
+    /// this with a `--transcript` and a `--then` mode picked so that the
+    /// REAL supervisor classifies the pane as the status the scenario asks
+    /// for — see [`ReplayThen`] for which shape produces which status.
+    Replay,
+}
+
+/// What [`Script::Replay`] does once the transcript is on screen. Each
+/// variant is chosen for the status the supervisor's classifier assigns to
+/// a pane holding that shape, which is the whole reason the fixture exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ReplayThen {
+    /// Redraw one status line every second so the sampler keeps seeing a
+    /// changed screen: classifies as `running`.
+    Spin,
+    /// Show a yes/no menu under a "Do you want to" question and block on
+    /// stdin: the exact shape `looks_like_a_choice_prompt` in the
+    /// supervisor's `agent_kind` module promotes to `waiting`, provided the
+    /// session's kind is claude or codex (the generic kind never sharpens).
+    Menu,
+    /// Block on stdin with nothing further: goes `idle` after the
+    /// classifier's quiet-sample threshold.
+    Quiet,
+    /// Exit with `--exit-code`: `exited`.
+    Exit,
+}
+
+/// Everything [`Script::Replay`] needs beyond the script name. Bundled so
+/// [`run`]'s signature does not grow one parameter per replay flag, and so
+/// the parser in `main.rs` and the fixture agree on one type.
+#[derive(Debug, Clone, Default)]
+pub struct ReplayOptions {
+    /// The transcript to print. `None` prints nothing before `then`.
+    pub transcript: Option<std::path::PathBuf>,
+    /// The shape to hold after the transcript; `None` is [`ReplayThen::Quiet`].
+    pub then: Option<ReplayThen>,
+    /// The status [`ReplayThen::Exit`] exits with.
+    pub exit_code: i32,
 }
 
 /// The variable [`Script::EnvEcho`] reports, exported by the rc files a
@@ -228,12 +268,16 @@ pub const RESUME_ENV_VAR: &str = "FARHELM_FAKE_AGENT_RESUME";
 /// bracket (`ESC[?2026h` ... `ESC[?2026l`), for the e2e shape that pins
 /// that a scrolled-back viewport stays honest while xterm.js buffers
 /// refreshes inside a bracket and repaints in full when it closes.
+///
+/// `replay` is read only by [`Script::Replay`], with the same tolerance.
 pub fn run(
     script: Script,
     record_home: Option<std::path::PathBuf>,
     sync_output: bool,
+    replay: ReplayOptions,
 ) -> anyhow::Result<()> {
     match script {
+        Script::Replay => replay_transcript(replay),
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
         Script::Binary => binary(),
@@ -2438,6 +2482,116 @@ fn set_raw_mode() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Print a transcript, then hold the shape [`ReplayOptions::then`] names.
+///
+/// The transcript format is deliberately trivial so a maintainer can write
+/// one by hand: lines starting with `##` are comments and are dropped, the
+/// two characters `\e` become ESC so colour is possible without a binary
+/// file, and everything else is printed verbatim as one terminal line with
+/// a short delay between lines. The delay is cosmetic pacing for anyone
+/// watching a capture run; nothing keys on it.
+///
+/// The ready marker every script owes the tests is printed first and then
+/// the screen AND the scrollback are cleared (`ESC[3J` is the xterm
+/// extension tmux honours for history), so the marker never appears in
+/// the picture: a plain clear-screen scrolls the marker into history in
+/// tmux, and an attach replays history, which put the marker at the top of
+/// the terminal in the first capture attempts.
+fn replay_transcript(options: ReplayOptions) -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    write!(out, "\x1b[H\x1b[2J\x1b[3J")?;
+    out.flush()?;
+
+    if let Some(path) = &options.transcript {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("reading transcript {}", path.display()))?;
+        for line in transcript_lines(&raw) {
+            write!(out, "{line}\r\n")?;
+            out.flush()?;
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+    }
+
+    match options.then.unwrap_or(ReplayThen::Quiet) {
+        ReplayThen::Spin => {
+            // The elapsed counter is what changes between samples. It starts
+            // from a fixed offset rather than zero so the line reads like a
+            // turn that has been going for a while, which is what the
+            // scenario shows; the exact value in the capture is whatever
+            // second the shot lands on and nothing keys on it.
+            let mut elapsed = 124u64;
+            loop {
+                write!(out, "\r\x1b[K{}", spin_line(elapsed))?;
+                out.flush()?;
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                elapsed += 1;
+            }
+        }
+        ReplayThen::Menu => {
+            write!(out, "{}", menu_block())?;
+            out.flush()?;
+            block_on_stdin()
+        }
+        ReplayThen::Quiet => block_on_stdin(),
+        ReplayThen::Exit => std::process::exit(options.exit_code),
+    }
+}
+
+/// The lines a transcript file actually prints: comments dropped, `\e`
+/// expanded. Split out so the format has a unit test that does not need a
+/// terminal.
+fn transcript_lines(raw: &str) -> Vec<String> {
+    raw.lines()
+        .filter(|line| !line.starts_with("##"))
+        .map(|line| line.replace("\\e", "\x1b"))
+        .collect()
+}
+
+/// The status line [`ReplayThen::Spin`] redraws, with `elapsed` seconds
+/// rendered as `Mm SSs`.
+fn spin_line(elapsed: u64) -> String {
+    format!(
+        "\x1b[33m✻ Verifying… ({}m {:02}s · esc to interrupt)\x1b[0m",
+        elapsed / 60,
+        elapsed % 60
+    )
+}
+
+/// The dialog [`ReplayThen::Menu`] leaves on screen. Its shape is a
+/// contract with the supervisor's choice-prompt recogniser, not decoration:
+/// a question containing "Do you want to" within a few lines above a run
+/// of numbered options that all begin with an answer word, one of them
+/// carrying the `❯` pointer. Change any of those and the pane stops
+/// classifying as waiting.
+///
+/// No colour escapes, on purpose: the supervisor samples the pane's
+/// rendered text, so escapes never reach the recogniser in production, but
+/// the unit test below feeds this string in directly and a coloured
+/// pointer would hide the marker from the parser there. Plain text keeps
+/// the test honest about what the classifier sees.
+fn menu_block() -> String {
+    concat!(
+        "\r\n",
+        "Do you want to make this edit to attach.spec.ts?\r\n",
+        "❯ 1. Yes\r\n",
+        "  2. No, and tell me what to do differently\r\n",
+    )
+    .to_string()
+}
+
+/// Sit on stdin until it closes, then exit cleanly. Used by the modes that
+/// must keep the pane alive without producing output: the supervisor
+/// stops the session by killing the process, so the read simply never
+/// returns in practice.
+fn block_on_stdin() -> anyhow::Result<()> {
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        line?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2687,5 +2841,51 @@ mod tests {
             "the FIRST separator splits, so a directory carrying the literal ` in ` survives whole"
         );
         assert_eq!(clone_request("hello"), None);
+    }
+
+    /// The transcript format is hand-written by a maintainer, so its two
+    /// rules have to hold exactly: `##` lines vanish entirely (not printed
+    /// as blank lines, which would shift the picture), and `\e` becomes ESC
+    /// so a colour escape survives a plain text file.
+    #[test]
+    fn replay_transcript_drops_comments_and_expands_escapes() {
+        let raw = "## a comment\n\\e[32mgreen\\e[0m\n\nplain\n";
+        assert_eq!(
+            transcript_lines(raw),
+            vec![
+                "\x1b[32mgreen\x1b[0m".to_string(),
+                String::new(),
+                "plain".to_string()
+            ]
+        );
+    }
+
+    /// The menu the replay fixture leaves on screen exists to make the REAL
+    /// classifier say `waiting`; this pins that contract against the
+    /// supervisor's own sharpener for both integrated kinds, so a wording
+    /// change on either side fails here rather than as a screenshot whose
+    /// red dot silently went blue.
+    #[test]
+    fn replay_menu_is_promoted_to_waiting_by_the_real_sharpeners() {
+        use farhelm_proto::{AgentKind, SessionStatus};
+        use farhelm_supervisor::agent_kind::integration_for;
+        let tail = format!("earlier output\r\n{}", menu_block());
+        for kind in [AgentKind::Claude, AgentKind::Codex] {
+            let integration = integration_for(kind).expect("integrated kind");
+            assert_eq!(
+                integration.sharpen(SessionStatus::Idle, &tail),
+                SessionStatus::Waiting,
+                "{kind:?} must read the replay menu as waiting"
+            );
+        }
+    }
+
+    /// The spin line is the only thing that changes between samples in the
+    /// `running` mode, so consecutive seconds must render differently or
+    /// the pane would go idle under the classifier.
+    #[test]
+    fn replay_spin_line_changes_every_second() {
+        assert_ne!(spin_line(124), spin_line(125));
+        assert!(spin_line(124).contains("2m 04s"));
     }
 }

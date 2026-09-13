@@ -1,0 +1,7 @@
+## Invented filler for sessions that are not the open one. Same format as
+## transcript.txt: two-hash lines are comments, \e is an escape.
+\e[90m› rotate the signing key and update the deploy notes\e[0m
+
+\e[35m•\e[0m Reading deploy/notes.md
+\e[35m•\e[0m Ran \e[1mgrep -rn signing-key deploy/\e[0m
+\e[90m  deploy/notes.md:14: signing-key: rotated 2026-06-02\e[0m

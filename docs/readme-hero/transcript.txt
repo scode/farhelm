@@ -1,0 +1,28 @@
+## Invented transcript for the README hero screenshot. Not a capture of any
+## real session; it imitates the shape of a coding agent's turn so the open
+## pane in the picture looks like one. Lines starting with two hashes are
+## comments and are not printed. Everything else is printed verbatim, one
+## line at a time, with a short delay between lines. ANSI escapes are allowed
+## and written as \e.
+
+\e[90m> fix the flaky attach test in e2e/attach.spec.ts\e[0m
+
+\e[32m⏺\e[0m I'll read the spec and the harness it leans on first.
+\e[32m⏺\e[0m \e[1mRead\e[0m(e2e/attach.spec.ts)
+\e[90m  ⎿  Read 212 lines\e[0m
+\e[32m⏺\e[0m \e[1mRead\e[0m(e2e/helpers/stack.ts)
+\e[90m  ⎿  Read 88 lines\e[0m
+
+\e[32m⏺\e[0m The race is in the attach step: the test waits for the pane
+  to exist, not for the supervisor to report it attached, so a
+  slow host wins a pane before the readiness line lands.
+
+\e[32m⏺\e[0m \e[1mUpdate\e[0m(e2e/attach.spec.ts)
+\e[90m  ⎿  Updated e2e/attach.spec.ts with 6 additions and 2 removals\e[0m
+\e[90m       41   await stack.helm.waitForHost('build-box');\e[0m
+\e[31m       42 - await expect(pane).toBeVisible();\e[0m
+\e[32m       42 + await stack.supervisor.waitForAttach(session.id);\e[0m
+\e[32m       43 + await expect(pane).toBeVisible();\e[0m
+
+\e[32m⏺\e[0m \e[1mBash\e[0m(npx playwright test e2e/attach.spec.ts --repeat-each 20)
+\e[90m  ⎿  Running…\e[0m

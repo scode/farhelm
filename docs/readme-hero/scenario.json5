@@ -1,0 +1,109 @@
+// The design of the README hero screenshot. See SPEC.md in this directory for
+// what is real, what is staged, and the rule that this file changes only when
+// the maintainer asks for a different picture.
+//
+// Every name here is invented. Nothing may name a real host, user, or project
+// from the machine that takes the capture.
+{
+  // The browser viewport the capture uses, in CSS pixels, and the device scale
+  // factor. `scale: 2` renders at twice the density so the image stays crisp
+  // when GitHub scales it down to the README's column. The publish script
+  // checks the PNG's pixel size against width*scale by height*scale.
+  viewport: { width: 1280, height: 800, scale: 2 },
+
+  // One supervisor per host. `local` is the helm's own reserved row. Each
+  // `remote` is registered over ssh to the capturing machine under the
+  // destination spelling given, which is why the spellings must differ: the
+  // helm treats each distinct destination string as its own host. Both
+  // spellings need passwordless ssh on the capturing machine.
+  hosts: [
+    { key: "local", alias: "this machine", kind: "local" },
+    { key: "build-box", alias: "build-box", kind: "remote", ssh: "localhost" },
+    { key: "gpu-1", alias: "gpu-1", kind: "remote", ssh: "$USER@localhost" },
+  ],
+
+  // Rows in the order they should appear; ages must agree with that order
+  // because the list sorts by recent activity. `age` is seconds before the
+  // capture. `wrapper` is the basename the invocation carries and therefore
+  // the badge the row shows. `status` is what the supervisor must actually
+  // classify the pane as before the capture fires:
+  //   running  the fake agent keeps redrawing a status line
+  //   waiting  it shows a yes/no menu under a "Do you want to" question
+  //   idle     it goes quiet; `seen: false` makes the dot blue, `true` grey
+  //   exited   it exits with `exit_code`
+  // `cwd` is the directory shown in the row; the session really runs in a
+  // scratch directory and the listing is rewritten to show this one.
+  // Exactly one session carries `open: true` and is the one whose terminal
+  // fills the main pane; it replays `transcript` (a file beside this one)
+  // before settling into its status. Other sessions may name a shorter one.
+  sessions: [
+    {
+      title: "fix flaky attach test",
+      host: "build-box",
+      cwd: "~/src/farhelm",
+      wrapper: "claude",
+      status: "running",
+      age: 120,
+      open: true,
+      transcript: "transcript.txt",
+    },
+    {
+      title: "migrate auth tokens",
+      host: "local",
+      cwd: "~/src/api",
+      wrapper: "codex",
+      status: "waiting",
+      age: 480,
+      transcript: "filler-codex.txt",
+    },
+    {
+      title: "readme rewrite",
+      host: "gpu-1",
+      cwd: "~/work/docs",
+      wrapper: "claude",
+      status: "idle",
+      seen: false,
+      age: 2460,
+      transcript: "filler-claude.txt",
+    },
+    {
+      title: "bench tokenizer on H100",
+      host: "gpu-1",
+      cwd: "~/work/tok",
+      wrapper: "claude",
+      status: "running",
+      age: 3600,
+      transcript: "filler-claude.txt",
+    },
+    {
+      title: "triage crash reports",
+      host: "local",
+      cwd: "~/src/api",
+      wrapper: "claude",
+      status: "idle",
+      seen: true,
+      age: 10800,
+      transcript: "filler-claude.txt",
+    },
+    {
+      title: "release 0.3.1",
+      host: "build-box",
+      cwd: "~/src/farhelm",
+      wrapper: "codex",
+      status: "exited",
+      exit_code: 0,
+      age: 86400,
+      transcript: "filler-codex.txt",
+    },
+    {
+      title: "port ci to nextest",
+      host: "build-box",
+      cwd: "~/src/ci",
+      wrapper: "codex",
+      status: "idle",
+      seen: false,
+      age: 172800,
+      transcript: "filler-codex.txt",
+    },
+  ],
+}

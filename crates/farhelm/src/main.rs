@@ -445,6 +445,19 @@ enum InternalCmd {
         /// `record_home` gets.
         #[arg(long)]
         sync_output: bool,
+        /// The transcript [`fake_agent::Script::Replay`] prints before it
+        /// settles (see `docs/readme-hero/SPEC.md`). Ignored by every other
+        /// script.
+        #[arg(long)]
+        transcript: Option<PathBuf>,
+        /// The shape [`fake_agent::Script::Replay`] holds after the
+        /// transcript; each one is chosen for the status the supervisor
+        /// classifies it as. Ignored by every other script.
+        #[arg(long, value_enum)]
+        then: Option<fake_agent::ReplayThen>,
+        /// The status `--then exit` exits with.
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
         /// Whatever the supervisor appends for the real vendor after the
         /// fixture's own flags — the per-launch hook flags, or anything a
         /// test's resume template places there. Every script tolerates the
@@ -885,13 +898,25 @@ fn main() -> anyhow::Result<()> {
                 script,
                 record_home,
                 sync_output,
+                transcript,
+                then,
+                exit_code,
                 // The fake agent does not need to understand the injected
                 // tail — it only has to survive parsing it. The record
                 // scripts read the same strings straight from
                 // `std::env::args()` for their `FAKE-AGENT ARGV:` marker,
                 // so nothing is passed through here.
                 extra: _,
-            } => fake_agent::run(script, record_home, sync_output),
+            } => fake_agent::run(
+                script,
+                record_home,
+                sync_output,
+                fake_agent::ReplayOptions {
+                    transcript,
+                    then,
+                    exit_code,
+                },
+            ),
             InternalCmd::SweepTestState => {
                 let outcome = farhelm_teststate::sweep(
                     std::path::Path::new(farhelm_teststate::TMP_ROOT),
