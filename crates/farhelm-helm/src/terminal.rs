@@ -344,6 +344,12 @@ fn serve_term_upgrade(
     let id_for_log = id.clone();
     upgrade
         .protocols([crate::auth::WS_PROTOCOL])
+        // Both bounds, not just the message: a peer can otherwise send one
+        // enormous frame or a run of small ones assembled into one message,
+        // and only one of those is what `max_message_size` alone stops. The
+        // tungstenite 0.29 default frame bound is 16 MiB, and its frame
+        // reader reserves the declared length before any payload arrives.
+        .max_frame_size(farhelm_proto::MAX_FRAME_LEN as usize)
         .max_message_size(farhelm_proto::MAX_FRAME_LEN as usize)
         .on_upgrade(move |socket| async move {
             if let Err(e) = serve_term(state, auth, id, q, socket, if_unowned).await {
@@ -489,9 +495,14 @@ async fn serve_term(
             Ok(parts) => parts,
             Err(e) => {
                 let notice = serde_json::json!({"type": "detached", "reason": format!("{e:#}")});
-                let _ = socket
-                    .send(ws::Message::Text(notice.to_string().into()))
-                    .await;
+                // Bound this notice because a peer that cannot accept a
+                // hundred-byte notice within the grace period is one the
+                // reason would never have reached anyway.
+                let _ = tokio::time::timeout(
+                    WS_TEARDOWN_GRACE,
+                    socket.send(ws::Message::Text(notice.to_string().into())),
+                )
+                .await;
                 return Err(e);
             }
             }
@@ -570,12 +581,14 @@ async fn serve_term(
                 }
                 Some(TermEvent::Detached(reason)) => {
                     let notice = serde_json::json!({"type": "detached", "reason": reason});
-                    // Best-effort and last: the socket closes right after,
-                    // and a browser that cannot even take this notice is
-                    // one the reason would not have reached anyway.
-                    let _ = ws_tx
-                        .send(ws::Message::Text(notice.to_string().into()))
-                        .await;
+                    // Bound this notice because a peer that cannot accept a
+                    // hundred-byte notice within the grace period is one the
+                    // reason would never have reached anyway.
+                    let _ = tokio::time::timeout(
+                        WS_TEARDOWN_GRACE,
+                        ws_tx.send(ws::Message::Text(notice.to_string().into())),
+                    )
+                    .await;
                     break;
                 }
             };
@@ -592,9 +605,15 @@ async fn serve_term(
                     // not reading.
                     let reason = reason.unwrap_or_else(|| "detached".to_string());
                     let notice = serde_json::json!({"type": "detached", "reason": reason});
-                    let _ = ws_tx
-                        .send(ws::Message::Text(notice.to_string().into()))
-                        .await;
+                    // Bound this notice because the peer was just proven not
+                    // to read, and a peer that cannot accept a hundred-byte
+                    // notice within the grace period is one the reason would
+                    // never have reached anyway.
+                    let _ = tokio::time::timeout(
+                        WS_TEARDOWN_GRACE,
+                        ws_tx.send(ws::Message::Text(notice.to_string().into())),
+                    )
+                    .await;
                     break;
                 }
             }
@@ -973,6 +992,35 @@ mod tests {
         );
     }
 
+    /// A terminal peer declaring an oversized frame is refused before its
+    /// payload arrives, so the WebSocket cannot reserve the frame's declared
+    /// length while waiting for bytes that never come.
+    #[farhelm_testtrace::test]
+    async fn an_oversized_terminal_frame_is_refused_before_its_bytes_arrive() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(scripted_supervisor_attach(peer_side));
+        let mut harness = rest_harness::spliced_helm(client_side).await;
+        let addr = harness.serve().await;
+        let (mut ws, peer) = tokio::join!(
+            WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
+            peer
+        );
+        let (_reader, _writer, _channel) = peer.unwrap();
+
+        // The header declares more than MAX_FRAME_LEN, but no payload bytes
+        // are sent. Only the frame bound can reject this declaration before
+        // the reader waits for or reserves the missing payload.
+        ws.send_frame_header(2, farhelm_proto::MAX_FRAME_LEN as usize + 1)
+            .await;
+        let result = tokio::time::timeout(super::WS_TEARDOWN_GRACE, ws.recv())
+            .await
+            .expect("the oversized frame must be refused within the teardown grace");
+        assert!(
+            result.is_none(),
+            "an oversized terminal frame must close before any payload arrives: {result:?}"
+        );
+    }
+
     /// A browser that stops reading must not pin the WebSocket handler:
     /// the stall detach has to terminate it even while a send to that
     /// browser is blocked.
@@ -987,11 +1035,11 @@ mod tests {
     /// long as the wedge lasted, which is exactly the unbounded pin the
     /// stall detach exists to end.
     ///
-    /// The assertion is the strongest one available from outside: the
-    /// server CLOSES the connection. That can only happen after
-    /// `serve_term` returned, which can only happen after the blocked send
-    /// was abandoned — so a regression that restores the in-band-only
-    /// detach hangs here instead of passing.
+    /// The assertion is made on the supervisor side: it sees the `Detach`
+    /// control frame only after `serve_term` has abandoned the blocked notice
+    /// send and begun attachment cleanup. The browser is deliberately never
+    /// read again, so a regression that restores the unbounded notice send
+    /// hangs here instead of passing.
     #[farhelm_testtrace::test]
     async fn a_wedged_browser_is_torn_down_by_the_stall_detach() {
         let (client_side, peer_side) = tokio::io::duplex(1024 * 1024);
@@ -1003,7 +1051,7 @@ mod tests {
             WsTestClient::connect(addr, "/api/sessions/sess-1/term"),
             peer
         );
-        let (_reader, mut writer, channel) = peer.unwrap();
+        let (mut reader, mut writer, channel) = peer.unwrap();
 
         // Read exactly one frame, proving the socket works, and then stop
         // reading forever — the wedged browser.
@@ -1040,18 +1088,34 @@ mod tests {
             .await
             .unwrap();
 
-        // Drain to EOF: the server must close. Whatever backlog is still
-        // in flight is fine to receive — the contract is that the
-        // connection ENDS, not that the backlog is discarded byte for
-        // byte.
-        let closed = tokio::time::timeout(Duration::from_secs(20), async {
-            while ws.recv().await.is_some() {}
-        })
+        // Do NOT resume reading from the browser socket: that would let the
+        // notice send complete and hide the defect. The supervisor-side
+        // Detach proves that serve_term got past the blocked notice and
+        // performed the required attachment cleanup.
+        // The bound is deliberately wider than one grace period: a blocked
+        // notice consumes one grace before the handler can detach upstream,
+        // then the detach round trip still needs headroom on a loaded machine.
+        let detached = tokio::time::timeout(
+            super::WS_TEARDOWN_GRACE * 2 + Duration::from_secs(5),
+            async {
+                loop {
+                    let frame = reader
+                        .read_frame()
+                        .await
+                        .expect("the supervisor connection must remain readable")
+                        .expect("the supervisor connection closed before detach");
+                    let message = farhelm_proto::io::parse_control(&frame).unwrap();
+                    if matches!(message, ControlMsg::Detach { channel: got } if got == channel) {
+                        return;
+                    }
+                }
+            },
+        )
         .await;
         assert!(
-            closed.is_ok(),
-            "the terminal WebSocket never closed after a stall detach — `serve_term` is still \
-             pinned on a send to a browser that stopped reading"
+            detached.is_ok(),
+            "the supervisor did not observe terminal detach within the teardown grace — `serve_term` \
+             is still pinned on a notice send to a browser that stopped reading"
         );
     }
 

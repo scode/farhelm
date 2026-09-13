@@ -312,18 +312,11 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Terminal WebSocket bounds and exits.** `A4-C2`, `A4-C3`, `A4-C4`, `A4-C5`, `A4-C6`, `A4-C1`. Medium, trivial each.
-  terminal.rs:346 sets `max_message_size` but not `max_frame_size`, leaving tungstenite 0.29's 16 MiB default, whose
-  reader reserves the declared header length before any payload arrives (verified in the pinned crate source); the
-  events socket sets both. Three detach-notice sends (terminal.rs:589, :572, :490) carry no timeout where every events
-  write is bounded by `WRITE_DEADLINE`; the stall path at :589 is the one whose peer is proven not to read. The inbound
-  task's `JoinError` is handled with `?` at :677 before `client.detach` at :693, breaking the module's "detach runs on
-  every exit path" invariant on the panic path. And an authenticated non-upgrade GET on a WebSocket route gets axum's
-  500 naming `farhelm_helm::auth::AuthenticatedSocket`, because the handlers extract the extension before
-  `WebSocketUpgrade` (auth.rs:259-269, terminal.rs:300-325, events.rs:126-130). Fix: add the frame bound plus the
-  terminal counterpart of the events oversized-header test; wrap all three notice sends in
-  `timeout(WS_TEARDOWN_GRACE, ...)`; fold the `JoinError` into the result so the detach tail runs; extract
-  `WebSocketUpgrade` first. Fence: count only the stall path as a proven hang; the other two sends are consistency.
+- **Terminal WebSocket bounds and exits.** `A4-C6`, `A4-C1`. Medium, trivial each. The inbound task's `JoinError` is
+  handled with `?` before `client.detach` runs, so a panic breaks the module's "detach runs on every exit path"
+  invariant. An authenticated non-upgrade GET on a WebSocket route gets axum's 500 naming
+  `farhelm_helm::auth::AuthenticatedSocket`, because the handlers extract the extension before `WebSocketUpgrade`. Fix:
+  fold the `JoinError` into the result so the detach tail still runs, and extract `WebSocketUpgrade` first.
 - **Store one-liners.** `A6-C3`, `A6-C14`, `A6-C2`. Medium, trivial to small. `register_probed_ssh_host` (helm
   store.rs:3307-3311) builds `IdentityMismatch` with `expected` and `actual` reversed relative to the variant's doc and
   every other site, so the operator reads the opposite of reality when re-provisioning a reinstalled machine.
