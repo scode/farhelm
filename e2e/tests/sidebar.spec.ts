@@ -4259,8 +4259,8 @@ test("composer search reconciles a custom model like a harness button", async ({
 /**
  * The structured surface deliberately permits selecting a known model before
  * its harness. Once that ownership is known, unrelated model buttons must
- * disappear without changing the selected choice, and the review strip must
- * make the optional defaults explicit before a launch is attempted.
+ * disappear without changing the selected choice, and the summary must make
+ * the optional defaults explicit before a launch is attempted.
  */
 test("composer keeps arbitrary model-first choices reviewable", async ({ page, request }) => {
   const build = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
@@ -4285,14 +4285,8 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   await form.getByRole("button", { name: "reviewable-codex (Codex)", exact: true }).click();
   await expect(form.getByRole("button", { name: /reviewable-claude(?: \(Claude\))?$/, exact: false })).toHaveCount(0);
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
-  await expect(form.locator(".launch-composer-selections")).toContainText("Codex");
-  await expect(form.locator(".launch-composer-selections")).toContainText("Model: reviewable-codex");
   await expect(form.locator(".launch-composer-summary")).toHaveText(
     "model: reviewable-codex · effort: default · permissions: default",
-  );
-  await form.getByRole("button", { name: "remove model reviewable-codex" }).click();
-  await expect(form.locator(".launch-composer-summary")).toHaveText(
-    "model: default · effort: default · permissions: default",
   );
 });
 
@@ -4406,7 +4400,7 @@ test("composer holds offered history steady until destination and search promoti
     const initialRow = await rows.first().getAttribute("title");
     const initialActive = await search.getAttribute("aria-activedescendant");
     const draft = await form.locator(".launch-composer-summary").innerText();
-    const initialFolders = await form.locator(".launch-composer-folder-options button").allTextContents();
+    const initialFolders = await form.locator(".launch-composer-folder-links button").allTextContents();
     const initialFetchedRevision = Number(await form.getAttribute("data-history-fetched-revision"));
     const baselineFreshReads = historyReads;
 
@@ -4453,7 +4447,7 @@ test("composer holds offered history steady until destination and search promoti
     await expect(rows.first()).toHaveAttribute("title", initialRow ?? "");
     await expect(search).toHaveAttribute("aria-activedescendant", initialActive ?? "");
     await expect(form.locator(".launch-composer-summary")).toHaveText(draft);
-    await expect(form.locator(".launch-composer-folder-options button")).toHaveText(initialFolders);
+    await expect(form.locator(".launch-composer-folder-links button")).toHaveText(initialFolders);
 
     const capturedSearchResult = form
       .locator(".launch-composer-search-recent-destination")
@@ -4462,7 +4456,7 @@ test("composer holds offered history steady until destination and search promoti
     await capturedSearchResult.click();
     await expect(form.getByLabel("folder", { exact: true }), "search activation must apply the captured old result, not replace it with fresh history").toHaveValue("/offered-history/old");
     const freshFolder = form
-      .locator(".launch-composer-folder-options")
+      .locator(".launch-composer-folder-links")
       .getByRole("button", { name: "/offered-history/folder-new", exact: true });
     await expect(freshFolder, "search activation must make the fresh destination suggestion available without another feed read").toBeVisible();
     await freshFolder.click();
@@ -4509,7 +4503,7 @@ test("composer path actions keep typing inert and browse the selected remote hos
   expect(remote, "the selected option must be the asserted remote fixture, not a positional row").toBe(String(remoteFixture.id));
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   const remotePath = remoteFixture.remote_state_dir;
-  await expect(form.locator(".launch-composer-folder-options").getByRole("button", { name: remotePath, exact: true }), "the remote path must be absent from selected-host history before Use or Browse").toHaveCount(0);
+  await expect(form.locator(".launch-composer-folder-links").getByRole("button", { name: remotePath, exact: true }), "the remote path must be absent from selected-host history before Use or Browse").toHaveCount(0);
   await search.fill(remotePath);
   expect(browseBodies, "typing must not inspect either filesystem").toHaveLength(0);
   expect(createPosts, "typing must not start a session").toBe(0);
@@ -4690,7 +4684,7 @@ test("composer rejects held and queued stale browse activation after destination
   const remote = await host.inputValue();
   expect(Number(remote), "the authority fixture needs a selected remote host").not.toBe(1);
   const folder = form.getByLabel("folder", { exact: true });
-  const saved = form.locator(".launch-composer-folder-options");
+  const saved = form.locator(".launch-composer-folder-links");
   await expect(saved.getByRole("button", { name: "/authority/a", exact: true }), "A must be an actual seeded saved-folder control").toBeVisible();
   await expect(saved.getByRole("button", { name: "/authority/b", exact: true }), "B must be an actual seeded saved-folder control").toBeVisible();
   await saved.getByRole("button", { name: "/authority/a", exact: true }).click();
@@ -4836,7 +4830,6 @@ test("composer escapes a restored custom model while submitting its raw bytes", 
   const custom = form.getByPlaceholder("custom model id");
   const escaped = "private<U+202E>-model";
   await expect(custom).toHaveValue(escaped);
-  await expect(form.locator(".launch-composer-selections")).toContainText(escaped);
   await expect(form.locator(".launch-composer-summary")).toContainText(escaped);
   await form.locator("button[type=submit]").click();
   await expect.poll(() => posts.length).toBe(1);
@@ -5150,6 +5143,63 @@ test("composer mounted clone generation replaces the prior draft and notice", as
 });
 
 /**
+ * The destination block keeps every input that determines where a structured
+ * session launches together: host and browse, folder, the recent-folder
+ * links with their two resets, then the optional name. This pins that DOM
+ * order (the Tab-order test covers keyboard order), proves a seeded folder
+ * renders as a pressed link once chosen, and proves the local-home shortcut
+ * resets both parts of the destination.
+ */
+test("composer destination block keeps host, browse, folder, and recent links together", async ({ page, request }) => {
+  const local = await localHostId(request);
+  const folders = [{
+    host: local, canonical_cwd: "/fixture/destination-link", canonical_proven: true,
+    display_cwd: "/fixture/destination-link", created_at: 1, creation_seq: 1,
+  }];
+  await installComposerChoices(page, request, [], [], folders);
+  await page.goto("/");
+  const form = page.locator(".create-session-form");
+  await page.locator(".new-session-button").click();
+  const destination = form.locator(".launch-composer-destination");
+  const host = destination.locator("select.create-session-host");
+  const browse = destination.getByRole("button", { name: "browse this path", exact: true });
+  const folder = destination.getByLabel("folder", { exact: true });
+  const links = destination.locator(".launch-composer-folder-links");
+  const recentLink = links.getByRole("button", { name: "/fixture/destination-link", exact: true });
+  const name = destination.getByLabel("name (optional)", { exact: true });
+  await expect(destination).toBeVisible();
+  await expect(name).toBeVisible();
+  const hostLabel = await host.locator("option:checked").textContent();
+  expect(hostLabel, "the host select must show a selected option before its label is checked").toBeTruthy();
+  await expect(browse).toContainText(hostLabel!.trim());
+  await expect(recentLink, "the seeded folder must render as a recent link").toBeVisible();
+  await expect(recentLink).toHaveAttribute("aria-pressed", "false");
+  await expect(links.getByText("home", { exact: true })).toBeVisible();
+  await expect(links.getByText("local home", { exact: true })).toBeVisible();
+  expect(await destination.evaluate((node) => {
+    const controls = [
+      node.querySelector("select.create-session-host"),
+      node.querySelector('button[aria-label="browse this path"]'),
+      node.querySelector('input[aria-label="folder"]'),
+      node.querySelector(".launch-composer-folder-links button[aria-pressed]"),
+      node.querySelector('.launch-composer-folder-links button[aria-label="reset folder to home"]'),
+      node.querySelector('.launch-composer-folder-links button[aria-label="reset destination to local home"]'),
+      node.querySelector(".launch-composer-name"),
+    ];
+    return controls.every((control, index) =>
+      control !== null && (index === 0 || Boolean(controls[index - 1]!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING)),
+    );
+  }), "the destination controls must remain in their reading order").toBe(true);
+  await recentLink.click();
+  await expect(folder).toHaveValue("/fixture/destination-link");
+  await expect(recentLink).toHaveAttribute("aria-pressed", "true");
+  await links.getByText("local home", { exact: true }).click();
+  await expect(folder).toHaveValue("~");
+  await expect(recentLink).toHaveAttribute("aria-pressed", "false");
+  await expect(host).toHaveValue(String(local));
+});
+
+/**
  * Folder suggestions are an alternate destination picker. This uses distinct
  * saved paths so an edited input can prove the selected affordance follows
  * the value that will be submitted, rather than an older raw seed.
@@ -5164,19 +5214,17 @@ test("composer folder history tracks edited destinations at narrow width", async
   await page.goto("/");
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
-  const choices = form.locator(".launch-composer-folder-options").getByRole("button");
+  const choices = form.locator(".launch-composer-folder-links").getByRole("button", { name: /^\/fixture\/history-/ });
   await expect(choices, "the controlled history must populate the narrow destination picker").toHaveCount(2);
   const folder = form.getByLabel("folder", { exact: true });
   await expect(folder).toBeVisible();
   await choices.first().click();
   await expect(choices.first()).toHaveAttribute("aria-pressed", "true");
-  await expect(choices.first()).toContainText("✓");
   await folder.fill("/fixture/history-b");
   await expect(choices.first()).toHaveAttribute("aria-pressed", "false");
   await expect(choices.nth(1)).toHaveAttribute("aria-pressed", "true");
-  const folderRow = form.locator("label.launch-composer-folder");
-  const grid = await folderRow.evaluate((node) => getComputedStyle(node).gridTemplateColumns.trim().split(/\s+/));
-  expect(grid, "the narrow Folder row has its intended two columns").toHaveLength(2);
+  const links = form.locator(".launch-composer-folder-links");
+  await expect(links, "the compact links line keeps its saved destinations reachable").toBeVisible();
   for (const control of [folder, choices.first(), choices.nth(1), form.getByRole("button", { name: "browse this path" })]) {
     await expect(control).toBeVisible();
     const box = await control.boundingBox();
@@ -5361,7 +5409,6 @@ test("composer reset notices follow every restored-choice transition", async ({ 
     // dependent fields but does not promise to choose that filter for us.
     await form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ }).click();
     await form.locator(".launch-composer-recent-slots").getByRole("button").first().click();
-    await expect(form.locator(".launch-composer-selections")).toContainText("restored-custom");
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
   };
@@ -5414,7 +5461,6 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
-  await expect(form.locator(".launch-composer-selections")).toContainText("fixture-codex-low-only");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /low$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(status).toHaveCount(0);
@@ -5434,7 +5480,6 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.getByRole("status")).toContainText("not in this harness's Farhelm offering");
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(custom).toHaveValue("");
-  await expect(form.locator(".launch-composer-selections")).not.toContainText("Model:");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
@@ -5446,7 +5491,6 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status).toContainText("not in this harness's Farhelm offering");
   await expect(status).toContainText("not in Farhelm's offering for that model or harness");
   await expect(custom).toHaveValue("");
-  await expect(form.locator(".launch-composer-selections")).not.toContainText("Effort:");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo");
 
@@ -5648,29 +5692,21 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   const form = page.locator(".create-session-form");
   const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
   await form.getByLabel("folder", { exact: true }).fill(folder);
-  // Named rather than indexed into `controls`: a later insertion into that
-  // array (the harness removal chip, below) already broke one index-based
-  // reference silently once, by shifting every position after it. Naming the
-  // two locators other assertions depend on makes that class of drift
-  // impossible to reintroduce.
+  // Name the controls rather than indexing a generic list so this traversal
+  // continues to document the destination's user-visible order.
   const recentSlot = form.locator(".launch-composer-recent-slots").getByRole("button", {
     name: new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   });
   const browseButton = form.getByRole("button", { name: "browse this path", exact: true });
   const harnessChoice = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
   const controls = [
-    form.getByRole("button", { name: "reset destination to local home", exact: true }),
-    form.getByRole("button", { name: "reset folder to home", exact: true }),
-    // Choosing Codex below (so Launch is enabled for the reverse-order check)
-    // renders its own removal chip right here in DOM order — between the
-    // folder reset and the recent slot — and Tab must land on it like any
-    // other real control, not skip over it.
-    form.getByRole("button", { name: "remove harness Codex", exact: true }),
     recentSlot,
     form.getByRole("combobox", { name: "host", exact: true }),
+    browseButton,
     form.getByLabel("folder", { exact: true }),
     form.getByRole("button", { name: folder, exact: true }),
-    browseButton,
+    form.getByRole("button", { name: "reset folder to home", exact: true }),
+    form.getByRole("button", { name: "reset destination to local home", exact: true }),
     form.getByLabel("name (optional)", { exact: true }),
     harnessChoice,
   ];
@@ -5682,9 +5718,7 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   // Launch is disabled until a harness is chosen, and a disabled control is
   // skipped entirely by native Tab — it would never receive focus below, so
   // the reverse-order assertion needs a real harness pick first, exactly as
-  // a person reaching for Launch would have already made one. That same
-  // pick is why the removal chip above exists at all: selecting a harness is
-  // what renders it, so the forward loop must expect it too.
+  // a person reaching for Launch would have already made one.
   await harnessChoice.click();
   await search.focus();
   await expect(search).toBeFocused();

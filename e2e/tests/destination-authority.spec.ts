@@ -142,7 +142,7 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
       await form.getByRole("combobox", { name: /search/i }).fill("codex");
       await form.getByRole("option", { name: /^Recent setup:.*\/tmp/ }).click();
     } else {
-      await form.locator(".launch-composer-folder-options").getByRole("button", { name: "/tmp", exact: true }).click();
+      await form.locator(".launch-composer-folder-links").getByRole("button", { name: "/tmp", exact: true }).click();
       await form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Codex$/ }).click();
     }
     await expect(form).toHaveAttribute("data-history-activation-attempts", "1");
@@ -185,12 +185,12 @@ for (const source of ["ordinary recent", "search recent", "saved folder"] as con
  * dispatching at a node already withdrawn from the document. */
 test("queued saved-folder activation cannot follow an explicit host change", async ({ page, request }) => {
   const { form, local } = await historyFixture(page, request);
-  const saved = form.locator(".launch-composer-folder-options").getByRole("button", { name: "/var/tmp", exact: true });
+  const saved = form.locator(".launch-composer-folder-links").getByRole("button", { name: "/var/tmp", exact: true });
   await expect(saved).toBeVisible();
   const attempts = Number(await form.getAttribute("data-history-activation-attempts"));
   await form.evaluate((node, local) => {
     const host = node.querySelector<HTMLSelectElement>(".create-session-host")!;
-    const saved = [...node.querySelectorAll<HTMLButtonElement>(".launch-composer-folder-options button")].find((button) => button.textContent?.includes("/var/tmp"))!;
+    const saved = [...node.querySelectorAll<HTMLButtonElement>(".launch-composer-folder-links button")].find((button) => button.textContent?.includes("/var/tmp"))!;
     host.value = String(local);
     host.dispatchEvent(new Event("change", { bubbles: true }));
     saved.dispatchEvent(new MouseEvent("click", { bubbles: true }));

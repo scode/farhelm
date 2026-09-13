@@ -1326,8 +1326,8 @@ pub(super) fn CreateSessionForm(
     {
         error.set(None);
     }
-    // Capture the immutable local id once for the reset chip. Moving the
-    // whole host list into that event handler would steal it from submit.
+    // Capture the immutable local id once for the destination link. Moving
+    // the whole host list into that event handler would steal it from submit.
     let local_host_id = hosts.iter().find(|host| host.local).map(|host| host.id);
     let local_destination = history_target(&hosts, local_host_id);
     let browse_generation = use_signal(|| 0_u64);
@@ -1821,6 +1821,149 @@ pub(super) fn CreateSessionForm(
     let browse_base_for_folder = browse_base.clone();
     let browse_hosts_for_folder = browse_hosts.clone();
     let hosts_for_destination_choice = hosts.clone();
+    // The host selector and its reconciliation notes are built ONCE and placed
+    // by whichever surface renders: inside the structured destination block,
+    // or under the legacy surface's own "host" label. One Element cloned into
+    // two mutually exclusive branches keeps the handler, the option marking,
+    // and the four notes from drifting apart the way two copies would.
+    //
+    // The select is disabled for the whole round trip, exactly like the text
+    // fields: the key is bound to the target, and a selection changing between
+    // minting and sending would publish a key that belongs to a different
+    // machine. Its value is empty only before the first hosts read lands (a
+    // live helm always has its local row); the submit handler refuses in that
+    // window rather than sending a hostless create.
+    let host_select = rsx! {
+        select {
+            class: "create-session-host",
+            aria_label: "host",
+            disabled: busy,
+            value: selected.map(|id| id.to_string()).unwrap_or_default(),
+            onchange: move |evt| {
+                if !draft_transition_allowed(ops) {
+                    return;
+                }
+                let next_host = evt.value().parse::<HostId>().ok();
+                chosen_host.set(next_host);
+                // A queued history callback can run before rerender.
+                // Revoke the old destination in this same event turn.
+                live_destination.set(history_target(&hosts_for_destination_choice, next_host));
+                remembered_destination.set(None);
+                invalidate_directory_browse(
+                    browse_generation, browse_request, browse_result, browse_error,
+                );
+                // The agent choice deliberately survives: every host
+                // consumes the same helm catalog.
+                // And it takes this generation's clone-derived
+                // binding off automatic handling for good
+                // (`CloneHostState::UserTookOver`): the user is now
+                // driving host selection by hand, so a later
+                // retarget of the CLONE's own row must not pull the
+                // rug out from under a choice the clone had nothing
+                // to do with anymore.
+                clone_host_state.set(CloneHostState::UserTookOver);
+                // A different host is a different intended create,
+                // exactly as a different directory is — so the key
+                // the last submit used stops applying (see this
+                // component's docs for both edges of that rule).
+                intent_key.set(None);
+            },
+            for host in hosts.iter() {
+                option {
+                    key: "{host.id}",
+                    value: "{host.id}",
+                    // Marked on the OPTION as well as through the
+                    // select's `value` above, and that redundancy is
+                    // load-bearing rather than belt-and-braces — see
+                    // the agent picker below, where the same
+                    // arrangement is what makes a preselection appear
+                    // at all.
+                    selected: selected == Some(host.id),
+                    "{host.label()}"
+                }
+            }
+        }
+    };
+    // The reconciliation, said out loud. A chosen host leaving the registry
+    // moves the effective target, and the one thing that must not happen is
+    // that move being invisible — a selector showing host A while the body
+    // carries host B is a create on a machine nobody picked. The key is
+    // re-minted for the new target by the submit path's own binding check.
+    //
+    // The clone-specific reconciliation sits in the same voice and the same
+    // slot: the row this form was cloned from could not be confirmed as the
+    // install it was cloned from (mismatched, or predating host tracking
+    // entirely — see `clone_host_note`'s own doc), so its host was not
+    // carried over, and the selector shows its ordinary default instead. Says
+    // nothing while a hostful clone is still `Waiting` on the registry (F1) —
+    // that is not yet a fact worth reporting.
+    let host_notes = rsx! {
+        if choice_vanished {
+            div { class: "create-session-host-note",
+                "the host you picked is no longer registered, so this create would go to the \
+                 one selected now"
+            }
+        }
+        if selected.is_some() && !selected_host_available {
+            div { class: "create-session-host-note",
+                "the selected host is unavailable; choose a connected host before launching"
+            }
+        }
+        if !remembered_destination_valid {
+            div { class: "create-session-host-note",
+                "{REMEMBERED_DESTINATION_CHANGED}"
+            }
+        }
+        if let Some(note) = clone_host_note {
+            div { class: "create-session-host-note", "{note}" }
+        }
+    };
+    // The two destination resets, built once for the same reason as the host
+    // select: both surfaces need them (a clone from a remote host is what makes
+    // "local home" necessary, on the legacy surface as much as the structured
+    // one), and one Element keeps the two handlers from drifting apart.
+    // "home" reseeds only the folder; "local home" also moves the host to the
+    // local machine and takes the clone's host binding off automatic handling.
+    let destination_resets = rsx! {
+        button { r#type: "button", disabled: busy,
+            aria_label: "reset folder to home",
+            onclick: move |_| {
+                if !draft_transition_allowed(ops) { return; }
+                remembered_destination.set(None);
+                promote_fetched_history_snapshot(
+                    offered_history, create_target, fetched_history,
+                );
+                invalidate_directory_browse(
+                    browse_generation, browse_request, browse_result, browse_error,
+                );
+                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
+                intent_key.set(None);
+            },
+            "home"
+        }
+        span { class: "launch-composer-folder-links-separator", aria_hidden: "true", "·" }
+        button { r#type: "button", disabled: busy,
+            aria_label: "reset destination to local home",
+            onclick: move |_| {
+                if !draft_transition_allowed(ops) { return; }
+                // This is an explicit local choice, unlike the ordinary
+                // default that may follow an open remote session.
+                chosen_host.set(local_host_id);
+                live_destination.set(local_destination.clone());
+                remembered_destination.set(None);
+                promote_fetched_history_snapshot(
+                    offered_history, create_target, fetched_history,
+                );
+                clone_host_state.set(CloneHostState::UserTookOver);
+                invalidate_directory_browse(
+                    browse_generation, browse_request, browse_result, browse_error,
+                );
+                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
+                intent_key.set(None);
+            },
+            "local home"
+        }
+    };
     rsx! {
         div {
             class: "launch-composer-backdrop",
@@ -2598,100 +2741,6 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
-                div { class: "launch-composer-selections", aria_label: "selected launch choices",
-                    button { r#type: "button", class: "launch-composer-chip", disabled: busy,
-                        aria_label: "reset destination to local home",
-                        onclick: move |_| {
-                            if !draft_transition_allowed(ops) { return; }
-                            // The ordinary default may follow an open remote
-                            // session. This action instead makes the stated
-                            // local destination an explicit user choice.
-                            chosen_host.set(local_host_id);
-                            live_destination.set(local_destination.clone());
-                            remembered_destination.set(None);
-                            promote_fetched_history_snapshot(
-                                offered_history, create_target, fetched_history,
-                            );
-                            clone_host_state.set(CloneHostState::UserTookOver);
-                            invalidate_directory_browse(
-                                browse_generation, browse_request, browse_result, browse_error,
-                            );
-                            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
-                            intent_key.set(None);
-                        },
-                        "Host: {selected_host_label} ×"
-                    }
-                    button { r#type: "button", class: "launch-composer-chip", dir: "ltr", disabled: busy,
-                        aria_label: "reset folder to home",
-                        onclick: move |_| {
-                            if !draft_transition_allowed(ops) { return; }
-                            remembered_destination.set(None);
-                            promote_fetched_history_snapshot(
-                                offered_history, create_target, fetched_history,
-                            );
-                            invalidate_directory_browse(
-                                browse_generation, browse_request, browse_result, browse_error,
-                            );
-                            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
-                            intent_key.set(None);
-                        },
-                        "Folder: {display_peer(&cwd())} ×"
-                    }
-                    if let Some(harness) = structured_harness() {
-                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
-                            aria_label: "remove harness {harness:?}",
-                            onclick: move |_| {
-                                if !draft_transition_allowed(ops) { return; }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                structured_harness.set(None); structured_model_raw_seed.set(None); structured_model_edited.set(false); structured_model.set(None);
-                                custom_model_harness.set(None); structured_effort.set(None);
-                                intent_key.set(None);
-                            },
-                            "{harness:?} ×"
-                        }
-                    }
-                    if let Some(model) = structured_model() {
-                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
-                            aria_label: "remove model {display_peer(&model)}",
-                            onclick: move |_| {
-                                if !draft_transition_allowed(ops) { return; }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                structured_model_raw_seed.set(None); structured_model_edited.set(false); structured_model.set(None); custom_model_harness.set(None); intent_key.set(None);
-                            },
-                            "Model: {display_peer(&model)} ×"
-                        }
-                    }
-                    if let Some(effort) = structured_effort() {
-                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
-                            aria_label: "remove effort {effort_value(effort)}",
-                            onclick: move |_| {
-                                if !draft_transition_allowed(ops) { return; }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                structured_effort.set(None); intent_key.set(None);
-                            },
-                            "Effort: {effort_value(effort)} ×"
-                        }
-                    }
-                    if let Some(permissions) = structured_permissions() {
-                        button { r#type: "button", class: "launch-composer-chip", disabled: busy,
-                            aria_label: "remove permissions {permissions:?}",
-                            onclick: move |_| {
-                                if !draft_transition_allowed(ops) { return; }
-                                promote_fetched_history_snapshot(
-                                    offered_history, create_target, fetched_history,
-                                );
-                                structured_permissions.set(None); intent_key.set(None);
-                            },
-                            "Permissions: {permissions:?} ×"
-                        }
-                    }
-                }
                 // Absent, not merely empty, with no history to offer: an
                 // always-present band used to reserve three 44px tracks so
                 // the controls below it would never jump, but that traded a
@@ -2787,108 +2836,39 @@ pub(super) fn CreateSessionForm(
             // client-side "helpful" rewrite) — so every input here opts
             // out of every form of text mangling a browser might apply on
             // its own, for whichever of these two reasons applies to it.
-            // First, because it decides what everything below it means: a
-            // working directory and an agent command are only meaningful
-            // relative to the machine they will run on.
-            label { class: "launch-composer-host",
-                "host"
-                select {
-                    class: "create-session-host",
-                    // Disabled for the whole round trip, exactly like the
-                    // text fields: the key is bound to the target, and a
-                    // selection changing between minting and sending would
-                    // publish a key that belongs to a different machine.
-                    disabled: busy,
-                    // Empty only before the first hosts read lands — a live
-                    // helm always has its local row. The submit handler
-                    // refuses in that window rather than sending a hostless
-                    // create.
-                    value: selected.map(|id| id.to_string()).unwrap_or_default(),
-                    onchange: move |evt| {
-                        if !draft_transition_allowed(ops) {
-                            return;
-                        }
-                        let next_host = evt.value().parse::<HostId>().ok();
-                        chosen_host.set(next_host);
-                        // A queued history callback can run before rerender.
-                        // Revoke the old destination in this same event turn.
-                        live_destination.set(history_target(&hosts_for_destination_choice, next_host));
-                        remembered_destination.set(None);
-                        invalidate_directory_browse(
-                            browse_generation, browse_request, browse_result, browse_error,
-                        );
-                        // The agent choice deliberately survives: every host
-                        // consumes the same helm catalog.
-                        // And it takes this generation's clone-derived
-                        // binding off automatic handling for good
-                        // (`CloneHostState::UserTookOver`): the user is now
-                        // driving host selection by hand, so a later
-                        // retarget of the CLONE's own row must not pull the
-                        // rug out from under a choice the clone had nothing
-                        // to do with anymore.
-                        clone_host_state.set(CloneHostState::UserTookOver);
-                        // A different host is a different intended create,
-                        // exactly as a different directory is — so the key
-                        // the last submit used stops applying (see this
-                        // component's docs for both edges of that rule).
-                        intent_key.set(None);
-                    },
-                    for host in hosts.iter() {
-                        option {
-                            key: "{host.id}",
-                            value: "{host.id}",
-                            // Marked on the OPTION as well as through the
-                            // select's `value` above, and that redundancy is
-                            // load-bearing rather than belt-and-braces — see
-                            // the agent picker below, where the same
-                            // arrangement is what makes a preselection appear
-                            // at all.
-                            selected: selected == Some(host.id),
-                            "{host.label()}"
+            if *creation_surface.read() == CreationSurface::Structured {
+                // A destination is a host and its folder, so the structured
+                // composer keeps the controls that change either fact in one
+                // compact block, in reading order: host and browse, the host
+                // reconciliation notes, the folder, the recent-folder links
+                // with the two resets, and the optional name. This makes a
+                // launch's location reviewable without restoring a second
+                // summary of its choices.
+                div { class: "launch-composer-destination",
+                    span { class: "launch-composer-section-label", "destination" }
+                    div { class: "launch-composer-destination-row",
+                        {host_select.clone()}
+                        button {
+                            r#type: "button",
+                            disabled: busy || selected.is_none(),
+                            // The accessible name stays "browse this path"
+                            // while the visible text names the host, so the
+                            // control reads as one thing to every client.
+                            aria_label: "browse this path",
+                            onclick: move |_| {
+                                if !draft_transition_allowed(ops) { return; }
+                                request_directory_browse(
+                                    browse_base_for_folder.clone(), selected, &browse_hosts_for_folder, browse_target,
+                                    submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
+                                    browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
+                                    live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
+                                );
+                            },
+                            "browse folders on "
+                            span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
                         }
                     }
-                }
-            }
-            // The reconciliation, said out loud. A chosen host leaving the
-            // registry moves the effective target, and the one thing that
-            // must not happen is that move being invisible — a selector
-            // showing host A while the body carries host B is a create on a
-            // machine nobody picked. The key is re-minted for the new target
-            // by the submit path's own binding check.
-            if choice_vanished {
-                div { class: "create-session-host-note",
-                    "the host you picked is no longer registered, so this create would go to the \
-                     one selected now"
-                }
-            }
-            if selected.is_some() && !selected_host_available {
-                div { class: "create-session-host-note",
-                    "the selected host is unavailable; choose a connected host before launching"
-                }
-            }
-            if !remembered_destination_valid {
-                div { class: "create-session-host-note",
-                    "{REMEMBERED_DESTINATION_CHANGED}"
-                }
-            }
-            // The clone-specific reconciliation, in the same voice and the
-            // same slot: the row this form was cloned from could not be
-            // confirmed as the install it was cloned from (mismatched, or
-            // predating host tracking entirely — see `clone_host_note`'s
-            // own doc), so its host was not carried over, and
-            // the selector below shows its ordinary default instead. Says
-            // nothing while a hostful clone is still `Waiting` on the
-            // registry (F1) — that is not yet a fact worth reporting.
-            if let Some(note) = clone_host_note {
-                div { class: "create-session-host-note", "{note}" }
-            }
-            if *creation_surface.read() == CreationSurface::Structured {
-                // Folder is deliberately adjacent to Host in the ordinary
-                // composer. A destination is a pair, and separating the two
-                // makes a familiar launch read like an agent choice rather
-                // than a place to run it.
-                label { class: "launch-composer-folder",
-                    "folder"
+                    {host_notes.clone()}
                     input {
                         r#type: "text",
                         required: true,
@@ -2914,7 +2894,13 @@ pub(super) fn CreateSessionForm(
                             intent_key.set(None);
                         },
                     }
-                    div { class: "launch-composer-folder-options", aria_label: "recent folders",
+                    // Recent folders are destination shortcuts, rendered as
+                    // text links rather than chips so they read as history
+                    // beneath the field they fill, not as a second picker.
+                    div { class: "launch-composer-folder-links", aria_label: "recent folders",
+                        if !recent_history.folders.is_empty() {
+                            span { class: "launch-composer-folder-links-muted", "recent:" }
+                        }
                         for folder in recent_history.folders.iter().take(3) {
                             button {
                                 r#type: "button",
@@ -2940,64 +2926,47 @@ pub(super) fn CreateSessionForm(
                                         intent_key.set(None);
                                     }
                                 },
-                                // Every option owns this slot, including an
-                                // unselected one. Selection must not change a
-                                // sibling's measured position while a reader
-                                // compares folder history.
-                                span {
-                                    class: "launch-composer-option-check",
-                                    aria_hidden: "true",
-                                    "✓"
-                                }
                                 "{display_peer(&folder.display_cwd)}"
                             }
                         }
+                        if !recent_history.folders.is_empty() {
+                            span { class: "launch-composer-folder-links-separator", aria_hidden: "true", "·" }
+                        }
+                        {destination_resets.clone()}
                     }
-                    button {
-                        r#type: "button",
-                        disabled: busy || selected.is_none(),
-                        onclick: move |_| {
-                            if !draft_transition_allowed(ops) { return; }
-                            request_directory_browse(
-                                browse_base_for_folder.clone(), selected, &browse_hosts_for_folder, browse_target,
-                                submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
-                                browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
-                                live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
-                            );
-                        },
-                        "browse this path"
-                    }
-                }
-                // This is one of two conditional render sites for the same
-                // optional name signal. Keeping only the active surface's
-                // input mounted gives assistive technology one destination
-                // block and preserves the strict label lookup tests rely on.
-                label { class: "launch-composer-name",
-                    "name (optional)"
-                    input {
-                        r#type: "text",
-                        autocomplete: "off",
-                        autocorrect: "off",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        // A clone can seed this from a peer-supplied title,
-                        // using the same escaped-display/raw-seed model as
-                        // the working-directory field below.
-                        dir: "ltr",
-                        value: "{title}",
-                        disabled: busy,
-                        oninput: move |evt| {
-                            if !draft_transition_allowed(ops) {
-                                return;
-                            }
-                            title.set(evt.value());
-                            title_edited.set(true);
-                            // An edit makes the next submit a DIFFERENT
-                            // intent, so the key the last one used stops
-                            // applying here (this component's docs carry the
-                            // full argument for both edges of that rule).
-                            intent_key.set(None);
-                        },
+                    // This is one of two conditional render sites for the
+                    // same optional name signal. Keeping only the active
+                    // surface's input mounted gives assistive technology one
+                    // destination block and preserves the strict label lookup
+                    // tests rely on.
+                    label { class: "launch-composer-name",
+                        "name (optional)"
+                        input {
+                            r#type: "text",
+                            autocomplete: "off",
+                            autocorrect: "off",
+                            autocapitalize: "none",
+                            spellcheck: "false",
+                            // A clone can seed this from a peer-supplied
+                            // title, using the same escaped-display/raw-seed
+                            // model as the folder field above.
+                            dir: "ltr",
+                            value: "{title}",
+                            disabled: busy,
+                            oninput: move |evt| {
+                                if !draft_transition_allowed(ops) {
+                                    return;
+                                }
+                                title.set(evt.value());
+                                title_edited.set(true);
+                                // An edit makes the next submit a DIFFERENT
+                                // intent, so the key the last one used stops
+                                // applying here (this component's docs carry
+                                // the full argument for both edges of that
+                                // rule).
+                                intent_key.set(None);
+                            },
+                        }
                     }
                 }
                 div { class: "launch-composer-choice launch-composer-harness-choice",
@@ -3339,6 +3308,15 @@ pub(super) fn CreateSessionForm(
                         "back to harnesses"
                     }
                 }
+                // The legacy surface keeps a plain labelled host control ahead
+                // of its working-directory field below; only the structured
+                // surface presents host and folder as the destination block.
+                // Same Element, same notes, so the two surfaces cannot drift.
+                label { class: "launch-composer-host",
+                    "host"
+                    {host_select.clone()}
+                }
+                {host_notes.clone()}
             }
             // The agent, offered from the helm catalog and defaulting
             // to what a session was last created from on this helm (SPEC.md's
@@ -3525,14 +3503,18 @@ pub(super) fn CreateSessionForm(
             }
             if *creation_surface.read() == CreationSurface::Legacy {
                 // The legacy destination is its working-directory field plus
-                // the browse button above; this mirror mounts the same
-                // optional-name behavior right after them, so both surfaces
-                // read host, folder, browse, name in the same order. The two
-                // sites are surface-guarded so exactly ONE name input exists
-                // in the DOM at a time: a hidden duplicate would double the
-                // accessible form and break strict label lookups, which is
-                // why this is not a `launch-composer-legacy-hidden` twin like
-                // the working-directory and command fields.
+                // the browse button above. The two resets follow them, as
+                // they do on the structured surface, and then this mirror
+                // mounts the same optional-name behavior, so both surfaces
+                // read host, folder, browse, resets, name in the same order.
+                // The two name sites are surface-guarded so exactly ONE name
+                // input exists in the DOM at a time: a hidden duplicate would
+                // double the accessible form and break strict label lookups,
+                // which is why this is not a `launch-composer-legacy-hidden`
+                // twin like the working-directory and command fields.
+                div { class: "launch-composer-folder-links",
+                    {destination_resets.clone()}
+                }
                 label { class: "launch-composer-name",
                     "name (optional)"
                     input {

@@ -114,8 +114,8 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   };
   const prefillCompleteRecent = async (form: Locator) => {
     // This is deliberately separate from the default-over-explicit state:
-    // reviewers need to see an ordinary complete setup populate every chip
-    // while the upper strip, heading, and first saved row are still together.
+    // reviewers need to see an ordinary complete setup update the summary
+    // while the action row, heading, and first saved row stay together.
     await form.locator('.launch-composer-search input[role="combobox"]').fill("alpha-the-ending-that-matters");
     const recent = form.getByRole("group", { name: "Recent setups" }).getByRole("option");
     await expect(recent, "the controlled search must expose the complete Astra/High/YOLO setup").toHaveCount(1);
@@ -153,20 +153,20 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await selectExplicit(form);
     await form.evaluate((node) => { node.scrollTop = 0; });
     await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
-    await expect(form.locator(".launch-composer-selections")).toContainText("Permissions: Yolo");
+    // The caption claims the explicit choices are visible; prove the draft
+    // holds them before the screenshot rather than trusting the clicks.
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
     await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
-  }, ["Codex/Astra/High/YOLO chips", "all chip removal affordances", "recent heading and first row at scrollTop 0"]);
+  }, ["Codex/Astra/High/YOLO summary", "recent heading and first row at scrollTop 0"]);
   await capture("complete-recent-prefill-upper-strip", narrow, async (form) => {
     await prefillCompleteRecent(form);
     await form.evaluate((node) => { node.scrollTop = 0; });
     await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
-    await expect(form.locator(".launch-composer-selections")).toContainText("Model: gpt-6-astra");
-    await expect(form.locator(".launch-composer-selections")).toContainText("Effort: high");
-    await expect(form.locator(".launch-composer-selections")).toContainText("Permissions: Yolo");
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
     await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
-  }, ["complete recent prefill", "all populated chips", "recent heading and first row at scrollTop 0"]);
+  }, ["complete recent prefill", "recent heading and first row at scrollTop 0"]);
   await capture("focus-wrap-launch-visible", narrow, async (form) => {
     // Launch no longer renders last — the action row moved to the top of the
     // dialog — so the wrap boundary is whatever the trap's own query finds
