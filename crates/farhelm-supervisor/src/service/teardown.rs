@@ -5,9 +5,9 @@
 //! and its steps are ordered against each other for reasons that are not
 //! recoverable from reading any one of them: uploads are cancelled before
 //! the multi-second process sweep so nothing goes on writing into a
-//! directory that is about to vanish; tab scope units are enumerated from
-//! two independent sources because a tmux server that died first leaves no
-//! windows to read tab ids from while a scrubbed tab daemon keeps running
+//! directory that is about to vanish; tab and past-launch scope units are
+//! enumerated from the manager because a tmux server that died first leaves
+//! no windows to read tab ids from while a scrubbed daemon keeps running
 //! inside its cgroup; the removable artifacts go before the DB row because
 //! a leftover launch spec holds credentials and this is the last moment
 //! anything comes back for it; and the row goes last because a crash that
@@ -67,7 +67,7 @@ use super::connection::notify_detached;
 use super::core::{ArchiveStage, SessionEntry, Supervisor, unknown_pane_owner_refusal};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::status::session_status;
-use super::sweep::{SweepTarget, reap_process_tree};
+use super::sweep::{ScopeUnits, SweepTarget, reap_process_tree};
 use super::terminals::{ActiveAttach, AttachmentKey};
 use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
@@ -115,7 +115,7 @@ pub(crate) enum TeardownError {
     /// collapse into "there are none".
     TabRediscovery(anyhow::Error),
     /// A systemd user manager exists but would not enumerate this
-    /// session's tab scopes.
+    /// session's tab or launch-generation scopes.
     TabScopeEnumeration(anyhow::Error),
     /// The process-tree sweep itself failed — not "nothing was found to
     /// kill", but "this could not be confirmed".
@@ -242,7 +242,7 @@ impl Supervisor {
         // Archive reaches the same whole-session ownership boundary as
         // delete: tabs carry separate cgroup units, and the manager is the
         // only source left when tmux died before its scrubbed daemon did.
-        let mut units = entry.scope.clone().into_iter().collect::<Vec<_>>();
+        let mut units = ScopeUnits::recorded(entry.scope.clone());
         if let Some(terminal) = entry.terminal.as_ref() {
             if let Some(gate) = &self.seams.archive_gate {
                 gate(ArchiveStage::TabRediscovery)
@@ -253,30 +253,35 @@ impl Supervisor {
                 .session_tabs_including_dead(terminal)
                 .await
                 .map_err(ArchiveError::TabRediscovery)?;
-            units.extend(
+            units.extend_derived(
                 tabs.iter()
                     .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
             );
         }
-        if let Some(glob) = crate::scope::tab_unit_glob(session_id) {
+        let globs = [
+            crate::scope::tab_unit_glob(session_id),
+            crate::scope::launch_unit_glob(session_id),
+        ];
+        if globs.iter().any(Option::is_some) {
             if let Some(gate) = &self.seams.archive_gate {
                 gate(ArchiveStage::ScopeEnumeration)
                     .await
                     .map_err(ArchiveError::TabScopeEnumeration)?;
             }
-            match self.seams.scopes.units_matching(&glob).await {
-                Ok(found) => units.extend(found),
-                Err(error) if !self.seams.scopes.available().await => debug!(
-                    session = %session_id,
-                    error = %format!("{error:#}"),
-                    "no systemd user manager to enumerate this archived session's tab scopes; \
-                     the process-tree sweep is the whole mechanism"
-                ),
-                Err(error) => return Err(ArchiveError::TabScopeEnumeration(error)),
+            for glob in globs.into_iter().flatten() {
+                match self.seams.scopes.units_matching(&glob).await {
+                    Ok(found) => units.extend_derived(found),
+                    Err(error) if !self.seams.scopes.available().await => debug!(
+                        session = %session_id,
+                        error = %format!("{error:#}"),
+                        "no systemd user manager to enumerate this archived session's scopes; \
+                         the process-tree sweep is the whole mechanism"
+                    ),
+                    Err(error) => return Err(ArchiveError::TabScopeEnumeration(error)),
+                }
             }
         }
-        units.sort();
-        units.dedup();
+        units.normalize();
         if let Some(gate) = &self.seams.archive_gate {
             gate(ArchiveStage::Sweep)
                 .await
@@ -292,7 +297,7 @@ impl Supervisor {
         abort_session_uploads(self, session_id, "the session was archived", false).await;
         reap_process_tree(
             &self.seams.scopes,
-            &units,
+            units,
             root_pid,
             session_id,
             &SweepTarget::WholeSession,
@@ -592,13 +597,15 @@ impl Supervisor {
         // no windows left to read tab ids from, while a scrubbed
         // tab daemon is still running inside a cgroup that
         // outlived its pane. So the manager is also asked directly
-        // for every unit matching this session's tab glob, which
-        // needs no tmux at all. A failure to ENUMERATE fails the
-        // delete outright, row retained: publishing "deleted" over
-        // an unenumerated cgroup is exactly the unreapable,
+        // for every unit matching this session's tab and launch
+        // globs, which need no tmux at all. The launch glob reaches
+        // prior generations whose failed kill left a scrubbed daemon
+        // after the old portable sweep reported clean. A failure to
+        // ENUMERATE fails the delete outright, row retained:
+        // publishing "deleted" over an unenumerated cgroup is exactly the unreapable,
         // invisible agent lore/2026-07-27-m2-process-tree-stop.md
         // ends on.
-        let mut units = entry.scope.clone().into_iter().collect::<Vec<_>>();
+        let mut units = ScopeUnits::recorded(entry.scope.clone());
         if let Some(terminal) = entry.terminal.as_ref() {
             // Strict: "we could not ask tmux" is not "there
             // are no tabs", and a delete that assumed the
@@ -607,29 +614,35 @@ impl Supervisor {
                 .session_tabs_including_dead(terminal)
                 .await
                 .map_err(TeardownError::TabRediscovery)?;
-            units.extend(
+            units.extend_derived(
                 tabs.iter()
                     .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
             );
         }
-        if let Some(glob) = crate::scope::tab_unit_glob(session_id) {
+        for glob in [
+            crate::scope::tab_unit_glob(session_id),
+            crate::scope::launch_unit_glob(session_id),
+        ]
+        .into_iter()
+        .flatten()
+        {
             match self.seams.scopes.units_matching(&glob).await {
-                Ok(found) => units.extend(found),
+                Ok(found) => units.extend_derived(found),
                 // Only a host with a usable manager can be asked at
                 // all; where there is none this is not a failure,
                 // it is the sweep-only world M2 already lived in.
                 Err(e) if !self.seams.scopes.available().await => debug!(
                     session = %session_id, error = %format!("{e:#}"),
-                    "no systemd user manager to enumerate this session's tab scopes;                              the process-tree sweep is the whole mechanism"
+                    "no systemd user manager to enumerate this session's scopes; \
+                     the process-tree sweep is the whole mechanism"
                 ),
                 Err(e) => return Err(TeardownError::TabScopeEnumeration(e)),
             }
         }
-        units.sort();
-        units.dedup();
+        units.normalize();
         reap_process_tree(
             &self.seams.scopes,
-            &units,
+            units,
             root_pid,
             session_id,
             &SweepTarget::WholeSession,
@@ -882,6 +895,7 @@ impl Supervisor {
 #[cfg(test)]
 mod tests {
     use super::super::core::tests::{StateDir, dummy_exe, entry_with};
+    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::*;
     use crate::store::{LastOutcome, StoredSession};
 
@@ -1107,6 +1121,98 @@ mod tests {
         assert_eq!(
             archived.info.status,
             farhelm_proto::SessionStatus::Exited { exit_code: None }
+        );
+    }
+
+    /// Delete must enumerate launch scopes from the manager, not only from
+    /// the current row generation. A failed old-generation kill can leave a
+    /// scrubbed daemon after the sweep reported clean, and deleting later is
+    /// the last durable chance to name that cgroup.
+    #[farhelm_testtrace::test]
+    async fn deleting_enumerates_and_kills_a_previous_launch_generation_scope() {
+        let state = StateDir::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let previous = crate::scope::unit_name(&id, 3).expect("a UUID names a launch scope");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let seams = SupervisorSeams {
+            scopes: Arc::new(
+                crate::scope::ScopeManager::fake_with_matching_units_vanishing(
+                    true,
+                    vec![previous.clone()],
+                    2,
+                    sink,
+                ),
+            ),
+            ..SupervisorSeams::default()
+        };
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            seams,
+        )
+        .await
+        .expect("supervisor");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.clone(),
+                    parent: None,
+                    archived: false,
+                    title: "previous scope".to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 4,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session being deleted");
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.clone();
+
+        let Ok(()) = sup.teardown_session(&entry, &id).await else {
+            panic!("a terminal-less session with a confirmed old scope deletes");
+        };
+
+        let observed = observed.lock().expect("scope operation sink poisoned");
+        assert!(
+            observed.iter().any(|op| matches!(
+                op,
+                crate::scope::ScopeOp::List(pattern)
+                    if pattern == &crate::scope::launch_unit_glob(&id).unwrap()
+            )),
+            "delete must enumerate every launch generation: {observed:?}"
+        );
+        assert!(
+            observed.iter().any(|op| matches!(
+                op,
+                crate::scope::ScopeOp::Kill { unit, .. } if unit == &previous
+            )),
+            "the previous launch scope returned by the glob must be killed: {observed:?}"
         );
     }
 }

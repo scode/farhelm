@@ -30,7 +30,7 @@ use super::launch_artifacts::{
 };
 use super::listing::list_all;
 use super::status::{dead_pane_exit_code, entry_info, observe_entry};
-use super::sweep::{SweepTarget, reap_process_tree, stop_live_agent};
+use super::sweep::{ScopeUnits, SweepTarget, reap_process_tree, stop_live_agent};
 use super::teardown::{ArchiveError, TeardownError};
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
@@ -1123,7 +1123,7 @@ async fn handle_stop_session(
             // or not the agent was alive to begin with.
             if let Err(e) = reap_process_tree(
                 &sup.seams.scopes,
-                entry.scope.as_slice(),
+                ScopeUnits::recorded(entry.scope.clone()),
                 None,
                 &session_id,
                 &SweepTarget::AgentOnly,

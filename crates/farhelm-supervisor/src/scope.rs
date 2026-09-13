@@ -63,6 +63,7 @@
 
 use anyhow::Context;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// How long any single `systemd-run`/`systemctl` QUERY may take before this
@@ -161,6 +162,19 @@ pub fn tab_unit_glob(session_id: &str) -> Option<String> {
     is_uuid_shaped(session_id).then(|| format!("{UNIT_PREFIX}{session_id}-tab-*.scope"))
 }
 
+/// The glob every generation of a session's LAUNCH scope matches, or `None`
+/// for a session id that cannot safely name a unit.
+///
+/// Delete and archive ask the manager for these names because the row only
+/// records its current generation. A prior generation can still contain a
+/// daemon after its portable sweep reported clean, and tmux has no record of
+/// that scope once the old pane is gone. The `[0-9]*` suffix is deliberately
+/// narrower than `*`: launch generations are digits, so this cannot match a
+/// tab scope's `-tab-` infix.
+pub fn launch_unit_glob(session_id: &str) -> Option<String> {
+    is_uuid_shaped(session_id).then(|| format!("{UNIT_PREFIX}{session_id}-[0-9]*.scope"))
+}
+
 /// Whether `id` is a plain lowercase hyphenated UUID (8-4-4-4-12 hex).
 ///
 /// Deliberately stricter than "parses as a UUID": accepting uppercase or
@@ -224,19 +238,21 @@ enum Mode {
     /// outside the crate (unlike the fakes below) because the integration
     /// suite lives in another crate.
     Disabled,
-    /// A test double: availability is fixed, nothing is actually signaled,
+    /// A test double: availability is scripted by probe, nothing is actually signaled,
     /// and every operation is reported to `sink`. `kills_fail` stands in for
     /// the manager that is THERE but not working — the case stop must
     /// survive without losing anything M2 guaranteed. `vanishes_after`
-    /// makes `exists` report the unit gone once that many existence checks
-    /// have been answered, which is how the post-kill confirmation's two
-    /// outcomes (converged, and timed out) are both reachable in a test.
+    /// makes `exists` report each unit gone once that many checks for that
+    /// unit have been answered, which is how the post-kill confirmation's
+    /// two outcomes (converged, and timed out) are both reachable in a test.
     #[cfg(test)]
     Fake {
-        available: bool,
+        probe_answers: std::sync::Mutex<std::collections::VecDeque<bool>>,
+        available: std::sync::atomic::AtomicBool,
         kills_fail: bool,
         vanishes_after: Option<usize>,
-        exists_calls: std::sync::atomic::AtomicUsize,
+        exists_calls: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+        matching_units: Vec<String>,
         sink: ScopeOpSink,
     },
 }
@@ -277,7 +293,12 @@ struct Tools {
 /// every launch. Each LAUNCH still makes and records its own selection from
 /// that verdict, which is what lets one session run under a scope and a
 /// later one (after a restart on a host that lost its manager) honestly
-/// record the fallback.
+/// record the fallback. There is one narrow exception: when teardown holds
+/// a unit the durable row says was scoped, a cached negative verdict gets
+/// one re-probe. That evidence proves a manager existed when the launch ran,
+/// so treating an old transient failure as stronger evidence would discard
+/// the one handle on an environment-scrubbed descendant. A second negative
+/// is final until the next supervisor process.
 ///
 /// Residual, accepted and documented rather than engineered around: a user
 /// manager that dies DURING a supervisor's lifetime leaves the cached
@@ -291,7 +312,21 @@ struct Tools {
 /// live user session is not a failure mode this tool needs to be robust to.
 pub struct ScopeManager {
     mode: Mode,
-    tools: tokio::sync::OnceCell<Option<Tools>>,
+    verdict: tokio::sync::Mutex<Verdict>,
+    verdict_changed: tokio::sync::Notify,
+}
+
+/// One process's cached user-manager answer.
+///
+/// Tools are shared by `Arc` so callers can run `systemctl` without holding
+/// the verdict mutex. `Probing` only coordinates concurrent callers: it does
+/// not make another manager query possible beyond the initial probe and the
+/// one permitted re-probe after a negative result.
+enum Verdict {
+    Unprobed,
+    Probing,
+    Usable(Option<Arc<Tools>>),
+    Unusable { reprobed: bool },
 }
 
 impl std::fmt::Debug for ScopeManager {
@@ -302,10 +337,7 @@ impl std::fmt::Debug for ScopeManager {
             #[cfg(test)]
             Mode::Fake { .. } => "fake",
         };
-        f.debug_struct("ScopeManager")
-            .field("mode", &mode)
-            .field("probed", &self.tools.get().map(Option::is_some))
-            .finish()
+        f.debug_struct("ScopeManager").field("mode", &mode).finish()
     }
 }
 
@@ -315,7 +347,8 @@ impl ScopeManager {
     pub fn systemd() -> ScopeManager {
         ScopeManager {
             mode: Mode::Systemd,
-            tools: tokio::sync::OnceCell::new(),
+            verdict: tokio::sync::Mutex::new(Verdict::Unprobed),
+            verdict_changed: tokio::sync::Notify::new(),
         }
     }
 
@@ -324,14 +357,65 @@ impl ScopeManager {
     pub fn disabled() -> ScopeManager {
         ScopeManager {
             mode: Mode::Disabled,
-            tools: tokio::sync::OnceCell::new(),
+            verdict: tokio::sync::Mutex::new(Verdict::Unprobed),
+            verdict_changed: tokio::sync::Notify::new(),
         }
     }
 
     /// A test double reporting every operation to `sink`; see [`ScopeOp`].
     #[cfg(test)]
     pub fn fake(available: bool, sink: ScopeOpSink) -> ScopeManager {
-        ScopeManager::fake_with(available, false, None, sink)
+        ScopeManager::fake_with(vec![available], false, None, Vec::new(), sink)
+    }
+
+    /// A fake whose first probe and permitted re-probe answer independently.
+    #[cfg(test)]
+    pub(crate) fn fake_reprobing(first: bool, second: bool, sink: ScopeOpSink) -> ScopeManager {
+        ScopeManager::fake_with(vec![first, second], false, None, Vec::new(), sink)
+    }
+
+    /// A re-probing fake whose kill confirmation can observe a gone unit.
+    #[cfg(test)]
+    pub(crate) fn fake_reprobing_vanishing(
+        first: bool,
+        second: bool,
+        vanishes_after: usize,
+        sink: ScopeOpSink,
+    ) -> ScopeManager {
+        ScopeManager::fake_with(
+            vec![first, second],
+            false,
+            Some(vanishes_after),
+            Vec::new(),
+            sink,
+        )
+    }
+
+    /// A fake manager that lists `matching_units` for every requested glob.
+    #[cfg(test)]
+    pub(crate) fn fake_with_matching_units(
+        available: bool,
+        matching_units: Vec<String>,
+        sink: ScopeOpSink,
+    ) -> ScopeManager {
+        ScopeManager::fake_with(vec![available], false, None, matching_units, sink)
+    }
+
+    /// A listing fake whose returned units disappear during kill confirmation.
+    #[cfg(test)]
+    pub(crate) fn fake_with_matching_units_vanishing(
+        available: bool,
+        matching_units: Vec<String>,
+        vanishes_after: usize,
+        sink: ScopeOpSink,
+    ) -> ScopeManager {
+        ScopeManager::fake_with(
+            vec![available],
+            false,
+            Some(vanishes_after),
+            matching_units,
+            sink,
+        )
     }
 
     /// A test double for a manager that is present and answers questions but
@@ -344,7 +428,7 @@ impl ScopeManager {
     /// must still succeed on the sweep's own verdict.
     #[cfg(test)]
     pub fn fake_failing_kills(sink: ScopeOpSink) -> ScopeManager {
-        ScopeManager::fake_with(true, true, None, sink)
+        ScopeManager::fake_with(vec![true], true, None, Vec::new(), sink)
     }
 
     /// A test double whose unit disappears after `vanishes_after` existence
@@ -353,25 +437,29 @@ impl ScopeManager {
     /// caller.
     #[cfg(test)]
     pub fn fake_vanishing(vanishes_after: usize, sink: ScopeOpSink) -> ScopeManager {
-        ScopeManager::fake_with(true, false, Some(vanishes_after), sink)
+        ScopeManager::fake_with(vec![true], false, Some(vanishes_after), Vec::new(), sink)
     }
 
     #[cfg(test)]
     fn fake_with(
-        available: bool,
+        probe_answers: Vec<bool>,
         kills_fail: bool,
         vanishes_after: Option<usize>,
+        matching_units: Vec<String>,
         sink: ScopeOpSink,
     ) -> ScopeManager {
         ScopeManager {
             mode: Mode::Fake {
-                available,
+                probe_answers: std::sync::Mutex::new(probe_answers.into()),
+                available: std::sync::atomic::AtomicBool::new(false),
                 kills_fail,
                 vanishes_after,
-                exists_calls: std::sync::atomic::AtomicUsize::new(0),
+                exists_calls: std::sync::Mutex::new(std::collections::HashMap::new()),
+                matching_units,
                 sink,
             },
-            tools: tokio::sync::OnceCell::new(),
+            verdict: tokio::sync::Mutex::new(Verdict::Unprobed),
+            verdict_changed: tokio::sync::Notify::new(),
         }
     }
 
@@ -393,31 +481,92 @@ impl ScopeManager {
     /// verdict is logged once here and every launch records its own
     /// selection durably.
     pub async fn available(&self) -> bool {
-        match &self.mode {
-            Mode::Disabled => false,
-            #[cfg(test)]
-            Mode::Fake {
-                available, sink, ..
-            } => {
-                // Routed through the same `OnceCell` the real path uses, so
-                // the caching contract is what a test observes.
-                self.tools
-                    .get_or_init(|| async {
-                        sink(&ScopeOp::Probe);
-                        None
-                    })
-                    .await;
-                *available
+        self.tools(false).await.is_some()
+    }
+
+    /// Re-check a cached negative verdict once for durable teardown evidence.
+    ///
+    /// A positive verdict stays cached even if its manager dies later; that
+    /// accepted residual is documented on [`ScopeManager`]. A second negative
+    /// also stays final, so repeated teardown work cannot turn into repeated
+    /// manager probes.
+    pub async fn reprobe(&self) -> bool {
+        self.tools(true).await.is_some()
+    }
+
+    /// Return the cached tools, probing once and re-probing one negative only
+    /// when `allow_reprobe` says the caller holds durable scope evidence.
+    async fn tools(&self, allow_reprobe: bool) -> Option<Arc<Tools>> {
+        if matches!(&self.mode, Mode::Disabled) {
+            return None;
+        }
+
+        let notified = self.verdict_changed.notified();
+        tokio::pin!(notified);
+        loop {
+            // Register before observing `Probing`, while the mutex still
+            // orders us against the probe owner. `notify_waiters` otherwise
+            // has no stored permit and could fire in the gap before await.
+            notified.as_mut().enable();
+            let should_probe = {
+                let mut verdict = self.verdict.lock().await;
+                match &*verdict {
+                    Verdict::Usable(tools) => return tools.clone(),
+                    Verdict::Unusable { reprobed } if !allow_reprobe || *reprobed => return None,
+                    Verdict::Unprobed => {
+                        *verdict = Verdict::Probing;
+                        Some(false)
+                    }
+                    Verdict::Unusable { .. } => {
+                        *verdict = Verdict::Probing;
+                        Some(true)
+                    }
+                    Verdict::Probing => None,
+                }
+            };
+            let Some(reprobed) = should_probe else {
+                notified.as_mut().await;
+                notified.set(self.verdict_changed.notified());
+                continue;
+            };
+            let tools = self.probe().await;
+            let available = tools.is_some();
+            {
+                let mut verdict = self.verdict.lock().await;
+                *verdict = if available {
+                    Verdict::Usable(tools)
+                } else {
+                    Verdict::Unusable { reprobed }
+                };
             }
-            Mode::Systemd => self.tools().await.is_some(),
+            self.verdict_changed.notify_waiters();
         }
     }
 
-    /// The probed tools, or `None` when this host has no usable manager.
-    async fn tools(&self) -> Option<&Tools> {
-        self.tools
-            .get_or_init(|| async {
-                let tools = probe_systemd().await;
+    /// Probe the mode without retaining the verdict mutex across process I/O.
+    async fn probe(&self) -> Option<Arc<Tools>> {
+        match &self.mode {
+            Mode::Disabled => None,
+            #[cfg(test)]
+            Mode::Fake {
+                probe_answers,
+                available,
+                sink,
+                ..
+            } => {
+                sink(&ScopeOp::Probe);
+                let answer = probe_answers.lock().unwrap().pop_front().unwrap_or(false);
+                available.store(answer, std::sync::atomic::Ordering::SeqCst);
+                answer.then(|| {
+                    Arc::new(Tools {
+                        systemd_run: PathBuf::new(),
+                        systemctl: PathBuf::new(),
+                        expand_environment_flag: false,
+                    })
+                })
+            }
+            Mode::Systemd => {
+                let tools = probe_systemd().await.map(Arc::new);
                 match &tools {
                     Some(tools) => tracing::info!(
                         systemd_run = %tools.systemd_run.display(),
@@ -432,9 +581,8 @@ impl ScopeManager {
                     ),
                 }
                 tools
-            })
-            .await
-            .as_ref()
+            }
+        }
     }
 
     /// The argv prefix that wraps a launch in `unit`, or `None` when this
@@ -461,7 +609,7 @@ impl ScopeManager {
     /// - `--` stops flag parsing before the shim's own argv.
     pub async fn launch_prefix(&self, unit: &str) -> Option<Vec<String>> {
         let tools = match &self.mode {
-            Mode::Systemd => self.tools().await?,
+            Mode::Systemd => self.tools(false).await?,
             // A fake never launches anything; a disabled manager has nothing
             // to wrap with. Both answer honestly rather than handing back a
             // prefix naming a binary they never probed.
@@ -504,11 +652,17 @@ impl ScopeManager {
                 ..
             } => {
                 sink(&ScopeOp::Exists(unit.to_string()));
-                let seen = exists_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Ok(*available && vanishes_after.is_none_or(|after| seen < after))
+                let mut calls = exists_calls
+                    .lock()
+                    .expect("fake scope existence log poisoned");
+                let seen = calls.entry(unit.to_string()).or_insert(0);
+                let prior = *seen;
+                *seen += 1;
+                Ok(available.load(std::sync::atomic::Ordering::SeqCst)
+                    && vanishes_after.is_none_or(|after| prior < after))
             }
             Mode::Systemd => {
-                let tools = self.tools().await.ok_or_else(|| {
+                let tools = self.tools(false).await.ok_or_else(|| {
                     anyhow::anyhow!("no systemd user manager to ask about {unit}")
                 })?;
                 let out = run_with_timeout(
@@ -538,8 +692,8 @@ impl ScopeManager {
     }
 
     /// Every unit this manager knows whose name matches `pattern` — the
-    /// tmux-independent half of a session teardown (see
-    /// [`tab_unit_glob`]).
+    /// tmux-independent half of a session teardown (see [`tab_unit_glob`]
+    /// and [`launch_unit_glob`]).
     ///
     /// `Ok(vec![])` means the manager answered and has none, which is the
     /// ordinary case and a real answer. An `Err` means the manager could
@@ -558,16 +712,19 @@ impl ScopeManager {
             Mode::Disabled => Ok(Vec::new()),
             #[cfg(test)]
             Mode::Fake {
-                available, sink, ..
+                matching_units,
+                sink,
+                ..
             } => {
                 sink(&ScopeOp::List(pattern.to_string()));
-                // A fake owns no real units; the availability flag is what
-                // a test is asserting against here.
-                let _ = available;
-                Ok(Vec::new())
+                Ok(matching_units
+                    .iter()
+                    .filter(|unit| unit_matches_pattern(pattern, unit))
+                    .cloned()
+                    .collect())
             }
             Mode::Systemd => {
-                let tools = self.tools().await.ok_or_else(|| {
+                let tools = self.tools(false).await.ok_or_else(|| {
                     anyhow::anyhow!("no systemd user manager to list units matching {pattern}")
                 })?;
                 let out = run_with_timeout(
@@ -627,7 +784,7 @@ impl ScopeManager {
                 Ok(())
             }
             Mode::Systemd => {
-                let tools = self.tools().await.ok_or_else(|| {
+                let tools = self.tools(false).await.ok_or_else(|| {
                     anyhow::anyhow!("no systemd user manager to kill scope {unit} with")
                 })?;
                 let out = run_with_timeout(
@@ -650,6 +807,31 @@ impl ScopeManager {
             }
         }
     }
+}
+
+/// Match the two session-scope glob shapes the fake needs to model.
+///
+/// This is deliberately not a general systemd glob implementation. Production
+/// passes its pattern straight to `systemctl`; the fake only needs to keep the
+/// test boundary honest by distinguishing the tab `*` suffix from the launch
+/// `[0-9]*` suffix that must reject `-tab-` names.
+#[cfg(test)]
+fn unit_matches_pattern(pattern: &str, unit: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix("[0-9]*.scope") {
+        return unit
+            .strip_prefix(prefix)
+            .and_then(|suffix| suffix.strip_suffix(".scope"))
+            .is_some_and(|generation| {
+                !generation.is_empty() && generation.bytes().all(|b| b.is_ascii_digit())
+            });
+    }
+    if let Some(prefix) = pattern.strip_suffix("*.scope") {
+        return unit
+            .strip_prefix(prefix)
+            .and_then(|suffix| suffix.strip_suffix(".scope"))
+            .is_some_and(|suffix| !suffix.is_empty());
+    }
+    unit == pattern
 }
 
 /// Resolve `name` to an absolute path by walking `$PATH`, or `None`.
@@ -1123,6 +1305,91 @@ mod tests {
         assert!(scopes.available().await);
         assert!(scopes.available().await);
         assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe]);
+    }
+
+    /// A negative verdict is normally final, but durable teardown evidence
+    /// gets one chance to distinguish a startup race from a truly absent
+    /// manager. The sink is the observable that matters: availability alone
+    /// cannot tell one fresh probe from a cached answer.
+    #[farhelm_testtrace::test]
+    async fn a_negative_verdict_reprobes_once_and_can_become_usable() {
+        let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let ops = Arc::clone(&ops);
+            Arc::new(move |op: &ScopeOp| ops.lock().unwrap().push(op.clone())) as ScopeOpSink
+        };
+        let scopes = ScopeManager::fake_reprobing(false, true, sink);
+
+        assert!(
+            !scopes.available().await,
+            "the first probe must stay negative"
+        );
+        assert!(
+            scopes.reprobe().await,
+            "the permitted re-probe must use its fresh answer"
+        );
+        assert!(
+            scopes.available().await,
+            "a positive re-probe must be cached"
+        );
+        assert_eq!(
+            *ops.lock().unwrap(),
+            vec![ScopeOp::Probe, ScopeOp::Probe],
+            "only the initial probe and the one durable-evidence re-probe may run"
+        );
+    }
+
+    /// A second negative answer closes the re-probe door for this process.
+    /// Without that bound, every inherited scoped row could turn a manager
+    /// outage into another full probe round trip during teardown.
+    #[farhelm_testtrace::test]
+    async fn a_still_negative_reprobe_is_final_for_this_process() {
+        let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let ops = Arc::clone(&ops);
+            Arc::new(move |op: &ScopeOp| ops.lock().unwrap().push(op.clone())) as ScopeOpSink
+        };
+        let scopes = ScopeManager::fake_reprobing(false, false, sink);
+
+        assert!(!scopes.available().await);
+        assert!(!scopes.reprobe().await);
+        assert!(!scopes.reprobe().await);
+        assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe, ScopeOp::Probe]);
+    }
+
+    /// A usable manager never gets a speculative health check. The residual
+    /// where it dies later is intentional: only a cached negative can be
+    /// stale in a way durable launch evidence is allowed to revisit.
+    #[farhelm_testtrace::test]
+    async fn a_positive_verdict_is_never_reprobed() {
+        let ops = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let ops = Arc::clone(&ops);
+            Arc::new(move |op: &ScopeOp| ops.lock().unwrap().push(op.clone())) as ScopeOpSink
+        };
+        let scopes = ScopeManager::fake_reprobing(true, false, sink);
+
+        assert!(scopes.available().await);
+        assert!(scopes.reprobe().await);
+        assert_eq!(*ops.lock().unwrap(), vec![ScopeOp::Probe]);
+    }
+
+    /// The launch glob may find prior generations, but it must not reach tab
+    /// scopes. Both shapes share the session prefix, so this test exercises
+    /// the fake's bracket-class matcher instead of merely comparing strings.
+    #[farhelm_testtrace::test]
+    async fn launch_scope_glob_refuses_bad_ids_and_excludes_tab_names() {
+        let previous = unit_name(UUID_A, 3).expect("the fixture UUID names a launch scope");
+        let tab = tab_unit_name(UUID_A, UUID_A).expect("the fixture UUIDs name a tab scope");
+        let scopes = ScopeManager::fake_with_matching_units(
+            true,
+            vec![previous.clone(), tab],
+            Arc::new(|_| {}),
+        );
+        let glob = launch_unit_glob(UUID_A).expect("the fixture UUID names a glob");
+
+        assert_eq!(scopes.units_matching(&glob).await.unwrap(), vec![previous]);
+        assert_eq!(launch_unit_glob("not-a-uuid"), None);
     }
 
     /// The wrapper's flags are the contract with the launch chain, and several

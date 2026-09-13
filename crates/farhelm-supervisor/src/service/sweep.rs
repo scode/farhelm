@@ -1013,6 +1013,58 @@ pub(crate) fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Opti
         .flatten()
 }
 
+/// Scope names a teardown may try before its portable sweep.
+///
+/// `recorded` is the one launch unit the durable row says actually existed;
+/// it is evidence strong enough to justify one re-probe after a cached
+/// negative manager verdict. `derived` is rediscovered or re-derived state:
+/// useful on a usable manager, but deliberately skippable where the manager
+/// is absent because it does not prove a unit ever existed. Keeping the two
+/// sets separate prevents a launch-glob result for the current generation
+/// from downgrading the row's stronger evidence.
+#[derive(Default)]
+pub(crate) struct ScopeUnits {
+    recorded: Vec<String>,
+    derived: Vec<String>,
+}
+
+impl ScopeUnits {
+    /// Start with a scope selection read from a durable launch row.
+    pub(crate) fn recorded(unit: Option<String>) -> Self {
+        Self {
+            recorded: unit.into_iter().collect(),
+            derived: Vec::new(),
+        }
+    }
+
+    /// Start with names that a teardown inferred without durable evidence.
+    pub(crate) fn derived(derived: Vec<String>) -> Self {
+        Self {
+            recorded: Vec::new(),
+            derived,
+        }
+    }
+
+    /// Add independently discovered names without changing their provenance.
+    pub(crate) fn extend_derived(&mut self, units: impl IntoIterator<Item = String>) {
+        self.derived.extend(units);
+    }
+
+    /// Remove duplicate work while retaining recorded precedence.
+    ///
+    /// The launch-generation glob includes the current launch. Removing a
+    /// duplicate only from `derived` means a cached-negative host still sees
+    /// that current unit as the durable row's evidence rather than as a
+    /// speculative name.
+    pub(crate) fn normalize(&mut self) {
+        self.recorded.sort();
+        self.recorded.dedup();
+        self.derived.retain(|unit| !self.recorded.contains(unit));
+        self.derived.sort();
+        self.derived.dedup();
+    }
+}
+
 /// Reap one launch's whole process tree: its cgroup scope first, then —
 /// always, unconditionally — the portable sweep (PLAN_M3.md item 10).
 ///
@@ -1047,22 +1099,18 @@ pub(crate) fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Opti
 /// carried into the error only when the sweep ALSO failed, where it is
 /// diagnostic context for a stop that is genuinely unconfirmed.
 ///
-/// `units` are the scopes to kill before the sweep — normally the one
-/// RECORDED for the launch being torn down, and for a DELETE additionally
-/// every open tab's own scope (PLAN_M4.md item 2), since delete is the one
-/// teardown that claims tabs too and a tab's cgroup is the only mechanism
-/// that reaches an environment-scrubbing double-fork under it. Existence
-/// is re-checked before each use because the names are re-derived rather
-/// than stored, and a unit may long since have been garbage-collected
-/// (item 10's reload/restart interplay). An empty slice means this
-/// teardown has no cgroup to lean on at all, which is the ordinary state
-/// on a host with no user manager. A NON-empty slice on such a host is
-/// also ordinary — delete derives tab unit names unconditionally — and is
-/// skipped wholesale rather than asked about; see the availability check
-/// below for why that skip is safe.
+/// `units.recorded` is the one launch scope the durable row says this launch
+/// ran in. `units.derived` contains every name inferred later: tab names,
+/// manager glob results, and launch scopes from other generations. Existence
+/// is still re-checked before every kill because no name proves its unit was
+/// retained rather than collected. When the cached verdict is negative, the
+/// recorded set gets one re-probe; it is evidence that this host had a
+/// manager for the launch, whereas the derived set is not. A still-negative
+/// result skips the recorded names loudly and derived names quietly, then the
+/// sweep remains the whole mechanism.
 pub(crate) async fn reap_process_tree(
     scopes: &crate::scope::ScopeManager,
-    units: &[String],
+    units: ScopeUnits,
     root_pid: Option<u32>,
     session_id: &str,
     target: &SweepTarget,
@@ -1089,37 +1137,40 @@ pub(crate) async fn reap_process_tree(
         }
     });
 
-    if units.is_empty() {
+    if units.recorded.is_empty() && units.derived.is_empty() {
         debug!(
             session = %session_id,
             "no cgroup scope recorded for this teardown; the process-tree sweep is the \
              whole mechanism"
         );
     }
-    // A non-empty unit list on a host with NO user manager is ordinary,
-    // not contradictory: delete derives every open tab's unit name without
-    // asking whether that tab was ever scoped (see `teardown_session`),
-    // precisely so a unit that MIGHT exist is never skipped. Where the
-    // availability probe says no manager exists, none of those names can
-    // possibly have a unit behind them — there is nothing to ask, and
-    // asking anyway converts each name into a string of "no systemd user
-    // manager" errors plus a full `SCOPE_CONFIRM_TIMEOUT` poll, turning
-    // every macOS (and manager-less Linux) delete slow and noisy for
-    // nothing. Skipping is safe for the same reason the probe's timeout
-    // is: the sweep below runs regardless and its verdict is the whole
-    // answer. A manager that probed AVAILABLE but fails mid-teardown is
-    // deliberately NOT skipped — those failures stay visible as
-    // diagnostic context for a stop the sweep could not confirm.
-    let units: &[String] = if units.is_empty() || scopes.available().await {
-        units
-    } else {
-        debug!(
-            session = %session_id,
-            "this host has no systemd user manager, so the recorded scope names cannot \
-             have units behind them; the process-tree sweep is the whole mechanism"
-        );
-        &[]
-    };
+    // A derived name on a manager-less host is ordinary: delete names tabs
+    // without knowing whether that launch used a scope, and manager globs
+    // are only a best-effort source. A row-recorded launch unit is different:
+    // it is durable evidence that a manager existed when this generation
+    // launched, so it gets one chance to overturn a stale negative cache.
+    // If that chance still says no, the sweep below remains the whole
+    // mechanism; if it says yes, `kill_scope` settles every name normally.
+    let units: Vec<&String> =
+        if scopes.available().await || (!units.recorded.is_empty() && scopes.reprobe().await) {
+            units.recorded.iter().chain(&units.derived).collect()
+        } else {
+            if !units.derived.is_empty() {
+                debug!(
+                    session = %session_id,
+                    "this host has no systemd user manager, so derived scope names are skipped; \
+                     the process-tree sweep is the whole mechanism"
+                );
+            }
+            for unit in &units.recorded {
+                warn!(
+                    session = %session_id, unit = %unit,
+                    "the row recorded a scoped launch but this host has no usable systemd user \
+                     manager; the process-tree sweep is the whole mechanism"
+                );
+            }
+            Vec::new()
+        };
     // Every unit is killed even when an earlier one failed, for
     // `kill_scope`'s own accumulate-never-short-circuit reason one level
     // up: a delete that stopped at the first unresponsive tab scope would
@@ -1406,7 +1457,7 @@ pub(crate) async fn stop_live_agent(
     // session's terminal tabs running (PLAN_M4.md item 2's marker split).
     reap_process_tree(
         &sup.seams.scopes,
-        entry.scope.as_slice(),
+        ScopeUnits::recorded(entry.scope.clone()),
         root_pid,
         session_id,
         &SweepTarget::AgentOnly,
@@ -2063,7 +2114,7 @@ mod tests {
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
         reap_process_tree(
             &scopes,
-            std::slice::from_ref(&unit),
+            ScopeUnits::recorded(Some(unit.clone())),
             None,
             &session_id,
             &SweepTarget::AgentOnly,
@@ -2128,7 +2179,7 @@ mod tests {
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
         reap_process_tree(
             &scopes,
-            std::slice::from_ref(&unit),
+            ScopeUnits::recorded(Some(unit.clone())),
             None,
             &session_id,
             &SweepTarget::AgentOnly,
@@ -2160,7 +2211,7 @@ mod tests {
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
         reap_process_tree(
             &scopes,
-            std::slice::from_ref(&unit),
+            ScopeUnits::recorded(Some(unit.clone())),
             None,
             &session_id,
             &SweepTarget::AgentOnly,
@@ -2206,7 +2257,7 @@ mod tests {
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
         reap_process_tree(
             &scopes,
-            std::slice::from_ref(&unit),
+            ScopeUnits::derived(vec![unit.clone()]),
             None,
             &session_id,
             &SweepTarget::AgentOnly,
@@ -2224,7 +2275,83 @@ mod tests {
                 .all(|op| matches!(op, crate::scope::ScopeOp::Probe)),
             "an absent manager must only ever see the availability probe, got: {observed:?}"
         );
+        assert_eq!(observed.as_slice(), [crate::scope::ScopeOp::Probe]);
         let _ = child.wait();
+    }
+
+    /// Durable launch evidence is the one exception to a cached negative
+    /// manager verdict. A row that says its launch was scoped proves the
+    /// first probe might be stale; once the re-probe succeeds, every named
+    /// unit is again safe to ask about, including the derived one.
+    #[farhelm_testtrace::test]
+    async fn a_recorded_scope_reprobes_and_restores_the_full_kill_set() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let recorded = crate::scope::unit_name(&session_id, 0).expect("UUID scope name");
+        let derived = crate::scope::unit_name(&session_id, 1).expect("UUID scope name");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let scopes = crate::scope::ScopeManager::fake_reprobing_vanishing(false, true, 3, sink);
+        let mut units = ScopeUnits::recorded(Some(recorded.clone()));
+        units.extend_derived(vec![derived.clone()]);
+
+        reap_process_tree(&scopes, units, None, &session_id, &SweepTarget::AgentOnly)
+            .await
+            .expect("a fake scope that confirms gone must leave a successful sweep");
+
+        let observed = observed.lock().expect("op sink mutex poisoned");
+        assert_eq!(
+            &observed[..2],
+            [crate::scope::ScopeOp::Probe, crate::scope::ScopeOp::Probe],
+            "the durable unit must spend exactly the one permitted re-probe"
+        );
+        for unit in [&recorded, &derived] {
+            assert!(
+                observed.iter().any(|op| matches!(
+                    op,
+                    crate::scope::ScopeOp::Kill { unit: killed, .. } if killed == unit
+                )),
+                "a successful re-probe must restore {unit} to the kill set: {observed:?}"
+            );
+        }
+    }
+
+    /// A second negative answer still leaves the portable sweep usable, but
+    /// a row-recorded scope is no longer silently discarded. The fake has no
+    /// process to reap here; `Ok(())` demonstrates that the sweep remains the
+    /// final verdict rather than turning the skipped cgroup into a failure.
+    #[farhelm_testtrace::test]
+    async fn a_still_negative_reprobe_skips_a_recorded_scope_without_killing() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let recorded = crate::scope::unit_name(&session_id, 0).expect("UUID scope name");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let scopes = crate::scope::ScopeManager::fake_reprobing(false, false, sink);
+
+        reap_process_tree(
+            &scopes,
+            ScopeUnits::recorded(Some(recorded)),
+            None,
+            &session_id,
+            &SweepTarget::AgentOnly,
+        )
+        .await
+        .expect("the portable sweep remains complete when the re-probe stays negative");
+
+        assert_eq!(
+            *observed.lock().expect("op sink mutex poisoned"),
+            vec![crate::scope::ScopeOp::Probe, crate::scope::ScopeOp::Probe],
+            "a still-negative manager must not receive a scope kill"
+        );
     }
 
     /// A scope kill must never leave the sweep seeding itself from a pid the
@@ -2253,7 +2380,7 @@ mod tests {
         let scopes = crate::scope::ScopeManager::disabled();
         reap_process_tree(
             &scopes,
-            &[],
+            ScopeUnits::default(),
             Some(gone_pid),
             &session_id,
             &SweepTarget::AgentOnly,

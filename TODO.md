@@ -398,20 +398,9 @@ severity.
 Mechanism verified on main, but the fix touches lifecycle, locking, or the kill set, or needs a reproduction before it
 is safe. Each is its own review unit.
 
-- **Kill sweep cgroup verdict.** `A3-C4`, `A3-C5`, `A3-C13`, `A3-C7`. High, small each, medium risk. The systemd
-  availability verdict is a per-process `OnceCell` (scope.rs:294, :417) with no invalidation, so one transient probe
-  failure at startup permanently disables cgroup teardown for every inherited session; `reap_process_tree`
-  (sweep.rs:1072) then discards every recorded unit name with a `debug!`, the opposite of the policy `reap_tab_tree`
-  documents and of what durable `entry.scope` means. A failed scope kill is downgraded to a warning even for delete
-  (sweep.rs:1097-1108), after which the row is removed and nothing can retry, while merely failing to enumerate tab
-  scopes is fatal on the same path. And no teardown path names a previous launch generation's scope (only
-  `tab_unit_glob` exists, scope.rs:160), so a generation whose kill failed while the portable sweep said clean is
-  orphaned by the next delete. Fix: ask the manager about names backed by durable evidence even when the cached verdict
-  is negative, letting `kill_scope`'s existence check settle it, and re-probe once when a teardown holds such a name;
-  return `Err` for delete and archive on a scope-kill failure so the row stays retryable; add a session-scoped
-  launch-unit glob enumerated with the tab glob's strictness; promote the teardown-side skip to `warn!` when the row
-  says `launch_scoped`. Fence: no new manager machinery; speculative names on manager-less hosts must stay skippable; a
-  portable sweep is not proof a scope is empty.
+- **Kill sweep cgroup verdict.** `A3-C13`. High, small, medium risk. A failed scope kill is downgraded to a warning even
+  for delete and archive, after which the row is removed and nothing can retry. Fix: return `Err` for delete and archive
+  on a scope-kill failure so the row stays retryable. Fence: stop and restart keep the warning.
 - **Real uid in the process walk.** `A3-C2` then `A3-C1`. High, small on macOS and medium on Linux, medium risk because
   widening the table widens the kill set. macOS `snapshot` (procs.rs:826) filters `kinfo_proc` rows by `cr_uid`, the
   effective uid, while `p_ruid` sits transcribed at :599 marked "never read"; Linux (procs.rs:391, :343) uses
