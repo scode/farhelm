@@ -191,8 +191,12 @@ teardown() {
   # kills below and the unit-stop fallback further down are usually
   # no-ops. Best-effort: teardown must proceed even if the helm is
   # already gone or wedged.
-  [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
-  [ -n "$SID_NEWEST" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 5 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null 2>&1
+  # 30 s, not 5: a delete of a session whose pane shell ignores SIGTERM (an
+  # interactive `bash`, which these smoke sessions run) waits the supervisor's
+  # full SIGTERM grace (`KILL_GRACE` in sweep.rs, 5 s) before the SIGKILL, so
+  # the request itself takes a little over 5 s; see the cleanup below.
+  [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
+  [ -n "$SID_NEWEST" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null 2>&1
 
   for p in desktop openbox xvfb; do
     [ -f "$X/$p.pid" ] && kill "$(cat "$X/$p.pid")" 2>/dev/null
@@ -839,8 +843,16 @@ done
 DISPLAY=$DISP xdotool windowsize "$WID" 1200 900
 sleep 3
 
-curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up the persisted smoke session"
-curl_auth -sf --max-time 5 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null || fail "cleaning up the newest persisted smoke session"
+# These deletes are the slowest requests in the smoke, and deliberately so:
+# each session runs an interactive `bash`, which ignores SIGTERM, so the
+# supervisor spends its whole SIGTERM grace (`KILL_GRACE` in
+# crates/farhelm-supervisor/src/service/sweep.rs, 5 s) before the SIGKILL
+# that actually ends it, and the DELETE reply follows that. A 5 s curl cap
+# raced the 5 s grace and lost by a few hundred milliseconds on the
+# v0.8.0-rc.1 gate; 30 s leaves the grace, the kill confirmation, and a slow
+# runner comfortable room while still failing a delete that hangs.
+curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null || fail "cleaning up the persisted smoke session"
+curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null || fail "cleaning up the newest persisted smoke session"
 SID=""
 SID_NEWEST=""
 

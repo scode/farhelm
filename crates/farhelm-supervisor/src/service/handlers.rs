@@ -4670,7 +4670,12 @@ mod tests {
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
 
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        // The stopped fixture cannot act on its SIGTERM, so the detached
+        // sweep waits out the whole SIGTERM grace (five seconds) before the
+        // quiesce and SIGKILL end it; this budget must clear that grace plus
+        // the kill confirmation with room for a loaded host, or a sweep that
+        // survived the cancellation would still read as one that did not.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         loop {
             let gone = matches!(
                 crate::procs::read_process(pid),
