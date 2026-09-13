@@ -49,7 +49,11 @@
 //! boundary is not a substitute for resource limits: one authenticated tab
 //! can still open sockets in a loop or stop reading. The subscriber cap,
 //! inbound frame/message limits, and write deadline keep those failures
-//! bounded without pretending the credential makes clients infallible.
+//! bounded without pretending the credential makes clients infallible. The
+//! subscriber cap is paired with an idle Ping: a subscriber that vanishes
+//! without closing costs one idle interval, at most two in the boundary case,
+//! before its seat returns. Browsers answer WebSocket Pings automatically;
+//! this keepalive is for peers that disappear without a FIN.
 
 use crate::manager::FleetEvents;
 use crate::{AppState, auth::AuthenticatedSocket};
@@ -98,6 +102,14 @@ const MAX_CLIENT_FRAME: usize = 1024;
 /// feed carries no state, so a client that reconnects is handed the current
 /// revision and re-reads (the handshake in the module docs).
 const WRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long an event subscriber may be quiet before it receives a keepalive.
+///
+/// Thirty seconds is long enough that an idle fleet pays almost no scheduling
+/// cost, while a silently vanished seat is reclaimed well within a minute or
+/// two. A revision write resets this idle window, but only a Pong or other
+/// inbound frame answers the Ping and proves the peer is still participating.
+const IDLE_PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How many clients may hold a subscription at once, across this helm.
 ///
@@ -192,6 +204,9 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
 
     let (mut tx, mut rx) = socket.split();
     let mut revisions = events.subscribe();
+    let idle = tokio::time::sleep(IDLE_PING_INTERVAL);
+    tokio::pin!(idle);
+    let mut awaiting_liveness = false;
     // The handshake: the current revision, before anything else, so the
     // client has a re-read to hang its fallback handover on (module docs).
     // `borrow_and_update` rather than a plain borrow so this value counts as
@@ -204,6 +219,17 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
     loop {
         tokio::select! {
             _ = auth.revoked() => return,
+            () = &mut idle => {
+                if awaiting_liveness {
+                    tracing::debug!("an event subscriber did not answer its keepalive; dropping the subscription");
+                    return;
+                }
+                if !ping(&mut tx, &auth).await {
+                    return;
+                }
+                awaiting_liveness = true;
+                idle.as_mut().reset(tokio::time::Instant::now() + IDLE_PING_INTERVAL);
+            }
             changed = revisions.changed() => {
                 // The sender is the manager's, which lives as long as the
                 // process serves; an error here means the helm is being torn
@@ -215,6 +241,7 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
                 if !notify(&mut tx, revision, &auth).await {
                     return;
                 }
+                idle.as_mut().reset(tokio::time::Instant::now() + IDLE_PING_INTERVAL);
             }
             incoming = rx.next() => {
                 match incoming {
@@ -226,9 +253,15 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
                         );
                         return;
                     }
-                    // Ping/pong are the transport talking, not the client,
-                    // and the WebSocket layer has already answered them.
-                    Some(Ok(_)) => {}
+                    // Ping/pong are the transport talking, not the client.
+                    // Browsers answer Pings automatically; any control frame
+                    // received here is still evidence that this peer is alive.
+                    Some(Ok(ws::Message::Ping(_) | ws::Message::Pong(_))) => {
+                        awaiting_liveness = false;
+                        idle.as_mut().reset(tokio::time::Instant::now() + IDLE_PING_INTERVAL);
+                    }
+                    // A close is terminal, not a liveness answer.
+                    Some(Ok(ws::Message::Close(_))) => return,
                     // A closed or broken socket ends the subscription.
                     None | Some(Err(_)) => return,
                 }
@@ -266,6 +299,21 @@ where
                  dropping the subscription"
             );
             false
+        }
+    }
+}
+
+/// Send a keepalive Ping without allowing a dead or wedged peer to pin the
+/// serving task.
+async fn ping<S>(tx: &mut S, auth: &AuthenticatedSocket) -> bool
+where
+    S: futures_util::SinkExt<ws::Message> + Unpin,
+{
+    tokio::select! {
+        biased;
+        _ = auth.revoked() => false,
+        sent = tokio::time::timeout(WRITE_DEADLINE, tx.send(ws::Message::Ping(Vec::new().into()))) => {
+            matches!(sent, Ok(Ok(())))
         }
     }
 }
@@ -885,6 +933,96 @@ mod tests {
             readmitted.is_ok(),
             "a seat must come back when its subscriber goes away"
         );
+    }
+
+    /// A peer that disappears without sending FIN must not occupy the only
+    /// seat forever. The first interval gives it a Ping; the second interval
+    /// is the bounded observation window in which it must answer.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn an_unanswered_keepalive_releases_the_subscriber_seat() {
+        let mut harness = rest_harness::FleetBuilder::new()
+            .await
+            .event_subscriber_cap(1)
+            .start()
+            .await;
+        let addr = harness.serve().await;
+
+        let mut vanished = WsTestClient::connect(addr, "/api/events").await;
+        revision(&mut vanished).await;
+
+        tokio::time::advance(super::IDLE_PING_INTERVAL).await;
+        tokio::task::yield_now().await;
+        let (opcode, payload) = vanished
+            .recv()
+            .await
+            .expect("the idle subscriber must receive a keepalive Ping");
+        assert_eq!(opcode, 9, "the keepalive must be a WebSocket Ping");
+        assert!(
+            payload.is_empty(),
+            "the keepalive Ping has no application payload"
+        );
+
+        tokio::time::advance(super::IDLE_PING_INTERVAL).await;
+        tokio::task::yield_now().await;
+        let admitted = tokio::time::timeout(NOTICE, async {
+            loop {
+                if let Ok(mut ws) = WsTestClient::try_connect(addr, "/api/events").await {
+                    revision(&mut ws).await;
+                    return;
+                }
+                // sleep-ok: retry admission until the timed-out subscriber task drops its seat.
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await;
+        assert!(
+            admitted.is_ok(),
+            "a subscriber that ignored its Ping must release its seat after the second interval"
+        );
+    }
+
+    /// A live peer that answers each keepalive remains admitted across idle
+    /// periods, which is the behavior browsers provide automatically.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_subscriber_answering_keepalives_stays_connected() {
+        let mut harness = rest_harness::FleetBuilder::new()
+            .await
+            .event_subscriber_cap(1)
+            .start()
+            .await;
+        let addr = harness.serve().await;
+        let mut ws = WsTestClient::connect(addr, "/api/events").await;
+        revision(&mut ws).await;
+
+        for _ in 0..3 {
+            // The harness may finish its startup refresh after the
+            // handshake, so consume that legitimate revision before looking
+            // for the keepalive whose interval it resets.
+            let (opcode, payload) = loop {
+                tokio::time::advance(super::IDLE_PING_INTERVAL).await;
+                tokio::task::yield_now().await;
+                let frame = ws
+                    .recv()
+                    .await
+                    .expect("a live subscriber must receive each keepalive");
+                if frame.0 != 1 {
+                    break frame;
+                }
+            };
+            assert_eq!(opcode, 9, "the keepalive must be a WebSocket Ping");
+            assert!(
+                payload.is_empty(),
+                "the keepalive Ping has no application payload"
+            );
+            ws.send_pong().await;
+            tokio::task::yield_now().await;
+        }
+
+        let replacement = WsTestClient::try_connect(addr, "/api/events")
+            .await
+            .err()
+            .expect("a live subscriber must retain its seat");
+        assert_eq!(replacement, 503);
     }
 
     /// Both inbound size bounds are enforced, and each is caught BEFORE the

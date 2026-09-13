@@ -1449,6 +1449,13 @@ impl WsTestClient {
         self.send(1, text.as_bytes()).await;
     }
 
+    /// Answer a server keepalive without making ordinary receive calls
+    /// implicitly prove peer liveness. Tests that model a healthy browser
+    /// choose when to answer; tests for vanished peers deliberately do not.
+    pub(crate) async fn send_pong(&mut self) {
+        self.send(0xA, &[]).await;
+    }
+
     /// Read one server frame's (opcode, payload), or `None` once the
     /// server closes. Server frames are never masked.
     pub(crate) async fn recv(&mut self) -> Option<(u8, Vec<u8>)> {
