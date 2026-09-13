@@ -383,12 +383,6 @@ severity.
   '=https' --proto-redir '=https'` on the default path, validate a set base URL like
   `parse_release_base_url`, and name a non-default one in the output. Fence: never delete a foreign collision; an
   operator-selected source is not an attacker; no bundled signatures or URL restrictions.
-- **Staging launch files at teardown.** `A3-C21`, `A5-S10`. Medium, small. `remove_launch_artifacts_for_session`
-  (launch_artifacts.rs:235) removes only names `parse_launch_file_name` accepts, while the startup sweep (:333) handles
-  `is_staged_temp_name` first; a post-link unlink failure leaves a credential-bearing `.tmp-<uuid>` copy that delete and
-  archive never touch (reproduced by the investigation). Fix: in the same fail-closed removal, also accept entries where
-  `is_staged_temp_name` holds and the de-dotted stem parses to this session id. Fence: only this session's staging
-  names; never other sessions' active writes; keep publication-success semantics.
 - **Small contained items.** `A2-C3`, `A1-C9`, `A6-D26`. Low, trivial. `is_stale_generation`
   (release_payloads.rs:1020-1024) splits a name at `len - 12` bytes and panics on a non-boundary; the panic is contained
   by `spawn_blocking` but the `OnceCell` stays uninitialised so every download retries and fails while the entry exists.
