@@ -187,11 +187,12 @@ pub(crate) struct ProvisioningPlan {
     pub(super) farhelm_path: PathBuf,
     pub(super) state_dir: PathBuf,
     pub(super) actions: Vec<ProvisioningAction>,
-    /// The reach probe's raw `/etc/os-release` `ID`, empty when the host
-    /// had none, and the payload architecture it matched — carried
-    /// through purely for `confirmation()`'s host line. Provisioning
-    /// gates on capabilities, not on this ID (see `Reach::distro_id`), so
-    /// nothing here or in execution branches on it.
+    /// The reach probe's validated `/etc/os-release` `ID`, empty when the
+    /// host had none, and the payload architecture it matched — carried
+    /// through purely for `confirmation()`'s host line. Validation happens
+    /// at the reach-record boundary because this value becomes plan text;
+    /// provisioning still gates on capabilities, not on this ID (see
+    /// `Reach::distro_id`), so nothing here or in execution branches on it.
     pub(super) host_distro_id: String,
     pub(super) host_arch: PayloadArch,
 }

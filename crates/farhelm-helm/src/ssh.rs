@@ -19,7 +19,7 @@
 //! runs on another machine. Separately, `-o` values are parsed with
 //! ssh_config tokenization and percent expansion, which is a different
 //! grammar again. `ssh_control_path_option` handles the second;
-//! [`shell_words`] handles the first.
+//! [`shell_quote`] handles the first.
 //!
 //! ## The prefix is a security boundary, so it is built in one place
 //!
@@ -126,15 +126,23 @@ pub(crate) fn ssh_stdio_args(
 ) -> anyhow::Result<Vec<String>> {
     let mut args = ssh_base_args(dest, control_path)?;
     args.extend([
-        shell_words::quote(remote_farhelm).into_owned(),
+        shell_quote(remote_farhelm),
         "internal".to_string(),
         "stdio".to_string(),
     ]);
     if let Some(remote_state) = remote_state_dir {
         args.push("--state-dir".to_string());
-        args.push(shell_words::quote(remote_state).into_owned());
+        args.push(shell_quote(remote_state));
     }
     Ok(args)
+}
+
+/// Encode one word for the remote login shell with a representation that
+/// never leaves shell syntax active. Always using single quotes matters here:
+/// `shell_words::quote` deliberately leaves some shell syntax, including
+/// braces, bare even though OpenSSH gives the joined command to `sh -c`.
+pub(crate) fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// Encode a ControlPath for OpenSSH's config-value parser.
@@ -201,10 +209,7 @@ pub(crate) fn annotate_ssh_handshake_eof(
     // directory is passed in `ssh_stdio_args` — a path with a space has to
     // survive being pasted into a shell there.
     let remedy = match remote_state_dir {
-        Some(dir) => format!(
-            "farhelm supervisor run --state-dir {}",
-            shell_words::quote(dir)
-        ),
+        Some(dir) => format!("farhelm supervisor run --state-dir {}", shell_quote(dir)),
         None => "farhelm supervisor run".to_string(),
     };
     e.context(format!(
@@ -323,13 +328,23 @@ mod tests {
         let args = super::ssh_stdio_args(
             "user@host",
             std::path::Path::new("/state/ssh-cm-%C"),
-            "/opt/far helm's/bin",
+            "/opt/far helm's/{a,b}/$bin",
             None,
         )
         .unwrap();
         assert_eq!(
             remote_command(&args),
-            vec!["/opt/far helm's/bin", "internal", "stdio"]
+            vec!["/opt/far helm's/{a,b}/$bin", "internal", "stdio"]
+        );
+    }
+
+    /// Every remote shell word uses the same explicit quoting, so shell
+    /// metacharacters cannot become syntax when OpenSSH reconstructs argv.
+    #[farhelm_testtrace::test]
+    fn shell_quote_always_uses_single_quotes() {
+        assert_eq!(
+            super::shell_quote("/home/u/{a,b} path/it's/$value"),
+            "'/home/u/{a,b} path/it'\\''s/$value'"
         );
     }
 

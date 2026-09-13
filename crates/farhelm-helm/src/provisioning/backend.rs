@@ -1633,7 +1633,7 @@ impl ProvisioningBackend for SystemBackend {
 /// Encode a path as one remote shell word, refusing bytes that cannot cross
 /// SSH's text command boundary without changing meaning.
 pub(super) fn shell_path(path: &Path) -> Result<String, BackendFailure> {
-    Ok(shell_words::quote(&path_text(path)?).into_owned())
+    Ok(crate::ssh::shell_quote(&path_text(path)?))
 }
 
 /// Build a remote checksum command whose filename is the shell redirection
@@ -1737,12 +1737,20 @@ pub(super) fn tmux_meets_floor(output: &str) -> bool {
         .is_ok_and(|version| version >= farhelm_supervisor::tmux::TMUX_FLOOR)
 }
 
+/// Recognize only a loginctl authorization refusal after the remote command
+/// actually ran. SSH also reports authentication failures as permission
+/// errors, commonly with status 255, so stderr text alone cannot justify
+/// reporting a degraded boot-persistence outcome.
 pub(super) fn linger_was_refused(code: Option<i32>, stderr: &str) -> bool {
-    if code == Some(0) {
+    // Exit 255 belongs to ssh, not to the remote loginctl command. Requiring
+    // a command exit code and its own diagnostic prevents an authentication
+    // refusal containing "permission denied" from becoming a benign
+    // best-effort linger degradation.
+    if !code.is_some_and(|code| code != 0 && code != 255) {
         return false;
     }
     let lower = stderr.to_ascii_lowercase();
-    [
+    let refusal = [
         "permission denied",
         "access denied",
         "authentication is required",
@@ -1750,7 +1758,9 @@ pub(super) fn linger_was_refused(code: Option<i32>, stderr: &str) -> bool {
         "not authorized",
     ]
     .iter()
-    .any(|message| lower.contains(message))
+    .any(|message| lower.contains(message));
+    let loginctl_evidence = lower.contains("loginctl") || lower.contains("linger");
+    refusal && loginctl_evidence
 }
 
 /// Turn the reach probe's NUL-delimited record into a support decision.
@@ -1772,7 +1782,22 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             String::from_utf8_lossy(output),
         ));
     }
+    if fields[1].len() > 64 {
+        return Err(BackendFailure::new(
+            "the provisioning reach check returned malformed output",
+            String::from_utf8_lossy(output),
+        ));
+    }
+    // This value is shown in the confirmation plan. Validate it before it
+    // can become a line in that plan; the ID remains informational and is
+    // not treated as a distribution allowlist.
     let distro_id = String::from_utf8_lossy(fields[1]).into_owned();
+    if distro_id.chars().any(char::is_control) {
+        return Err(BackendFailure::new(
+            "the provisioning reach check returned malformed output",
+            String::from_utf8_lossy(output),
+        ));
+    }
     let arch_text = String::from_utf8_lossy(fields[3]);
     let arch = match arch_text.as_ref() {
         "x86_64" => PayloadArch::X86_64,
