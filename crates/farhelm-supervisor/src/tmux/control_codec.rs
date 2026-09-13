@@ -599,12 +599,17 @@ fn flatten_decoded_output(output: Vec<DecodedOutput>) -> Vec<u8> {
         .collect()
 }
 
-/// Remove the newline control mode adds after one command's stdout.
+/// Remove the line terminator from a one-line command reply.
 ///
-/// This is separate from [`super::normalize_capture`]: capture-pane already
-/// terminates its final row, so a command block contains two trailing
-/// newlines. One belongs to control mode and is removed here; the other
-/// belongs to capture-pane and is removed during terminal normalization.
+/// A command block's bytes are exactly the command's stdout, line
+/// terminators included; control mode adds NO newline of its own around
+/// them (measured on the pinned tmux 3.7c: the block for a capture is
+/// byte-for-byte the direct `capture-pane` output). So this is for replies
+/// that are a single line whose terminator the caller does not want — the
+/// pane-modes expansion, an `%error` reason. It must NOT be applied to a
+/// capture block: there every row is a terminated line and
+/// [`super::normalize_capture`] removes the final row's terminator itself;
+/// stripping one here first deleted the last row whenever it was blank.
 pub(super) fn strip_command_output_terminator(output: &[u8]) -> &[u8] {
     // Same trailing-CRLF-or-LF shape as a notification's own terminator,
     // so it shares that implementation rather than repeating it; the two
@@ -1136,16 +1141,18 @@ mod tests {
         assert_eq!(line, b"%output %0 live\\015\\012\n");
     }
 
-    /// Control mode adds one newline around command output. Removing it
-    /// before capture normalization preserves the capture's own final
-    /// terminator, which normalization must remove separately.
+    /// A capture block is one terminated line per pane row and nothing
+    /// else, so exactly one terminator is removed on the way to the
+    /// browser, by `normalize_capture`, and a blank final row survives as
+    /// an empty line. An earlier version of this test pinned the opposite
+    /// model (a second, control-mode-added newline stripped first), which
+    /// lost the last row of every capture whose bottom row was blank.
     #[farhelm_testtrace::test]
-    fn command_output_and_capture_terminators_are_distinct() {
+    fn a_capture_block_loses_exactly_its_final_row_terminator() {
         let block = b"row one\nrow two\n\n";
-        assert_eq!(
-            normalize_capture(strip_command_output_terminator(block)),
-            b"row one\r\nrow two"
-        );
+        assert_eq!(normalize_capture(block), b"row one\r\nrow two\r\n");
+        // The one-line reply shape the terminator strip IS for.
+        assert_eq!(strip_command_output_terminator(b"0,1,0\n"), b"0,1,0");
     }
 
     /// The warn-on-old-tmux predicate has three shapes and got one of
