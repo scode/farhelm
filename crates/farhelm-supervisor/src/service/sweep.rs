@@ -104,7 +104,7 @@ struct EnvironMarkers {
 
 /// Scan one process's raw environment for [`EnvironMarkers`].
 ///
-/// Split out from [`environ_marker_verdict`] purely so this matching logic
+/// Split out from [`environ_markers_of`] purely so this matching logic
 /// is unit-testable against constructed byte buffers, without a real
 /// process or a real process table behind it.
 ///
@@ -302,13 +302,17 @@ impl SweepTarget {
 /// macOS arrives in the same kernel buffer and is deliberately dropped
 /// before it gets here.
 ///
-/// An unreadable environment yielding "not claimed" is the SAFE
-/// direction: a sweep never signals a process it could not identify.
-fn environ_marker_verdict(pid: u32, session_id: &str, target: &SweepTarget) -> bool {
-    let Some(bytes) = procs::read_environ(pid) else {
-        return false;
-    };
-    target.claims(&environ_markers(&bytes, session_id, target.selects_tab()))
+/// An unreadable environment yielding `None` — which every caller treats
+/// as "not claimed" — is the SAFE direction: a sweep never signals a
+/// process it could not identify.
+///
+/// The markers come back whole rather than reduced to a claimed/unclaimed
+/// verdict because the walk needs two answers from the one expensive
+/// read: whether [`SweepTarget::claims`] the process at all, and whether
+/// it is a tab's (see `ProcSnapshot::hangup`).
+fn environ_markers_of(pid: u32, session_id: &str, target: &SweepTarget) -> Option<EnvironMarkers> {
+    let bytes = procs::read_environ(pid)?;
+    Some(environ_markers(&bytes, session_id, target.selects_tab()))
 }
 
 /// What a tab reap anchors its descendant walk on.
@@ -354,6 +358,12 @@ struct ProcSnapshot {
     /// process is here because something said it belongs to this sweep,
     /// never merely because nothing excluded it.
     marked: HashSet<u32>,
+    /// The subset of `marked` that wears a terminal-tab marker: a tab's
+    /// shell and whatever it started. These are hung up as well as
+    /// terminated (see [`kill_process_tree`]), because an interactive
+    /// shell ignores SIGTERM and honours SIGHUP — the signal a terminal
+    /// closing would have sent it.
+    hangup: HashSet<u32>,
 }
 
 /// One enumeration's admitted identities and the PPIDs observed with them.
@@ -368,6 +378,15 @@ struct ProcessTree {
     identities: HashMap<u32, u64>,
     /// Snapshot PPIDs retained only to explain bounded quiesce failures.
     parents: HashMap<u32, u32>,
+    /// The claimed identities that wear a tab marker. [`kill_process_tree`]
+    /// hangs these up in the polite phase (and, for a tab's own sweep,
+    /// every identity regardless — that rule is applied where the signal
+    /// is sent, so it holds even when an enumeration failed and the
+    /// caller's seed stood in for it). Only the first round's value is ever
+    /// used — later rounds signal nothing politely — so it is not
+    /// re-derived. A tab-marked process reached only through the PPID
+    /// closure, never claimed by the marker scan, is not in here.
+    hangup: HashSet<u32>,
 }
 
 /// Walk the process table once, in full, for `session_id`, and decide
@@ -400,12 +419,28 @@ fn snapshot_proc(
     // per process, host-wide, on every round of every sweep — and a marked
     // pid the walk has no start-time for is discarded by `enumerate_tree`
     // anyway, for want of an identity to re-validate before signaling.
-    let marked = stats
-        .keys()
-        .copied()
-        .filter(|&pid| environ_marker_verdict(pid, session_id, target))
-        .collect();
-    Ok((ProcSnapshot { stats, marked }, soft_errors))
+    let mut marked = HashSet::new();
+    let mut hangup = HashSet::new();
+    for &pid in stats.keys() {
+        let Some(markers) = environ_markers_of(pid, session_id, target) else {
+            continue;
+        };
+        if !target.claims(&markers) {
+            continue;
+        }
+        marked.insert(pid);
+        if markers.any_tab {
+            hangup.insert(pid);
+        }
+    }
+    Ok((
+        ProcSnapshot {
+            stats,
+            marked,
+            hangup,
+        },
+        soft_errors,
+    ))
 }
 
 /// Read one process identity at most once for a PPID-closure expansion.
@@ -581,10 +616,16 @@ fn enumerate_tree(
         .keys()
         .map(|&pid| (pid, snapshot.stats[&pid].0))
         .collect();
+    let hangup = found
+        .keys()
+        .copied()
+        .filter(|pid| snapshot.hangup.contains(pid))
+        .collect();
     Ok((
         ProcessTree {
             identities: found,
             parents,
+            hangup,
         },
         soft_errors,
     ))
@@ -930,7 +971,10 @@ async fn poll_until_gone(
 /// proved insufficient:
 ///
 /// 1. Enumerate (PPID closure from `root_pid` if any, unioned with the
-///    environment-marker scan for `session_id`) and SIGTERM the result.
+///    environment-marker scan for `session_id`) and SIGTERM the result;
+///    the tab processes among them (every one, for a tab's own sweep) get
+///    SIGHUP as well, because an interactive shell ignores SIGTERM and
+///    exits on the hangup its terminal closing would have sent.
 /// 2. After a grace period — bounded by [`KILL_GRACE`], ended early only
 ///    once EVERY pid round 1 signalled is confirmed gone (see
 ///    [`poll_until_gone`] for why the root alone dying is not enough) —
@@ -1027,9 +1071,30 @@ async fn kill_process_tree_with_grace(
     let seed = ProcessTree {
         identities: root.into_iter().collect(),
         parents: HashMap::new(),
+        hangup: HashSet::new(),
     };
     let mut found = enumerate_or_reuse(None, session_id, &seed, target, &mut errors).await;
     errors.extend(signal_all(&found.identities, libc::SIGTERM));
+    // Hang up the tab processes too. An interactive shell ignores SIGTERM
+    // (bash does, absent a trap) but exits on SIGHUP, which is the signal
+    // its terminal closing would have delivered; without it a tab's shell
+    // sat out the entire grace and died to the SIGKILL, and a close paid
+    // the whole bound for nothing. Agents never wear a tab marker, so
+    // their SIGTERM handling is untouched by this. A tab's own sweep hangs
+    // up everything it holds — the pane root and every descendant the
+    // closure reached are that tab's — decided HERE rather than during
+    // enumeration so the rule survives an enumeration failure, where the
+    // caller's seed (the pane root alone) stands in for the walk.
+    let to_hang_up: HashMap<u32, u64> = match target {
+        SweepTarget::Tab(_) => found.identities.clone(),
+        _ => found
+            .identities
+            .iter()
+            .filter(|(pid, _)| found.hangup.contains(pid))
+            .map(|(&pid, &starttime)| (pid, starttime))
+            .collect(),
+    };
+    errors.extend(signal_all(&to_hang_up, libc::SIGHUP));
 
     // The grace is a bounded wait on everything just signalled, not a
     // fixed sleep: it ends as soon as every one of those pids is confirmed
@@ -1418,6 +1483,16 @@ async fn kill_scope_with_grace(
         "killing the launch's cgroup scope before the backstop process-tree sweep"
     );
     if let Err(e) = scopes.kill(unit, "SIGTERM").await {
+        advisory.push(format!("{e:#}"));
+    }
+    // A tab's scope holds an interactive shell, which ignores SIGTERM and
+    // honours SIGHUP (the signal its terminal closing would send). Hanging
+    // it up is what lets a tab close end inside the grace instead of
+    // sitting it out and dying to the SIGKILL; a launch scope holds the
+    // agent, whose graceful SIGTERM handling a hangup would pre-empt.
+    if crate::scope::is_tab_unit(unit)
+        && let Err(e) = scopes.kill(unit, "SIGHUP").await
+    {
         advisory.push(format!("{e:#}"));
     }
     // The grace is a bounded wait for the unit to retire on its own, not a
@@ -1926,10 +2001,12 @@ mod tests {
         let previous = ProcessTree {
             identities: HashMap::from([(42, 100)]),
             parents: HashMap::from([(42, 1)]),
+            hangup: HashSet::new(),
         };
         let next = ProcessTree {
             identities: HashMap::from([(42, 999)]),
             parents: HashMap::from([(42, 7)]),
+            hangup: HashSet::new(),
         };
         let mut growth = Vec::new();
 
@@ -1950,6 +2027,7 @@ mod tests {
         let mut previous = ProcessTree {
             identities: HashMap::new(),
             parents: HashMap::new(),
+            hangup: HashSet::new(),
         };
         let mut growth = Vec::new();
         for pass in 1..=MAX_QUIESCE_PASSES {
@@ -1964,6 +2042,7 @@ mod tests {
             let next = ProcessTree {
                 identities,
                 parents,
+                hangup: HashSet::new(),
             };
             let newly_found = record_quiesce_pass(pass, &previous, &next, &mut growth);
             assert_eq!(newly_found.len(), MAX_QUIESCE_IDENTITIES_PER_PASS + 2);
@@ -2157,7 +2236,7 @@ mod tests {
     /// environment from `KERN_PROCARGS2`, so a shell child is invisible to
     /// the very scan these tests exist to exercise — see
     /// [`crate::procs::sleeper`] for the full story, and
-    /// `environ_marker_verdict`'s docs for what that means in production.
+    /// `environ_markers_of`'s docs for what that means in production.
     fn spawn_marked_process(session_id: &str) -> std::process::Child {
         crate::procs::sleeper::spawn(&[(crate::launch::SESSION_ID_ENV_VAR, session_id)])
     }
@@ -2748,6 +2827,133 @@ mod tests {
             Some(libc::SIGTERM),
             "the process must have died to the SIGTERM, not to a premature SIGKILL: {status:?}"
         );
+    }
+
+    /// A tab's scope is hung up as well as terminated, a launch scope is
+    /// not: the shell in a tab ignores SIGTERM and exits on SIGHUP, while
+    /// the agent in a launch scope must keep its graceful SIGTERM handling.
+    ///
+    /// Pinned on the fake by op order — SIGHUP after SIGTERM and before any
+    /// SIGKILL — because the real manager's behaviour here is systemd's,
+    /// and what this code owns is which signals it asks for.
+    #[farhelm_testtrace::test]
+    async fn a_tab_scope_is_hung_up_after_sigterm_and_a_launch_scope_is_not() {
+        for (unit, expect_hangup) in [
+            (
+                crate::scope::tab_unit_name(
+                    &uuid::Uuid::new_v4().to_string(),
+                    &uuid::Uuid::new_v4().to_string(),
+                )
+                .expect("UUIDs name a tab unit"),
+                true,
+            ),
+            (
+                crate::scope::unit_name(&uuid::Uuid::new_v4().to_string(), 0)
+                    .expect("a UUID names a launch unit"),
+                false,
+            ),
+        ] {
+            let observed: Arc<std::sync::Mutex<Vec<crate::scope::ScopeOp>>> =
+                Arc::new(std::sync::Mutex::new(Vec::new()));
+            let sink = {
+                let observed = Arc::clone(&observed);
+                Arc::new(move |op: &crate::scope::ScopeOp| {
+                    observed.lock().unwrap().push(op.clone());
+                }) as crate::scope::ScopeOpSink
+            };
+            let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGKILL", sink);
+            assert!(scopes.available().await, "the fake must probe available");
+            kill_scope_with_grace(&scopes, &unit, "session", Duration::from_millis(50))
+                .await
+                .expect("a unit that retires on SIGKILL is a clean teardown");
+            let ops = observed.lock().expect("op sink mutex poisoned");
+            let position = |signal: &str| {
+                ops.iter().position(|op| {
+                    *op == crate::scope::ScopeOp::Kill {
+                        unit: unit.clone(),
+                        signal: signal.to_string(),
+                    }
+                })
+            };
+            let term = position("SIGTERM").expect("SIGTERM is always sent");
+            let kill = position("SIGKILL").expect("this unit outlives SIGTERM, so SIGKILL is sent");
+            match (expect_hangup, position("SIGHUP")) {
+                (true, Some(hup)) => assert!(
+                    term < hup && hup < kill,
+                    "a tab scope is hung up after SIGTERM and before SIGKILL: {ops:?}"
+                ),
+                (true, None) => panic!("a tab scope must be hung up: {ops:?}"),
+                (false, Some(_)) => panic!("a launch scope must never be hung up: {ops:?}"),
+                (false, None) => {}
+            }
+        }
+    }
+
+    /// A tab process that ignores SIGTERM (as an interactive shell does)
+    /// still ends inside the grace, because the sweep hangs it up too —
+    /// and it ends by that hangup, not by the SIGKILL a run-out grace would
+    /// have reached. The agent-marked process beside it, which never gets
+    /// the hangup, ends by its SIGTERM.
+    ///
+    /// Two targets are exercised: a tab's own sweep, where everything found
+    /// is hung up, and a whole-session sweep, where only the tab-marked
+    /// process is. Timing is asserted against a long bound so "ended early"
+    /// is a margin of seconds; the exit signals are what actually pin the
+    /// mechanism.
+    #[farhelm_testtrace::test]
+    async fn a_sigterm_ignoring_tab_process_ends_by_hangup_inside_the_grace() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let tab_id = uuid::Uuid::new_v4().to_string();
+        let grace = Duration::from_secs(5);
+
+        for target in [SweepTarget::Tab(tab_id.clone()), SweepTarget::WholeSession] {
+            let mut shell = crate::procs::sleeper::spawn(&[
+                (crate::launch::SESSION_ID_ENV_VAR, &session_id),
+                (crate::launch::TAB_ID_ENV_VAR, &tab_id),
+                (crate::procs::sleeper::SLEEPER_IGNORE_TERM_ENV, "1"),
+            ]);
+            let mut agent = spawn_marked_process(&session_id);
+            let started = tokio::time::Instant::now();
+            kill_process_tree_with_grace(None, &session_id, &target, grace)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("the sweep must confirm both gone under {target:?}: {e:#}")
+                });
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < grace / 2,
+                "a hung-up shell must end the grace early under {target:?}, but the sweep took \
+                 {elapsed:?} against a {grace:?} bound"
+            );
+            let shell_status = shell.wait().expect("reaping the shell stand-in");
+            assert_eq!(
+                shell_status.signal(),
+                Some(libc::SIGHUP),
+                "the SIGTERM-ignoring tab process must have died to the hangup, not to a SIGKILL: \
+                 {shell_status:?} under {target:?}"
+            );
+            match target {
+                // A tab's own sweep never claims the agent at all: it must
+                // still be running afterwards, and is this test's to end.
+                SweepTarget::Tab(_) => {
+                    assert!(
+                        !marked_process_gone(agent.id()),
+                        "a tab sweep must leave the agent alone"
+                    );
+                    agent.kill().expect("cleanup: SIGKILL the agent stand-in");
+                    let _ = agent.wait();
+                }
+                _ => {
+                    let agent_status = agent.wait().expect("reaping the agent stand-in");
+                    assert_eq!(
+                        agent_status.signal(),
+                        Some(libc::SIGTERM),
+                        "the agent must have died to its SIGTERM, never a hangup: {agent_status:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// A host with NO user manager must not be asked about derived scope

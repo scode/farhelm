@@ -110,7 +110,10 @@ session's `FARHELM_AGENT_ID` — the value is the session's own id, set on every
 agent of this session" rather than "this generation of it" — and, for sessions launched by builds predating that marker,
 anything wearing the session marker with no other claim on it. All of those additionally require the session's
 `FARHELM_SESSION_ID`: one session's stop can never reach another's processes however their other markers read. A tab's
-shell wears its own tab marker, which is what keeps it out.
+shell wears its own tab marker, which is what keeps it out — and, when a tab or a whole session is torn down, what earns
+it a SIGHUP alongside the SIGTERM: an interactive shell ignores SIGTERM and exits on the hangup its terminal closing
+would have sent, so a tab close ends inside the grace instead of waiting for the SIGKILL. Agents never carry a tab
+marker and are never hung up.
 
 Where this launch recorded a cgroup scope, the manager is still there, and that unit still exists, the scope is killed
 first: SIGTERM to everything in it, about 500 ms, then SIGKILL, then a bounded wait for the unit to be collected. The

@@ -162,6 +162,19 @@ pub fn tab_unit_glob(session_id: &str) -> Option<String> {
     is_uuid_shaped(session_id).then(|| format!("{UNIT_PREFIX}{session_id}-tab-*.scope"))
 }
 
+/// Whether `unit` names a terminal tab's scope (as [`tab_unit_name`]
+/// builds it) rather than a launch scope.
+///
+/// The teardown asks so it can hang up a tab's shell as well as terminate
+/// it (see `service::sweep::kill_scope`). Anchored on the `-tab-` infix
+/// within the farhelm prefix, which no launch unit can spell because a
+/// generation is always digits.
+pub fn is_tab_unit(unit: &str) -> bool {
+    unit.strip_prefix(UNIT_PREFIX)
+        .and_then(|rest| rest.strip_suffix(".scope"))
+        .is_some_and(|body| body.contains("-tab-"))
+}
+
 /// The glob every generation of a session's LAUNCH scope matches, or `None`
 /// for a session id that cannot safely name a unit.
 ///
