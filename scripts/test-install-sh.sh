@@ -358,7 +358,7 @@ server_request_count() {
 # binary to decompress, so a toolchain missing it would make every "should
 # succeed" scenario fail for a reason that has nothing to do with what is
 # actually under test. It has no "omit gzip" scenario of its own.
-BASE_TOOLS=(uname mkdir mktemp rmdir ls cp curl tar gzip sha256sum shasum openssl awk sed grep tr head cut mv rm chmod cat sysctl sleep)
+BASE_TOOLS=(uname mkdir mktemp rmdir ls cp curl tar gzip sha256sum shasum openssl awk sed grep tr head cut mv rm chmod cat sysctl sleep find)
 
 # make_toolchain DIR [OMIT...]
 # Populates DIR with symlinks to every tool in BASE_TOOLS found on this
@@ -841,6 +841,7 @@ cp "$INSTALLCRASH/farhelm" "$INSTALLCRASH/.farhelm.old"
 printf '#!/bin/sh\necho "farhelm 9.9.9-mid-swap"\n' >"$INSTALLCRASH/farhelm"
 chmod 755 "$INSTALLCRASH/farhelm"
 mkdir "$INSTALLCRASH/.farhelm-install.lock"
+chmod 0700 "$INSTALLCRASH/.farhelm-install.lock"
 echo 999999 >"$INSTALLCRASH/.farhelm-install.lock/pid" # a pid nothing on this machine holds
 # The journal lives INSIDE the lock directory and names binaries, not
 # paths: "PARK cli" is the whole record for "the old farhelm was moved
@@ -1679,6 +1680,29 @@ check "F6: refusal names it as not a farhelm lock (directory case)" contains "$E
 check "F6: the unrelated directory's contents are untouched" \
   [ "$(cat "$INSTALLLOCKDIR/.farhelm-install.lock/somefile")" = "unrelated data" ]
 
+# A lock with the expected names is still foreign when its directory is
+# writable by another account. Once that boundary is checked, the same
+# fixture is made owner-only so the dead-PID path proves a real installer lock
+# remains recoverable.
+HOMELOCKMODE="$WORKDIR/homelockmode"
+INSTALLLOCKMODE="$HOMELOCKMODE/.local/bin"
+mkdir -p "$INSTALLLOCKMODE"
+mkdir "$INSTALLLOCKMODE/.farhelm-install.lock"
+chmod 0770 "$INSTALLLOCKMODE/.farhelm-install.lock"
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$INSTALLLOCKMODE" "$BASE/good" 1.2.3
+check "F6: a group-writable shaped lock is refused" [ "$RC" -ne 0 ]
+check "F6: a writable lock refusal keeps the existing message" \
+  contains "$ERR" "not a farhelm install lock"
+check "F6: the group-writable lock is left untouched" \
+  [ -d "$INSTALLLOCKMODE/.farhelm-install.lock" ]
+
+chmod 0700 "$INSTALLLOCKMODE/.farhelm-install.lock"
+printf '999999\n' >"$INSTALLLOCKMODE/.farhelm-install.lock/pid"
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$INSTALLLOCKMODE" "$BASE/good" 1.2.3
+check "F6: an owner-only stale lock follows recovery" [ "$RC" -eq 0 ]
+check "F6: an owner-only stale lock is removed after recovery" \
+  [ ! -e "$INSTALLLOCKMODE/.farhelm-install.lock" ]
+
 # ===========================================================================
 # Scenario: a reserved backup path already has something at it before a
 # FRESH transaction starts (F7) -- refused before any mutation, whatever it
@@ -1718,6 +1742,7 @@ chmod 755 "$INSTALLRECOVERYBAD/.farhelm.old"
 mkdir -p "$INSTALLRECOVERYBAD/farhelm" # farhelm has BECOME a directory since the simulated crash
 echo "unrelated" >"$INSTALLRECOVERYBAD/farhelm/somefile"
 mkdir "$INSTALLRECOVERYBAD/.farhelm-install.lock"
+chmod 0700 "$INSTALLRECOVERYBAD/.farhelm-install.lock"
 echo 999999 >"$INSTALLRECOVERYBAD/.farhelm-install.lock/pid"
 printf 'PARK cli\n' >"$INSTALLRECOVERYBAD/.farhelm-install.lock/journal"
 
@@ -1750,6 +1775,24 @@ check "F9: umask-000 install exits 0" [ "$F9_RC" -eq 0 ]
 check "F9: the installed binary is mode 0755" [ "$(stat -c %a "$INSTALLUMASK/farhelm")" = "755" ]
 check "F9: the newly-created install directory is not group/world-writable" \
   [ "$(stat -c %a "$INSTALLUMASK")" = "755" ]
+check "F9: the newly-created HOME .local directory is not group/world-writable" \
+  [ "$(stat -c %a "$HOMEUMASK/.local")" = "755" ]
+
+HOMEUMASKMAC="$WORKDIR/homeumaskmac"
+INSTALLUMASKMAC="$HOMEUMASKMAC/.local/bin"
+mkdir -p "$HOMEUMASKMAC"
+set +e
+# shellcheck disable=SC2016 # the single quotes are deliberate: "$1" must reach the INNER sh, not expand in this one
+env -i PATH="$MAC_TOOLS" HOME="$HOMEUMASKMAC" FARHELM_INSTALL_DIR="$INSTALLUMASKMAC" \
+  FARHELM_RELEASE_BASE_URL="$BASE/good" FARHELM_VERSION=1.2.3 \
+  /bin/sh -c 'umask 000; exec /bin/sh "$1"' _ "$INSTALL_SH" >"$WORKDIR/f9-mac-out" 2>"$WORKDIR/f9-mac-err"
+F9_MAC_RC=$?
+set -e
+check "F9: macOS-shaped umask-000 install exits 0" [ "$F9_MAC_RC" -eq 0 ]
+check "F9: macOS-shaped Applications directory is not group/world-writable" \
+  [ "$(stat -c %a "$HOMEUMASKMAC/Applications")" = "755" ]
+check "F9: macOS-shaped bundle Contents directory is not group/world-writable" \
+  [ "$(stat -c %a "$HOMEUMASKMAC/Applications/Farhelm.app/Contents")" = "755" ]
 
 # ===========================================================================
 # Scenario: multiline tmux output is rejected as a whole, not scanned line
@@ -2107,6 +2150,7 @@ R3F4_FARHELM=$(cat "$INSTALL_R3F4BAD/farhelm")
 printf '#!/bin/sh\necho "farhelm 0.0.1-parked"\n' >"$INSTALL_R3F4BAD/.farhelm.old"
 R3F4_BACKUP=$(cat "$INSTALL_R3F4BAD/.farhelm.old")
 mkdir "$INSTALL_R3F4BAD/.farhelm-install.lock"
+chmod 0700 "$INSTALL_R3F4BAD/.farhelm-install.lock"
 echo 999999 >"$INSTALL_R3F4BAD/.farhelm-install.lock/pid"
 # A well-formed record followed by a path-bearing one in the retired
 # "TYPE|SRC|DEST" spelling: the whole journal must be rejected, not

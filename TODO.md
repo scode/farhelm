@@ -312,13 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Installer umask and lock hygiene.** `A2-C7`, `A2-S5`, `A2-S2`. Medium, trivial. `mkdir -p "$INSTALL_DIR"`
-  (install.sh:806-819) chmods only the leaf, so under `umask 000` a freshly created `$HOME/.local` is 0777 and another
-  account can replace the `bin` entry the leaf chmod was meant to protect; the macOS bundle tree (:1099, :1139) and the
-  lock directory (:588, :628) are created the same way. Fix: `(umask 022; mkdir -p ...)` for the install chain and
-  bundle assembly, `umask 077` or an immediate `chmod 0700` for the lock, and have `is_our_lock` refuse a group- or
-  world-writable lock directory. Fence: only paths this run creates; preserve pre-existing shared directories; no
-  recursive chmod.
 - **Terminal WebSocket bounds and exits.** `A4-C2`, `A4-C3`, `A4-C4`, `A4-C5`, `A4-C6`, `A4-C1`. Medium, trivial each.
   terminal.rs:346 sets `max_message_size` but not `max_frame_size`, leaving tungstenite 0.29's 16 MiB default, whose
   reader reserves the declared header length before any payload arrives (verified in the pinned crate source); the

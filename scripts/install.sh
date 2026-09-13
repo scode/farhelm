@@ -331,8 +331,13 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # listing is what catches an EXTRA entry; the `-f` tests are what stop a
   # single crafted entry whose name embeds a newline from impersonating
   # the two-line listing a real lock produces.
+  # A group- or world-writable lock directory is never trusted, even when
+  # its entries have the expected names: another account could change those
+  # entries after this check and redirect recovery or ownership decisions.
   is_our_lock() {
     [ -d "$1" ] || return 1
+    [ -z "$(find "$1" -prune -perm -020 -print 2>/dev/null)" ] || return 1
+    [ -z "$(find "$1" -prune -perm -002 -print 2>/dev/null)" ] || return 1
     iol_entries=$(ls -A "$1" 2>/dev/null)
     case "$iol_entries" in
       '') return 0 ;;
@@ -585,7 +590,7 @@ EOF
   # no automatic recovery, by the same safety-over-self-healing tradeoff;
   # the refusal message says so.
   acquire_lock() {
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
+    if (umask 077; mkdir "$LOCK_DIR") 2>/dev/null; then
       printf '%s\n' "$$" >"$LOCK_DIR/pid"
       LOCK_ACQUIRED=1
       return 0
@@ -625,7 +630,7 @@ EOF
     # continue within THIS invocation; there is nothing to report beyond
     # "the slot was free".
     remove_owned_lock
-    mkdir "$LOCK_DIR"
+    (umask 077; mkdir "$LOCK_DIR")
     printf '%s\n' "$$" >"$LOCK_DIR/pid"
     LOCK_ACQUIRED=1
   }
@@ -810,10 +815,11 @@ EOF
     # directory entry). A directory that already existed is left exactly
     # as it was: this is not a general permission-hardening pass over
     # someone's chosen install location, only over what this run itself
-    # creates.
+    # creates. The subshell is important because mkdir -p can create
+    # intermediate components that the leaf chmod below cannot protect.
     install_dir_existed=1
     [ -d "$INSTALL_DIR" ] || install_dir_existed=0
-    mkdir -p "$INSTALL_DIR"
+    (umask 022; mkdir -p "$INSTALL_DIR")
     if [ "$install_dir_existed" -eq 0 ]; then
       chmod 0755 "$INSTALL_DIR"
     fi
@@ -1096,7 +1102,7 @@ EOF
         }
 
         bundle_stage="$STAGING_DIR/Farhelm.app"
-        mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources" || bundle_fail "creating the staging layout"
+        (umask 022; mkdir -p "$bundle_stage/Contents/MacOS" "$bundle_stage/Contents/Resources") || bundle_fail "creating the staging layout"
         cp "$INSTALL_DIR/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm-desktop" || bundle_fail "copying farhelm-desktop"
         cp "$INSTALL_DIR/farhelm" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "copying farhelm"
         chmod 0755 "$bundle_stage/Contents/MacOS/farhelm-desktop" "$bundle_stage/Contents/MacOS/farhelm" || bundle_fail "setting binary modes"
@@ -1136,7 +1142,7 @@ EOF
 </plist>
 PLIST_EOF
 
-        mkdir -p "$app_parent" || bundle_fail "creating $app_parent"
+        (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
         rm -rf "$app_path" || bundle_fail "removing the previous bundle (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
         mv "$bundle_stage" "$app_path" || bundle_fail "moving the staged bundle into place"
 
