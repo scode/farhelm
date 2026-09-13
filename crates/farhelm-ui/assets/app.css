@@ -3704,6 +3704,19 @@ samp {
    `.btn-primary:hover` (0,3,0), which would otherwise swap this fill for the
    surface tint the moment the pointer arrives. */
 .launch-composer-actions .create-session-submit {
+  /* A flex row rather than inline text on purpose: the context span below
+     hides its overflow for the ellipsis, and an inline-block with hidden
+     overflow takes its BOTTOM EDGE as its baseline (CSS 2 §10.8.1), which
+     sat the bold verb visibly lower than the lighter context beside it.
+     That rule is specific to inline formatting; a flex item's baseline is
+     its first line's text baseline whatever its overflow, so aligning the
+     two items by baseline puts the verb on the context's first line — and
+     keeps it there on a phone, where the context wraps to a second line
+     below. The flex container also drops the markup's inter-node space,
+     so `gap` is the whole of the spacing between the two. */
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
   align-self: auto;
   max-width: 100%;
   min-width: 0;
@@ -3725,11 +3738,13 @@ samp {
 /* The context is what the button will do, in a lighter weight than the verb;
    capped and ellipsized so a deep folder path cannot grow the button past
    the row (see `.launch-composer-actions`). The phone-width media query
-   lifts the cap, where the row wraps anyway. */
+   lifts the single-line rule (the cap stays, and is what makes the text
+   wrap there), where the row wraps anyway. */
 .launch-composer-launch-context {
-  display: inline-block;
+  /* A flex item of the button (see `.create-session-submit`); `min-width`
+     is what lets it shrink to the ellipsis instead of widening the row. */
+  min-width: 0;
   max-width: 34ch;
-  margin-left: 12px;
   overflow: hidden;
   color: var(--composer-launch-context-fg);
   font-weight: 400;
@@ -3791,6 +3806,10 @@ samp {
      reverses the base rule's single-line cap on purpose. */
   .launch-composer-launch-context {
     white-space: normal;
+    /* The button's UA style centres text; a wrapped context would otherwise
+       show an indented first line over a wider second one beside the verb.
+       Flush lines read as one label continuing under itself. */
+    text-align: start;
   }
 }
 
