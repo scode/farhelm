@@ -1141,12 +1141,12 @@ impl StateDirOwnership {
 /// read loop — so an unbounded flood of slow requests backpressures
 /// whichever connection sent them once the cap is hit, rather than
 /// spawning an unbounded number of tasks each holding a tmux subprocess or
-/// a multi-second kill sweep open. Acquiring INSIDE the spawned task
-/// instead would still bound how many run concurrently, but would not
-/// bound how many accumulate — every request would still spawn (and
-/// `JoinSet` would still track) a task immediately, just one that sits
-/// parked on the semaphore; that is exactly the unbounded-queuing failure
-/// mode this ordering exists to close. 8 is generous headroom for
+/// a multi-second kill sweep open. Delete is the deliberate exception: it
+/// must claim its agent-request fence before admission, so a retained
+/// mutation cannot strand all eight permits while the reply that releases it
+/// is waiting for dispatch. Its task is tracked before that wait and acquires
+/// a permit only after the fence clears; the other slow handlers retain the
+/// admission-before-spawn rule. 8 is generous headroom for
 /// ordinary use (a polling UI keeps at most one `ListSessions` in flight
 /// per connection at a time) while still being a REAL bound against a
 /// pathological flood or a buggy client that fires requests without
@@ -3670,6 +3670,14 @@ pub struct Supervisor {
     /// nothing durable, so a delete racing a listing has nothing to
     /// protect against, and serializing them behind an unrelated delete
     /// would cost latency for no correctness gain.
+    ///
+    /// The delete claims this fence before taking a handler admission permit.
+    /// That ordering is intentional: the retained mutation that releases the
+    /// fence may need the same supervisor dispatch capacity, so charging a
+    /// parked delete to the permit pool would let eight such deletes starve
+    /// the reply that lets any of them proceed. The delete task remains
+    /// tracked while it waits and acquires its permit only after this claim
+    /// succeeds.
     pub(crate) agent_request_locks: Arc<KeyedLocks>,
     /// The home directory the agents' own record trees hang off
     /// (PLAN_M3.md item 8), resolved once at construction from
