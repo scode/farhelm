@@ -849,3 +849,21 @@ selection failed 100% before). Disposition: fixed in this PR; the TODO.md entry 
 Class: fixture-premise
 
 Cause: established
+
+## 2026-09-13 — `aliasing a remote host renames it everywhere but the details view` reads a disposed route response on WebKit (e2e/tests/sidebar.spec.ts)
+
+The test intercepts `**/api/hosts`, fetches the real reply with `route.fetch()`, and rewrites its JSON before
+fulfilling. On WebKit the `apiResponse.json()` call failed once with `Response has been disposed`, followed by
+`browserContext.close: Test ended`, in browser run `bd2005c8-0c9a-4d77-b1b0-4927d70edb7a` (a full
+sidebar-plus-five-specs gate for the composer redesign stack; the same run passed the test on Chromium, and 336 other
+cases passed). It is the same shape TODO.md's Deflake entry recorded from run `7fd44a19-ce3f-42fb-a3df-410da327634a`. A
+narrow repetition of the test alone, both engines, passed immediately (run `e831acbc-43fe-44f9-839c-ed2f3f367885`).
+Nothing in the failing stack touches host aliasing or the hosts route, so this is read as the same latent flake
+recurring under load rather than a regression. Suspected cause: the fetched response is disposed by the time the handler
+reads it, either because the page navigated and dropped the request or because the test ended (a later assertion timed
+out) while the handler was still awaiting the body; the retained trace has the network and console records to decide
+between the two. Disposition: open; the TODO.md entry stands.
+
+Class: fixture-lifetime
+
+Cause: hypothesis
