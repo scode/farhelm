@@ -437,7 +437,9 @@ is safe. Each is its own review unit.
   active pane, which is the agent window. Keystrokes typed in the seconds between kill and detach can land in the
   agent's pane. Fix: move `detach_closed_tab` ahead of the reap and kill, or invalidate the attachment's `InputClient`
   under the attachments lock immediately before the kill. Fence: the fallback was audited for `display-message`, not
-  `send-keys`; verify input delivery separately from output capture.
+  `send-keys`; verify input delivery separately from output capture. A focused real-tmux reproduction on pinned tmux
+  3.7c instead got `tmux send-keys input command failed: can't find pane: %1`; the next attempt should start by checking
+  whether the production connection path changes that control-client reply.
 - **Upload stall attributed to the browser.** `A4-C12`. High, small, medium risk. uploads.rs arms the stall deadline at
   :197 and re-arms only when a non-empty chunk arrives (:289), immediately before the potentially long
   `send_upload_chunk` (:293) that waits on supervisor credit; the biased select at :222-227 then takes the expired
