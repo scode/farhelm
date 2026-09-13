@@ -1713,7 +1713,9 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     if let Some(refusal) = find_cause::<store::HostStoreError>(e) {
         return match refusal {
             store::HostStoreError::HostNotFound(_) => ErrorKind::NotFound,
-            store::HostStoreError::InvalidDestination(_) | store::HostStoreError::InvalidAlias(_) => {
+            store::HostStoreError::InvalidDestination(_)
+            | store::HostStoreError::InvalidRemoteFarhelm(_)
+            | store::HostStoreError::InvalidAlias(_) => {
                 ErrorKind::InvalidRequest
             }
             store::HostStoreError::DuplicateDestination(_)
@@ -2321,6 +2323,18 @@ mod tests {
             response.status(),
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    /// A malformed registered remote executable is caller input, so its
+    /// typed store error must reach the same 400 response as other invalid
+    /// host-registration fields instead of being reported as a server fault.
+    #[farhelm_testtrace::test]
+    fn http_error_maps_invalid_remote_farhelm_to_400() {
+        let error = anyhow::Error::new(crate::store::HostStoreError::InvalidRemoteFarhelm(
+            ".".to_string(),
+        ));
+        let response = super::http_error(error);
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 
     /// Pins `error_kind`'s documented order of specificity — `HostStoreError`

@@ -253,6 +253,9 @@ impl PlanLayout {
 
     /// Freeze every path, unit byte, and operation-specific action before
     /// confirmation; execution is not allowed to derive any of them later.
+    /// A destination without a file name is refused here instead of reaching
+    /// the temporary-name builder, whose old unchecked assumption panicked on
+    /// values such as `/` and `..`.
     pub(super) fn plan(
         &self,
         operation: ProvisioningOperation,
@@ -280,12 +283,28 @@ impl PlanLayout {
             .clone()
             .unwrap_or_else(|| lib_dir.join("farhelm"));
         let unit_path = unit_dir.join(&self.unit_name);
-        let temporary = |path: &Path| {
+        let farhelm_name = farhelm_path.file_name().ok_or_else(|| {
+            BackendFailure::new(
+                format!(
+                    "provisioning farhelm destination {:?} has no file name",
+                    farhelm_path
+                ),
+                "",
+            )
+        })?;
+        let unit_name = unit_path.file_name().ok_or_else(|| {
+            BackendFailure::new(
+                format!(
+                    "provisioning unit destination {:?} has no file name",
+                    unit_path
+                ),
+                "",
+            )
+        })?;
+        let temporary = |path: &Path, name: &std::ffi::OsStr| {
             path.with_file_name(format!(
                 ".{}.farhelm-tmp-{run_nonce}",
-                path.file_name()
-                    .expect("provisioning destinations always have file names")
-                    .to_string_lossy()
+                name.to_string_lossy()
             ))
         };
         let mut actions = vec![ProvisioningAction::EnsureDirectories {
@@ -308,7 +327,7 @@ impl PlanLayout {
             payload: PayloadKind::Farhelm,
             arch: reach.arch,
             destination: farhelm_path.clone(),
-            temporary: temporary(&farhelm_path),
+            temporary: temporary(&farhelm_path, farhelm_name),
         });
         // Whichever branch runs, `tmux_program` ends up naming the exact
         // executable the supervisor must drive — see `supervisor_unit`
@@ -319,7 +338,18 @@ impl PlanLayout {
                 payload: PayloadKind::Tmux,
                 arch: reach.arch,
                 destination: tmux_path.clone(),
-                temporary: temporary(&tmux_path),
+                temporary: temporary(
+                    &tmux_path,
+                    tmux_path.file_name().ok_or_else(|| {
+                        BackendFailure::new(
+                            format!(
+                                "provisioning tmux destination {:?} has no file name",
+                                tmux_path
+                            ),
+                            "",
+                        )
+                    })?,
+                ),
             });
             tmux_path
         } else {
@@ -333,7 +363,7 @@ impl PlanLayout {
             ProvisioningAction::WriteUnit {
                 unit: self.unit_name.clone(),
                 destination: unit_path.clone(),
-                temporary: temporary(&unit_path),
+                temporary: temporary(&unit_path, unit_name),
                 content,
             },
             ProvisioningAction::DaemonReload,
@@ -367,8 +397,9 @@ impl PlanLayout {
     }
 
     /// UPDATE converges the installation the registry actually dials. A
-    /// custom binary or state override is not permission to create a second
-    /// standard-layout supervisor beside it.
+    /// relative `remote_farhelm` is accepted at registration because SSH
+    /// resolves it through PATH, but is refused here: installing to a guessed
+    /// absolute layout would update a binary different from the one in use.
     pub(super) fn plan_for_row(
         &self,
         row: &HostRow,
@@ -379,6 +410,14 @@ impl PlanLayout {
         let mut layout = self.clone();
         if row.kind == HostKind::Ssh {
             if let Some(farhelm) = &row.remote_farhelm {
+                if !Path::new(farhelm).is_absolute() {
+                    return Err(BackendFailure::new(
+                        format!(
+                            "updating in place needs an absolute remote_farhelm; registered value {farhelm:?} is resolved through the remote PATH instead",
+                        ),
+                        "",
+                    ));
+                }
                 let farhelm = PathBuf::from(farhelm);
                 layout.override_lib_dir = farhelm.parent().map(Path::to_path_buf);
                 layout.override_farhelm_path = Some(farhelm);
