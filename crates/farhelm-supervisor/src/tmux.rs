@@ -5322,9 +5322,10 @@ mod tests {
     /// the substring match this replaced did not have.
     #[test]
     fn session_gone_diagnostics_match_raw_stderr_prefixes_only() {
-        let gone = anyhow::Error::new(TmuxCommandFailure {
-            stderr: b"can't find session: fh-abcd1234\n".to_vec(),
-        })
+        let gone = anyhow::Error::new(TmuxCommandFailure::new(
+            b"can't find session: fh-abcd1234\n".to_vec(),
+            &[],
+        ))
         .context("killing tmux session fh-abcd1234");
         assert!(tmux_said_any(
             &gone,
@@ -5333,9 +5334,10 @@ mod tests {
 
         // The phrase appears, but not at the start of tmux's own message:
         // a target whose text contains a diagnostic is not a diagnostic.
-        let laundered = anyhow::Error::new(TmuxCommandFailure {
-            stderr: b"invalid target: =no server running here\n".to_vec(),
-        });
+        let laundered = anyhow::Error::new(TmuxCommandFailure::new(
+            b"invalid target: =no server running here\n".to_vec(),
+            &[],
+        ));
         assert!(!tmux_said_any(
             &laundered,
             TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
