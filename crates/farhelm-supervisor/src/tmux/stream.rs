@@ -1039,8 +1039,16 @@ impl OutputStream {
         } else {
             history_output
         };
-        let snapshot = strip_command_output_terminator(&snapshot);
-        Ok((modes, normalize_capture(snapshot)))
+        // The capture block is handed to `normalize_capture` whole. Measured
+        // on the pinned tmux (3.7c): the bytes between `%begin` and `%end`
+        // are byte-for-byte the direct `capture-pane` output, one row per
+        // line with every row terminated, and control mode adds NO newline
+        // of its own around them. `normalize_capture` removes the final
+        // row's terminator; stripping a "command terminator" here first
+        // removed a second one, which deleted the pane's last row whenever
+        // that row was blank — the ordinary case, since the cursor usually
+        // sits on a blank line — and shifted the whole replay up a row.
+        Ok((modes, normalize_capture(&snapshot)))
     }
 
     /// Next event of interest, or `None` when the client exits (session
@@ -2116,6 +2124,98 @@ mod tests {
         let post = modes.post_content_sequences();
         assert!(
             post.contains("\x1b[?7l") && post.contains("\x1b="),
+            "{post:?}"
+        );
+        shutdown_test_stream(stream).await;
+    }
+
+    /// The replay prefill must carry exactly the pane's rows, with the
+    /// pane's own row count as the oracle rather than any model of how
+    /// many newlines a control-mode block carries. An earlier version
+    /// stripped one terminator as "control mode's" and one as
+    /// "capture-pane's", on the belief that the block carried two; measured
+    /// on the pinned tmux it carries one per row and nothing more, so the
+    /// double strip dropped the last row whenever it was blank — the
+    /// ordinary case, since the cursor usually sits on a blank line — and
+    /// every reattach came back one row short. A 6-row pane that printed
+    /// three lines must replay as six rows: three with text, three blank.
+    #[farhelm_testtrace::test]
+    async fn replay_prefill_carries_every_pane_row_including_a_blank_last_one() {
+        let server = ScratchServer::start().await;
+        let argv: Vec<String> = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf 'L1\\nL2\\nL3\\n'; sleep 60".into(),
+        ];
+        let pane = server
+            .driver
+            .create_session("fh-rows", "/", 20, 6, &[], &argv)
+            .await
+            .expect("session");
+        tail_containing(&server.driver, "fh-rows", &pane, "L3").await;
+        let (modes, prefill, stream) = server
+            .driver
+            .open_replay_stream("fh-rows", &pane)
+            .await
+            .expect("replay stream");
+        assert_eq!(
+            modes.pane_height, 6,
+            "test premise: tmux reports the pane's row count"
+        );
+        let rows: Vec<String> = String::from_utf8_lossy(&prefill)
+            .split("\r\n")
+            .map(|row| row.trim_end().to_string())
+            .collect();
+        assert_eq!(
+            rows.len(),
+            usize::from(modes.pane_height),
+            "one replayed row per pane row, blank last row included: {rows:?}"
+        );
+        assert_eq!(&rows[..3], ["L1", "L2", "L3"], "{rows:?}");
+        assert!(rows[3..].iter().all(String::is_empty), "{rows:?}");
+        shutdown_test_stream(stream).await;
+    }
+
+    /// The scroll-region and origin-mode fields are read from positions
+    /// 13 to 16 of the pane-mode expansion, and the replay rests on the
+    /// pinned tmux expanding `#{scroll_region_upper}`,
+    /// `#{scroll_region_lower}`, `#{origin_flag}` and `#{pane_height}`
+    /// there: a misspelled name would expand empty, read as the reset
+    /// state, and silently bring the scrolled-away-header bug back with
+    /// green unit tests. So this drives a real pane through `ESC[2;4r`
+    /// and `ESC[?6h` and reads the modes back through the replay path.
+    #[farhelm_testtrace::test]
+    async fn scroll_region_and_origin_mode_are_read_from_a_real_pane() {
+        let server = ScratchServer::start().await;
+        let argv: Vec<String> = vec![
+            "sh".into(),
+            "-c".into(),
+            "printf 'READY\\033[2;4r\\033[?6h'; sleep 60".into(),
+        ];
+        let pane = server
+            .driver
+            .create_session("fh-region", "/", 40, 6, &[], &argv)
+            .await
+            .expect("session");
+        tail_containing(&server.driver, "fh-region", &pane, "READY").await;
+        let (modes, _prefill, stream) = server
+            .driver
+            .open_replay_stream("fh-region", &pane)
+            .await
+            .expect("replay stream");
+        assert_eq!(
+            modes.pane_height, 6,
+            "test premise: tmux reports the pane height: {modes:?}"
+        );
+        assert_eq!(
+            (modes.scroll_region_upper, modes.scroll_region_lower),
+            (1, 3),
+            "tmux reports the region 0-based: {modes:?}"
+        );
+        assert!(modes.origin_mode, "{modes:?}");
+        let post = modes.post_content_sequences();
+        assert!(
+            post.contains("\x1b[2;4r") && post.contains("\x1b[?6h"),
             "{post:?}"
         );
         shutdown_test_stream(stream).await;

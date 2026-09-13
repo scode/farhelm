@@ -628,7 +628,10 @@ polish. Pane modes, a history snapshot, a visible-screen snapshot, and a final
 replacement. The matching `%end` for the final refresh block is the cutover: earlier pane bytes are represented by the
 snapshot, later ones arrive as live output, and `no-output` advances rather than queueing a second copy for delivery.
 Normal-screen replay selects the history snapshot; alternate-screen replay selects the visible snapshot so normal
-history is not mixed into a full-screen app.
+history is not mixed into a full-screen app. Known limitation, accepted: an alternate-screen replay carries only that
+screen, so when the full-screen program later exits, the browser's normal buffer behind it is empty until new output
+arrives, where tmux's own grid still held the pre-program scrollback. Replaying both would add two captures to every
+attach for a cosmetic gain, and was declined (review finding A7-C8).
 
 The initial foreign-pane filters must be arguments of that same cutover `refresh-client` invocation. Clearing
 `no-output` resets the client's per-pane state, so sending the filters as a separate earlier command silently loses

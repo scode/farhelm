@@ -245,11 +245,15 @@ fn control_cleanup_retry_delay(failures: u32) -> std::time::Duration {
 /// meaning what it meant. Each tmux format name maps to one DEC mode:
 /// `wrap_flag` is DECAWM (`?7`, auto-wrap), `keypad_flag` is DECKPAM
 /// (`ESC =`, application keypad), `keypad_cursor_flag` is DECCKM (`?1`,
-/// application cursor keys), `cursor_flag` is DECTCEM (`?25`).
+/// application cursor keys), `cursor_flag` is DECTCEM (`?25`),
+/// `scroll_region_upper`/`scroll_region_lower` are DECSTBM (`CSI r`, 0-based
+/// rows as tmux reports them), `origin_flag` is DECOM (`?6`), and
+/// `pane_height` is what tells a full-pane region apart from a real one.
 const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_all_flag},\
                                 #{mouse_button_flag},#{mouse_standard_flag},#{mouse_sgr_flag},\
                                 #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y},\
-                                #{wrap_flag},#{keypad_flag}";
+                                #{wrap_flag},#{keypad_flag},#{scroll_region_upper},\
+                                #{scroll_region_lower},#{origin_flag},#{pane_height}";
 
 /// How long `OutputStream::foreign_panes` gives tmux to list a
 /// session's panes, independently of the attach's own budget.
@@ -1128,6 +1132,25 @@ pub struct PaneModes {
     /// which changes what the numeric keypad sends. Distinct from
     /// `app_cursor_keys` (DECCKM), which tmux reports separately.
     pub app_keypad: bool,
+    /// DECSTBM scroll region as tmux reports it: 0-based top and bottom
+    /// rows, inclusive. A region covering the whole pane is the reset
+    /// state and is not replayed (see `pane_height`); a narrower one is
+    /// what keeps a full-screen app's pinned header or status line from
+    /// scrolling away, and it is lost on a same-size reattach unless it is
+    /// restored.
+    pub scroll_region_upper: u16,
+    /// See `scroll_region_upper`.
+    pub scroll_region_lower: u16,
+    /// DECOM (`?6`), from `#{origin_flag}`: cursor addressing relative to
+    /// the scroll region. Replayed AFTER the region and BEFORE the cursor
+    /// placement, because setting it homes the cursor and changes what a
+    /// following CUP means.
+    pub origin_mode: bool,
+    /// The pane's row count when the modes were sampled, from
+    /// `#{pane_height}`. Only used to decide whether the scroll region is
+    /// the whole pane; a zero (older tmux, unparseable field) disables the
+    /// region replay rather than guessing.
+    pub pane_height: u16,
 }
 
 /// The reset state of a fresh terminal, which is what `parse` falls back
@@ -1151,6 +1174,10 @@ impl Default for PaneModes {
             cursor_y: 0,
             auto_wrap: true,
             app_keypad: false,
+            scroll_region_upper: 0,
+            scroll_region_lower: 0,
+            origin_mode: false,
+            pane_height: 0,
         }
     }
 }
@@ -1181,9 +1208,10 @@ impl PaneModes {
         let mouse_sgr = flag(reset.mouse_sgr);
         let cursor_visible = flag(reset.cursor_visible);
         let app_cursor_keys = flag(reset.app_cursor_keys);
-        let mut num = || -> u16 { it.next().and_then(|v| v.parse().ok()).unwrap_or(0) };
-        let cursor_x = num();
-        let cursor_y = num();
+        let mut num =
+            |default: u16| -> u16 { it.next().and_then(|v| v.parse().ok()).unwrap_or(default) };
+        let cursor_x = num(reset.cursor_x);
+        let cursor_y = num(reset.cursor_y);
         // Trailing fields, appended after the cursor position so an
         // older expansion (or a positional fixture) with only ten fields
         // still parses; both take their reset-state default when absent.
@@ -1195,6 +1223,20 @@ impl PaneModes {
         };
         let auto_wrap = flag(reset.auto_wrap);
         let app_keypad = flag(reset.app_keypad);
+        let mut num =
+            |default: u16| -> u16 { it.next().and_then(|v| v.parse().ok()).unwrap_or(default) };
+        let scroll_region_upper = num(reset.scroll_region_upper);
+        let scroll_region_lower = num(reset.scroll_region_lower);
+        let mut flag = |default: bool| -> bool {
+            match it.next() {
+                Some("") | None => default,
+                Some(v) => v == "1",
+            }
+        };
+        let origin_mode = flag(reset.origin_mode);
+        let mut num =
+            |default: u16| -> u16 { it.next().and_then(|v| v.parse().ok()).unwrap_or(default) };
+        let pane_height = num(reset.pane_height);
         PaneModes {
             alternate_on,
             bracket_paste,
@@ -1208,7 +1250,27 @@ impl PaneModes {
             cursor_y,
             auto_wrap,
             app_keypad,
+            scroll_region_upper,
+            scroll_region_lower,
+            origin_mode,
+            pane_height,
         }
+    }
+
+    /// Whether the sampled scroll region is narrower than the pane, i.e.
+    /// something an application set on purpose. The reset region spans
+    /// the whole pane and must NOT be replayed: the browser's terminal may
+    /// not have exactly the pane's row count at the instant of replay, and
+    /// pinning a full-height region there would silently clip scrolling.
+    /// A missing `pane_height` (zero) is treated as "cannot tell", which
+    /// disables the replay rather than guessing.
+    fn has_custom_scroll_region(&self) -> bool {
+        // Strictly taller than one row: tmux itself refuses a one-row
+        // DECSTBM and xterm.js ignores it, so replaying one would be
+        // asking for a region the pane never had.
+        self.pane_height > 0
+            && self.scroll_region_lower > self.scroll_region_upper
+            && (self.scroll_region_upper > 0 || self.scroll_region_lower + 1 < self.pane_height)
     }
 
     /// Escape sequences that must precede the content prefill.
@@ -1286,12 +1348,31 @@ impl PaneModes {
         if !self.auto_wrap {
             s.push_str("\x1b[?7l");
         }
+        // Scroll region and origin mode come after the content (the
+        // prefill must scroll the whole screen the way tmux's grid did,
+        // not a region) and BEFORE the cursor placement, because both
+        // DECSTBM and DECOM home the cursor as a side effect: emitting
+        // either after the CUP would throw the restored position away.
+        // With origin mode on, the CUP that follows is region-relative, so
+        // the row is rebased onto the region's top; tmux reports the
+        // cursor in absolute pane rows either way.
+        let region = self.has_custom_scroll_region();
+        if region {
+            s.push_str(&format!(
+                "\x1b[{};{}r",
+                self.scroll_region_upper + 1,
+                self.scroll_region_lower + 1
+            ));
+        }
+        let mut cursor_row = self.cursor_y;
+        if self.origin_mode {
+            s.push_str("\x1b[?6h");
+            if region {
+                cursor_row = cursor_row.saturating_sub(self.scroll_region_upper);
+            }
+        }
         // Cursor position is 1-based in the escape sequence.
-        s.push_str(&format!(
-            "\x1b[{};{}H",
-            self.cursor_y + 1,
-            self.cursor_x + 1
-        ));
+        s.push_str(&format!("\x1b[{};{}H", cursor_row + 1, self.cursor_x + 1));
         // Visibility last so a hidden cursor stays hidden through the
         // positioning above.
         if !self.cursor_visible {
@@ -3585,6 +3666,66 @@ mod tests {
         let cursor = both_changed.find("\x1b[1;1H").expect("cursor placement");
         let wrap = both_changed.find("\x1b[?7l").expect("wrap off");
         assert!(wrap < cursor, "{both_changed:?}");
+    }
+
+    /// A scroll region is replayed only when an application narrowed it,
+    /// and the order around the cursor placement is the whole point: both
+    /// DECSTBM and DECOM home the cursor, so they must precede the CUP,
+    /// and with origin mode on the CUP has to be region-relative or the
+    /// cursor lands `upper` rows too low. The full-pane region is the reset
+    /// state and must produce no escape at all (the browser's row count is
+    /// not guaranteed to equal the pane's at replay time), and an unknown
+    /// pane height disables the replay rather than guessing.
+    #[farhelm_testtrace::test]
+    fn scroll_region_and_origin_mode_precede_a_region_relative_cursor() {
+        // fields 11-16: wrap, keypad, region upper, region lower, origin, height
+        let full = PaneModes::parse("0,0,0,0,0,0,1,0,2,4,1,0,0,23,0,24").post_content_sequences();
+        assert!(
+            !full.contains("\x1b[1;24r"),
+            "full-pane region must not be replayed: {full:?}"
+        );
+        assert!(full.contains("\x1b[5;3H"), "{full:?}");
+
+        let unknown_height =
+            PaneModes::parse("0,0,0,0,0,0,1,0,2,4,1,0,1,10,0,").post_content_sequences();
+        assert!(!unknown_height.contains("\x1b[2;11r"), "{unknown_height:?}");
+
+        // A one-row region is one tmux refuses and xterm.js ignores.
+        let one_row = PaneModes::parse("0,0,0,0,0,0,1,0,2,4,1,0,5,5,0,24").post_content_sequences();
+        assert!(!one_row.contains("\x1b[6;6r"), "{one_row:?}");
+
+        // Origin mode with the full-pane region: the mode is replayed but
+        // the cursor row stays absolute, since there is no region to
+        // rebase onto.
+        let origin_full =
+            PaneModes::parse("0,0,0,0,0,0,1,0,2,4,1,0,0,23,1,24").post_content_sequences();
+        assert!(
+            origin_full.contains("\x1b[?6h") && origin_full.contains("\x1b[5;3H"),
+            "{origin_full:?}"
+        );
+
+        // A cursor above a narrowed region with origin mode on cannot be
+        // addressed relative to the region; the row saturates to the
+        // region's top rather than wrapping.
+        let above = PaneModes::parse("0,0,0,0,0,0,1,0,2,1,1,0,5,20,1,24").post_content_sequences();
+        assert!(above.contains("\x1b[1;3H"), "{above:?}");
+
+        let narrowed =
+            PaneModes::parse("0,0,0,0,0,0,1,0,2,4,1,0,1,20,0,24").post_content_sequences();
+        let region = narrowed.find("\x1b[2;21r").expect("region escape");
+        let cursor = narrowed
+            .find("\x1b[5;3H")
+            .expect("absolute cursor without origin mode");
+        assert!(region < cursor, "{narrowed:?}");
+        assert!(!narrowed.contains("\x1b[?6h"), "{narrowed:?}");
+
+        let origin = PaneModes::parse("0,0,0,0,0,0,1,0,2,4,1,0,1,20,1,24").post_content_sequences();
+        let region = origin.find("\x1b[2;21r").expect("region escape");
+        let decom = origin.find("\x1b[?6h").expect("origin mode");
+        // Absolute row 4 inside a region starting at row 1 is region row 3,
+        // i.e. a 1-based CUP row of 4.
+        let cursor = origin.find("\x1b[4;3H").expect("region-relative cursor");
+        assert!(region < decom && decom < cursor, "{origin:?}");
     }
 
     /// One DECSET code per real tmux state, with the OTHER two mouse

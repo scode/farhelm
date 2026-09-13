@@ -529,17 +529,6 @@ is safe. Each is its own review unit.
   nothing excluding the new row, and returns `Ok(true)` regardless; a clock rollback or tie evicts the credential just
   issued and hands the browser an unusable secret. Fix: order eviction by `rowid DESC` so insertion order decides,
   keeping the offset. Fence: the cap must stay exactly 64; excluding the new row while keeping the offset leaves 65.
-- **Replay state on reattach.** `A7-C11`, `A7-C8`, `A7-C7`. Medium, small to medium, medium risk. `PANE_MODE_FORMAT`
-  carries neither the scroll region fields nor `#{origin_flag}` and `post_content_sequences` (tmux.rs:1172-1225) emits
-  no `CSI r`, so pinned chrome scrolls away after a same-dimension reattach. Replay of an alternate-screen pane
-  (stream.rs:1021-1025) captures only the visible buffer, so the normal buffer is blank after the program exits. The
-  snapshot passes through `strip_command_output_terminator` and then `normalize_capture`, each stripping a trailing
-  newline where the reviewer measured only one exists, dropping the blank bottom row. Fix: collect the region and origin
-  fields and emit the region before the cursor escape and `\x1b[?6h` after it; add the `-E -1` history and `-a -q`
-  captures and emit normal-screen content before `?1049h`, or record the gap in SPEC_impl's limitations; drop the outer
-  strip and rewrite the unit test around a fixture whose trailing blank row must survive. Fence: DECSTBM and DECOM both
-  home the cursor, so ordering is the risk; capture cost is a real tradeoff; the newline fix needs an independent grid
-  oracle, not a test encoding the disputed model.
 - **Helm store resilience.** `A6-C13`, `A6-C4`, `A1-C14`. Medium and low, small. `HelmStore::profiles` (helm
   store.rs:5445-5460) collects decode results into one `Result`, so one undecodable stored row fails the catalogue read
   that host refresh and create reach through `load_profile_name_index`. `update_ssh_destination` (:3530-3562) runs the
