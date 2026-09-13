@@ -1361,6 +1361,7 @@ enum ReplyKind {
     Session,
     Stopped,
     Created,
+    ResolvedProfile,
 }
 
 impl ReplyKind {
@@ -1384,7 +1385,7 @@ impl ReplyKind {
             // This is an internal supervisor-to-helm query, never a CLI
             // verb. Classifying it keeps a malformed peer reply recoverable
             // instead of letting a new wire variant abort this process.
-            farhelm_proto::AgentVerb::ResolveProfile { .. } => ReplyKind::Created,
+            farhelm_proto::AgentVerb::ResolveProfile { .. } => ReplyKind::ResolvedProfile,
         }
     }
 
@@ -1395,7 +1396,7 @@ impl ReplyKind {
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Stopped {} => ReplyKind::Stopped,
             AgentReply::Created { .. } => ReplyKind::Created,
-            AgentReply::ResolvedProfile { .. } => ReplyKind::Created,
+            AgentReply::ResolvedProfile { .. } => ReplyKind::ResolvedProfile,
         }
     }
 
@@ -1416,6 +1417,7 @@ impl ReplyKind {
             // both, and a reader who sees "session row" against "created
             // session row" can tell which end of the mismatch is which.
             ReplyKind::Created => "created session row",
+            ReplyKind::ResolvedProfile => "resolved profile",
         }
     }
 }
@@ -1702,14 +1704,32 @@ fn quoted(field: &str) -> String {
     format!("\"{}\"", safe_cell(&escaped))
 }
 
+/// Whether a character can forge table structure or disguise its text.
+///
+/// Unicode Cc controls include terminal-active C0, DEL, and C1 characters;
+/// line and paragraph separators can create extra visual lines; and bidi
+/// controls can reorder or hide columns. These categories are unsafe in both
+/// table cells and peer-supplied error prose, so both paths share this
+/// predicate through [`safe_cell`].
+fn is_unsafe_table_character(ch: char) -> bool {
+    ch.is_control()
+        || matches!(
+            ch,
+            '\u{2028}'
+                | '\u{2029}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+        )
+}
+
 /// One cell as a single printable line.
 ///
-/// Every control character is replaced by a visible escape rather than
+/// Every unsafe character is replaced by a visible escape rather than
 /// dropped, so a cell that contained one still says so — a silently
 /// stripped newline turns two forged rows into one plausible row, which is
-/// worse than an ugly one. C0, DEL and C1 are all covered: C1 is the eight-
-/// bit form of the same escape sequences ESC introduces, and a terminal in
-/// a legacy encoding acts on it.
+/// worse than an ugly one.
 fn safe_cell(cell: &str) -> String {
     let mut out = String::with_capacity(cell.len());
     for ch in cell.chars() {
@@ -1717,10 +1737,14 @@ fn safe_cell(cell: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if c.is_control() => {
-                // `is_control` is Unicode's Cc category: C0, DEL, and C1,
-                // all of which fit in two hex digits.
-                out.push_str(&format!("\\x{:02x}", c as u32));
+            c if is_unsafe_table_character(c) => {
+                if c.is_control() {
+                    // Cc is Unicode's C0, DEL, and C1 category, all of
+                    // which fit in two hex digits.
+                    out.push_str(&format!("\\x{:02x}", c as u32));
+                } else {
+                    out.push_str(&format!("\\u{{{:04x}}}", c as u32));
+                }
             }
             c => out.push(c),
         }
@@ -2179,6 +2203,26 @@ mod tests {
         }
     }
 
+    /// Profile resolution is an internal reply shape, so it must not share
+    /// the creating verbs' classification: otherwise a malformed create or
+    /// clone reply can evade the outcome-unknown remedy.
+    #[farhelm_testtrace::test]
+    fn profile_resolution_has_its_own_reply_kind() {
+        let create = ReplyKind::of_verb(&farhelm_proto::AgentVerb::Create {
+            host: None,
+            cwd: "/w".to_string(),
+            profile_name: None,
+            invocation: Some("claude".to_string()),
+            title: None,
+            intent_key: None,
+        });
+        let resolve = ReplyKind::of_verb(&farhelm_proto::AgentVerb::ResolveProfile {
+            name: "claude".to_string(),
+        });
+        assert_ne!(create, resolve);
+        assert_eq!(resolve.noun(), "resolved profile");
+    }
+
     /// Spec: column widths are counted in characters, so a multibyte but
     /// single-width character does not shift the columns after it.
     ///
@@ -2228,7 +2272,7 @@ mod tests {
     fn control_characters_in_a_cell_are_escaped_into_one_visible_line() {
         let rendered = render_agent_reply(&sessions(vec![agent_session(
             "s1",
-            "real\n  s2 forged\ttab\x1b[31m",
+            "real\n  s2 forged\ttab\x1b[31m\u{2028}\u{202e}line",
         )]))
         .expect("a sessions listing renders as a table");
         assert_eq!(
@@ -2239,10 +2283,13 @@ mod tests {
         assert!(rendered.contains("real\\n"), "{rendered:?}");
         assert!(rendered.contains("forged\\ttab"), "{rendered:?}");
         assert!(rendered.contains("\\x1b[31m"), "{rendered:?}");
+        assert!(rendered.contains("\\u{2028}\\u{202e}"), "{rendered:?}");
         assert!(
             !rendered.contains('\x1b'),
             "no raw ESC may reach the terminal: {rendered:?}"
         );
+        assert!(!rendered.contains('\u{2028}'), "{rendered:?}");
+        assert!(!rendered.contains('\u{202e}'), "{rendered:?}");
     }
 
     /// Spec: a non-final column is cut to [`MAX_CELL_WIDTH`] with a `…`,
