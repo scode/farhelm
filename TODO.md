@@ -341,16 +341,6 @@ is safe. Each is its own review unit.
   `send-keys`; verify input delivery separately from output capture. A focused real-tmux reproduction on pinned tmux
   3.7c instead got `tmux send-keys input command failed: can't find pane: %1`; the next attempt should start by checking
   whether the production connection path changes that control-client reply.
-- **Helm store resilience.** `A6-C13`, `A6-C4`, `A1-C14`. Medium and low, small. `HelmStore::profiles` (helm
-  store.rs:5445-5460) collects decode results into one `Result`, so one undecodable stored row fails the catalogue read
-  that host refresh and create reach through `load_profile_name_index`. `update_ssh_destination` (:3530-3562) runs the
-  alias-collision check even for a host that already has an alias, refusing a retarget whose display name would not
-  change. `helm_link_for_session` (agent_relay.rs:588-600) takes the first matching attachment and gives up if that one
-  link is unregistered, which a helm reconnect can produce while another terminal is live. Fix: skip-and-warn an
-  undecodable row naming its id; include alias in the lookup and skip the check when present; iterate every matching
-  attachment and return the first whose queue matches a registered link, correcting the lease-versus- connection
-  docstring. Fence: do not assert all hosts or all creation fail; the alias contract's fail-closed behaviour is optional
-  UX; no lease redesign.
 
 ### Later: low confidence or needs an argument first
 

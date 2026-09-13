@@ -3565,23 +3565,24 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning update destination transaction")?;
-            let current: Option<String> = tx
+            let current: Option<(String, Option<String>)> = tx
                 .query_row(
-                    "SELECT kind FROM hosts WHERE id = ?1",
+                    "SELECT kind, alias FROM hosts WHERE id = ?1",
                     rusqlite::params![host],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .optional()
                 .context("looking up host before updating its destination")?;
-            let current = current
-                .map(|kind| HostKind::from_column(&kind))
-                .transpose()?;
+            let current = match current {
+                Some((kind, alias)) => Some((HostKind::from_column(&kind)?, alias)),
+                None => None,
+            };
             match current {
                 None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
-                Some(HostKind::Local) => {
+                Some((HostKind::Local, _)) => {
                     Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                 }
-                Some(HostKind::Ssh) => {
+                Some((HostKind::Ssh, alias)) => {
                     // Only ALIASES are compared here — colliding with
                     // another row's plain, unaliased destination is not
                     // this check's job. That case is caught below by
@@ -3597,7 +3598,9 @@ impl HelmStore {
                     // no alias is involved on either side, and would shadow
                     // `DuplicateDestination` entirely since this check runs
                     // first.
-                    if let Some(name) = alias_collision(&tx, Some(host), &destination)? {
+                    if alias.is_none()
+                        && let Some(name) = alias_collision(&tx, Some(host), &destination)?
+                    {
                         return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
                     }
                     let changed = tx
@@ -5348,11 +5351,13 @@ impl HelmStore {
         .context("session owner lookup task panicked")?
     }
 
-    /// Return the helm-owned catalog in stable id order.
+    /// Return the usable portion of the helm-owned catalog in stable id order.
     ///
     /// Listing does not repair or reseed rows: user edits and deletions are
-    /// durable choices, while malformed persisted data is reported by the
-    /// decoder instead of silently normalized into a different profile.
+    /// durable choices. Malformed persisted data is reported by the decoder
+    /// and warning log instead of silently normalized into a different
+    /// profile, but one bad row must not make the rest of the catalog
+    /// unavailable to host refresh or session creation.
     pub async fn profiles(&self) -> anyhow::Result<Vec<farhelm_proto::Profile>> {
         let conn = Arc::clone(&self.conn);
         let stored: Vec<farhelm_proto::Profile> = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
@@ -5360,14 +5365,19 @@ impl HelmStore {
             let mut statement = conn
                 .prepare("SELECT id, name, invocation, agent_kind, resume_template FROM profiles ORDER BY id")
                 .context("preparing profile list query")?;
-            statement
+            let rows = statement
                 .query_map([], read_profile_columns)
-                .context("querying profiles")?
-                .map(|row| {
-                    let columns = row.context("reading profile row")?;
-                    decode_profile_row(columns)
-                })
-                .collect()
+                .context("querying profiles")?;
+            let mut profiles = Vec::new();
+            for row in rows {
+                let columns = row.context("reading profile row")?;
+                let id = columns.0.clone();
+                match decode_profile_row(columns) {
+                    Ok(profile) => profiles.push(profile),
+                    Err(error) => tracing::warn!(%id, %error, "skipping undecodable stored profile"),
+                }
+            }
+            Ok(profiles)
         })
         .await
         .context("profile list task panicked")?
@@ -5489,27 +5499,30 @@ impl HelmStore {
         .context("profile update task panicked")?
     }
 
-    /// Plant a profile row that the normal catalog decoder must reject.
+    /// Make every profile catalog read fail without touching anything else.
     ///
     /// Mutation-order tests need a catalog read to fail without damaging the
-    /// session cache or connection registry they use for routing. Production
-    /// writers validate every field, so this test-only seam bypasses them in
-    /// the narrowest possible way and leaves all ordinary store behavior real.
+    /// session cache or connection registry they use for routing. A single
+    /// undecodable row no longer does that — `profiles` logs and skips it so
+    /// one damaged row cannot take the whole catalog down — so this seam
+    /// breaks the catalog at the schema level instead: with the table renamed
+    /// away, the list query cannot even be prepared, which is the shape a
+    /// truncated or mismigrated database presents. Nothing else in the store
+    /// joins the profiles table, so routing stays real.
     #[cfg(test)]
-    pub(crate) async fn plant_invalid_profile_for_test(&self) -> anyhow::Result<()> {
+    pub(crate) async fn break_profile_catalog_for_test(&self) -> anyhow::Result<()> {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let conn = conn.lock().expect("helm db mutex poisoned");
             conn.execute(
-                "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-                 VALUES ('invalid-test-profile', 'broken', 'agent', 'unknown', NULL)",
+                "ALTER TABLE profiles RENAME TO profiles_broken_for_test",
                 [],
             )
-            .context("planting invalid profile row")?;
+            .context("renaming the profiles table away")?;
             Ok(())
         })
         .await
-        .context("invalid profile fixture task panicked")?
+        .context("broken catalog fixture task panicked")?
     }
 
     /// Delete one profile and report whether its id existed; the raw
@@ -9586,6 +9599,41 @@ mod tests {
         );
     }
 
+    /// An aliased host keeps that alias as its display name while its SSH
+    /// destination changes, so a destination matching another alias does not
+    /// create a new display-name collision for the edited row.
+    #[farhelm_testtrace::test]
+    async fn update_ssh_destination_allows_aliased_host_to_match_another_alias() {
+        let (_dir, store) = fresh_store().await;
+        let aliased = store
+            .add_ssh_host("aliased@host", None, None)
+            .await
+            .unwrap();
+        store
+            .update_alias(aliased, Some("Stable Name"))
+            .await
+            .unwrap();
+        let other = store.add_ssh_host("other@host", None, None).await.unwrap();
+        store
+            .update_alias(other, Some("Target Name"))
+            .await
+            .unwrap();
+
+        store
+            .update_ssh_destination(aliased, "Target Name")
+            .await
+            .expect("an unchanged aliased display name must allow retargeting");
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|host| host.id == aliased)
+            .unwrap();
+        assert_eq!(row.destination.as_deref(), Some("Target Name"));
+        assert_eq!(row.alias.as_deref(), Some("Stable Name"));
+    }
+
     /// A version-15 database — the schema immediately before `hosts.alias` —
     /// migrates existing hosts to a `NULL` alias, and the column is usable
     /// immediately afterward, not merely present.
@@ -12171,13 +12219,13 @@ mod tests {
         assert_eq!(reopened.profiles().await.unwrap(), expected);
     }
 
-    /// Both profile readers fail loudly on every malformed persisted shape
-    /// and identify the row that blocked the read.
+    /// Single-profile reads fail loudly, while catalog reads retain usable
+    /// rows when one persisted profile is malformed.
     ///
     /// Store methods validate ordinary writes, so these fixtures bypass that
     /// boundary as a damaged or hand-edited database would. Silently skipping
     /// or normalizing one would turn corruption into a plausible catalog with
-    /// a different meaning.
+    /// a different meaning, so the catalog path logs and omits it instead.
     #[farhelm_testtrace::test]
     async fn malformed_profile_rows_fail_single_and_catalog_reads() {
         let cases = [
@@ -12217,19 +12265,33 @@ mod tests {
                     rusqlite::params![id, name, invocation, kind, template],
                 )
                 .unwrap();
+                conn.execute(
+                    "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![
+                        "valid-profile",
+                        "valid",
+                        "agent",
+                        "generic",
+                        Option::<String>::None,
+                    ],
+                )
+                .unwrap();
             }
 
-            for error in [
-                store.profile(id).await.expect_err("single read must fail"),
-                store.profiles().await.expect_err("catalog read must fail"),
-            ] {
-                let rendered = format!("{error:#}");
-                assert!(rendered.contains(id), "error must name {id}: {rendered}");
-                assert!(
-                    rendered.contains(reason),
-                    "error for {id} must explain {reason:?}: {rendered}"
-                );
-            }
+            let error = store.profile(id).await.expect_err("single read must fail");
+            let rendered = format!("{error:#}");
+            assert!(rendered.contains(id), "error must name {id}: {rendered}");
+            assert!(
+                rendered.contains(reason),
+                "error for {id} must explain {reason:?}: {rendered}"
+            );
+            let profiles = store
+                .profiles()
+                .await
+                .expect("catalog read skips malformed row");
+            assert_eq!(profiles.len(), builtin_profiles().len() + 1);
+            assert!(profiles.iter().any(|profile| profile.id == "valid-profile"));
         }
     }
 
