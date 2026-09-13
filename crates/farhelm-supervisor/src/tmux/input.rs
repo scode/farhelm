@@ -159,11 +159,11 @@ pub struct InputClient {
     /// Deliberately never reset. It answers "has anything ever landed",
     /// and the correlator it feeds is itself write-once.
     delivered_any_bytes: bool,
-    /// This client's copy of [`TmuxDriver::exchange_timeout`], consulted by
-    /// [`Self::send`] for every chunk write, flush, and reply read. Stored
-    /// rather than passed in per call because `send` computes a fresh
-    /// per-reply deadline of its own well after this client was opened —
-    /// the same reason `OutputStream` carries its own copy.
+    /// This client's copy of [`TmuxDriver::exchange_timeout`], used by
+    /// [`Self::send`] to establish one deadline for the whole input frame.
+    /// Stored rather than passed in per call because the timeout is selected
+    /// when the client is opened — the same reason `OutputStream` carries its
+    /// own copy.
     exchange_timeout: std::time::Duration,
 }
 
@@ -209,80 +209,271 @@ impl InputClient {
     /// reaches this side's writes, and both ends block until the timeout
     /// fires — a large paste would fail instead of being slow. One
     /// batch's replies (~30 bytes each) stay far below the pipe capacity.
+    /// One whole call has one [`TmuxDriver::exchange_timeout`] budget shared
+    /// by every write, flush, and reply read across all batches. This bounds
+    /// how long the caller can hold the attachments lock: the shipped helm
+    /// chunks input at 32 KiB, so ordinary frames fit with wide margin, while
+    /// an oversized frame that cannot finish in one budget fails explicitly
+    /// instead of extending that lock hold once per chunk.
     pub async fn send(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
-        if bytes.is_empty() {
-            // Nothing reaches the pane, so nothing is delivered — see
-            // `delivered_any_bytes`, whose whole point is that an empty
-            // frame must not start conversation capture's clock.
-            return Ok(());
-        }
-        let mut line = String::with_capacity(32 + Self::MAX_CHUNK * 3);
-        let chunks: Vec<&[u8]> = bytes.chunks(Self::MAX_CHUNK).collect();
-        for batch in chunks.chunks(Self::PIPELINE_BATCH) {
-            for chunk in batch {
-                line.clear();
-                if chunk.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
-                    // Printable ASCII has the same pane bytes under -l and
-                    // -H. Keep it in one argument to avoid parsing hundreds
-                    // of separate hex arguments. This is tmux syntax, not
-                    // shell syntax: even a leading tilde in double quotes
-                    // expands unless escaped. Quoting does not stop option
-                    // parsing, so -- also protects chunks beginning with -
-                    // from being consumed as flags or overriding the target.
-                    // Payload never enters a process's argv.
-                    write!(line, "send-keys -t {} -l -- \"", self.target)
-                        .expect("String write is infallible");
-                    for &byte in *chunk {
-                        if matches!(byte, b'\\' | b'"' | b'$' | b'~') {
-                            line.push('\\');
-                        }
-                        line.push(char::from(byte));
-                    }
-                    line.push('"');
-                } else {
-                    write!(line, "send-keys -t {} -H", self.target)
-                        .expect("String write is infallible");
-                    for byte in *chunk {
-                        write!(line, " {byte:02x}").expect("String write is infallible");
-                    }
-                }
-                line.push('\n');
-                tokio::time::timeout(self.exchange_timeout, self.stdin.write_all(line.as_bytes()))
-                    .await
-                    .context("timed out writing tmux send-keys command")?
-                    .context("writing tmux send-keys command")?;
-            }
-            tokio::time::timeout(self.exchange_timeout, self.stdin.flush())
-                .await
-                .context("timed out flushing tmux send-keys commands")?
-                .context("flushing tmux send-keys commands")?;
-            for _ in 0..batch.len() {
-                // One deadline per reply, not one for the whole batch: a
-                // wedged tmux on one reply must not inherit the unspent
-                // budget of every reply before it.
-                let deadline = tokio::time::Instant::now() + self.exchange_timeout;
-                read_command_block(
-                    &mut self.reader,
-                    &mut self.line,
-                    deadline,
-                    "send-keys input",
-                    &self.pane,
-                )
-                .await?;
-                // Marked per CONFIRMED chunk, not once at the end: a send
-                // that fails on a later chunk has still delivered this
-                // one, and the correlator cares about the earliest byte
-                // that landed rather than about the call succeeding.
-                self.delivered_any_bytes = true;
-            }
-        }
-        Ok(())
+        let deadline = tokio::time::Instant::now() + self.exchange_timeout;
+        send_input(
+            bytes,
+            SendInputContext {
+                stdin: &mut self.stdin,
+                reader: &mut self.reader,
+                line: &mut self.line,
+                target: &self.target,
+                pane: &self.pane,
+                deadline,
+                delivered_any_bytes: &mut self.delivered_any_bytes,
+            },
+        )
+        .await
     }
+}
 
+/// Send one frame through a dedicated control client under one absolute
+/// deadline. The generic I/O parameters keep the timing contract testable
+/// with a scripted duplex stream without changing the production client's
+/// process ownership.
+struct SendInputContext<'a, S, R> {
+    stdin: &'a mut S,
+    reader: &'a mut BufReader<R>,
+    line: &'a mut Vec<u8>,
+    target: &'a str,
+    pane: &'a str,
+    deadline: tokio::time::Instant,
+    delivered_any_bytes: &'a mut bool,
+}
+
+async fn send_input<S, R>(bytes: &[u8], context: SendInputContext<'_, S, R>) -> anyhow::Result<()>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let SendInputContext {
+        stdin,
+        reader,
+        line,
+        target,
+        pane,
+        deadline,
+        delivered_any_bytes,
+    } = context;
+    if bytes.is_empty() {
+        // Nothing reaches the pane, so nothing is delivered — see
+        // `delivered_any_bytes`, whose whole point is that an empty
+        // frame must not start conversation capture's clock.
+        return Ok(());
+    }
+    let mut command = String::with_capacity(32 + InputClient::MAX_CHUNK * 3);
+    let chunks: Vec<&[u8]> = bytes.chunks(InputClient::MAX_CHUNK).collect();
+    for (batch_index, batch) in chunks.chunks(InputClient::PIPELINE_BATCH).enumerate() {
+        let batch_start = batch_index * InputClient::PIPELINE_BATCH;
+        for (chunk_offset, chunk) in batch.iter().enumerate() {
+            let chunk_index = batch_start + chunk_offset;
+            command.clear();
+            if chunk.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
+                // Printable ASCII has the same pane bytes under -l and
+                // -H. Keep it in one argument to avoid parsing hundreds
+                // of separate hex arguments. This is tmux syntax, not
+                // shell syntax: even a leading tilde in double quotes
+                // expands unless escaped. Quoting does not stop option
+                // parsing, so -- also protects chunks beginning with -
+                // from being consumed as flags or overriding the target.
+                // Payload never enters a process's argv.
+                write!(command, "send-keys -t {} -l -- \"", target)
+                    .expect("String write is infallible");
+                for &byte in *chunk {
+                    if matches!(byte, b'\\' | b'"' | b'$' | b'~') {
+                        command.push('\\');
+                    }
+                    command.push(char::from(byte));
+                }
+                command.push('"');
+            } else {
+                write!(command, "send-keys -t {} -H", target).expect("String write is infallible");
+                for byte in *chunk {
+                    write!(command, " {byte:02x}").expect("String write is infallible");
+                }
+            }
+            command.push('\n');
+            tokio::time::timeout_at(deadline, stdin.write_all(command.as_bytes()))
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "input send exceeded its whole-call budget at chunk {chunk_index}"
+                    )
+                })?
+                .context("writing tmux send-keys command")?;
+        }
+        tokio::time::timeout_at(deadline, stdin.flush())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("input send exceeded its whole-call budget at chunk {batch_start}")
+            })?
+            .context("flushing tmux send-keys commands")?;
+        for (reply_offset, _) in batch.iter().enumerate() {
+            // A wedged tmux on one reply no longer gets a fresh budget.
+            // Sharing the deadline means the whole call, and therefore
+            // the attachments lock held by its caller, cannot outlive
+            // one exchange timeout.
+            if let Err(error) =
+                read_command_block(reader, line, deadline, "send-keys input", pane).await
+            {
+                if error
+                    .downcast_ref::<tokio::time::error::Elapsed>()
+                    .is_some()
+                {
+                    anyhow::bail!(
+                        "input send exceeded its whole-call budget at chunk {}",
+                        batch_start + reply_offset
+                    );
+                }
+                return Err(error);
+            }
+            // Marked per CONFIRMED chunk, not once at the end: a send
+            // that fails on a later chunk has still delivered this
+            // one, and the correlator cares about the earliest byte
+            // that landed rather than about the call succeeding.
+            *delivered_any_bytes = true;
+        }
+    }
+    Ok(())
+}
+
+impl InputClient {
     /// Whether this attachment has ever had input confirmed into its pane.
     /// See [`InputClient::delivered_any_bytes`] for why conversation
     /// capture keys on this rather than on a successful `send`.
     pub fn delivered_any_bytes(&self) -> bool {
         self.delivered_any_bytes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InputClient, SendInputContext, send_input};
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex, split};
+
+    /// Answer each scripted command after a fixed virtual delay, modelling a
+    /// tmux server that is slow but still answers every exchange.
+    async fn scripted_tmux(
+        mut reader: BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        mut writer: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+        reply_delay: Duration,
+    ) {
+        let mut command = Vec::new();
+        for id in 0..4 {
+            command.clear();
+            if reader.read_until(b'\n', &mut command).await.is_err() {
+                return;
+            }
+            if !reply_delay.is_zero() {
+                // sleep-ok: this is the scripted tmux response latency under the paused clock.
+                tokio::time::sleep(reply_delay).await;
+            }
+            let reply = format!("%begin {id} 0 1\n%end {id} 0 1\n");
+            if writer.write_all(reply.as_bytes()).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// A multi-chunk frame still succeeds when every scripted reply is
+    /// immediate; the shared deadline must not change the normal batched
+    /// confirmation path.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn send_confirms_a_fast_multi_chunk_frame() {
+        let (client, server) = duplex(8192);
+        let (client_reader, mut client_writer) = split(client);
+        let (server_reader, server_writer) = split(server);
+        let responder = tokio::spawn(scripted_tmux(
+            BufReader::new(server_reader),
+            server_writer,
+            Duration::ZERO,
+        ));
+        let mut reader = BufReader::new(client_reader);
+        let mut line = Vec::new();
+        let mut delivered = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        send_input(
+            &vec![b'x'; InputClient::MAX_CHUNK * 4],
+            SendInputContext {
+                stdin: &mut client_writer,
+                reader: &mut reader,
+                line: &mut line,
+                target: "\"session:.0\"",
+                pane: "%0",
+                deadline,
+                delivered_any_bytes: &mut delivered,
+            },
+        )
+        .await
+        .expect("fast scripted replies should confirm every chunk");
+        assert!(delivered);
+        responder.await.expect("scripted tmux task must not panic");
+    }
+
+    /// Four replies that each arrive just before a one-second exchange
+    /// timeout must not buy four seconds of attachment-lock ownership. The
+    /// error identifies exhaustion of the frame budget rather than a tmux
+    /// command failure.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn send_bounds_slow_multi_chunk_frame_to_one_budget() {
+        let (client, server) = duplex(8192);
+        let (client_reader, mut client_writer) = split(client);
+        let (server_reader, server_writer) = split(server);
+        let responder = tokio::spawn(scripted_tmux(
+            BufReader::new(server_reader),
+            server_writer,
+            Duration::from_millis(900),
+        ));
+        let sender = tokio::spawn(async move {
+            let mut reader = BufReader::new(client_reader);
+            let mut line = Vec::new();
+            let mut delivered = false;
+            let start = tokio::time::Instant::now();
+            let result = send_input(
+                &vec![b'x'; InputClient::MAX_CHUNK * 4],
+                SendInputContext {
+                    stdin: &mut client_writer,
+                    reader: &mut reader,
+                    line: &mut line,
+                    target: "\"session:.0\"",
+                    pane: "%0",
+                    deadline: start + Duration::from_secs(1),
+                    delivered_any_bytes: &mut delivered,
+                },
+            )
+            .await;
+            (start, result, delivered)
+        });
+
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::advance(Duration::from_millis(900)).await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+
+        let (start, result, delivered) = sender.await.expect("send task must not panic");
+        let error = result.expect_err("the whole-call budget must expire");
+        assert!(
+            error
+                .to_string()
+                .contains("input send exceeded its whole-call budget"),
+            "unexpected timeout error: {error:#}"
+        );
+        assert!(error.to_string().contains("chunk 1"));
+        assert!(delivered);
+        assert_eq!(
+            tokio::time::Instant::now().duration_since(start),
+            Duration::from_secs(1)
+        );
+        responder.abort();
     }
 }
