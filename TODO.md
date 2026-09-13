@@ -291,6 +291,16 @@ is a clean gate.
   run cannot establish that these latent failures are fixed; retain the release exclusion until the evidence supports
   reversing it.
 
+- Deflake `profile CRUD round-trips from the app-bar popup to the helm` in `e2e/tests/profiles.spec.ts` (profile CRUD
+  edit timeout). The deflake sweep's browser battery failed it once on Chromium: the 60 s test timeout fired in the
+  `openProfileEditor` helper while clicking `.profile-edit` inside the freshly created profile row — the edit control
+  never became actionable. All three classification reruns passed. Sweep failure run
+  `fc4285c8-b667-4f2d-86c1-97dfe260aded`; reruns `b04195c1-6ad7-4c2d-a779-924ba0342b8a`,
+  `cebdd484-c94a-4df4-8b0b-61175ba99b00`, `36a54b08-c525-4bdb-9570-d9517a0d8630`. No hypothesis yet; the retained trace
+  and failure screenshot carry the row's actual state. On recurrence open the trace before changing the helper's wait or
+  the popup's render path — this spec already holds several focus and popup races, and this one is not yet attributed to
+  any of them.
+
 ### Systematic deflake
 
 Deferred work, with its original triggers:

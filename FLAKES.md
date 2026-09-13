@@ -873,3 +873,21 @@ helm unit test), `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed. Disposition: fixe
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-09-13 — `profile CRUD round-trips from the app-bar popup to the helm` (e2e/tests/profiles.spec.ts)
+
+The deflake sweep's browser battery failed this profiles test once on Chromium (`chromium-profiles` project): the 60 s
+test timeout fired in the `openProfileEditor` helper (profiles.spec.ts:214), whose click on `.profile-edit` inside the
+freshly created profile row never became actionable. All three classification reruns passed. Sweep failure retained run
+`fc4285c8-b667-4f2d-86c1-97dfe260aded` (failure screenshot and trace.zip retained under `playwright-artifacts`); reruns
+`b04195c1-6ad7-4c2d-a779-924ba0342b8a`, `cebdd484-c94a-4df4-8b0b-61175ba99b00`, `36a54b08-c525-4bdb-9570-d9517a0d8630`.
+Tested commit `b475c5c6` with a clean tree. Selection `browser suite, both
+engines`; concurrency
+`one browser worker; retries 0`. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, only
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` present in the test process. No attributed cause; the
+trace was not opened for this record. Disposition: open (TODO.md).
+
+Class: unknown
+
+Cause: unknown
