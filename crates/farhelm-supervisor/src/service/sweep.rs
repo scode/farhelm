@@ -623,6 +623,43 @@ fn signal_all(pids: &HashMap<u32, u64>, signal: i32) -> Vec<String> {
     errors
 }
 
+/// Restores processes that were quiesced if cancellation interrupts the
+/// narrow interval between SIGSTOP and SIGKILL. SIGKILL itself does not need
+/// SIGCONT first, so the normal path disarms this guard immediately after
+/// issuing the kill and keeps the established escalation sequence unchanged.
+struct StoppedProcessGuard {
+    identities: HashMap<u32, u64>,
+    armed: bool,
+}
+
+impl StoppedProcessGuard {
+    /// Start an armed cleanup scope with no identities recorded yet.
+    fn new() -> Self {
+        Self {
+            identities: HashMap::new(),
+            armed: true,
+        }
+    }
+
+    /// Add identities targeted by a SIGSTOP round to the cleanup set.
+    fn record(&mut self, identities: &HashMap<u32, u64>) {
+        self.identities.extend(identities);
+    }
+
+    /// Make the guard inert once SIGKILL has been issued to every identity.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for StoppedProcessGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = signal_all(&self.identities, libc::SIGCONT);
+        }
+    }
+}
+
 /// Enumerate one round for [`kill_process_tree`], folding `fallback` (the
 /// previous round's result) in as this round's seeds — see
 /// [`enumerate_tree`]'s docs for what that buys. `root_pid` should be
@@ -923,6 +960,8 @@ async fn kill_process_tree(
 
     found = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
     errors.extend(signal_all(&found.identities, libc::SIGSTOP));
+    let mut stopped = StoppedProcessGuard::new();
+    stopped.record(&found.identities);
 
     let mut converged = false;
     let mut quiesce_growth = Vec::new();
@@ -940,6 +979,7 @@ async fn kill_process_tree(
             converged = true;
             break;
         }
+        stopped.record(&newly_found);
         errors.extend(signal_all(&newly_found, libc::SIGSTOP));
     }
     if !converged {
@@ -950,6 +990,7 @@ async fn kill_process_tree(
     }
 
     errors.extend(signal_all(&found.identities, libc::SIGKILL));
+    stopped.disarm();
     errors.extend(confirm_gone(&found.identities, KILL_CONFIRM_TIMEOUT).await);
 
     if errors.is_empty() {
@@ -1902,6 +1943,78 @@ mod tests {
             Ok(Some((_, _, state))) => state == ProcessState::Zombie,
             Err(_) => false,
         }
+    }
+
+    /// A cancellation between quiescence and SIGKILL must resume the owned
+    /// process, because a dropped sweep cannot leave an otherwise live agent
+    /// permanently stopped. The fixture is marked and spawned by this test,
+    /// so the identity passed to the guard cannot name an unrelated process.
+    #[farhelm_testtrace::test]
+    async fn stopped_process_guard_resumes_a_stopped_owned_process() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = spawn_marked_process(&session_id);
+        let pid = child.id();
+        let (_, starttime, _) = procs::read_process(pid)
+            .expect("the owned fixture must be readable")
+            .expect("the owned fixture must be alive after spawn");
+
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        assert_eq!(result, 0, "SIGSTOP must reach the owned fixture");
+        let stopped_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let mut status = 0;
+            let waited = unsafe {
+                libc::waitpid(
+                    pid as libc::pid_t,
+                    &mut status,
+                    libc::WNOHANG | libc::WUNTRACED,
+                )
+            };
+            if waited == pid as libc::pid_t && libc::WIFSTOPPED(status) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < stopped_deadline,
+                "owned fixture never reached the stopped state"
+            );
+            // sleep-ok: poll the kernel's observable process state after SIGSTOP.
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let mut guard = StoppedProcessGuard::new();
+        guard.record(&HashMap::from([(pid, starttime)]));
+        drop(guard);
+
+        // Request a second stop. A stopped child does not produce a new
+        // WUNTRACED event for a repeated SIGSTOP, whereas a child resumed by
+        // the guard does; this makes the post-drop assertion independent of
+        // the abstract ProcessState classification used by the sweep.
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        assert_eq!(result, 0, "SIGSTOP must reach the owned fixture again");
+        let running_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let mut status = 0;
+            let waited = unsafe {
+                libc::waitpid(
+                    pid as libc::pid_t,
+                    &mut status,
+                    libc::WNOHANG | libc::WUNTRACED,
+                )
+            };
+            if waited == pid as libc::pid_t && libc::WIFSTOPPED(status) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < running_deadline,
+                "the resumed fixture did not accept a second stop"
+            );
+            // sleep-ok: poll for the second SIGSTOP's waitpid event.
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        assert_eq!(result, 0, "SIGKILL must reach the owned fixture");
+        child.wait().expect("the owned fixture must be reaped");
     }
 
     /// The ORDER of stop's two mechanisms, which nothing about the end
