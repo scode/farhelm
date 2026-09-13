@@ -464,7 +464,7 @@ pub(crate) fn ListView(
     let base = use_context::<ApiBase>().0;
     // The helm's shared preference, already read by `PreferencesGate` —
     // this component never mounts before it has (see `SharedPreferences`).
-    let preferences = use_context::<SharedPreferences>();
+    let mut preferences = use_context::<SharedPreferences>();
     let mut row_ops = row_ops;
     let mut listing = use_signal(|| None::<Result<SessionListing, String>>);
     // The same generation discipline the hosts read has, for the same
@@ -2307,6 +2307,31 @@ pub(crate) fn ListView(
                     on_created: move |session: Session| {
                         // Creation is a user-initiated selection too.
                         remember_selection(&created_base, preferences, &session.id);
+                        // Mirror THIS client's own successful structured
+                        // launch into its held copy of the preferences
+                        // (SPEC.md's launch-composer carve-out), so the next
+                        // "New" open in this client is right without
+                        // waiting on a refetch — the durable copy is
+                        // already written by the helm itself as part of
+                        // this same create, so there is deliberately no
+                        // PUT here, only a local mirror (compare
+                        // `remember_selection`/`remember_compact`, which DO
+                        // write through). A legacy/profile launch carries no
+                        // `launch` at all and must leave this field alone,
+                        // matching the helm's own write condition. Not
+                        // exactly, though: the helm also declines to write
+                        // when the create's history admission is refused (a
+                        // host with no install identity, an out-of-order
+                        // replay), cases this client cannot see. Until the
+                        // next reload this client then preselects a value
+                        // the helm never stored — the rarer, reversible
+                        // direction, and accepted rather than plumbed back.
+                        if let Some(launch) = &session.launch {
+                            let word = launch
+                                .permissions
+                                .map(|crate::LaunchPermission::Yolo| "yolo".to_string());
+                            preferences.0.write().remembered_permissions = word;
+                        }
                         show_create.set(false);
                         // This component stays mounted after creation, so
                         // clear the draft's host and clone seed just as the

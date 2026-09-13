@@ -359,7 +359,8 @@ impl ListSort {
 
 /// The one client preference the helm remembers for every client at once
 /// (SPEC.md, Session list): the chosen list order, user-selected session,
-/// and compact-row choice. The reply shape of `GET /api/preferences`.
+/// compact-row choice, and the permissions mode the last successful
+/// STRUCTURED launch used. The reply shape of `GET /api/preferences`.
 ///
 /// `None` means "never chosen, use the default". Writes use
 /// [`PreferenceValue`] to send only the field the user changed, so another
@@ -367,6 +368,14 @@ impl ListSort {
 /// word rather than a decoded [`ListSort`] so an unrecognized value can be
 /// carried through to `list::view::decoded_sort`'s fallback instead of
 /// failing the decode of the whole reply.
+///
+/// `remembered_permissions` is never one of this client's OWN writes — no
+/// [`PreferenceValue`] variant exists for it. The helm sets it as a side
+/// effect of a successful structured launch (any client's, or another
+/// client's), and this client only ever mirrors its own launch's result
+/// into this field directly (`list::view`'s `on_created` handler), the same
+/// "update the local copy without a PUT" shortcut a server-observed fact
+/// gets everywhere else in this codebase.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, Deserialize)]
 pub(crate) struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -375,6 +384,8 @@ pub(crate) struct Preferences {
     pub(crate) last_selected: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) compact: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) remembered_permissions: Option<String>,
 }
 
 /// How long the seed read of the shared preference may take before the

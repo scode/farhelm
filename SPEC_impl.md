@@ -50,25 +50,28 @@ no semantic selectors. Among DOM-based Rust options, Dioxus is the most active a
 Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus-fullstack keeps the API a first-class
 tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
 
-The session list's chosen ORDER, last-selected session, and compact-row choice are one preference the HELM keeps, in a
-singleton row of `helm.db` (`preferences`: `list_sort`, `last_selected`, `compact`) behind `GET`/`PUT /api/preferences`,
-device-authenticated like every other route. Both clients read it once after authentication — `PreferencesGate` holds
-the authenticated tree, rendering nothing, until the read lands, so the sort control and the auto-select effect see the
-remembered values on their first run and no frame shows a default that is then corrected. On desktop the IPC
-authentication gate already holds the tree and the read is one loopback hop, so nothing is visible; in the browser the
-first paint deliberately waits on that one round trip to the helm — a page with a valid credential used to paint its
-sidebar synchronously from localStorage — so the list never appears in an order that then changes. A write is a sparse
-patch naming only the field the user changed, merged per-field by the helm (an absent field is untouched, an explicit
-`null` clears one), so two clients changing different fields at nearly the same time cannot clobber each other; the
-signal in the page is updated before the request leaves, which is what keeps the choice in force when the write fails.
-Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the helm in reverse
-order; the write queue is process state outside the remounted tree, and after credential recovery the gate overlays and
-replays any local choice whose write never got through, so reauthentication cannot roll the current client back to the
-helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing remembered",
-so a stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort travels as the bare
-word `?sort=` takes and is validated against that vocabulary at the write; the selection is a bare session id (the
-browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could outlive a
-state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or
+The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
+permissions mode are one preference the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`,
+`last_selected`, `compact`, `remembered_permissions`) behind `GET`/`PUT /api/preferences`, device-authenticated like
+every other route. `remembered_permissions` is the one field of the four no client ever PUTs: the helm writes it itself,
+as a side effect of a successful user-initiated STRUCTURED launch, so every client and the spawn path agree on what
+actually launched rather than trusting any one client's report. Both clients read it once after authentication —
+`PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort control and the
+auto-select effect see the remembered values on their first run and no frame shows a default that is then corrected. On
+desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so nothing is visible; in
+the browser the first paint deliberately waits on that one round trip to the helm — a page with a valid credential used
+to paint its sidebar synchronously from localStorage — so the list never appears in an order that then changes. A write
+is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent field is untouched, an
+explicit `null` clears one), so two clients changing different fields at nearly the same time cannot clobber each other;
+the signal in the page is updated before the request leaves, which is what keeps the choice in force when the write
+fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the helm in
+reverse order; the write queue is process state outside the remounted tree, and after credential recovery the gate
+overlays and replays any local choice whose write never got through, so reauthentication cannot roll the current client
+back to the helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing
+remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort
+travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is a bare
+session id (the browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could
+outlive a state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or
 unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the build that
 validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which now holds
 credentials only), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every
