@@ -937,7 +937,9 @@ mod tests {
 
     /// A peer that disappears without sending FIN must not occupy the only
     /// seat forever. The first interval gives it a Ping; the second interval
-    /// is the bounded observation window in which it must answer.
+    /// is the bounded observation window in which it must answer. Revision
+    /// bursts between the handshake and the Ping cost extra intervals, so
+    /// the bound below is on the silence, not the schedule.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn an_unanswered_keepalive_releases_the_subscriber_seat() {
         let mut harness = rest_harness::FleetBuilder::new()
@@ -945,40 +947,84 @@ mod tests {
             .event_subscriber_cap(1)
             .start()
             .await;
+
+        // Settle the local row's connect ladder before subscribing: every
+        // attempt transition publishes a revision, and the routine ones
+        // would otherwise land in the keepalive slot below. A restart later
+        // on still publishes — the loops below tolerate that — but the
+        // common path is then a quiet feed with exactly one bump in it.
+        let local = rest_harness::local_id(&harness.store).await;
+        harness
+            .await_state(local, |state| {
+                matches!(state, crate::manager::HostState::Unreachable { .. })
+            })
+            .await;
+
         let addr = harness.serve().await;
 
         let mut vanished = WsTestClient::connect(addr, "/api/events").await;
-        revision(&mut vanished).await;
+        let handshake = revision(&mut vanished).await;
 
-        tokio::time::advance(super::IDLE_PING_INTERVAL).await;
-        tokio::task::yield_now().await;
-        let (opcode, payload) = vanished
-            .recv()
-            .await
-            .expect("the idle subscriber must receive a keepalive Ping");
+        // Pin the interleaving the deflake sweep caught as a flake: a
+        // legitimate revision landing between the handshake and the
+        // keepalive. Nothing else can publish between the bump and this
+        // read — the actor is frozen without clock movement — so the exact
+        // successor proves the pin engaged rather than the Ping winning the
+        // socket order.
+        harness.manager.events().bump();
+        assert_eq!(
+            revision(&mut vanished).await,
+            handshake + 1,
+            "the pinned revision must arrive before the keepalive"
+        );
+
+        // Revisions reset the idle window, so each one consumed costs an
+        // interval; a ladder restart mid-test publishes a few more. The cap
+        // bounds that burst — past it the test fails loud instead of
+        // spinning, and well past anything the quiesce above leaves behind.
+        let (opcode, payload) = 'keepalive: {
+            for _ in 0..10 {
+                tokio::time::advance(super::IDLE_PING_INTERVAL).await;
+                tokio::task::yield_now().await;
+                let frame = vanished
+                    .recv()
+                    .await
+                    .expect("the idle subscriber must receive a keepalive Ping");
+                if frame.0 != 1 {
+                    break 'keepalive frame;
+                }
+            }
+            panic!("ten intervals passed without a keepalive Ping");
+        };
         assert_eq!(opcode, 9, "the keepalive must be a WebSocket Ping");
         assert!(
             payload.is_empty(),
             "the keepalive Ping has no application payload"
         );
 
-        tokio::time::advance(super::IDLE_PING_INTERVAL).await;
-        tokio::task::yield_now().await;
-        let admitted = tokio::time::timeout(NOTICE, async {
-            loop {
-                if let Ok(mut ws) = WsTestClient::try_connect(addr, "/api/events").await {
-                    revision(&mut ws).await;
-                    return;
-                }
-                // sleep-ok: retry admission until the timed-out subscriber task drops its seat.
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
-        .await;
+        // The seat is still held. Read through the same counter the endpoint
+        // gates on rather than another socket: a round trip here would race
+        // loopback IO against the paused clock.
         assert!(
-            admitted.is_ok(),
-            "a subscriber that ignored its Ping must release its seat after the second interval"
+            harness.manager.events().admit(1).is_none(),
+            "one unanswered Ping must not release the seat yet"
         );
+
+        // A revision that landed after the Ping pushed its release an
+        // interval out; keep advancing until the seat frees rather than
+        // assuming the next interval is the one. Same cap discipline: a
+        // bounded silence is the property, and past the cap something is
+        // genuinely stuck.
+        for _ in 0..5 {
+            tokio::time::advance(super::IDLE_PING_INTERVAL).await;
+            tokio::task::yield_now().await;
+            let released = harness.manager.events().admit(1);
+            if released.is_some() {
+                drop(released);
+                return;
+            }
+        }
+        panic!("five silent intervals passed without releasing the seat");
     }
 
     /// A live peer that answers each keepalive remains admitted across idle
@@ -995,9 +1041,9 @@ mod tests {
         revision(&mut ws).await;
 
         for _ in 0..3 {
-            // The harness may finish its startup refresh after the
-            // handshake, so consume that legitimate revision before looking
-            // for the keepalive whose interval it resets.
+            // The local row's connect ladder may still be walking after the
+            // handshake, so consume those legitimate revisions before looking
+            // for the keepalive whose interval each resets.
             let (opcode, payload) = loop {
                 tokio::time::advance(super::IDLE_PING_INTERVAL).await;
                 tokio::task::yield_now().await;
