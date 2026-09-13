@@ -23,6 +23,20 @@ const SOCKET_NAME: &str = "helm-token.sock";
 const LOCK_NAME: &str = "helm-token.lock";
 const MAX_REPLY_BYTES: u64 = 128;
 const CONTROL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+/// The first pause after an accept failure that may be caused by descriptor
+/// pressure; without it, readiness stays set while every retry fails again.
+const ACCEPT_ERROR_INITIAL_BACKOFF: std::time::Duration = std::time::Duration::from_millis(50);
+/// Keep persistent listener failures from turning a recoverable condition into
+/// a multi-second outage while still preventing a readiness-driven retry loop.
+const ACCEPT_ERROR_MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The accept loop's policy: peer races retry immediately, while listener
+/// failures that leave readiness asserted retry after a bounded pause.
+#[derive(Debug, PartialEq, Eq)]
+enum AcceptErrorDisposition {
+    ImmediateRetry,
+    DelayedRetry(std::time::Duration),
+}
 
 /// Signals that a serving helm has claimed the state directory but its socket
 /// may still be in the short startup window before bind completes.
@@ -86,18 +100,22 @@ pub(crate) async fn serve(state_dir: &Path, auth: AuthState) -> anyhow::Result<C
         .with_context(|| format!("inspecting bound token-control socket {}", path.display()))?;
     let socket_identity = (metadata.dev(), metadata.ino());
     let task = tokio::spawn(async move {
+        let mut accept_backoff = ACCEPT_ERROR_INITIAL_BACKOFF;
         loop {
             let stream = match listener.accept().await {
-                Ok((stream, _)) => stream,
-                Err(error) if transient_accept_error(&error) => {
-                    tracing::warn!(error = %error, "transient token-control accept failed");
-                    continue;
+                Ok((stream, _)) => {
+                    accept_backoff = ACCEPT_ERROR_INITIAL_BACKOFF;
+                    stream
                 }
-                Err(error) => {
-                    return Err(
-                        anyhow::Error::new(error).context("accepting a token-control connection")
-                    );
-                }
+                Err(error) => match accept_error_disposition(&error, accept_backoff) {
+                    AcceptErrorDisposition::ImmediateRetry => continue,
+                    AcceptErrorDisposition::DelayedRetry(delay) => {
+                        tracing::warn!(error = %error, ?delay, "token-control accept failed; retrying");
+                        tokio::time::sleep(delay).await;
+                        accept_backoff = next_accept_backoff(accept_backoff);
+                        continue;
+                    }
+                },
             };
             let auth = auth.clone();
             tokio::spawn(async move {
@@ -333,8 +351,11 @@ async fn acquire_ownership(state_dir: PathBuf) -> anyhow::Result<OwnershipLock> 
     .context("token-control lock task panicked")?
 }
 
-/// Accept failures caused by one aborted peer do not invalidate the listener;
-/// every other error means the serving helm must stop with token control.
+/// Classify failures that can be retried without pausing the listener.
+///
+/// The flock, not this accept loop, protects the control socket's ownership.
+/// A persistent accept failure therefore gets logged and retried with a
+/// bounded pause instead of ending the serving helm.
 fn transient_accept_error(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -343,6 +364,24 @@ fn transient_accept_error(error: &std::io::Error) -> bool {
             | std::io::ErrorKind::ConnectionAborted
             | std::io::ErrorKind::ConnectionReset
     )
+}
+
+/// Choose the immediate-or-delayed retry behavior for one accept failure.
+fn accept_error_disposition(
+    error: &std::io::Error,
+    current_backoff: std::time::Duration,
+) -> AcceptErrorDisposition {
+    if transient_accept_error(error) {
+        AcceptErrorDisposition::ImmediateRetry
+    } else {
+        AcceptErrorDisposition::DelayedRetry(current_backoff.min(ACCEPT_ERROR_MAX_BACKOFF))
+    }
+}
+
+/// Double the retry interval while keeping a persistent listener failure
+/// responsive enough for recovery once descriptors become available.
+fn next_accept_backoff(current_backoff: std::time::Duration) -> std::time::Duration {
+    (current_backoff * 2).min(ACCEPT_ERROR_MAX_BACKOFF)
 }
 
 /// Remove only an abandoned Unix socket while the caller holds ownership.
@@ -382,6 +421,40 @@ fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Descriptor exhaustion must keep token control alive, but the four
+    /// peer-race errors still need their immediate retry behavior.
+    #[test]
+    fn accept_errors_retry_immediately_or_with_capped_backoff() {
+        for kind in [
+            std::io::ErrorKind::Interrupted,
+            std::io::ErrorKind::WouldBlock,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::ConnectionReset,
+        ] {
+            let error = std::io::Error::from(kind);
+            assert!(transient_accept_error(&error));
+            assert_eq!(
+                accept_error_disposition(&error, ACCEPT_ERROR_INITIAL_BACKOFF),
+                AcceptErrorDisposition::ImmediateRetry
+            );
+        }
+
+        let exhaustion = std::io::Error::from_raw_os_error(libc::EMFILE);
+        assert!(!transient_accept_error(&exhaustion));
+        assert_eq!(
+            accept_error_disposition(&exhaustion, ACCEPT_ERROR_INITIAL_BACKOFF),
+            AcceptErrorDisposition::DelayedRetry(std::time::Duration::from_millis(50))
+        );
+        assert_eq!(
+            next_accept_backoff(std::time::Duration::from_millis(500)),
+            ACCEPT_ERROR_MAX_BACKOFF
+        );
+        assert_eq!(
+            next_accept_backoff(ACCEPT_ERROR_MAX_BACKOFF),
+            ACCEPT_ERROR_MAX_BACKOFF
+        );
+    }
 
     /// The CLI-to-helm path must do all three parts of live rotation: commit a
     /// different token, delete device rows, and notify already-admitted

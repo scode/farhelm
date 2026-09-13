@@ -98,6 +98,46 @@ const DIRECTORY_BROWSE_FIELD_BYTES: usize = 4_096;
 /// text — because quoted and backslash-heavy legal names expand on the wire.
 const DIRECTORY_BROWSE_RESPONSE_BYTES: usize = 64 * 1024;
 
+/// The initial pause after an accept failure that is not safe to retry in a
+/// tight loop. Descriptor exhaustion leaves the listener readable, so the
+/// same failure can otherwise monopolize this task and flood its logs.
+const ACCEPT_ERROR_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
+/// Keep persistent listener failures from turning a recoverable condition into
+/// a multi-second outage while still preventing a readiness-driven retry loop.
+const ACCEPT_ERROR_MAX_BACKOFF: Duration = Duration::from_secs(1);
+
+/// The accept loop's policy: peer races retry immediately, while listener
+/// failures that leave readiness asserted retry after a bounded pause.
+#[derive(Debug, PartialEq, Eq)]
+enum AcceptErrorDisposition {
+    ImmediateRetry,
+    DelayedRetry(Duration),
+}
+
+/// Classify an accept failure and choose the pause for a repeated failure.
+fn accept_error_disposition(
+    error: &std::io::Error,
+    current_backoff: Duration,
+) -> AcceptErrorDisposition {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+    ) {
+        AcceptErrorDisposition::ImmediateRetry
+    } else {
+        AcceptErrorDisposition::DelayedRetry(current_backoff.min(ACCEPT_ERROR_MAX_BACKOFF))
+    }
+}
+
+/// Advance the delayed retry interval without allowing descriptor pressure to
+/// turn into a multi-second interruption of ordinary supervisor service.
+fn next_accept_backoff(current_backoff: Duration) -> Duration {
+    (current_backoff * 2).min(ACCEPT_ERROR_MAX_BACKOFF)
+}
+
 /// The longest a single attachment may stay paused before the supervisor
 /// detaches it with [`farhelm_proto::DETACH_REASON_STALLED`].
 ///
@@ -5131,6 +5171,7 @@ impl Supervisor {
         // the accept loop below never returns, so the ticker's lifetime is
         // this call's.
         let mut ticker = start_ticker(self);
+        let mut accept_backoff = ACCEPT_ERROR_INITIAL_BACKOFF;
         info!(socket = %path.display(), "supervisor listening");
         loop {
             let accepted = tokio::select! {
@@ -5153,6 +5194,7 @@ impl Supervisor {
             };
             match accepted {
                 Ok((stream, _)) => {
+                    accept_backoff = ACCEPT_ERROR_INITIAL_BACKOFF;
                     let sup = Arc::clone(self);
                     tokio::spawn(async move {
                         if let Err(e) = handle_connection(sup, stream).await {
@@ -5160,10 +5202,14 @@ impl Supervisor {
                         }
                     });
                 }
-                // A transient accept failure (EMFILE under fd pressure,
-                // say) must not kill the process whose entire purpose is
-                // outliving everything else.
-                Err(e) => warn!(error = %e, "accept failed; continuing"),
+                Err(error) => match accept_error_disposition(&error, accept_backoff) {
+                    AcceptErrorDisposition::ImmediateRetry => {}
+                    AcceptErrorDisposition::DelayedRetry(delay) => {
+                        warn!(error = %error, ?delay, "accept failed; retrying");
+                        tokio::time::sleep(delay).await;
+                        accept_backoff = next_accept_backoff(accept_backoff);
+                    }
+                },
             }
         }
     }
@@ -10035,6 +10081,38 @@ pub(crate) mod tests {
     /// [`UploadRoute`]).
     pub(crate) fn no_uploads() -> HashMap<u32, UploadRoute> {
         HashMap::new()
+    }
+
+    /// The accept loop must distinguish retryable peer races from failures
+    /// that can persist while the kernel keeps readiness asserted, including
+    /// the raw descriptor-exhaustion error used by the operating system.
+    #[test]
+    fn accept_errors_retry_immediately_or_with_capped_backoff() {
+        for kind in [
+            std::io::ErrorKind::Interrupted,
+            std::io::ErrorKind::WouldBlock,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::ConnectionReset,
+        ] {
+            assert_eq!(
+                accept_error_disposition(&std::io::Error::from(kind), Duration::from_millis(50)),
+                AcceptErrorDisposition::ImmediateRetry
+            );
+        }
+
+        let exhaustion = std::io::Error::from_raw_os_error(libc::EMFILE);
+        assert_eq!(
+            accept_error_disposition(&exhaustion, ACCEPT_ERROR_INITIAL_BACKOFF),
+            AcceptErrorDisposition::DelayedRetry(Duration::from_millis(50))
+        );
+        assert_eq!(
+            next_accept_backoff(Duration::from_millis(500)),
+            ACCEPT_ERROR_MAX_BACKOFF
+        );
+        assert_eq!(
+            next_accept_backoff(ACCEPT_ERROR_MAX_BACKOFF),
+            ACCEPT_ERROR_MAX_BACKOFF
+        );
     }
 
     /// The `~` expansion contract, form by form (BUGS_BURNDOWN.md issue 1,

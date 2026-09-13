@@ -312,14 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Accept loops under descriptor pressure.** `A5-C6`, `A4-C9`. High and medium, small. The supervisor's accept loop
-  (service/core.rs:5154-5166) retries any accept error immediately with no backoff, so `EMFILE` becomes a busy loop and
-  log flood on the task the ticker shares. The helm's token-control accept loop (token_control.rs:338-346) classifies
-  only four kinds as transient and otherwise returns `Err`, which reaches `token_control.failed()` in lib.rs:1646 and
-  exits the helm, while the axum listener in the same process rides the identical error out. Fix: in both, retry at once
-  on `ConnectionAborted`/`Interrupted`, otherwise sleep a capped backoff with a rate-limited warning; correct the
-  token-control docstring to credit the flock rather than process exit. Fence: exhaustion itself is unproven, and the
-  `EMFILE` to `Uncategorized` mapping is the reviewer's empirical claim.
 - **`remote_farhelm` panics and empty install directories.** `A2-C4`, `A2-C21`. High and medium, small.
   `PlanLayout::plan` (provisioning/plan.rs:283-289) does `file_name().expect(...)`, and `plan_for_row` feeds it the
   stored `remote_farhelm` verbatim; `add_ssh_host` (helm store.rs:3208-3239) validates only the ssh destination, so
