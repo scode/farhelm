@@ -1732,6 +1732,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | store::HostStoreError::LocalHostImmutable
             | store::HostStoreError::IdentityMismatch { .. }
             | store::HostStoreError::IdentityClaimed { .. }
+            | store::HostStoreError::IdentityClaimedBeforeRegistration { .. }
             | store::HostStoreError::StaleAttempt { .. }
             // Two hosts claiming one session id: well-formed request,
             // incoherent fleet. `Conflict` rather than `Internal` because
@@ -2303,6 +2304,21 @@ mod tests {
             kind: farhelm_proto::ErrorKind::Conflict,
             message: "intent key already used with a different request".to_string(),
         });
+        let response = super::http_error(err);
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    /// A discovery claim made before its destination is registered is still
+    /// a fleet conflict, so the HTTP layer must expose the same 409 response
+    /// as the existing-row identity-claim path.
+    #[farhelm_testtrace::test]
+    fn error_kind_maps_pre_registration_identity_claim_to_conflict() {
+        let err = anyhow::Error::new(
+            crate::store::HostStoreError::IdentityClaimedBeforeRegistration {
+                identity: "identity-owned".to_string(),
+                owner: 42,
+            },
+        );
         let response = super::http_error(err);
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     }
