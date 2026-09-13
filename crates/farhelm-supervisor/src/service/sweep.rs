@@ -1270,12 +1270,50 @@ const SCOPE_CONFIRM_POLL: Duration = Duration::from_millis(50);
 /// nothing about. The one exception is a unit the manager reports as
 /// ALREADY GONE, which is a definitive answer rather than a failure and
 /// ends the escalation with nothing to do.
+///
+/// # The unit's disappearance is the verdict; exit statuses are advisory
+///
+/// `systemctl kill`'s exit status is NOT trusted as the outcome of the
+/// kill. It is evidence, kept for the diagnostic when the teardown is
+/// genuinely unconfirmed, but a unit the manager has retired outranks
+/// it: a `--collect` scope is gone only once its cgroup is empty, so
+/// "the unit no longer exists" is the strongest proof available that
+/// every process it held is dead, whatever any earlier step reported.
+///
+/// The concrete reason this rule exists: on systemd 255 with cgroup v2,
+/// a SIGKILL delivered through `systemctl kill` to a scope holding a
+/// MULTITHREADED process kills everything and retires the unit, yet the
+/// command exits 1 with "Failed to send signal SIGKILL to auxiliary
+/// processes: Invalid argument" (systemd additionally walks the cgroup's
+/// thread list on SIGKILL, and opening a pid reference for a non-leader
+/// thread fails with EINVAL on kernels of that era; reproduced on
+/// 255.4 / Linux 6.8). Every node-based agent is multithreaded, and an
+/// agent that does not exit within [`KILL_GRACE`] reaches the SIGKILL,
+/// so on such hosts this was the COMMON path for a delete, not an edge
+/// case; treating that exit status as a failed teardown is what refused
+/// every Replace of a running claude session on 0.6.0-rc.4 (the
+/// `ScopeKillFailure::Refuse` policy PR #597 introduced for delete and
+/// archive, which is correct for a unit that SURVIVES and must stay).
+/// The error text is deliberately not matched anywhere; the shape of
+/// the decision — retired unit wins, surviving unit refuses — is what
+/// stays true across systemd versions.
+///
+/// "Retired means empty" is systemd's ordinary `--collect` behavior, not
+/// a law: an operator's `systemctl stop` running past its timeout, or a
+/// user manager restarted without its state, can drop a unit whose
+/// processes still run. That is no weaker than the pre-existing
+/// early return for a unit that is already gone before anything is
+/// signalled, and the process-tree sweep that always runs after this is
+/// the backstop for exactly such a survivor.
 async fn kill_scope(
     scopes: &crate::scope::ScopeManager,
     unit: &str,
     session_id: &str,
 ) -> anyhow::Result<()> {
-    let mut errors: Vec<String> = Vec::new();
+    // Two buckets on purpose. `advisory` holds what `systemctl` REPORTED
+    // (a failed existence check, a non-zero kill exit); the confirmation
+    // below decides whether those reports were about anything real.
+    let mut advisory: Vec<String> = Vec::new();
     match scopes.exists(unit).await {
         Ok(false) => {
             // Ordinary, not exceptional: `--collect` disposes of a scope
@@ -1292,14 +1330,14 @@ async fn kill_scope(
         // "Cannot tell" is not "gone": the escalation proceeds, because
         // refusing to signal a unit that may well be full of processes is
         // the strictly worse failure.
-        Err(e) => errors.push(format!("checking whether scope {unit} still exists: {e:#}")),
+        Err(e) => advisory.push(format!("checking whether scope {unit} still exists: {e:#}")),
     }
     info!(
         session = %session_id, unit,
         "killing the launch's cgroup scope before the backstop process-tree sweep"
     );
     if let Err(e) = scopes.kill(unit, "SIGTERM").await {
-        errors.push(format!("{e:#}"));
+        advisory.push(format!("{e:#}"));
     }
     tokio::time::sleep(KILL_GRACE).await;
     // Re-checked rather than killed unconditionally, unlike the sweep's own
@@ -1313,18 +1351,40 @@ async fn kill_scope(
     if scopes.exists(unit).await.unwrap_or(true)
         && let Err(e) = scopes.kill(unit, "SIGKILL").await
     {
-        errors.push(format!("{e:#}"));
+        advisory.push(format!("{e:#}"));
     }
-    if let Err(e) = confirm_scope_gone(scopes, unit).await {
-        errors.push(format!("{e:#}"));
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        anyhow::bail!(
-            "tearing down cgroup scope {unit} hit {}",
-            summarize_errors(&errors)
-        )
+    match confirm_scope_gone(scopes, unit).await {
+        Ok(()) => {
+            // The unit retired, so its cgroup emptied: whatever the
+            // signalling steps reported, the teardown happened. Logged
+            // rather than dropped, because on an affected systemd this
+            // fires on every SIGKILLed multithreaded agent, and the
+            // journal is where someone chasing "why does every delete
+            // warn" will look.
+            if !advisory.is_empty() {
+                warn!(
+                    session = %session_id, unit,
+                    error = %summarize_errors(&advisory),
+                    "the cgroup scope retired after its kill, so the teardown succeeded; the \
+                     manager's report(s) along the way — a failed existence check or a kill \
+                     exit status — are advisory, since neither is trusted over the unit's \
+                     disappearance"
+                );
+            }
+            Ok(())
+        }
+        Err(e) => {
+            // Unconfirmed: the unit is still loaded, or the manager
+            // stopped answering. Now every earlier report is evidence
+            // about a teardown that may not have happened, and all of it
+            // goes to the caller.
+            let mut errors = vec![format!("{e:#}")];
+            errors.extend(advisory);
+            anyhow::bail!(
+                "tearing down cgroup scope {unit} hit {}",
+                summarize_errors(&errors)
+            )
+        }
     }
 }
 
@@ -2279,11 +2339,114 @@ mod tests {
             error.contains("session is kept") && error.contains("retried"),
             "error must explain retryability: {error}"
         );
+        // The refusal is for a unit that SURVIVED its SIGKILL, and the
+        // error must say so — the confirmation timeout is the finding, with
+        // the kill's own failure report attached as evidence. A refusal
+        // carrying only the exit status would be the rc.4 defect (see
+        // `a_failed_kill_exit_status_is_forgiven_once_the_unit_is_confirmed_gone`)
+        // wearing a different message.
+        assert!(
+            error.contains("still loaded") && error.contains("after its SIGKILL"),
+            "the refusal must be grounded in the unit outliving its SIGKILL: {error}"
+        );
+        assert!(
+            error.contains("injected failure sending SIGKILL"),
+            "the kill's own failure report must accompany the refusal as evidence: {error}"
+        );
         assert!(
             marked_process_gone(refusal_decoy),
             "the refusal must happen only after the process-tree sweep confirms gone"
         );
         let _ = refusal_child.wait();
+    }
+
+    /// A kill whose `systemctl` exit status reports failure, but whose unit
+    /// then RETIRES, is a successful teardown under both policies — and
+    /// under REFUSE in particular, since that is the policy that turned this
+    /// shape into a user-visible refusal.
+    ///
+    /// The shape is real, not hypothetical: on systemd 255 with cgroup v2,
+    /// SIGKILL through `systemctl kill` on a scope holding a multithreaded
+    /// process (every node-based agent) kills everything and retires the
+    /// unit, yet exits 1 with "Failed to send signal SIGKILL to auxiliary
+    /// processes: Invalid argument". On 0.6.0-rc.4 that exit status alone
+    /// made every Replace, delete, and archive of a running claude session
+    /// refuse with "the named cgroup scope(s) could not be torn down ...
+    /// the session is kept", both sessions left in place. The e2e suite pins
+    /// the same contract against the real manager
+    /// (`a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the_cgroup`);
+    /// this is the fast, everywhere-runnable version with the fake.
+    ///
+    /// What is specified: the full escalation still runs (existence check,
+    /// TERM, re-check, KILL, confirmation — the failing reports must not
+    /// short-circuit it), the reap returns `Ok` under REFUSE and under WARN,
+    /// and the sweep still reaps the marked process either way. The
+    /// companion assertion in
+    /// `a_broken_user_manager_never_fails_a_stop_the_sweep_confirmed` pins
+    /// the other half: the same failing kills against a unit that never
+    /// retires still refuse, grounded in the unit outliving its SIGKILL.
+    #[farhelm_testtrace::test]
+    async fn a_failed_kill_exit_status_is_forgiven_once_the_unit_is_confirmed_gone() {
+        for policy in [ScopeKillFailure::Refuse, ScopeKillFailure::Warn] {
+            let session_id = uuid::Uuid::new_v4().to_string();
+            let mut child = spawn_marked_process(&session_id);
+            let decoy = child.id();
+
+            let observed: Arc<std::sync::Mutex<Vec<crate::scope::ScopeOp>>> =
+                Arc::new(std::sync::Mutex::new(Vec::new()));
+            let sink = {
+                let observed = Arc::clone(&observed);
+                Arc::new(move |op: &crate::scope::ScopeOp| {
+                    observed.lock().unwrap().push(op.clone());
+                }) as crate::scope::ScopeOpSink
+            };
+            // Loaded until the SIGKILL is sent and gone from then on — an
+            // agent that ignores SIGTERM — while every kill reports failure,
+            // which is the systemd 255 shape.
+            let scopes =
+                crate::scope::ScopeManager::fake_failing_kills_vanishing_after_sigkill(sink);
+            let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+
+            reap_process_tree(
+                &scopes,
+                ScopeUnits::recorded(Some(unit.clone())),
+                None,
+                &session_id,
+                &SweepTarget::AgentOnly,
+                policy,
+            )
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "a retired unit must make failed kill reports advisory under {policy:?}: {e:#}"
+                )
+            });
+
+            let observed = observed.lock().expect("op sink mutex poisoned");
+            assert_eq!(
+                *observed,
+                vec![
+                    crate::scope::ScopeOp::Probe,
+                    crate::scope::ScopeOp::Exists(unit.clone()),
+                    crate::scope::ScopeOp::Kill {
+                        unit: unit.clone(),
+                        signal: "SIGTERM".to_string(),
+                    },
+                    crate::scope::ScopeOp::Exists(unit.clone()),
+                    crate::scope::ScopeOp::Kill {
+                        unit: unit.clone(),
+                        signal: "SIGKILL".to_string(),
+                    },
+                    crate::scope::ScopeOp::Exists(unit.clone()),
+                ],
+                "failing kill reports must not short-circuit the escalation under {policy:?}"
+            );
+            assert!(
+                marked_process_gone(decoy),
+                "the backstop sweep must still have reaped the marked process under {policy:?}"
+            );
+            let _ = child.wait();
+        }
     }
 
     /// A host with NO user manager must not be asked about derived scope

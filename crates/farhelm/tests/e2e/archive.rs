@@ -507,3 +507,80 @@ async fn reopening_an_archived_row_ignores_a_same_named_tmux_husk() {
     drop(state);
     drop(_slot);
 }
+
+/// Archive's counterpart to `session_lifecycle`'s systemd-255 scope-kill
+/// coverage: see that file's
+/// `a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the_cgroup`
+/// for the quirk itself (`systemctl --user kill --signal=SIGKILL` against
+/// a scope holding a multithreaded process can exit 1 even though the
+/// kill worked). `reap_process_tree`'s `ScopeKillFailure::Refuse` applies
+/// that same all-or-nothing refusal to archive as it does to delete, so a
+/// scope-teardown error here keeps the row unarchived for a retry — even
+/// though, as in the delete case, the process-tree sweep run right
+/// afterward finds nothing left running at all.
+///
+/// This pins the fully-succeeded outcome (archive returns `Ok`, the pane
+/// process is gone, the row is archived, and the scope unit is collected)
+/// for the same reason its delete counterpart does: on 0.6.0-rc.4 an
+/// affected host answered this sequence with `kill_scope`'s refusal
+/// message instead, because the kill's reported exit status was trusted
+/// over the unit having retired.
+#[farhelm_testtrace::test]
+async fn archiving_a_multithreaded_sigterm_ignoring_agent_tears_down_its_scope() {
+    let Some((h, scopes)) = scope_gated_harness(
+        "archiving_a_multithreaded_sigterm_ignoring_agent_tears_down_its_scope",
+    )
+    .await
+    else {
+        return;
+    };
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script stubborn-threads"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let _pid_cleanup = PidKillGuard::arm(self_pid);
+
+    // The fixture premise: a LIVE, multithreaded, SIGTERM-ignoring pane
+    // process under a recorded launch scope — the same premise the
+    // delete-side test asserts, for the same reason.
+    assert!(
+        !process_is_gone(self_pid),
+        "test setup: the fixture must still be running before archive is asked to tear it down"
+    );
+    let unit = crate::session_lifecycle::launch_scope_of(&h, &session.id)
+        .await
+        .expect("test setup: a launch on a manager-equipped host must record its scope");
+    assert_stubborn_threads_premise(self_pid, Some(&unit));
+
+    let archived = h
+        .client
+        .archive_session(&session.id)
+        .await
+        .expect("archive");
+    assert!(archived.archived);
+    assert!(matches!(
+        archived.status,
+        SessionStatus::Exited { exit_code: None }
+    ));
+
+    wait_until_pid_gone(self_pid, 15).await;
+    wait_until_scope_gone(&scopes, &unit, 5).await;
+}

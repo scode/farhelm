@@ -228,6 +228,13 @@ pub enum ScopeOp {
 pub type ScopeOpSink = std::sync::Arc<dyn Fn(&ScopeOp) + Send + Sync>;
 
 /// How a [`ScopeManager`] talks to the world.
+///
+/// The test double is many times the size of the two production variants
+/// (it carries scripted answers and an operation log), which trips
+/// `large_enum_variant` only in test builds. One `Mode` lives inside one
+/// `ScopeManager` per supervisor, so the size difference costs nothing
+/// worth boxing for.
+#[cfg_attr(test, allow(clippy::large_enum_variant))]
 enum Mode {
     /// The real `systemd-run`/`systemctl --user` pair.
     Systemd,
@@ -251,6 +258,15 @@ enum Mode {
         available: std::sync::atomic::AtomicBool,
         kills_fail: bool,
         vanishes_after: Option<usize>,
+        /// Report a unit gone once this signal (`"SIGTERM"` or `"SIGKILL"`)
+        /// has been sent to it — an agent that exits politely, or one that
+        /// dies only to the unignorable signal — expressed by EVENT rather
+        /// than by check count so a test does not depend on how many times
+        /// the teardown happens to ask in between.
+        vanishes_after_signal: Option<&'static str>,
+        /// Every `(unit, signal)` pair `kill` has been asked to send, whether
+        /// or not it reported success.
+        signalled: std::sync::Mutex<std::collections::HashSet<(String, String)>>,
         exists_calls: std::sync::Mutex<std::collections::HashMap<String, usize>>,
         matching_units: Vec<String>,
         sink: ScopeOpSink,
@@ -440,6 +456,37 @@ impl ScopeManager {
         ScopeManager::fake_with(vec![true], false, Some(vanishes_after), Vec::new(), sink)
     }
 
+    /// Every kill REPORTS failure, yet the unit retires as soon as a
+    /// `SIGKILL` has been sent to it.
+    ///
+    /// This is the systemd 255 shape `service::sweep::kill_scope` has to
+    /// get right — `systemctl kill` exiting non-zero after a SIGKILL that
+    /// killed everything in a multithreaded scope — and neither existing
+    /// knob alone can express it: [`fake_failing_kills`](Self::fake_failing_kills)
+    /// models a manager whose kills do nothing, and
+    /// [`fake_vanishing`](Self::fake_vanishing) one whose kills work and
+    /// say so. The distinction a caller must draw is between the report
+    /// and the outcome, which is exactly what this fixture separates.
+    #[cfg(test)]
+    pub fn fake_failing_kills_vanishing_after_sigkill(sink: ScopeOpSink) -> ScopeManager {
+        ScopeManager::fake_with(vec![true], true, None, Vec::new(), sink)
+            .vanishing_after_signal("SIGKILL")
+    }
+
+    /// Make a fake's units retire once `signal` has been sent to them; see
+    /// the `vanishes_after_signal` field.
+    #[cfg(test)]
+    fn vanishing_after_signal(mut self, signal: &'static str) -> ScopeManager {
+        if let Mode::Fake {
+            vanishes_after_signal,
+            ..
+        } = &mut self.mode
+        {
+            *vanishes_after_signal = Some(signal);
+        }
+        self
+    }
+
     #[cfg(test)]
     fn fake_with(
         probe_answers: Vec<bool>,
@@ -454,6 +501,8 @@ impl ScopeManager {
                 available: std::sync::atomic::AtomicBool::new(false),
                 kills_fail,
                 vanishes_after,
+                vanishes_after_signal: None,
+                signalled: std::sync::Mutex::new(std::collections::HashSet::new()),
                 exists_calls: std::sync::Mutex::new(std::collections::HashMap::new()),
                 matching_units,
                 sink,
@@ -647,6 +696,8 @@ impl ScopeManager {
             Mode::Fake {
                 available,
                 vanishes_after,
+                vanishes_after_signal,
+                signalled,
                 exists_calls,
                 sink,
                 ..
@@ -658,8 +709,15 @@ impl ScopeManager {
                 let seen = calls.entry(unit.to_string()).or_insert(0);
                 let prior = *seen;
                 *seen += 1;
+                let retired_by_signal = vanishes_after_signal.is_some_and(|signal| {
+                    signalled
+                        .lock()
+                        .expect("fake scope signal log poisoned")
+                        .contains(&(unit.to_string(), signal.to_string()))
+                });
                 Ok(available.load(std::sync::atomic::Ordering::SeqCst)
-                    && vanishes_after.is_none_or(|after| prior < after))
+                    && vanishes_after.is_none_or(|after| prior < after)
+                    && !retired_by_signal)
             }
             Mode::Systemd => {
                 let tools = self.tools(false).await.ok_or_else(|| {
@@ -767,17 +825,36 @@ impl ScopeManager {
     /// treat as information rather than failure — see
     /// `service::reap_process_tree`, where nothing about the scope is ever
     /// allowed to fail a stop the sweep afterwards confirms.
+    ///
+    /// More generally, an `Err` from this call is a REPORT, not the
+    /// outcome: `systemctl kill` can exit non-zero after delivering the
+    /// signal to everything in the cgroup (systemd 255 does exactly that
+    /// for SIGKILL against a scope holding a multithreaded process, see
+    /// `service::sweep::kill_scope`'s docs). Callers that need to know
+    /// whether the kill WORKED ask [`exists`](Self::exists) afterwards
+    /// and let the unit's disappearance decide.
     pub async fn kill(&self, unit: &str, signal: &str) -> anyhow::Result<()> {
         match &self.mode {
             Mode::Disabled => anyhow::bail!("no systemd user manager to kill scope {unit} with"),
             #[cfg(test)]
             Mode::Fake {
-                kills_fail, sink, ..
+                kills_fail,
+                signalled,
+                sink,
+                ..
             } => {
                 sink(&ScopeOp::Kill {
                     unit: unit.to_string(),
                     signal: signal.to_string(),
                 });
+                // Recorded BEFORE the failure report, deliberately: the
+                // `vanishes_after_signal` shape is a kill that worked while
+                // its report said otherwise, so the event must count even
+                // when this call is about to return an error.
+                signalled
+                    .lock()
+                    .expect("fake scope signal log poisoned")
+                    .insert((unit.to_string(), signal.to_string()));
                 if *kills_fail {
                     anyhow::bail!("injected failure sending {signal} to scope {unit}");
                 }

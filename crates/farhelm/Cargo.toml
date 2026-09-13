@@ -104,3 +104,8 @@ reqwest.workspace = true
 # assertions must not depend on a loaded machine scheduling real sleeps, and
 # `test-util` keeps that test-only support out of the shipped binary.
 tokio = { workspace = true, features = ["test-util"] }
+# The systemd-255 scope-kill quirk's standalone probe test mints its own
+# throwaway session id (no supervisor is involved, so nothing else assigns
+# one) to build a syntactically valid, but otherwise unrecorded, scope unit
+# name.
+uuid.workspace = true
