@@ -4,10 +4,11 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Six buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "near term" is what should be picked up next; "tricky bugs" retains
+Seven buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
+— the decision is made, only the work remains; "near term" is what should be picked up next; "tricky bugs" retains
 unresolved bug reports and their investigation findings; "deflake" gathers test and harness reliability work, including
-CI execution and restoring gates; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
+CI execution and restoring gates; "code review" is the residue of the September 2026 review swarms after the policy
+pass, ordered by confidence and risk; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
 everything not yet sorted, which carries no implication either way. Within a bucket, no order unless the bucket
 explicitly says so.
 
@@ -279,6 +280,383 @@ Deferred work, with its original triggers:
   release gate still excludes the e2e target; evaluate any concurrency experiment using the then-current runner budget
   rather than reviving the old libtest thread setting.
 
+## Code review
+
+The residue of the September 2026 review swarms (700 findings over seven areas, reviewed at `db76f00b`) after the policy
+pass applied the maintainer-confirmed decisions in SPEC.md, and after a per-finding check against main at `7c2cdd83` on
+2026-09-13 established which mechanisms still exist. Finding IDs such as `A5-C4` are area-N plus the finding's tag in
+that area's review; each resolves to a line in the brain's verbatim mirror, linked from
+[this page](https://claude.ai/code/artifact/5a79de5b-90d5-4eee-8aa1-ea3c803ef50c). The full working archive, including
+the fourteen group notes whose fences the entries below quote, is in the private brain under
+[farhelm-review-postprocessing](https://github.com/scode/brain/blob/main/personal/farhelm-review-postprocessing.md); the
+raw swarm reports are the seven mirrors beside it. The final synthesis is also on
+[HackMD](https://hackmd.io/a2F0fZKqQsSh4anyxFrjlA?type=view).
+
+Every entry names the code it rests on as of the check; a later reader must confirm the mechanism is still present
+before building. "Fence" is what the group notes say the fix must preserve or must not become. Severity and effort are
+agent judgments, not measurements. Nothing here authorizes a broader rewrite than the entry names: the notes repeatedly
+warn against folding neighbours into one lifecycle or locking overhaul.
+
+Closed by the check, so nobody re-raises them: `A4-T8` was fixed on main by the per-test capture buffers (#419, #423);
+`A3-C8` (delete cancels uploads before its preflight) is accepted by SPEC's partial-deletion decision; `A6-C6` (the
+14→15 profile-table drop) and `A6-C7` (per-session SQL parameters at fleet scale) are excluded by the compatibility and
+client-scale decisions.
+
+### Do first: high confidence, low risk
+
+Mechanism verified on main, fix is trivial or small, and the notes attach no design question. Ordered roughly by
+severity.
+
+- **Exact tmux targets.** `A7-C1`, `A7-C2`, `A7-C3`, `A7-C14`. Critical, trivial. `kill_session` (tmux.rs:2297), the
+  session sink's attach (tmux/sink.rs:47), and the replay stream's attach (tmux/stream.rs:283) all pass a bare
+  `-t
+  <name>`, which tmux resolves by exact, then glob, then prefix match, so a vanished `fh-<id>` can kill or attach
+  to a neighbour whose name extends it; `has_session` already uses the exact `={name}` form and its docstring says why.
+  Any pane can create such a neighbour on the private socket. Fix: spell all three targets `={name}`; the tolerated
+  "can't find session" arm in `kill_session` already handles the exact-form miss. In the same change convert
+  `pane_process` (tmux.rs:2680) and `kill_session`'s identical arm from `e.to_string().contains(...)` to
+  `tmux_said_any`, the anchored raw-stderr form the module documents as the safe one. Fence: no wrong-target outcome was
+  reproduced; generated names cannot prefix each other, so reachability needs a foreign session.
+- **Session token in tmux failure diagnostics.** `A5-S5`, `A7-S2`. Critical, small. `run_bytes` (tmux.rs:2016, and the
+  tail variant at :2962) formats the whole argv into the failure context, `new_window` pushes every `-e NAME=VALUE` pair
+  including `FARHELM_SESSION_TOKEN` (built at service/core.rs:8594), and `open_tab_window` renders the chain with
+  `{e:#}` into a client-visible error (core.rs:8652). Reproduced with a synthetic token by the investigation. Fix:
+  render `-e` values as `NAME=<redacted>` when composing the context, keep raw stderr in `TmuxCommandFailure` for the
+  exact classifiers, and add a driver-level regression asserting the token never appears. Fence: redaction defect, not
+  escalation; no generic credential framework or launch redesign.
+- **Snapshot self-witness.** `A3-C3`. High, trivial. `procs::snapshot` (procs.rs:372-402) returns `Ok` with an empty map
+  when `/proc` is present but unmounted, and the macOS path (procs.rs:765) returns `Ok(Vec::new())` for a zero-sized
+  `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
+  fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
+  `std::process::id()`. Also backstops the real-uid changes below.
+- **DECRQSS answered twice.** `A7-C5`. High, trivial. The vendored xterm.js registers a DCS `$ q` handler that replies,
+  and terminal.js has no `registerDcsHandler` at all (only the CSI `$p` `swallowDecrqm` pair at terminal.js:4099), so
+  the browser's reply is typed into the pane as an ESC-prefixed keystroke sequence, the same shape as the recorded
+  "stray y on every vim launch" bug. Fix: register a DCS handler for `{intermediates:"$", final:"q"}` returning true,
+  mirroring `swallowDecrqm`, and correct query_strip.rs's "exact set answered by tmux" sentence to name the browser-side
+  swallow as the other half of the policy.
+- **NSS lookup with no time bound.** `A3-C18`. High, small. `launch.rs:243` spawns `getent passwd <euid>` with a plain
+  `.output().await`, no timeout and no `kill_on_drop`, inside the caller's lifecycle claim and admission slot, so a
+  wedged NSS backend hangs every launch and tab open. Fix: wrap the child in `tokio::time::timeout` with
+  `kill_on_drop(true)`, treat a timeout as "rung one could not answer", bound the `getpwuid_r` await too, and fall
+  through to `/bin/sh`. Fence: a `spawn_blocking` NSS call cannot truly be cancelled, so bound and fall through rather
+  than claim cancellation.
+- **Accept loops under descriptor pressure.** `A5-C6`, `A4-C9`. High and medium, small. The supervisor's accept loop
+  (service/core.rs:5154-5166) retries any accept error immediately with no backoff, so `EMFILE` becomes a busy loop and
+  log flood on the task the ticker shares. The helm's token-control accept loop (token_control.rs:338-346) classifies
+  only four kinds as transient and otherwise returns `Err`, which reaches `token_control.failed()` in lib.rs:1646 and
+  exits the helm, while the axum listener in the same process rides the identical error out. Fix: in both, retry at once
+  on `ConnectionAborted`/`Interrupted`, otherwise sleep a capped backoff with a rate-limited warning; correct the
+  token-control docstring to credit the flock rather than process exit. Fence: exhaustion itself is unproven, and the
+  `EMFILE` to `Uncategorized` mapping is the reviewer's empirical claim.
+- **`remote_farhelm` panics and empty install directories.** `A2-C4`, `A2-C21`. High and medium, small.
+  `PlanLayout::plan` (provisioning/plan.rs:283-289) does `file_name().expect(...)`, and `plan_for_row` feeds it the
+  stored `remote_farhelm` verbatim; `add_ssh_host` (helm store.rs:3208-3239) validates only the ssh destination, so
+  `POST /api/hosts` with `"remote_farhelm": "."` followed by an update panics the request handler. A bare relative name
+  instead yields `Some("")` as `override_lib_dir` and a plan whose first step creates an empty path. Fix: return a
+  `BackendFailure` when `file_name()` is `None`, validate the field at the store or API boundary with a 400, and treat
+  an empty or relative parent as "no override". Fence: keep valid relative and PATH registrations working; check the
+  bare-name probe path before choosing a blanket absolute-only rule.
+- **Provisioning sha256sum with backslash paths.** `A2-C1`, `A2-C2`. Medium, trivial. Both the post-upload digest check
+  (provisioning/backend.rs:661-670) and the metadata probe (:465-490) pass the path as an argument, so GNU coreutils
+  escapes the line and prefixes `\`, and the parse fails as a bogus "digest mismatch" or "malformed output" on any home
+  directory containing a backslash. `install.sh`'s `sha256_of` documents this quirk and feeds stdin. Fix:
+  `sha256sum <
+  path` in both; the existing whitespace parser keeps working with the literal `-`. Fence: one
+  verification for both; a refusal is not acceptance of bad bytes; no general path restriction.
+- **Installer umask and lock hygiene.** `A2-C7`, `A2-S5`, `A2-S2`. Medium, trivial. `mkdir -p "$INSTALL_DIR"`
+  (install.sh:806-819) chmods only the leaf, so under `umask 000` a freshly created `$HOME/.local` is 0777 and another
+  account can replace the `bin` entry the leaf chmod was meant to protect; the macOS bundle tree (:1099, :1139) and the
+  lock directory (:588, :628) are created the same way. Fix: `(umask 022; mkdir -p ...)` for the install chain and
+  bundle assembly, `umask 077` or an immediate `chmod 0700` for the lock, and have `is_our_lock` refuse a group- or
+  world-writable lock directory. Fence: only paths this run creates; preserve pre-existing shared directories; no
+  recursive chmod.
+- **Terminal WebSocket bounds and exits.** `A4-C2`, `A4-C3`, `A4-C4`, `A4-C5`, `A4-C6`, `A4-C1`. Medium, trivial each.
+  terminal.rs:346 sets `max_message_size` but not `max_frame_size`, leaving tungstenite 0.29's 16 MiB default, whose
+  reader reserves the declared header length before any payload arrives (verified in the pinned crate source); the
+  events socket sets both. Three detach-notice sends (terminal.rs:589, :572, :490) carry no timeout where every events
+  write is bounded by `WRITE_DEADLINE`; the stall path at :589 is the one whose peer is proven not to read. The inbound
+  task's `JoinError` is handled with `?` at :677 before `client.detach` at :693, breaking the module's "detach runs on
+  every exit path" invariant on the panic path. And an authenticated non-upgrade GET on a WebSocket route gets axum's
+  500 naming `farhelm_helm::auth::AuthenticatedSocket`, because the handlers extract the extension before
+  `WebSocketUpgrade` (auth.rs:259-269, terminal.rs:300-325, events.rs:126-130). Fix: add the frame bound plus the
+  terminal counterpart of the events oversized-header test; wrap all three notice sends in
+  `timeout(WS_TEARDOWN_GRACE, ...)`; fold the `JoinError` into the result so the detach tail runs; extract
+  `WebSocketUpgrade` first. Fence: count only the stall path as a proven hang; the other two sends are consistency.
+- **Store one-liners.** `A6-C3`, `A6-C14`, `A6-C2`. Medium, trivial to small. `register_probed_ssh_host` (helm
+  store.rs:3307-3311) builds `IdentityMismatch` with `expected` and `actual` reversed relative to the variant's doc and
+  every other site, so the operator reads the opposite of reality when re-provisioning a reinstalled machine.
+  `mark_seen` (store.rs:3035-3038) guards its shared row with `!=` rather than `<`, so a stale client un-sees a session
+  for everyone; the supervisor's `record_activity` already uses `<`. The insert branch of `register_probed_ssh_host`
+  (:3341) bails with a string for an already-claimed identity while the converge branch returns the typed
+  `IdentityClaimed`, so the same situation is a 409 on one path and a 500 on the other. Fix: swap the two fields with a
+  test on the probe path; change the `DO UPDATE` predicate to `<`; add a typed variant carrying identity and owner only
+  and map it to Conflict in `error_kind`. Fence: do not invent a host id where registration failed before creating one.
+- **Relay diagnostics and redaction.** `A1-C11`, `A1-C8`, `A1-C19`, `A1-C6`. Medium to low, trivial. The relay's only
+  warn line for a failed upcall (agent_relay.rs:637-647) asserts the helm "did not answer in time" with a budget field
+  for three endings where no budget elapsed. `list_sessions` (helm client.rs:2547) is the one wrong-reply site still
+  using `{other:?}`, which restores raw invocation argv into an agent-visible message; its five siblings use
+  `wrong_reply()`. The delete-fence docs (agent_relay.rs:222-225, core.rs:3566) claim every non-retained ending means
+  the mutation cannot still be running, omitting the two post-queue connection-loss exits. `ResolveProfile` shares
+  `ReplyKind::Created` with the creating verbs (farhelm main.rs:1387, :1398), so a wrong reply to create or clone
+  bypasses the outcome-unknown remedy and hits a bare bail. Fix: log the outcome's own message and drop the budget field
+  where none expired; `Err(wrong_reply("ListSessions", &other))`; add the fourth category to the docs; give
+  ResolveProfile its own variant. Fence: keep the Timeout-means-outcome-unknown vocabulary; do not extend fences to make
+  the old claim true.
+- **Provisioning download sanity limit.** `A2-C8`. Medium, small; a SPEC requirement with no implementation.
+  `download_verified` (release_payloads.rs:689-742) streams every chunk to `<asset>.part` with no byte counter; the only
+  caps in the file are for the control files. Fix: an `ASSET_MAX_BYTES` constant far above the largest archive, a
+  counter in the loop, a refusal naming the asset and limit, removal of the `.part`, and a corrected `SUMS_MAX_BYTES`
+  docstring, whose "the expected hash is already known" rationale is unsound. Fence: not a quota system; not
+  `install.sh`; not attachment uploads.
+- **Installer terminal states.** `A2-C9`, `A2-C26`, `A2-C6`. High and medium, small. A crash between journal removal and
+  backup cleanup (install.sh:1038-1041) strands `.farhelm.old`, which `refuse_unless_absent` (:983) then rejects on
+  every later run while the message advises a re-run that cannot help. `is_our_lock` (:334-342) parses `ls -A` output,
+  which an inherited `QUOTING_STYLE` reshapes, so release silently skips and every later run refuses. The download
+  channel takes `FARHELM_RELEASE_BASE_URL` unvalidated, passes no `--proto` pins, and never reports a non-default
+  source. Fix: sweep reserved `.old` backups right after `acquire_lock` succeeds with no journal (committed debris by
+  the file's own invariant); enumerate the lock with a glob or `QUOTING_STYLE=literal`; add
+  `--proto
+  '=https' --proto-redir '=https'` on the default path, validate a set base URL like
+  `parse_release_base_url`, and name a non-default one in the output. Fence: never delete a foreign collision; an
+  operator-selected source is not an attacker; no bundled signatures or URL restrictions.
+- **Staging launch files at teardown.** `A3-C21`, `A5-S10`. Medium, small. `remove_launch_artifacts_for_session`
+  (launch_artifacts.rs:235) removes only names `parse_launch_file_name` accepts, while the startup sweep (:333) handles
+  `is_staged_temp_name` first; a post-link unlink failure leaves a credential-bearing `.tmp-<uuid>` copy that delete and
+  archive never touch (reproduced by the investigation). Fix: in the same fail-closed removal, also accept entries where
+  `is_staged_temp_name` holds and the de-dotted stem parses to this session id. Fence: only this session's staging
+  names; never other sessions' active writes; keep publication-success semantics.
+- **Error rows on reload.** `A5-C4`, `A5-C15`. Medium and low, small. `reload_sessions` (service/core.rs:4471-4474)
+  `continue`s for `LastOutcome::Error` rows before the pane lookup at :4491-4505, so the entry is built terminal-less,
+  attach refuses, and delete (teardown.rs:714-718) skips its conditional tmux kill with no durable `tmux_name` fallback,
+  leaking the session and its scrollback forever; the sentinel branch at :4529 keeps its pane for exactly this stated
+  reason. The same early branch also calls `cleanup_launch_artifacts` unconditionally while every other durable step in
+  the pass is gated on `may_write`. Reproduced once by the investigation; its fix and test were reverted for scope. Fix:
+  hoist the pane resolution above the early-continue and insert it into `found_panes`; gate the cleanup on `may_write`;
+  optionally add delete's durable `tmux_name` fallback. Fence: leave the archived-row skip alone.
+- **Startup diagnostics.** `A5-C16`, `A5-C17`. Low, trivial. `try_lock().is_err()` (core.rs:1049) collapses a real flock
+  I/O error into "a supervisor is already running", and the stale-socket `remove_file` (core.rs:5085-5088) discards its
+  error so an unlink failure surfaces as `EADDRINUSE` on a directory this process just proved it owns. Fix: match
+  `WouldBlock` for contention and propagate `Error(e)` naming the lock path; remove unconditionally, treat `NotFound` as
+  success, propagate anything else with the socket path.
+- **Query strip and replay modes.** `A7-C6`, `A7-C9`, `A7-C10`. Medium and low, small. `next_output`
+  (tmux/stream.rs:1072-1080) wraps `fill_buf` in `timeout_at`, which polls the inner future first, so the stripper's 50
+  ms flush deadline is never consulted while the control stream has bytes and held output stalls past its documented
+  bound; `read_control_line` below it has no deadline either. `PANE_MODE_FORMAT` (tmux.rs:241-243) omits `#{wrap_flag}`
+  and `#{keypad_flag}`, so DECAWM-off and application keypad are not restored on a same-dimension reattach. Fix: check
+  the clock before polling the reader and bound the partial-line read; collect both flags and emit `\x1b[?7l` and
+  `\x1b=` from `post_content_sequences`. Fence: display latency only for the first; a different-dimension reattach heals
+  the mode cases via SIGWINCH.
+- **Small contained items.** `A2-C3`, `A1-C9`, `A6-D26`. Low, trivial. `is_stale_generation`
+  (release_payloads.rs:1020-1024) splits a name at `len - 12` bytes and panics on a non-boundary; the panic is contained
+  by `spawn_blocking` but the `OnceCell` stays uninitialised so every download retries and fails while the entry exists.
+  `safe_cell` (farhelm main.rs:1713-1729) escapes only Cc, so U+2028/U+2029 and bidi controls reach the agent-facing
+  table whose widths are computed after sanitizing. `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the
+  annotation is set only by a user-initiated stop, but archive writes it too. Fix: a boundary-safe split; widen
+  `safe_cell` (ideally one shared predicate with its two siblings) to emit visible `\u{...}` escapes; name both writers
+  in the doc without blessing the archive overwrite. Fence: leave the acceptance checks alone, they are specified
+  policy; no prompt-injection promise.
+
+### Next: high confidence, needs care
+
+Mechanism verified on main, but the fix touches lifecycle, locking, or the kill set, or needs a reproduction before it
+is safe. Each is its own review unit.
+
+- **Kill sweep cgroup verdict.** `A3-C4`, `A3-C5`, `A3-C13`, `A3-C7`. High, small each, medium risk. The systemd
+  availability verdict is a per-process `OnceCell` (scope.rs:294, :417) with no invalidation, so one transient probe
+  failure at startup permanently disables cgroup teardown for every inherited session; `reap_process_tree`
+  (sweep.rs:1072) then discards every recorded unit name with a `debug!`, the opposite of the policy `reap_tab_tree`
+  documents and of what durable `entry.scope` means. A failed scope kill is downgraded to a warning even for delete
+  (sweep.rs:1097-1108), after which the row is removed and nothing can retry, while merely failing to enumerate tab
+  scopes is fatal on the same path. And no teardown path names a previous launch generation's scope (only
+  `tab_unit_glob` exists, scope.rs:160), so a generation whose kill failed while the portable sweep said clean is
+  orphaned by the next delete. Fix: ask the manager about names backed by durable evidence even when the cached verdict
+  is negative, letting `kill_scope`'s existence check settle it, and re-probe once when a teardown holds such a name;
+  return `Err` for delete and archive on a scope-kill failure so the row stays retryable; add a session-scoped
+  launch-unit glob enumerated with the tab glob's strictness; promote the teardown-side skip to `warn!` when the row
+  says `launch_scoped`. Fence: no new manager machinery; speculative names on manager-less hosts must stay skippable; a
+  portable sweep is not proof a scope is empty.
+- **Real uid in the process walk.** `A3-C2` then `A3-C1`. High, small on macOS and medium on Linux, medium risk because
+  widening the table widens the kill set. macOS `snapshot` (procs.rs:826) filters `kinfo_proc` rows by `cr_uid`, the
+  effective uid, while `p_ruid` sits transcribed at :599 marked "never read"; Linux (procs.rs:391, :343) uses
+  `/proc/<pid>` directory ownership, which also tracks the effective uid. A descendant that execs a setuid binary, and
+  everything below it, is silently dropped, and stop reports success; macOS has no cgroup backstop. Fix: on macOS add an
+  offset assertion for `kp_eproc.e_pcred.p_ruid` beside the four at :678 and accept a row when real or effective uid
+  matches; on Linux select by the real uid from `/proc/<pid>/status` and keep the directory-owner check only where
+  `read_process` uses it to classify a failed read; correct the `snapshot` docstring's "not killable" premise. Do macOS
+  first, Linux second, each with the self-witness above already landed. Fence: ordinary descendants in scope, deliberate
+  same-account escape not; never broaden a kill set on identity that has not been revalidated.
+- **Archive preserves a known outcome.** `A3-SP1`, `A6-C23`. High, small, medium risk. `teardown_for_archive`
+  (teardown.rs:385-392) builds `Exited{exit_code: None, annotation: STOP_ANNOTATION}` unconditionally and
+  `archive_session` (supervisor store.rs:3572-3576) runs
+  `UPDATE ... outcome_state = 'exited', exit_code = NULL,
+  annotation = ?2, error_detail = NULL` with no condition on
+  the prior outcome, so an Error with its detail or an Exited with its code is rewritten as "stopped by user". Fix: read
+  the outcome quartet in the same transaction and synthesize the annotated exit only when the archive actually tore down
+  a live agent, in both the SQL and the in-memory entry. Fence: archiving a live agent really is a user-initiated stop;
+  only the Error-to-Exited conversion is a SPEC divergence, so narrow rather than blanket preservation.
+- **Tab close leaves input aimed at the agent pane.** `A5-S4`. High, small, medium risk. `close_tab_window`
+  (core.rs:8901-8932) reaps, kills the window, reaps again, and only then calls `detach_closed_tab`; the audited
+  `=<session>:.<pane>` target doc (tmux.rs:1552-1559) records that a vanished pane silently degrades to the session's
+  active pane, which is the agent window. Keystrokes typed in the seconds between kill and detach can land in the
+  agent's pane. Fix: move `detach_closed_tab` ahead of the reap and kill, or invalidate the attachment's `InputClient`
+  under the attachments lock immediately before the kill. Fence: the fallback was audited for `display-message`, not
+  `send-keys`; verify input delivery separately from output capture.
+- **Upload stall attributed to the browser.** `A4-C12`. High, small, medium risk. uploads.rs arms the stall deadline at
+  :197 and re-arms only when a non-empty chunk arrives (:289), immediately before the potentially long
+  `send_upload_chunk` (:293) that waits on supervisor credit; the biased select at :222-227 then takes the expired
+  Stalled arm and aborts with "no body progress from the client". Fix: arm the deadline immediately before the select in
+  the body-not-ready arm instead of at chunk receipt, keeping the empty-chunk fast path. Fence: trace
+  `wait_for_credit`'s own re-arming in client.rs first; the magnitude depends on credit waits exceeding 60 s.
+- **Dispatch under the attachments and lifecycle locks.** `A1-C1`, `A1-C3`, `A1-C4`, `A5-C1`, `A1-C2`. Medium, small to
+  medium, medium risk; one unit per finding. `InputClient::send` (tmux/input.rs:212-277) gives every write, flush and
+  reply read its own fresh exchange timeout with no whole-call budget while connection.rs:475-495 holds the
+  supervisor-wide attachments mutex across it, and `CONTROL_EXCHANGE_TIMEOUT`'s docstring (tmux.rs:198-208) claims to
+  bound that hold. A tab attach (handlers.rs:1440) claims the session's lifecycle lock inline on the read loop with no
+  timeout, behind a stop or delete that holds it for the whole sweep. The restricted create arm (handlers.rs:2858)
+  claims the parent's lifecycle lock across a `ResolveProfile` round trip to the helm. The writer task's
+  `else =>
+  break` (connection.rs:286-296) is unreachable at shutdown because `priority_tx` and a full-authority link's
+  `tx` clone outlive the drop at :669, so every teardown burns the full drain window and force-aborts with a false
+  warning; the addendum rules out sender accounting because upload and detach tasks hold more clones. A delete parked on
+  a retained agent fence (handlers.rs:1166, :1187) holds one of eight process-wide admission permits for up to the 600 s
+  retention while the reply that would free it is dispatched by the loop those permits park. Fix: one `Instant` at the
+  top of `send` clamping each per-exchange timeout, plus an honest docstring; a short timeout on the tab-attach claim
+  refusing with the Conflict shape `handle_attach` already uses; resolve the profile before taking the parent claim,
+  then claim and re-check the credential; `rx.close()` and `priority_rx.close()` in the shutdown tail; claim the fence
+  before the permit or bound the wait well under retention with a retry-safe Conflict. Fence: takeover ownership across
+  every chunk; the credential re-check stays under the claim; ordinary unrelated controls must progress; no fair
+  scheduling for hostile local workloads; the shipped helm chunks input at 32 KiB so the 8 MiB frame is not an ordinary
+  paste.
+- **Helm-owned default profile.** `A6-S1`. Critical, medium, medium risk. `source_is_newer` (helm store.rs:569) falls
+  back to raw `candidate.created_at > stored.created_at` for any cross-host pair, and `replace_host_sessions`
+  (:4227-4283) feeds it drain-derived timestamps with no sanity check before writing `remembered_profile`; a remote
+  session naming a different starter profile with a high timestamp pins the fleet-wide default and the user's later
+  direct choice is rejected as older. Reproduced through real store APIs by the investigation probe, which also showed
+  recovery after complete source disappearance. Contradicts SPEC's "the helm owns the remembered default". Fix: give
+  user-originated creates unconditional authority over the remembered default and stop drain observations from replacing
+  it, distinguishing agent create and clone origin in `do_create_session`; reconcile the discovery and default prose and
+  tests in the same change. Fence: a timestamp clamp is insufficient by design; keep profile-catalog discovery
+  independent of default selection; its own review unit.
+- **Provisioning quoting and provenance.** `A2-S3`, `A2-C5`, `A2-C18`. Medium, small, medium risk. `shell_path`
+  (backend.rs:1627-1629) uses `shell_words::quote`, whose minimal set excludes braces, so a path can brace-expand into
+  several remote words under `sh -c`; the same helper builds the steady-state argv in ssh.rs. `parse_reach_output`
+  (backend.rs:1761) stores the host's `os-release` ID unvalidated, `confirmation()` (plan.rs:217-222) splices it into a
+  line, and `PeerBlock` splits on `lines()` so a newline in it becomes a plan step the operator approves.
+  `linger_was_refused` (backend.rs:1726-1740) substring-matches "permission denied" against whole stderr, so ssh's own
+  refusal with exit 255 is reported as a benign degraded linger. Fix: an always-single-quote helper used by both layers;
+  reject or sanitize newlines and bound the length in `distro_id` at the boundary; require positive evidence the linger
+  command reached the host before accepting degradation. Fence: correctness for the operator's own path, no new
+  authority; no double escaping at the GUI; neither an unconditional success claim nor a blanket exit-255 classifier.
+- **Credential cap self-eviction.** `A6-C15`. Medium, small, medium risk. `exchange_device_session_inner` (helm
+  store.rs:2755-2769) inserts, then deletes rows past `OFFSET 64` ordered by `created_at DESC, cookie_hash DESC`, with
+  nothing excluding the new row, and returns `Ok(true)` regardless; a clock rollback or tie evicts the credential just
+  issued and hands the browser an unusable secret. Fix: order eviction by `rowid DESC` so insertion order decides,
+  keeping the offset. Fence: the cap must stay exactly 64; excluding the new row while keeping the offset leaves 65.
+- **Replay state on reattach.** `A7-C11`, `A7-C8`, `A7-C7`. Medium, small to medium, medium risk. `PANE_MODE_FORMAT`
+  carries neither the scroll region fields nor `#{origin_flag}` and `post_content_sequences` (tmux.rs:1172-1225) emits
+  no `CSI r`, so pinned chrome scrolls away after a same-dimension reattach. Replay of an alternate-screen pane
+  (stream.rs:1021-1025) captures only the visible buffer, so the normal buffer is blank after the program exits. The
+  snapshot passes through `strip_command_output_terminator` and then `normalize_capture`, each stripping a trailing
+  newline where the reviewer measured only one exists, dropping the blank bottom row. Fix: collect the region and origin
+  fields and emit the region before the cursor escape and `\x1b[?6h` after it; add the `-E -1` history and `-a -q`
+  captures and emit normal-screen content before `?1049h`, or record the gap in SPEC_impl's limitations; drop the outer
+  strip and rewrite the unit test around a fixture whose trailing blank row must survive. Fence: DECSTBM and DECOM both
+  home the cursor, so ordering is the risk; capture cost is a real tradeoff; the newline fix needs an independent grid
+  oracle, not a test encoding the disputed model.
+- **Helm store resilience.** `A6-C13`, `A6-C4`, `A1-C14`. Medium and low, small. `HelmStore::profiles` (helm
+  store.rs:5445-5460) collects decode results into one `Result`, so one undecodable stored row fails the catalogue read
+  that host refresh and create reach through `load_profile_name_index`. `update_ssh_destination` (:3530-3562) runs the
+  alias-collision check even for a host that already has an alias, refusing a retarget whose display name would not
+  change. `helm_link_for_session` (agent_relay.rs:588-600) takes the first matching attachment and gives up if that one
+  link is unregistered, which a helm reconnect can produce while another terminal is live. Fix: skip-and-warn an
+  undecodable row naming its id; include alias in the lookup and skip the check when present; iterate every matching
+  attachment and return the first whose queue matches a registered link, correcting the lease-versus- connection
+  docstring. Fence: do not assert all hosts or all creation fail; the alias contract's fail-closed behaviour is optional
+  UX; no lease redesign.
+- **Unlisted launch rows after ambiguous failure.** `A5-C2`, `A5-C3`, `A5-C10`, `A3-C11`. High, medium, medium risk;
+  needs a focused failure reproduction first. The retain-the-row exits of the create path (core.rs:6551-6556 and
+  :6576-6596) return `Err` without publishing a `SessionEntry`, so a possibly-running agent is unlisted and unstoppable
+  until restart while the error text tells the user to stop or delete it; `reload_sessions` has exactly two call sites,
+  both at startup. The keyed-retry takeover removes the existing entry at :6341 and never restores it on those exits,
+  rewrites the row at `generation: 0` (:6303, :6256, :6683) rolling back a counter the module treats as monotonic, and
+  clears the previous attempt's launch artifacts (:6251-6262) before `restart_pending_launch` decides the takeover is
+  warranted. `Supervisor::relaunch` (core.rs:7084-7122) already re-publishes after a failed restart. Fix: a shared
+  helper publishing a Launching-shaped entry on every retaining exit, paired with delete's durable `tmux_name` fallback;
+  read `generation` in the takeover's snapshot and thread it through; move the artifact clear into the
+  `RetryClaim::Acquired` arm. Fence: the removal is load-bearing for serializing against stop and delete; the original
+  new-session-timeout premise was wrong; do not claim the probe established every interleaving; separate unit from the
+  Error-reload fix.
+- **Ticker witnesses agent exits.** `A5-C5`. Medium, medium, medium risk. `sample_pass` (ticker.rs:898-905) drops dead
+  or missing panes and the file contains no `Transition` or `record` call, so an exit that happens while nobody polls is
+  durably lost if the host then reboots; `reload_sessions` blanket-converts live rows to Interrupted on a boot-id change
+  (core.rs:4419-4426). Fix: before the liveness filter, collect `ObservedExit` transitions for positively owned dead or
+  absent panes and commit them via `transition_many`, gated on `may_record()`, fenced on the entry generation, behind
+  the launch-sentinel check. Fence: do not infer exits from moved or unmatched panes; no generalized reconciliation.
+- **`token show` migrates under a running helm.** `A6-C1`. Medium, medium, medium risk. `HelmStore::open` takes no
+  `may_migrate` and its module doc argues none is needed, but `token_control::show` (token_control.rs:120-124) opens the
+  store with no ownership lock, so the ordinary install-then-`token show` sequence migrates `helm.db` under the
+  incumbent; today's top rungs are additive, so the incumbent survives by luck. Fix: a `may_migrate` or read-only
+  distinction on `open`, `false` from `show` or the token lock taken first, and corrected module docs. Fence: a
+  mixed-version workflow item; do not declare incumbent breakage without an actual destructive crossed migration.
+- **Event-feed seats never reclaimed.** `A4-C7`. Medium, small, medium risk. `serve_events` (events.rs:204-236) has no
+  idle or ping arm, `WRITE_DEADLINE` bounds a blocked write rather than a dead peer, and no `SO_KEEPALIVE` is set, so a
+  subscriber lost without a FIN keeps its seat in the 64 cap for the helm's life; at 64 every new subscriber gets 503
+  and the fleet reverts to polling. Fix: an idle arm sending a Ping and ending the subscription when no Pong arrives by
+  the next interval; correct the module header's bounding claim. Fence: the ratchet is argued, not observed; the
+  64-enrollment decision does not excuse stale seats.
+- **Harness environment mutation.** `A4-T7`. Low, small, medium risk. `exposeHarnessDeviceSecret`
+  (e2e/tests/helpers/device-auth.ts:63-65) assigns into `process.env` from a test-body path, against the standing rule
+  in `.agents/test-authoring.md`. Fix: drop the env channel and read only the persisted storage state, after confirming
+  a clean-tree run supplies it before config load. Fence: preserve global-setup, config-load, and worker-refresh
+  ordering rather than deleting the fallback blind.
+- **Likely but unreproduced, cheap.** `A4-SP7`, `A5-C24`, `A3-C14`. Medium to high, trivial to small. lib.rs:1621 caches
+  the bootstrap token before `token_control::serve` takes the flock, so an offline rotation in that gap leaves the helm
+  refusing both tokens until restart. The Codex hook-collision check (core.rs:2184-2188) recognizes `-c` but not
+  `--config`, so a user hook table spelled the long way gets farhelm's appended over it. `StopSession` (handlers.rs:856)
+  runs its sweep on the connection's `JoinSet`, which `abort_all`s on shutdown, and the sweep SIGSTOPs at sweep.rs:925
+  with no SIGCONT anywhere, so an aborted stop can leave a tree stopped. Fix: swap the two startup lines with a comment;
+  treat `--config` and `--config=` like `-c` after confirming the flag against the vendor; spawn the stop's sweep on a
+  supervisor-owned task and await its handle, optionally with a drop guard over the SIGSTOP region. Fence: the race
+  window is one flock hop; no vendor audit was done; the exact interleaving is unproven.
+
+### Later: low confidence or needs an argument first
+
+Real enough to keep, not established enough to act on. Each names what would settle it.
+
+- **Capture parsing at the 64 KiB prefix.** `A5-C20`. `read_prefix` (agent_kind/capture.rs:626-630) takes a flat byte
+  cut, and one unparseable leading line marks the whole scan incomplete and blocks every durable claim. Conditional on a
+  supported vendor record whose first line exceeds 64 KiB and on no successful identity hook; neither verified. If
+  shown: make the front of the read line-aware under a hard ceiling, or report mid-line truncation.
+- **Partially removed `Farhelm.app`.** `A2-C25`. install.sh:1084-1090 requires `Contents/Info.plist` and :1140 does
+  `rm -rf` then a cross-volume `mv` from the staging directory, so a partial failure leaves a plist-less directory the
+  guard reads as foreign. Fix would stage into a same-filesystem sibling and move the old bundle aside; a missing
+  Contents directory is not proof of ownership, and a foreign collision must never be deleted.
+- **One-sided activity clock guard.** `A6-C22`. `record_activity` (supervisor store.rs:3660-3665) accepts only forward
+  moves, so a single forward clock jump pins the stamp. The notes want the whole activity, seen, and merge path
+  investigated before any clock slack, and do not accept the literal permanent-freeze claim for every excursion.
+- **Descriptor ceiling and terminal socket admission.** `A4-C8`. `render_helm_unit` sets no `LimitNOFILE` or
+  `StartLimit` directive, `serve_term_upgrade` takes no seat where `events_ws` does, and with the fatal accept path
+  above the chain ends with the helm down and not restarting. Reachability in ordinary use is the open premise, and
+  SPEC's handful-of-clients decision argues against treating hundreds of terminal sockets as expected. If pursued:
+  `LimitNOFILE` first, non-fatal accept second, admission control last.
+- **Aggregate input cost under the attachments lock.** `A7-C33`, `A5-C9`. `InputClient::send` has no total bound and the
+  caller holds the supervisor-wide lock across it; the shipped helm chunks at 32 KiB so ordinary use is about 128
+  pipelined round trips, and SPEC's local-authority decision removes the hostile framing. State the aggregate cost in
+  the contract; if a bound is wanted, cap what one frame may carry where the chunking lives rather than releasing the
+  lock mid-send.
+- **Relaxed ordering on the relay's issued-id check.** `A1-C12`. agent_relay.rs:270 issues ids Relaxed and :374 compares
+  Relaxed before the pending-table lock, then retires the connection on a miss. Nothing in-process establishes a
+  happens-before, but the proposed Acquire/Release swap does not either, since the reader never synchronizes with the
+  issuer. Either document the real ordering argument or make the check consult the pending table.
+- **Capture columns after a failed non-Resume restart.** `A6-C5`. `begin_relaunch` clears five capture columns and
+  `PriorRun` restores four other fields; the headline loss of a usable conversation is unreachable because the mode is
+  validated against a non-Resume offer, leaving unrestored `first_input_at` and `capture_ambiguous` plus overbroad
+  restore prose. Confirm a reachable consequence first; otherwise correct the prose.
+- **Local install path without fsync.** `A2-C19`. backend.rs:620-644 renames a payload into place after `flush()` with
+  no `sync_all`; the panel refuses local provisioning outright, so production reachability is doubtful. Trivial if ever
+  wanted; no blanket power-loss guarantee and no remote-branch change.
+
 ## Maybe later
 
 - Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
@@ -442,26 +820,6 @@ Deferred work, with its original triggers:
   two-day spike mounting ghostty-web in the island under WebKit.
 
 ## Unbucketized
-
-- Follow up on the [final review synthesis](https://hackmd.io/a2F0fZKqQsSh4anyxFrjlA?type=view). The policy pass covered
-  all 700 substantive findings across seven reviewed areas; its remaining candidates still need current-code validation
-  and a proportionality judgment before implementation. Apply the maintainer-confirmed decisions in SPEC.md rather than
-  treating the original findings as an approved fix list. The reviews predate subsequent development; retain their
-  qualifications and check their recorded commit before relying on a claim.
-
-  Raw findings are preserved in the private brain's Markdown mirrors below. The
-  [artifact index](https://github.com/scode/brain/blob/main/personal/farhelm-risk-review-artifacts.md) also links the
-  original Claude artifacts and the risk ranking. Access requires the maintainer's brain permissions.
-
-  | Reviewed area                                | Raw findings                                                                                    |
-  | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-  | Agent upcall relay and session credentials   | [Area 1](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-1-agent-relay.md)      |
-  | Release supply chain and remote provisioning | [Area 2](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-2-supply-chain.md)     |
-  | Process kill sweep                           | [Area 3](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-3-kill-sweep.md)       |
-  | Helm HTTP and WebSocket authentication       | [Area 4](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-4-auth-edge.md)        |
-  | Supervisor core                              | [Area 5](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-5-supervisor-core.md)  |
-  | Persistence and schema migration             | [Area 6](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-6-schema-migration.md) |
-  | tmux control-mode parsing and streaming      | [Area 7](https://github.com/scode/brain/blob/main/personal/farhelm-swarm-7-control-mode.md)     |
 
 - Make the never-started verdict say which link died. When a scoped launch dies before farhelm's exec shim, the
   supervisor's `wrapper_failure_detail` (launch_artifacts.rs) records "the agent was never started: the launch never
