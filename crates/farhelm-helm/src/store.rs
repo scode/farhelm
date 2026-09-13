@@ -1115,6 +1115,13 @@ pub enum HostStoreError {
         identity: String,
         owner: HostId,
     },
+    /// A newly discovered destination claimed an identity another row
+    /// already holds. This is the insert-branch twin of
+    /// [`HostStoreError::IdentityClaimed`]; because registration failed
+    /// before a destination row existed, there is no honest host id to
+    /// include for the new destination.
+    #[error("host {owner} already holds discovered identity {identity:?}")]
+    IdentityClaimedBeforeRegistration { identity: String, owner: HostId },
     /// The row no longer carries the connection-defining configuration the
     /// caller's attempt was made under (see [`DialedAs`]) — the user edited
     /// the destination while a handshake or an adoption decision was in
@@ -3024,10 +3031,10 @@ impl HelmStore {
         .context("seen-activity read task panicked")?
     }
 
-    /// Upsert `session_id`'s seen stamp to `activity_at` (a manual "mark
-    /// read", or the automatic mark the session view issues on open and on
-    /// every activity advance), returning whether the stored value actually
-    /// changed.
+    /// Monotonically upsert `session_id`'s seen stamp to `activity_at` (a
+    /// manual "mark read", or the automatic mark the session view issues on
+    /// open and on every activity advance), returning whether the stored value
+    /// actually changed. Only [`Self::clear_seen`] moves a stamp downward.
     ///
     /// The `WHERE` clause on the `DO UPDATE` is what makes the return value
     /// meaningful: SQLite only counts a row as touched by
@@ -3050,7 +3057,7 @@ impl HelmStore {
                 .execute(
                     "INSERT INTO session_seen (session_id, seen_activity_at) VALUES (?1, ?2) \
                      ON CONFLICT (session_id) DO UPDATE SET seen_activity_at = excluded.seen_activity_at \
-                     WHERE session_seen.seen_activity_at != excluded.seen_activity_at",
+                     WHERE session_seen.seen_activity_at < excluded.seen_activity_at",
                     rusqlite::params![session_id, activity_at],
                 )
                 .context("writing the seen stamp")?;
@@ -3341,8 +3348,8 @@ impl HelmStore {
                 {
                     return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
                         host,
-                        expected: recorded.clone(),
-                        actual: Some(reported.clone()),
+                        expected: reported.clone(),
+                        actual: Some(recorded.clone()),
                     }));
                 }
                 if recorded.is_none()
@@ -3373,9 +3380,12 @@ impl HelmStore {
                         .optional()
                         .context("checking the discovered identity claim")?;
                     if let Some(owner) = owner {
-                        anyhow::bail!(
-                            "host {owner} already holds discovered identity {identity:?}"
-                        );
+                        return Err(anyhow::Error::new(
+                            HostStoreError::IdentityClaimedBeforeRegistration {
+                                identity: identity.clone(),
+                                owner,
+                            },
+                        ));
                     }
                 }
                 if let Some(name) = alias_collision(&tx, None, &destination)? {
@@ -7522,6 +7532,26 @@ mod tests {
         );
     }
 
+    /// A stale browser observation must not move the shared seen stamp
+    /// backward: otherwise one client's older activity view can make every
+    /// other client see the session as unread again.
+    #[farhelm_testtrace::test]
+    async fn mark_seen_rejects_an_older_activity_stamp() {
+        let (_dir, store) = fresh_store().await;
+
+        assert!(store.mark_seen("s-1", 200).await.unwrap());
+        assert!(!store.mark_seen("s-1", 100).await.unwrap());
+        assert_eq!(
+            store.seen_activity(&["s-1".to_string()]).await.unwrap()["s-1"],
+            200
+        );
+        assert!(store.mark_seen("s-1", 300).await.unwrap());
+        assert_eq!(
+            store.seen_activity(&["s-1".to_string()]).await.unwrap()["s-1"],
+            300
+        );
+    }
+
     // ---- Schema and the version mechanism ----------------------------
 
     /// A fresh database must come up on the current schema with the reserved
@@ -9801,6 +9831,63 @@ mod tests {
             store.list_hosts().await.unwrap().len(),
             2,
             "a refused discovery-registration must not have created a row"
+        );
+    }
+
+    /// Discovery of a NEW destination must report an existing identity claim
+    /// as a typed conflict even though no row exists yet to name as the
+    /// destination host.
+    #[farhelm_testtrace::test]
+    async fn register_probed_ssh_host_reports_an_identity_claim_before_registration() {
+        let (_dir, store) = fresh_store().await;
+        let owner = host_with_identity(&store, "identity-owner@host", "identity-owned").await;
+
+        let err = store
+            .register_probed_ssh_host("new-destination@host", None, None, Some("identity-owned"))
+            .await
+            .expect_err("a new destination cannot claim another host's identity");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::IdentityClaimedBeforeRegistration { identity, owner: actual_owner })
+                    if identity == "identity-owned" && *actual_owner == owner
+            ),
+            "must preserve the claimed identity and its existing owner: {err:#}"
+        );
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            2,
+            "the refused registration must not create a destination row"
+        );
+    }
+
+    /// A probe that converges on an existing destination must label the
+    /// reported identity as the caller's expectation and the recorded
+    /// identity as the current value, including in the rendered error.
+    #[farhelm_testtrace::test]
+    async fn register_probed_ssh_host_reports_identity_mismatch_by_role() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "mismatch@host", "identity-recorded").await;
+
+        let err = store
+            .register_probed_ssh_host("mismatch@host", None, None, Some("identity-reported"))
+            .await
+            .expect_err("a changed probed identity must not silently replace the recorded one");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::IdentityMismatch { host: actual_host, expected, actual })
+                    if *actual_host == host
+                        && expected == "identity-reported"
+                        && actual.as_deref() == Some("identity-recorded")
+            ),
+            "must identify the reported value as expected and the stored value as actual: {err:#}"
+        );
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "host {host} identity is Some(\"identity-recorded\"), not the expected \"identity-reported\""
+            )
         );
     }
 

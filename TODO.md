@@ -312,15 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Store one-liners.** `A6-C3`, `A6-C14`, `A6-C2`. Medium, trivial to small. `register_probed_ssh_host` (helm
-  store.rs:3307-3311) builds `IdentityMismatch` with `expected` and `actual` reversed relative to the variant's doc and
-  every other site, so the operator reads the opposite of reality when re-provisioning a reinstalled machine.
-  `mark_seen` (store.rs:3035-3038) guards its shared row with `!=` rather than `<`, so a stale client un-sees a session
-  for everyone; the supervisor's `record_activity` already uses `<`. The insert branch of `register_probed_ssh_host`
-  (:3341) bails with a string for an already-claimed identity while the converge branch returns the typed
-  `IdentityClaimed`, so the same situation is a 409 on one path and a 500 on the other. Fix: swap the two fields with a
-  test on the probe path; change the `DO UPDATE` predicate to `<`; add a typed variant carrying identity and owner only
-  and map it to Conflict in `error_kind`. Fence: do not invent a host id where registration failed before creating one.
 - **Relay diagnostics and redaction.** `A1-C11`, `A1-C8`, `A1-C19`, `A1-C6`. Medium to low, trivial. The relay's only
   warn line for a failed upcall (agent_relay.rs:637-647) asserts the helm "did not answer in time" with a budget field
   for three endings where no budget elapsed. `list_sessions` (helm client.rs:2547) is the one wrong-reply site still
