@@ -319,12 +319,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **DECRQSS answered twice.** `A7-C5`. High, trivial. The vendored xterm.js registers a DCS `$ q` handler that replies,
-  and terminal.js has no `registerDcsHandler` at all (only the CSI `$p` `swallowDecrqm` pair at terminal.js:4099), so
-  the browser's reply is typed into the pane as an ESC-prefixed keystroke sequence, the same shape as the recorded
-  "stray y on every vim launch" bug. Fix: register a DCS handler for `{intermediates:"$", final:"q"}` returning true,
-  mirroring `swallowDecrqm`, and correct query_strip.rs's "exact set answered by tmux" sentence to name the browser-side
-  swallow as the other half of the policy.
 - **NSS lookup with no time bound.** `A3-C18`. High, small. `launch.rs:243` spawns `getent passwd <euid>` with a plain
   `.output().await`, no timeout and no `kill_on_drop`, inside the caller's lifecycle claim and admission slot, so a
   wedged NSS backend hangs every launch and tab open. Fix: wrap the child in `tokio::time::timeout` with
