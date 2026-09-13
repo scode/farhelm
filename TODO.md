@@ -312,13 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Provisioning sha256sum with backslash paths.** `A2-C1`, `A2-C2`. Medium, trivial. Both the post-upload digest check
-  (provisioning/backend.rs:661-670) and the metadata probe (:465-490) pass the path as an argument, so GNU coreutils
-  escapes the line and prefixes `\`, and the parse fails as a bogus "digest mismatch" or "malformed output" on any home
-  directory containing a backslash. `install.sh`'s `sha256_of` documents this quirk and feeds stdin. Fix:
-  `sha256sum <
-  path` in both; the existing whitespace parser keeps working with the literal `-`. Fence: one
-  verification for both; a refusal is not acceptance of bad bytes; no general path restriction.
 - **Installer umask and lock hygiene.** `A2-C7`, `A2-S5`, `A2-S2`. Medium, trivial. `mkdir -p "$INSTALL_DIR"`
   (install.sh:806-819) chmods only the leaf, so under `umask 000` a freshly created `$HOME/.local` is 0777 and another
   account can replace the `bin` entry the leaf chmod was meant to protect; the macOS bundle tree (:1099, :1139) and the

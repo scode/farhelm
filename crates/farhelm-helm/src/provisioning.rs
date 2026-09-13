@@ -3201,8 +3201,19 @@ mod tests {
         let target = ProvisioningTarget::Ssh {
             destination: "scripted.example".to_string(),
         };
-        let absent = ScriptLauncher::new(["exit 44".to_string()]);
+        let digest = "a".repeat(64);
+        let passing = ScriptLauncher::new([format!("printf '{digest}  -\\n755\\n'")]);
         let mut backend = test_system_backend(root.path());
+        backend.launcher = passing;
+        let metadata = backend
+            .metadata_on_target(&target, Path::new("/home/a\\b payload"))
+            .await
+            .expect("stdin-form checksum output should parse")
+            .expect("the scripted file should exist");
+        assert_eq!(metadata.hash, digest);
+
+        let absent = ScriptLauncher::new(["exit 44".to_string()]);
+        backend = test_system_backend(root.path());
         backend.launcher = absent;
         assert!(
             backend
@@ -3220,6 +3231,20 @@ mod tests {
             .await
             .expect_err("hash failures are not absence");
         assert!(error.rendered().contains("sha256sum missing"));
+    }
+
+    /// Remote checksum commands keep filenames out of `sha256sum`'s output,
+    /// because GNU coreutils escapes backslashes in argument-based output.
+    /// The redirection operand still needs shell quoting for spaces and
+    /// backslashes, so both forms are part of this command contract.
+    #[farhelm_testtrace::test]
+    fn remote_sha256sum_uses_quoted_stdin_redirection() {
+        for (path, quoted) in [("/tmp/a b", "'/tmp/a b'"), ("/tmp/a\\b", "'/tmp/a\\b'")] {
+            assert_eq!(
+                remote_sha256sum(&shell_path(Path::new(path)).unwrap()),
+                format!("sha256sum < {quoted}")
+            );
+        }
     }
 
     /// Local convergence streams hashes, installs one immutable payload

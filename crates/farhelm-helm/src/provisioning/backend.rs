@@ -460,12 +460,17 @@ impl SystemBackend {
             },
             ProvisioningTarget::Ssh { .. } => {
                 let path = shell_path(path)?;
+                // Read the file through stdin. GNU coreutils escapes a
+                // backslash or newline in a filename in its output, so
+                // passing the path as an argument would corrupt the digest
+                // parser; this follows install.sh's sha256_of convention.
                 let output = self
                     .run_shell(
                         target,
                         &format!(
                             "if [ ! -e {path} ]; then exit 44; fi; \
-                             sha256sum -- {path} && stat -c '%a' -- {path}"
+                             {} && stat -c '%a' -- {path}",
+                            remote_sha256sum(&path)
                         ),
                         COMMAND_TIMEOUT,
                     )
@@ -651,14 +656,17 @@ impl SystemBackend {
             } => {
                 async {
                     self.sftp_put(ssh_destination, source, temporary).await?;
+                    // Keep the checksum input on stdin. GNU coreutils escapes
+                    // backslashes and newlines in argument-based output; the
+                    // stdin form follows install.sh's sha256_of convention.
                     self.require_shell(
                         target,
                         &format!(
-                            "actual=$(sha256sum -- {}) || exit; \
+                            "actual=$({}) || exit; \
                              [ \"${{actual%% *}}\" = {} ] || {{ \
                                printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
                              }}; chmod {mode:o} -- {} && mv -f -- {} {}",
-                            shell_path(temporary)?,
+                            remote_sha256sum(&shell_path(temporary)?),
                             shell_words::quote(source_hash),
                             shell_path(temporary)?,
                             shell_path(temporary)?,
@@ -1626,6 +1634,12 @@ impl ProvisioningBackend for SystemBackend {
 /// SSH's text command boundary without changing meaning.
 pub(super) fn shell_path(path: &Path) -> Result<String, BackendFailure> {
     Ok(shell_words::quote(&path_text(path)?).into_owned())
+}
+
+/// Build a remote checksum command whose filename is the shell redirection
+/// operand rather than a `sha256sum` argument.
+pub(super) fn remote_sha256sum(path: &str) -> String {
+    format!("sha256sum < {path}")
 }
 
 /// Preserve a path exactly at every text-only SSH, registry, and systemd
