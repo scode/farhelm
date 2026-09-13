@@ -394,11 +394,6 @@ is safe. Each is its own review unit.
   incumbent; today's top rungs are additive, so the incumbent survives by luck. Fix: a `may_migrate` or read-only
   distinction on `open`, `false` from `show` or the token lock taken first, and corrected module docs. Fence: a
   mixed-version workflow item; do not declare incumbent breakage without an actual destructive crossed migration.
-- **Harness environment mutation.** `A4-T7`. Low, small, medium risk. `exposeHarnessDeviceSecret`
-  (e2e/tests/helpers/device-auth.ts:63-65) assigns into `process.env` from a test-body path, against the standing rule
-  in `.agents/test-authoring.md`. Fix: drop the env channel and read only the persisted storage state, after confirming
-  a clean-tree run supplies it before config load. Fence: preserve global-setup, config-load, and worker-refresh
-  ordering rather than deleting the fallback blind.
 
 ### Later: low confidence or needs an argument first
 
