@@ -22,11 +22,20 @@ interface StackInfo {
   state: string;
 }
 
+/**
+ * Where the stack script published what it booted. The ordinary suite's
+ * `start-stack.sh` writes `e2e/.stack-info.json`; a config that boots a
+ * different stack (the README hero capture, `readme-hero.config.ts`) names
+ * its own file through this variable so the two never read each other's
+ * state directory. That config publishes the variable into the runner's
+ * own environment at load time, which is where this setup reads it.
+ */
+export const STACK_INFO_ENV = "FARHELM_E2E_STACK_INFO";
+
 /** Mint one device identity and persist it before any browser worker starts. */
 export default async function globalSetup(config: FullConfig) {
-  const info = JSON.parse(
-    await readFile(path.join(__dirname, ".stack-info.json"), "utf8"),
-  ) as StackInfo;
+  const infoPath = process.env[STACK_INFO_ENV] || path.join(__dirname, ".stack-info.json");
+  const info = JSON.parse(await readFile(infoPath, "utf8")) as StackInfo;
   const { stdout } = await run(info.farhelm, [
     "helm",
     "token",

@@ -350,6 +350,16 @@ the current tree, however recent it looks.
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
 what a bridge-death line looks like. Start there before investigating any "the desktop UI is broken" report.
 
+# README hero screenshot
+
+The image at the top of README.md is a real capture of the web UI against a staged fleet, governed by
+`docs/readme-hero/SPEC.md`. "Refresh the README screenshot" means exactly: run `scripts/readme-screenshot.sh`, look at
+the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the one-line README change that leaves behind.
+The design (`docs/readme-hero/scenario.json5` and the transcripts beside it) changes only when the maintainer asks for a
+different picture. The publish script is the only thing that pushes the `readme-assets` branch; never run that push by
+hand, and never commit the PNG on main. Neither script is a gate: nothing in CI runs or checks the image. Changing the
+publish script means running its `--self-test`, which is its whole validation and needs no network.
+
 # The live install is off-limits
 
 This machine runs the maintainer's production Farhelm: the released `farhelm` binary at `~/.local/bin/farhelm` (put
