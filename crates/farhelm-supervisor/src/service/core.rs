@@ -3408,6 +3408,11 @@ pub struct Supervisor {
     /// this struct's docs state: `helm_link_for_session` releases
     /// `attachments` before taking this, and nothing else takes both.
     pub(crate) helm_links: Mutex<Vec<Arc<super::agent_relay::HelmLink>>>,
+    /// Test-only direct routing for a synthetic helm link; production
+    /// routing remains attachment-based so a profile lookup asks the helm
+    /// that actually owns the parent session.
+    #[cfg(test)]
+    pub(crate) test_helm_links: Mutex<HashMap<String, Arc<super::agent_relay::HelmLink>>>,
     /// Per-terminal barriers for provisional opens and unfinished shutdowns.
     ///
     /// Teardown publishes a `Reaping` entry while it still holds
@@ -3792,6 +3797,13 @@ async fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
 }
 
 impl Supervisor {
+    /// Hold an intent key so handler tests can park a create after its
+    /// lifecycle claim and inspect that claim at the create boundary.
+    #[cfg(test)]
+    pub(crate) async fn claim_intent_for_test(&self, key: &str) -> KeyedGuard {
+        self.intent_locks.claim(key).await
+    }
+
     /// Read immediate child directories on this supervisor's filesystem.
     ///
     /// This is deliberately a nonrecursive browse operation. It expands `~`
@@ -4280,6 +4292,8 @@ impl Supervisor {
             sessions: Mutex::new(sessions),
             attachments: Mutex::new(HashMap::new()),
             helm_links: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            test_helm_links: Mutex::new(HashMap::new()),
             output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
             sinks: Arc::new(std::sync::Mutex::new(Default::default())),
             uploads: Mutex::new(HashMap::new()),

@@ -325,47 +325,7 @@ async fn resolve_create_selector(
                     "profile_name is available only to a session-authenticated spawn".to_string(),
                 ));
             };
-            match sup
-                .relay_agent_request(
-                    asking_session.clone(),
-                    AgentVerb::ResolveProfile { name },
-                    None,
-                )
-                .await
-            {
-                AgentOutcome::Ok {
-                    reply:
-                        AgentReply::ResolvedProfile {
-                            invocation,
-                            agent_kind,
-                            resume_template,
-                            source_profile,
-                        },
-                } => Ok(CreateMode::Raw {
-                    invocation,
-                    agent_kind: Some(agent_kind),
-                    resume_template,
-                    source_profile: Some(crate::store::ProfileSnapshot {
-                        id: source_profile.id,
-                        name: source_profile.name,
-                    }),
-                    launch: None,
-                }),
-                AgentOutcome::Ok { reply } => Err((
-                    ErrorKind::Internal,
-                    format!("the attached helm returned an unexpected {reply:?} reply"),
-                )),
-                AgentOutcome::Err {
-                    kind: ErrorKind::Unavailable,
-                    message,
-                } if message.starts_with(NO_HELM_ATTACHED) => Err((
-                    ErrorKind::Unavailable,
-                    "an attached helm is needed to resolve a profile name; omit --agent to \
-                     reuse the asking session's agent"
-                        .to_string(),
-                )),
-                AgentOutcome::Err { kind, message } => Err((kind, message)),
-            }
+            resolve_restricted_profile(sup, asking_session, name).await
         }
         CreateSelector::Derived => {
             let CreateAdmission::Spawn { asking_session } = admission else {
@@ -415,6 +375,62 @@ async fn resolve_create_selector(
     }
 }
 
+/// Resolve a named profile through the attached helm while no parent
+/// lifecycle claim is held.
+///
+/// Restricted creation takes the parent claim only after this upcall. The
+/// claim still encloses the credential re-check and durable create, which is
+/// the serialization boundary with deletion; keeping the helm round trip
+/// outside it prevents a slow profile catalog from delaying parent lifecycle
+/// operations.
+async fn resolve_restricted_profile(
+    sup: &Arc<Supervisor>,
+    asking_session: &str,
+    name: String,
+) -> Result<CreateMode, (ErrorKind, String)> {
+    match sup
+        .relay_agent_request(
+            asking_session.to_string(),
+            AgentVerb::ResolveProfile { name },
+            None,
+        )
+        .await
+    {
+        AgentOutcome::Ok {
+            reply:
+                AgentReply::ResolvedProfile {
+                    invocation,
+                    agent_kind,
+                    resume_template,
+                    source_profile,
+                },
+        } => Ok(CreateMode::Raw {
+            invocation,
+            agent_kind: Some(agent_kind),
+            resume_template,
+            source_profile: Some(crate::store::ProfileSnapshot {
+                id: source_profile.id,
+                name: source_profile.name,
+            }),
+            launch: None,
+        }),
+        AgentOutcome::Ok { reply } => Err((
+            ErrorKind::Internal,
+            format!("the attached helm returned an unexpected {reply:?} reply"),
+        )),
+        AgentOutcome::Err {
+            kind: ErrorKind::Unavailable,
+            message,
+        } if message.starts_with(NO_HELM_ATTACHED) => Err((
+            ErrorKind::Unavailable,
+            "an attached helm is needed to resolve a profile name; omit --agent to \
+             reuse the asking session's agent"
+                .to_string(),
+        )),
+        AgentOutcome::Err { kind, message } => Err((kind, message)),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_create_session(
     sup: &Arc<Supervisor>,
@@ -438,6 +454,7 @@ async fn handle_create_session(
     resume_template: Option<Vec<String>>,
     source_profile: Option<WireProfileSnapshot>,
     launch: Option<LaunchSelection>,
+    resolved_mode: Option<CreateMode>,
 ) {
     let selector = match create_mode(
         invocation,
@@ -501,7 +518,12 @@ async fn handle_create_session(
         .await;
         return;
     }
-    let mode = match resolve_create_selector(sup, &admission, selector).await {
+    let mode = if let Some(mode) = resolved_mode {
+        Ok(mode)
+    } else {
+        resolve_create_selector(sup, &admission, selector).await
+    };
+    let mode = match mode {
         Ok(mode) => mode,
         Err((kind, message)) => {
             send_reply(
@@ -2681,6 +2703,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 resume_template,
                 source_profile,
                 launch,
+                None,
             )
             .await
         }
@@ -2888,11 +2911,11 @@ pub(crate) async fn handle_restricted_control(
             source_profile,
             launch,
         } => {
-            // The hello check admits the connection; this check authorizes
-            // each create. Holding the parent's lifecycle claim across the
-            // create serializes it with deletion, so an authenticated peer
-            // cannot outlive the session whose authority it is using.
-            let _parent_lifecycle = sup.lifecycle_locks.claim(&auth.session_id).await;
+            // Reject an invalid credential before asking the attached helm
+            // anything. This check is intentionally unclaimed: it prevents
+            // an unauthenticated peer from causing an upcall, while the
+            // second check below is still needed to serialize the accepted
+            // create with deletion.
             match sup
                 .store
                 .authenticates_session(&auth.session_id, &auth.token)
@@ -2945,6 +2968,85 @@ pub(crate) async fn handle_restricted_control(
                 )
                 .await;
                 return;
+            }
+            // Profile lookup is an attached-helm round trip and must not
+            // delay stop, delete, or another lifecycle operation on the
+            // parent. The claim below still covers the credential check and
+            // create, which is the serialization boundary with deletion.
+            let resolved_mode = if invocation.is_none()
+                && profile_name.is_some()
+                && agent_kind.is_none()
+                && resume_template.is_none()
+                && source_profile.is_none()
+                && launch.is_none()
+            {
+                match resolve_restricted_profile(
+                    sup,
+                    &auth.session_id,
+                    profile_name.clone().expect("profile name checked above"),
+                )
+                .await
+                {
+                    Ok(mode) => Some(mode),
+                    Err((kind, message)) => {
+                        send_reply(
+                            tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message,
+                                kind,
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+            // The first check above prevents an unauthenticated peer from
+            // reaching the helm. The hello check admits the connection, but
+            // credentials can be revoked after hello; this second check
+            // authorizes this create at the lifecycle boundary. Holding the
+            // parent's claim across it and creation serializes both with
+            // deletion, so an authenticated peer cannot outlive the session
+            // whose authority it is using. The profile round trip stays
+            // outside the claim because it may take several seconds.
+            let _parent_lifecycle = sup.lifecycle_locks.claim(&auth.session_id).await;
+            match sup
+                .store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message:
+                                "the session credential is invalid or its session no longer exists"
+                                    .to_string(),
+                            kind: ErrorKind::Unauthorized,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+                Err(error) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!(
+                                "could not validate the session credential: {error:#}"
+                            ),
+                            kind: ErrorKind::Internal,
+                        },
+                    )
+                    .await;
+                    return;
+                }
             }
             // A session may ask the helm to resolve a name, but it may not
             // assert that an arbitrary invocation came from a trusted
@@ -2999,6 +3101,7 @@ pub(crate) async fn handle_restricted_control(
                 resume_template,
                 source_profile,
                 launch,
+                resolved_mode,
             )
             .await;
         }
@@ -3973,6 +4076,102 @@ mod tests {
         assert!(message.contains("omit --agent"));
         assert!(message.contains("asking session's agent"));
     }
+
+    /// A named restricted create must leave the parent lifecycle lock free
+    /// while the helm resolves the profile, then hold it when the credential
+    /// and durable create path are reached. The synthetic link makes the
+    /// pending upcall an explicit boundary rather than a timing assumption;
+    /// the create-intent seam supplies the second observable boundary.
+    #[farhelm_testtrace::test]
+    async fn restricted_named_create_resolves_before_claiming_parent() {
+        let state = StateDir::new();
+        let create_waiting = Arc::new(tokio::sync::Notify::new());
+        let create_waiting_signal = Arc::clone(&create_waiting);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_intent_waiting: Some(Arc::new(move |_| create_waiting_signal.notify_one())),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let auth = authenticated_parent(&sup, state.path(), "resolve-parent").await;
+        let (helm, mut helm_rx) = sup.register_test_helm_link(&auth.session_id).await;
+        let intent = sup.claim_intent_for_test("resolve-before-claim").await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let create = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let auth = auth.clone();
+            async move {
+                handle_restricted_control(
+                    &sup,
+                    ControlMsg::CreateSession {
+                        req_id: 91,
+                        parent: Some(auth.session_id.clone()),
+                        cwd: state.path().to_string_lossy().into_owned(),
+                        invocation: None,
+                        profile_name: Some("Delayed profile".to_string()),
+                        title: Some("child".to_string()),
+                        cols: 80,
+                        rows: 24,
+                        intent_key: Some("resolve-before-claim".to_string()),
+                        agent_kind: None,
+                        resume_template: None,
+                        source_profile: None,
+                        launch: None,
+                    },
+                    &tx,
+                    &auth,
+                )
+                .await;
+            }
+        });
+        let request = helm_rx.recv().await.expect("profile upcall");
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = serde_json::from_slice(&request.body).expect("decode profile upcall")
+        else {
+            panic!("expected a profile upcall");
+        };
+        assert!(matches!(request, AgentVerb::ResolveProfile { .. }));
+        assert!(
+            !sup.lifecycle_locks.claimed_for_test(&auth.session_id),
+            "the parent claim must not span profile resolution"
+        );
+        helm.complete(
+            req_id,
+            AgentOutcome::Ok {
+                reply: AgentReply::ResolvedProfile {
+                    invocation: "/fixture/delayed-agent".to_string(),
+                    agent_kind: AgentKind::Codex,
+                    resume_template: None,
+                    source_profile: WireProfileSnapshot {
+                        id: "delayed-profile".to_string(),
+                        name: "Delayed profile".to_string(),
+                    },
+                },
+            },
+        )
+        .await;
+        create_waiting.notified().await;
+        assert!(
+            sup.lifecycle_locks.claimed_for_test(&auth.session_id),
+            "the parent claim must cover the credential and create path"
+        );
+        drop(intent);
+        create.await.expect("create task must not panic");
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("create reply").body)
+                .expect("decode create reply");
+        assert!(matches!(
+            reply,
+            ControlMsg::SessionCreated { req_id: 91, .. }
+        ));
+    }
+
     use std::time::Duration;
 
     /// The pre-storage create refusals, driven through the

@@ -544,6 +544,28 @@ impl Supervisor {
         link
     }
 
+    /// Register a synthetic helm link for handler tests without constructing
+    /// a terminal attachment and its subprocess-backed forwarder.
+    #[cfg(test)]
+    pub(crate) async fn register_test_helm_link(
+        &self,
+        session_id: &str,
+    ) -> (Arc<HelmLink>, mpsc::Receiver<Frame>) {
+        let (notify, receiver) = mpsc::channel(8);
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        let link = Arc::new(HelmLink {
+            notify,
+            shutdown,
+            pending: Mutex::new(Pending::default()),
+            next_req: AtomicU64::new(1),
+        });
+        self.test_helm_links
+            .lock()
+            .await
+            .insert(session_id.to_string(), Arc::clone(&link));
+        (link, receiver)
+    }
+
     /// Drop a connection's link from the registry and fail whatever it was
     /// carrying.
     pub(crate) async fn unregister_helm_link(&self, link: &Arc<HelmLink>) {
@@ -585,6 +607,10 @@ impl Supervisor {
     /// bounded by live terminals, links by connected helms — and neither
     /// lock is held across the other.
     pub(crate) async fn helm_link_for_session(&self, session_id: &str) -> Option<Arc<HelmLink>> {
+        #[cfg(test)]
+        if let Some(link) = self.test_helm_links.lock().await.get(session_id) {
+            return Some(Arc::clone(link));
+        }
         let owner = {
             let attachments = self.attachments.lock().await;
             attachments

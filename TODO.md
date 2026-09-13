@@ -444,12 +444,6 @@ is safe. Each is its own review unit.
   Stalled arm and aborts with "no body progress from the client". Fix: arm the deadline immediately before the select in
   the body-not-ready arm instead of at chunk receipt, keeping the empty-chunk fast path. Fence: trace
   `wait_for_credit`'s own re-arming in client.rs first; the magnitude depends on credit waits exceeding 60 s.
-- **Dispatch under the attachments and lifecycle locks.** `A1-C4`. Medium, small to medium, medium risk; one unit per
-  finding. The restricted create arm (handlers.rs:2858) claims the parent's lifecycle lock across a `ResolveProfile`
-  round trip to the helm. Fix: resolve the profile before taking the parent claim, then claim and re-check the
-  credential. Fence: takeover ownership across every chunk; the credential re-check stays under the claim; ordinary
-  unrelated controls must progress; no fair scheduling for hostile local workloads; the shipped helm chunks input at 32
-  KiB so the 8 MiB frame is not an ordinary paste.
 - **Helm-owned default profile.** `A6-S1`. Critical, medium, medium risk. `source_is_newer` (helm store.rs:569) falls
   back to raw `candidate.created_at > stored.created_at` for any cross-host pair, and `replace_host_sessions`
   (:4227-4283) feeds it drain-derived timestamps with no sanity check before writing `remembered_profile`; a remote
