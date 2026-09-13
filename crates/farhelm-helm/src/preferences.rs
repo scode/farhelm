@@ -1,6 +1,7 @@
 //! `GET`/`PUT /api/preferences` — the one client preference the helm
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
-//! last user-selected session, and compact-row choice.
+//! last user-selected session, compact-row choice, and the permissions mode
+//! the last successful structured launch used.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client keeps its own copy, so a browser tab and the desktop
@@ -10,6 +11,15 @@
 //! after authenticating and writes a sparse patch on change; a field a
 //! patch leaves out is untouched, and an explicit `null` clears one.
 //!
+//! `remembered_permissions` is the exception to "every client writes its own
+//! choice": no shipped client ever PUTs it. It is written only by the helm
+//! itself, as a side effect of a successful user-initiated structured
+//! launch (`store::HelmStore::record_create_history_with_paths`), which is
+//! what makes it a fact every client and the spawn path agree on rather
+//! than something any one client claims happened. The route still accepts
+//! it on `PUT` for wire uniformity with the other three fields (and so a
+//! test fixture can plant a value directly), and validates it the same way.
+//!
 //! ## What the handlers check, and what they leave alone
 //!
 //! `list_sort` is validated against the same vocabulary `GET
@@ -17,6 +27,8 @@
 //! reason that route refuses an unknown word: a preference the list read
 //! would then 400 on is a list that fails to load until somebody finds
 //! the stored word, and refusing it at the write is the cheap place.
+//! `remembered_permissions` gets the identical treatment against its own
+//! smaller vocabulary ([`store::is_known_remembered_permissions_word`]).
 //! `last_selected` is NOT checked against the fleet — a session can be
 //! deleted after the write, so the reader has to tolerate a stale id
 //! regardless (the UI's auto-select falls back to the newest session), and
@@ -82,6 +94,17 @@ pub(crate) async fn put_preferences(
             message: format!(
                 "{sort:?} is not a session list order; this helm serves created, activity, and \
                  title"
+            ),
+        }));
+    }
+    if let Some(Some(word)) = &patch.remembered_permissions
+        && !store::is_known_remembered_permissions_word(word)
+    {
+        return http_error(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: format!(
+                "{word:?} is not a remembered structured-launch permissions mode; this helm \
+                 serves yolo"
             ),
         }));
     }
@@ -211,6 +234,7 @@ mod tests {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("session-7".to_string()),
                 compact: Some(true),
+                remembered_permissions: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -251,6 +275,39 @@ mod tests {
         );
         assert_eq!(read(&harness).await.compact, Some(true));
 
+        // `remembered_permissions` is validated the same way `list_sort` is,
+        // against its own smaller vocabulary: a word this helm does not
+        // serve is a 400 that leaves the row untouched, and the one word it
+        // does serve is accepted like any other field.
+        let response = harness
+            .router()
+            .oneshot(put(
+                serde_json::json!({ "remembered_permissions": "always" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "a permissions word this helm does not serve is refused at the write"
+        );
+        assert_eq!(
+            read(&harness).await.remembered_permissions,
+            None,
+            "a refused permissions patch leaves the row unchanged"
+        );
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "remembered_permissions": "yolo" })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await.remembered_permissions.as_deref(),
+            Some("yolo"),
+            "the one word this helm serves is accepted"
+        );
+
         let response = harness
             .router()
             .oneshot(put(serde_json::json!({ "last_selected": null })))
@@ -263,6 +320,7 @@ mod tests {
                 list_sort: Some("title".to_string()),
                 last_selected: None,
                 compact: Some(true),
+                remembered_permissions: Some("yolo".to_string()),
             },
             "an explicit null clears the field it names and only that one"
         );
@@ -292,6 +350,23 @@ mod tests {
             read(&harness).await.last_selected.as_deref(),
             Some(at_limit.as_str()),
             "the refused oversize patch left the stored value alone"
+        );
+
+        let response = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "remembered_permissions": null })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            read(&harness).await.remembered_permissions,
+            None,
+            "null clears the remembered permissions mode like any other field"
+        );
+        assert_eq!(
+            read(&harness).await.last_selected.as_deref(),
+            Some(at_limit.as_str()),
+            "clearing remembered_permissions must not disturb an unrelated field"
         );
 
         let response = harness

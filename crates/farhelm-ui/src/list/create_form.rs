@@ -19,6 +19,7 @@ use crate::{
     ProfileExistence, Session,
 };
 
+use super::SharedPreferences;
 use super::shared::{
     HostOption, OpenHost, effective_create_host, enrich_created_session, matching_host_option,
 };
@@ -98,6 +99,34 @@ fn effort_value(effort: LaunchEffort) -> &'static str {
     }
 }
 
+/// Decode the helm's remembered `remembered_permissions` word into the
+/// composer's typed choice, for a dialog mount that has nothing else to
+/// seed it from (SPEC.md's launch-composer carve-out: the last SUCCESSFUL
+/// structured launch's permissions mode is the one preselected choice a
+/// fresh "New" open carries over).
+///
+/// Deliberately preferences-only, not preferences-and-prefill: a
+/// clone/replace prefill's own reseed effect always wins when one is
+/// present (decided alongside this feature — a prefill is a more specific,
+/// more recent intent than the helm-wide memory), and that precedence is a
+/// one-line guard at each of this function's two call sites rather than
+/// logic folded in here. There is no decodable behavior in "ignore the
+/// memory when a prefill exists" worth unit-testing on its own; what IS
+/// worth testing, and what this function isolates, is the word-to-enum
+/// decode — including tolerating a word this build does not recognize,
+/// mirroring `list::view::decoded_sort`'s tolerance for an unrecognized
+/// `list_sort`. The helm's own store already refuses to store anything but
+/// `"yolo"` (`is_known_remembered_permissions_word` on the helm side), so
+/// this fallback is defense in depth against a stale cached reply or an
+/// older UI build talking to a newer helm, not a path this build's own
+/// writes can trigger.
+fn initial_structured_permissions(preferences: &api::Preferences) -> Option<LaunchPermission> {
+    match preferences.remembered_permissions.as_deref() {
+        Some("yolo") => Some(LaunchPermission::Yolo),
+        _ => None,
+    }
+}
+
 /// Apply a clicked or keyboard-selected search result without launching.
 ///
 /// Search is only a picker. Keeping its result application in one helper
@@ -125,6 +154,7 @@ fn apply_composer_search_result(
     mut custom_model_harness: Signal<Option<LaunchHarness>>,
     mut structured_effort: Signal<Option<LaunchEffort>>,
     mut structured_permissions: Signal<Option<LaunchPermission>>,
+    mut structured_permissions_is_explicit: Signal<bool>,
     mut composer_reset_reason: Signal<Option<String>>,
     catalog: &[crate::api::LaunchCatalogModel],
     mut intent_key: Signal<Option<(String, IntentBinding)>>,
@@ -227,6 +257,10 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            // A search-applied recent replaces the whole draft with a real
+            // choice, not a passive default — see
+            // `structured_permissions_is_explicit`'s own doc.
+            structured_permissions_is_explicit.set(true);
             custom_model_harness.set(owner);
             reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &entry.cwd);
         }
@@ -1210,6 +1244,14 @@ pub(super) fn CreateSessionForm(
     on_created: EventHandler<Session>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    // The helm-wide preference row (`PreferencesGate`'s seed): read here
+    // only to seed a fresh no-prefill dialog's permissions segment and to
+    // answer "reset choices" — see `initial_structured_permissions`. This
+    // form never WRITES through this signal; the helm sets
+    // `remembered_permissions` as a side effect of a successful launch, and
+    // `list::view`'s `on_created` handler mirrors this client's own result
+    // into it afterward.
+    let preferences = use_context::<SharedPreferences>();
     let launch_catalog_base = base.clone();
     let launch_catalog = use_resource(move || {
         let base = launch_catalog_base.clone();
@@ -1241,7 +1283,37 @@ pub(super) fn CreateSessionForm(
     let mut structured_model_edited = use_signal(|| false);
     let mut custom_model_harness = use_signal(|| None::<LaunchHarness>);
     let mut structured_effort = use_signal(|| None::<LaunchEffort>);
-    let mut structured_permissions = use_signal(|| None::<LaunchPermission>);
+    // Seeded from the helm's remembered permissions mode ONLY when this
+    // mount has no prefill at all (SPEC.md's launch-composer carve-out): a
+    // clone/replace prefill's own reseed effect below (`prefill.launch`)
+    // unconditionally overwrites this seed the moment it runs, so a
+    // prefilled mount briefly starting at `None` here is never visible —
+    // see `initial_structured_permissions`'s own doc for why the precedence
+    // is a call-site guard rather than logic inside that function.
+    let mut structured_permissions = use_signal(|| {
+        if prefill.is_none() {
+            initial_structured_permissions(&preferences.0.peek())
+        } else {
+            None
+        }
+    });
+    // Whether `structured_permissions`'s current value is a real choice
+    // (an explicit click, a restored prefill, or an applied recent/search
+    // row) rather than the passive memory seed above or "reset choices"
+    // re-applying it. `recent_filter` below reads this, not
+    // `structured_permissions` directly: `ComposerFilter`'s whole contract
+    // is that an absent dimension excludes nothing (see that type's own
+    // doc), and a memory-seeded permissions value the person never asked
+    // for must not start silently hiding an otherwise-relevant recent
+    // whose OWN permissions choice happens to differ — the exact failure
+    // this flag exists to prevent turned up as a genuine recent-slot
+    // regression while validating this feature (a fixture recent with
+    // `permissions: null` vanished once an earlier launch in the same
+    // browser session had remembered `"yolo"`). Every other seeded field
+    // (harness/model/effort) has no passive-seed case to distinguish from
+    // — SPEC.md keeps them unpreselected on a fresh open — so only
+    // permissions needs this second signal.
+    let mut structured_permissions_is_explicit = use_signal(|| false);
     // Compatibility clears are intentional, but defaults must never make an
     // earlier explicit choice vanish without telling the person what changed.
     let mut composer_reset_reason = use_signal(|| None::<String>);
@@ -1551,6 +1623,10 @@ pub(super) fn CreateSessionForm(
                     custom_model_harness.set(launch.model.as_ref().map(|_| launch.harness));
                     structured_effort.set(launch.effort);
                     structured_permissions.set(launch.permissions);
+                    // A restored structured snapshot is a real choice the
+                    // source session made, not a passive default — it must
+                    // filter recents exactly as it always has.
+                    structured_permissions_is_explicit.set(true);
                 } else {
                     creation_surface.set(CreationSurface::Legacy);
                     structured_harness.set(None);
@@ -1560,6 +1636,7 @@ pub(super) fn CreateSessionForm(
                     custom_model_harness.set(None);
                     structured_effort.set(None);
                     structured_permissions.set(None);
+                    structured_permissions_is_explicit.set(true);
                 }
                 // A prefill is as fresh an intent as any manual edit —
                 // see the field `oninput` handlers below for both edges
@@ -1744,7 +1821,14 @@ pub(super) fn CreateSessionForm(
         harness: structured_harness(),
         model: structured_model(),
         effort: structured_effort(),
-        permissions: structured_permissions(),
+        // Not a bare `structured_permissions()` read: see
+        // `structured_permissions_is_explicit`'s own doc for why the
+        // passive memory seed must not act as a filter dimension.
+        permissions: if structured_permissions_is_explicit() {
+            structured_permissions()
+        } else {
+            None
+        },
     };
     let recent_launches =
         crate::launch_composer::matching_recents(&recent_history, &recent_filter, Some(&cwd()))
@@ -1882,6 +1966,10 @@ pub(super) fn CreateSessionForm(
             }));
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            // Applying a recent is a deliberate whole-draft replacement, not
+            // a passive default — its permissions choice must filter
+            // further recents exactly as it always has.
+            structured_permissions_is_explicit.set(true);
             invalidate_directory_browse(
                 browse_generation,
                 browse_request,
@@ -2649,7 +2737,20 @@ pub(super) fn CreateSessionForm(
                             structured_model.set(None);
                             custom_model_harness.set(None);
                             structured_effort.set(None);
-                            structured_permissions.set(None);
+                            // Reset returns the segment to the REMEMBERED
+                            // value, not to "default" — it does not clear
+                            // the memory itself, only re-applies it (SPEC.md's
+                            // launch-composer carve-out). A fresh `peek` here
+                            // rather than the value this dialog seeded from,
+                            // since "reset" means "as if freshly opened now".
+                            structured_permissions
+                                .set(initial_structured_permissions(&preferences.0.peek()));
+                            // Back to a passive seed, exactly like a fresh
+                            // open: reset does not turn the remembered value
+                            // into a deliberate choice, so it must not start
+                            // filtering recents either (see
+                            // `structured_permissions_is_explicit`).
+                            structured_permissions_is_explicit.set(false);
                             composer_reset_reason.set(None);
                             promote_fetched_history_snapshot(
                                 offered_history, create_target, fetched_history,
@@ -2799,6 +2900,7 @@ pub(super) fn CreateSessionForm(
                                             custom_model_harness,
                                             structured_effort,
                                             structured_permissions,
+                                            structured_permissions_is_explicit,
                                             composer_reset_reason,
                                             &catalog,
                                             intent_key,
@@ -2898,7 +3000,8 @@ pub(super) fn CreateSessionForm(
                                                                 structured_harness, structured_model,
                                                                 structured_model_raw_seed, structured_model_edited,
                                                                 custom_model_harness, structured_effort,
-                                                                structured_permissions, composer_reset_reason,
+                                                                structured_permissions, structured_permissions_is_explicit,
+                                                                composer_reset_reason,
                                                                 &catalog, intent_key,
                                                             );
                                                             if let Some(path) = browse_path {
@@ -3525,7 +3628,9 @@ pub(super) fn CreateSessionForm(
                                         promote_fetched_history_snapshot(
                                             offered_history, create_target, fetched_history,
                                         );
-                                        structured_permissions.set(None); intent_key.set(None);
+                                        structured_permissions.set(None);
+                                        structured_permissions_is_explicit.set(true);
+                                        intent_key.set(None);
                                     },
                                     "default"
                                 }
@@ -3537,7 +3642,9 @@ pub(super) fn CreateSessionForm(
                                         promote_fetched_history_snapshot(
                                             offered_history, create_target, fetched_history,
                                         );
-                                        structured_permissions.set(Some(LaunchPermission::Yolo)); intent_key.set(None);
+                                        structured_permissions.set(Some(LaunchPermission::Yolo));
+                                        structured_permissions_is_explicit.set(true);
+                                        intent_key.set(None);
                                     },
                                     "yolo"
                                 }
@@ -3992,6 +4099,32 @@ pub(super) fn CreateSessionForm(
 
 #[cfg(test)]
 mod tests {
+    /// The helm's remembered permissions word seeds the composer's segment
+    /// only when it is a mode this build knows: `"yolo"` preselects yolo,
+    /// nothing remembered preselects default, and a word a newer helm might
+    /// store reads as default rather than as an error — the same tolerance
+    /// the list-order preference has, for the same reason (the row outlives
+    /// the build that validated it).
+    #[test]
+    fn the_remembered_permissions_word_seeds_only_a_mode_this_build_knows() {
+        let with = |word: Option<&str>| super::api::Preferences {
+            list_sort: None,
+            last_selected: None,
+            compact: None,
+            remembered_permissions: word.map(str::to_string),
+        };
+        assert_eq!(
+            super::initial_structured_permissions(&with(Some("yolo"))),
+            Some(super::LaunchPermission::Yolo)
+        );
+        assert_eq!(super::initial_structured_permissions(&with(None)), None);
+        assert_eq!(
+            super::initial_structured_permissions(&with(Some("supervised"))),
+            None,
+            "a word this build does not know must read as nothing remembered"
+        );
+    }
+
     use super::super::row::row_specimen;
     use super::super::shared::tests::{open, option};
     use super::*;
