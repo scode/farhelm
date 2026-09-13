@@ -32,3 +32,4 @@ nextest farhelm::e2e replay_marker::a_tmux_pause_catch_up_replays_without_a_mark
 nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment  # forced-pause-client-parsing
 nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane  # forced-pause-client-parsing
 nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state  # forced-pause-client-parsing
+playwright profiles.spec.ts profile CRUD round-trips from the app-bar popup to the helm  # profile-crud-edit-timeout
