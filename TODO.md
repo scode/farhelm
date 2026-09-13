@@ -312,12 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **NSS lookup with no time bound.** `A3-C18`. High, small. `launch.rs:243` spawns `getent passwd <euid>` with a plain
-  `.output().await`, no timeout and no `kill_on_drop`, inside the caller's lifecycle claim and admission slot, so a
-  wedged NSS backend hangs every launch and tab open. Fix: wrap the child in `tokio::time::timeout` with
-  `kill_on_drop(true)`, treat a timeout as "rung one could not answer", bound the `getpwuid_r` await too, and fall
-  through to `/bin/sh`. Fence: a `spawn_blocking` NSS call cannot truly be cancelled, so bound and fall through rather
-  than claim cancellation.
 - **Accept loops under descriptor pressure.** `A5-C6`, `A4-C9`. High and medium, small. The supervisor's accept loop
   (service/core.rs:5154-5166) retries any accept error immediately with no backoff, so `EMFILE` becomes a busy loop and
   log flood on the task the ticker shares. The helm's token-control accept loop (token_control.rs:338-346) classifies
