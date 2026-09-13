@@ -1252,7 +1252,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   conversation-identity capture. OpenCode is a structured harness only: its release catalog holds four Zen model IDs,
   requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its
   empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
-  provider-specific effort or conversation lifecycle contract.
+  provider-specific effort or conversation lifecycle contract. Resolving `SourceProfile` snapshots while draining remote
+  sessions discovers catalog state only: those observations never select the helm-wide remembered default. A successful
+  profile-backed create through the user's REST surface alone writes that default; agent-relay creates and clones do
+  not, so an agent's work cannot change the profile the user's next dialog suggests.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

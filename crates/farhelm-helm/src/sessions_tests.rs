@@ -5652,6 +5652,11 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
     assert_eq!(status, axum::http::StatusCode::OK, "{created}");
     let created: serde_json::Value = serde_json::from_str(&created).unwrap();
     assert_eq!(created["source_profile"]["existence"], "present");
+    assert_eq!(
+        harness.store.remembered_profile().await.unwrap().as_deref(),
+        Some("builtin-codex"),
+        "a profile selected through the REST create surface becomes the user's default"
+    );
 
     let profile_id = profile.id.clone();
     profile.name = "claude-renamed".to_string();

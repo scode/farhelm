@@ -432,9 +432,9 @@ pub struct CachedSlice {
 /// What one [`HelmStore::replace_host_sessions`] call did.
 ///
 /// Two facts a wholesale replacement can only report from inside its own
-/// transaction, and both are consumed by the connection actor: the ids it
-/// had to drop because another host already claims them, and whether the
-/// commit left this host's slice of the cache DIFFERENT than it found it.
+/// transaction: the ids it had to drop because another host already claims
+/// them, and whether the commit left this host's cache slice different from
+/// what it found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CacheReplacement {
     /// Session ids another host's cache already claims, so this refresh's
@@ -446,23 +446,7 @@ pub struct CacheReplacement {
     /// See [`HelmStore::replace_host_sessions`] for why the answer belongs
     /// to the write rather than to a comparison made afterwards.
     pub changed: bool,
-    /// Whether convergence changed the profile a fresh create dialog sees.
-    /// Provenance-only advances stay internal and do not wake clients.
-    pub default_changed: bool,
 }
-
-/// Remembered-default columns needed to compare one source observation:
-/// `(profile_id, source_host_id, source_creation_seq, source_created_at, source_session_id)`.
-///
-/// The alias keeps the SQL projection's positional contract visible without
-/// making each query repeat an opaque tuple type.
-type RememberedProfileRow = (
-    String,
-    Option<HostId>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-);
 
 /// The five SQLite columns needed to reconstruct and revalidate one profile.
 type ProfileColumns = (String, String, String, String, Option<String>);
@@ -543,47 +527,6 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
         agent_kind,
         resume_template,
     })
-}
-
-/// One observation's ordering fields, borrowed while a store transaction compares them.
-///
-/// A sequence is meaningful only within `host`; `created_at` and `session_id`
-/// remain the fleet-wide fallback when either source lacks that shared domain.
-struct ProfileSource<'a> {
-    host: Option<HostId>,
-    sequence: Option<u64>,
-    created_at: i64,
-    session_id: &'a str,
-}
-
-/// Compare provenance without treating independent supervisor sequences as global time.
-///
-/// A missing sequence marks an older peer. In that mixed-version case the
-/// established timestamp/id rule remains the only ordering both sides can
-/// understand, so rollout does not make an old observation permanently
-/// incomparable with a new one.
-///
-/// `false` means the candidate did not advance the stored source. That covers
-/// both equality and rejection as older; callers must not interpret it as
-/// proof that the two provenance records identify the same observation.
-fn source_is_newer(candidate: ProfileSource<'_>, stored: ProfileSource<'_>) -> bool {
-    match (
-        candidate.host,
-        candidate.sequence,
-        stored.host,
-        stored.sequence,
-    ) {
-        (Some(candidate_host), Some(candidate), Some(stored_host), Some(stored))
-            if candidate_host == stored_host =>
-        {
-            candidate > stored
-        }
-        _ => {
-            candidate.created_at > stored.created_at
-                || (candidate.created_at == stored.created_at
-                    && candidate.session_id < stored.session_id)
-        }
-    }
 }
 
 /// The predicates a merged-view read is narrowed by — SPEC.md's filtering
@@ -4131,8 +4074,6 @@ impl HelmStore {
             .context("clearing the stale cache")?;
             let mut contested: Vec<String> = Vec::new();
             let mut changed = false;
-            let mut newest_profile_source: Option<(Option<u64>, i64, String, String)> = None;
-            let mut present_session_ids = std::collections::HashSet::new();
             for entry in &entries {
                 let json = serde_json::to_string(entry).context("serializing cached session")?;
                 let inserted = tx
@@ -4189,26 +4130,6 @@ impl HelmStore {
                     contested.push(entry.id.clone());
                     continue;
                 }
-                present_session_ids.insert(entry.id.clone());
-                if let Some(source) = &entry.source_profile {
-                    let candidate = (
-                        entry.creation_seq,
-                        entry.created_at,
-                        entry.id.clone(),
-                        source.id.clone(),
-                    );
-                    let replaces = newest_profile_source.as_ref().is_none_or(
-                        |(creation_seq, created_at, session_id, _)| {
-                            source_is_newer(
-                                ProfileSource { host: Some(host), sequence: candidate.0, created_at: candidate.1, session_id: &candidate.2 },
-                                ProfileSource { host: Some(host), sequence: *creation_seq, created_at: *created_at, session_id },
-                            )
-                        },
-                    );
-                    if replaces {
-                        newest_profile_source = Some(candidate);
-                    }
-                }
                 // A row that was already stored EXACTLY as it is being
                 // written back is not a change; anything else — a new id, a
                 // repaired timestamp, a different payload — is.
@@ -4235,110 +4156,6 @@ impl HelmStore {
                 .context("recording whether the cached list was cut")?
                 != 0;
             let changed = changed || truncated_changed;
-            // A drain is the authoritative observation that a profile was
-            // actually used. Carry its session ordering key beside the
-            // preference so a delayed, older drain cannot roll the default
-            // backward after a newer create or refresh has already landed.
-            let mut default_changed = false;
-            let remembered: Option<RememberedProfileRow> = tx
-                .query_row(
-                    "SELECT profile_id, source_host_id, source_creation_seq, source_created_at, \
-                            source_session_id \
-                     FROM remembered_profile WHERE singleton = 1",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-                )
-                .optional()
-                .context("reading remembered profile provenance")?;
-            // Absence is only evidence in an UNTRUNCATED reply: a capped
-            // list omits every session past the cut, so a remembered source
-            // missing from it may simply be old rather than gone. Under
-            // truncation the absence is unknown — the stored provenance is
-            // neither cleared nor treated as vacated, and a replacement
-            // must prove itself newer through the ordinary provenance
-            // comparison below.
-            let source_disappeared = !truncated
-                && remembered
-                    .as_ref()
-                    .filter(|(_, source_host, _, _, _)| *source_host == Some(host))
-                    .and_then(|(_, _, _, _, session_id)| session_id.as_deref())
-                    .is_some_and(|session_id| !present_session_ids.contains(session_id));
-            // A remembered source that is no longer among this host's
-            // sessions is the retarget/adopt/reinstall shape (or a plain
-            // deletion of the establishing session). Under the bare-id
-            // contract the PREFERENCE survives it — deleting the row here
-            // would quietly rebuild the install eviction schema v12 removed
-            // — but the provenance does not: it was minted in an ordering
-            // domain this drain can no longer see, and keeping it would let
-            // a predecessor's high sequence numbers veto the successor's
-            // genuinely newer creates. So the id is kept and the source_*
-            // columns are cleared, which drops the row into the same
-            // "opaque until a direct create re-establishes provenance"
-            // state a v7-era migrated preference starts in.
-            if source_disappeared {
-                tx.execute(
-                    "UPDATE remembered_profile SET source_host_id = NULL, source_creation_seq = NULL, \
-                     source_created_at = NULL, source_session_id = NULL WHERE singleton = 1",
-                    [],
-                )
-                .context("orphaning a remembered profile whose source disappeared")?;
-            }
-            if let Some((creation_seq, created_at, session_id, profile_id)) = newest_profile_source
-            {
-                // Only a demonstrably NEWER source advances the default,
-                // judged against the provenance as it stood BEFORE any
-                // orphaning above — a disappeared source is no longer a
-                // license to promote whatever survived (the old rule), it
-                // only stops mattering as a comparison point once cleared.
-                // A survivor that fails the comparison leaves the bare id
-                // in place.
-                let advances = match &remembered {
-                    None => true,
-                    Some((_, stored_host, stored_seq, Some(stored_at), Some(stored_id))) => source_is_newer(
-                        ProfileSource { host: Some(host), sequence: creation_seq, created_at, session_id: &session_id },
-                        ProfileSource { host: *stored_host, sequence: stored_seq.and_then(|seq| u64::try_from(seq).ok()), created_at: *stored_at, session_id: stored_id },
-                    ),
-                    // A v7 -> v8 migrated preference has no source at
-                    // all. The first post-upgrade drain cannot prove its
-                    // newest SURVIVING session is newer than the session
-                    // the user actually chose before upgrading: that
-                    // source may already have been deleted. Keep the
-                    // opaque preference until a direct create records a
-                    // real source, after which ordinary drain ordering
-                    // applies again.
-                    Some((_, _, None, None, None)) => false,
-                    Some(_) => true,
-                };
-                if advances {
-                    default_changed = remembered
-                        .as_ref()
-                        .is_none_or(|(stored_profile, _, _, _, _)| stored_profile != &profile_id);
-                    tx.execute(
-                        "INSERT INTO remembered_profile (\
-                             singleton, profile_id, source_host_id, source_creation_seq, \
-                             source_created_at, source_session_id\
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-                         ON CONFLICT (singleton) DO UPDATE SET \
-                             profile_id = excluded.profile_id, \
-                             source_host_id = excluded.source_host_id, \
-                             source_creation_seq = excluded.source_creation_seq, \
-                             source_created_at = excluded.source_created_at, \
-                             source_session_id = excluded.source_session_id",
-                        rusqlite::params![
-                            1,
-                            profile_id,
-                            host,
-                            creation_seq
-                                .map(i64::try_from)
-                                .transpose()
-                                .context("creation sequence exceeds SQLite's integer range")?,
-                            created_at,
-                            session_id
-                        ],
-                    )
-                    .context("advancing the remembered profile from the completed drain")?;
-                }
-            }
             tx.commit().context("committing cache replace")?;
             // SORTED, so the set is compared by CONTENT rather than by the
             // order a peer happened to list its sessions in. The published
@@ -4350,7 +4167,6 @@ impl HelmStore {
             Ok(CacheReplacement {
                 changed,
                 contested,
-                default_changed,
             })
         })
         .await
@@ -5696,9 +5512,9 @@ impl HelmStore {
     /// Remember `profile_id` without a session provenance marker.
     ///
     /// Kept for administrative and test callers that do not have the
-    /// creating session in hand. Production create handling uses
-    /// [`Self::remember_profile_default_from_session`] so later drains can
-    /// prove which observation is newer.
+    /// creating session in hand. Production user-create handling records
+    /// diagnostic provenance through
+    /// [`Self::remember_profile_default_from_host_session`].
     pub async fn remember_profile_default(&self, profile_id: &str) -> anyhow::Result<bool> {
         self.remember_profile_default_with_source(profile_id, None, None, None, None)
             .await
@@ -5706,10 +5522,9 @@ impl HelmStore {
 
     /// Remember a successful profile-backed create whose host owns its sequence.
     ///
-    /// `source_host` makes a supervisor-local sequence comparable only with
-    /// another observation from that same supervisor. Cross-host observations
-    /// instead use the timestamp/id fallback, which is the only ordering key
-    /// those independent catalogs share.
+    /// The source fields are diagnostic provenance for the user's successful
+    /// choice. They never order writes: every successful user create has
+    /// unconditional authority over the remembered default.
     pub async fn remember_profile_default_from_host_session(
         &self,
         profile_id: &str,
@@ -5731,10 +5546,8 @@ impl HelmStore {
     /// Remember a successful profile-backed create without a known host.
     ///
     /// This remains for administrative and test callers. Production session
-    /// creation uses [`Self::remember_profile_default_from_host_session`] so
-    /// the stored sequence keeps its ordering domain. Without that domain,
-    /// comparisons deliberately ignore both local sequences and use the
-    /// timestamp/session-id fallback.
+    /// creation uses [`Self::remember_profile_default_from_host_session`] to
+    /// retain the host that created the chosen session as diagnostic context.
     pub async fn remember_profile_default_from_session(
         &self,
         profile_id: &str,
@@ -5755,18 +5568,14 @@ impl HelmStore {
     /// Write `profile_id` as the helm-wide last-used profile, replacing
     /// whatever was there.
     ///
-    /// Written both by a successful profile-backed create and by a completed
-    /// session drain. Both observations mean a session was actually created
-    /// from the profile; merely opening a picker does not. Their supervisor
-    /// creation sequence decides chronology only when both observations came
-    /// from the same host. Otherwise `(created_at, session id)` is the one
-    /// fleet-wide ordering key available.
+    /// Written by a successful user-originated profile-backed create.
+    /// Diagnostic callers may use the public wrappers above, but remote
+    /// observations and agent-relay creates do not reach this writer.
     /// Returns whether the visible profile id changed, so the invalidation
     /// feed does not wake every client each time a user creates from the same
-    /// profile twice in a row. `false` does not necessarily mean the candidate
-    /// matched the stored provenance: it also means an out-of-order candidate
-    /// was rejected as older. Callers must not treat it as proof that this
-    /// observation became the remembered source.
+    /// profile twice in a row. The source columns still refresh on that
+    /// repeated choice, so they describe the most recent successful user
+    /// create even when the visible id did not change.
     ///
     /// The value is intentionally not tied to a host or installation. A
     /// create whose reply lands after a host retarget records the id all the
@@ -5791,35 +5600,18 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning remembered-default transaction")?;
-            // Read the singleton once inside the write transaction. The
-            // provenance comparison and replacement must judge the same
-            // prior row; a separate read would make an out-of-order drain
-            // race with another writer.
-            let known: Option<RememberedProfileRow> = tx
+            // The profile id alone controls client invalidation. Provenance
+            // is diagnostic, so a later user choice always replaces it even
+            // when its supervisor timestamp is older than an earlier one.
+            let previous_profile: Option<String> = tx
                 .query_row(
-                    "SELECT profile_id, source_host_id, source_creation_seq, source_created_at, source_session_id \
-                     FROM remembered_profile WHERE singleton = 1",
+                    "SELECT profile_id FROM remembered_profile WHERE singleton = 1",
                     [],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                    |row| row.get(0),
                 )
                 .optional()
                 .context("checking the remembered default row")?;
-            let (previous_profile, previous_host, previous_creation_seq, previous_created_at, previous_session_id) =
-                known.unwrap_or_default();
-            if let (Some(candidate_at), Some(candidate_id), Some(stored_at), Some(stored_id)) = (
-                source_created_at,
-                source_session_id.as_deref(),
-                previous_created_at,
-                previous_session_id.as_deref(),
-            ) && !source_is_newer(
-                ProfileSource { host: source_host, sequence: source_creation_seq, created_at: candidate_at, session_id: candidate_id },
-                ProfileSource { host: previous_host, sequence: previous_creation_seq.and_then(|seq| u64::try_from(seq).ok()), created_at: stored_at, session_id: stored_id },
-            ) {
-                tx.commit()
-                    .context("committing an unchanged remembered default")?;
-                return Ok(false);
-            }
-            let changed = previous_profile != profile_id;
+            let changed = previous_profile.as_deref() != Some(profile_id.as_str());
             tx.execute(
                 "INSERT INTO remembered_profile (\
                      singleton, profile_id, source_host_id, source_creation_seq, \
@@ -8455,9 +8247,9 @@ mod tests {
     /// the per-host table with the empty helm-wide singleton.
     ///
     /// The legacy host-scoped value has no comparable meaning in the new
-    /// singleton, so migration discards it. The first completed
-    /// profile-backed drain may establish that empty preference; a later
-    /// direct create then advances it through ordinary provenance ordering.
+    /// singleton, so migration discards it. A later user-originated
+    /// profile-backed create establishes the empty preference; drains continue
+    /// to discover sessions without selecting one as the default.
     #[farhelm_testtrace::test]
     async fn version_7_remembered_default_is_dropped_by_schema_15() {
         let dir = tempfile::tempdir().unwrap();
@@ -8499,7 +8291,7 @@ mod tests {
 
         let store = HelmStore::open(&path).await.unwrap();
         assert_eq!(store.remembered_profile().await.unwrap(), None);
-        let replacement = store
+        store
             .replace_host_sessions(
                 host,
                 "v7-identity",
@@ -8513,10 +8305,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(replacement.default_changed);
         assert_eq!(
             store.remembered_profile().await.unwrap().as_deref(),
-            Some("older-surviving-profile")
+            None,
+            "a migrated database still requires a user create to select a default"
         );
 
         assert!(
@@ -8530,7 +8322,7 @@ mod tests {
                 )
                 .await
                 .unwrap(),
-            "a create observed after migration is demonstrably new"
+            "a user create after migration establishes the default"
         );
         assert_eq!(
             store.remembered_profile().await.unwrap().as_deref(),
@@ -12040,324 +11832,66 @@ mod tests {
         assert!(!SessionFilter::default().parent("parent-7").is_empty());
     }
 
-    /// Completed drains converge the remembered default to their newest
-    /// profile-backed source and never let an older snapshot roll it back.
+    /// Drains discover remote profile-backed sessions without selecting the
+    /// profile the user's next create dialog will suggest.
+    ///
+    /// A remote session can carry a much newer timestamp than the user's
+    /// last choice. This test keeps both observations in the real store so a
+    /// future drain writer cannot again pin the default and reject the user's
+    /// subsequent, older-timestamp create.
     #[farhelm_testtrace::test]
-    async fn drain_convergence_advances_only_to_newer_profile_provenance() {
+    async fn drains_leave_the_default_to_unconditional_user_creates() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "profiles@host", "profile-identity").await;
+        assert!(
+            store
+                .remember_profile_default_from_host_session(
+                    "profile-user-before-drain",
+                    host,
+                    Some(10),
+                    500,
+                    "user-before-drain",
+                )
+                .await
+                .unwrap()
+        );
+
         store
-            .remember_profile_default_from_session("profile-old", Some(2), 200, "old-source")
-            .await
-            .unwrap();
-
-        let advanced = store
-            .replace_host_sessions(
-                host,
-                "profile-identity",
-                vec![
-                    session("raw-newer", 400),
-                    sequenced_profiled_session("new-source", 300, 3, "profile-new"),
-                ],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(advanced.default_changed);
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-new")
-        );
-
-        let delayed = store
-            .replace_host_sessions(
-                host,
-                "profile-identity",
-                vec![
-                    sequenced_profiled_session("new-source", 300, 3, "profile-new"),
-                    sequenced_profiled_session("older-source", 300, 1, "profile-older"),
-                ],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(!delayed.default_changed);
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-new"),
-            "an older completed drain cannot overwrite newer provenance"
-        );
-
-        let provenance_only = store
             .replace_host_sessions(
                 host,
                 "profile-identity",
                 vec![sequenced_profiled_session(
-                    "same-profile-new-source",
-                    300,
-                    4,
-                    "profile-new",
+                    "remote-newer-session",
+                    900,
+                    99,
+                    "profile-from-drain",
                 )],
                 false,
             )
             .await
             .unwrap();
-        assert!(
-            !provenance_only.default_changed,
-            "advancing provenance for the same default must not wake clients"
-        );
-        let no_rollback = store
-            .replace_host_sessions(
-                host,
-                "profile-identity",
-                vec![
-                    sequenced_profiled_session("same-profile-new-source", 300, 4, "profile-new"),
-                    sequenced_profiled_session("late-old", 300, 2, "profile-old"),
-                ],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(!no_rollback.default_changed);
         assert_eq!(
             store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-new")
+            Some("profile-user-before-drain"),
+            "a remote observation must not select the user's default"
         );
 
-        let retreated = store
-            .replace_host_sessions(
-                host,
-                "profile-identity",
-                vec![sequenced_profiled_session(
-                    "older-source",
-                    300,
-                    1,
-                    "profile-older",
-                )],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(
-            !retreated.default_changed,
-            "the visible default did not move, so nobody is woken"
-        );
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-new"),
-            "a drain that orphans the provenance keeps the bare id rather than guessing from \
-             survivors"
-        );
-
-        let cleared = store
-            .replace_host_sessions(host, "profile-identity", Vec::new(), false)
-            .await
-            .unwrap();
-        assert!(!cleared.default_changed);
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-new"),
-            "an empty drain does not forget the helm-wide preference either"
-        );
-    }
-
-    /// A retarget-shaped drain — the remembered source is gone and nothing
-    /// provably newer replaces it — keeps the bare default and re-opens it
-    /// to the next direct create.
-    ///
-    /// This is the install transition the bare-id contract exists for.
-    /// Deleting the row here would rebuild the install-bound eviction schema
-    /// v12 removed; replacing it from a surviving session would guess; and
-    /// keeping the predecessor's provenance would let its high sequence
-    /// numbers refuse the successor's own first create (a fresh supervisor
-    /// restarts sequences low). So: the id survives, the provenance is
-    /// cleared, survivors do not advance it, and a direct create with a
-    /// RESET sequence does.
-    #[farhelm_testtrace::test]
-    async fn a_retarget_shaped_drain_keeps_the_bare_default() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "moving@host", "moving-identity").await;
-        store
-            .remember_profile_default_from_host_session(
-                "profile-kept",
-                host,
-                Some(9),
-                900,
-                "gone-source",
-            )
-            .await
-            .unwrap();
-
-        // The successor install knows nothing of the establishing session.
-        let survived = store
-            .replace_host_sessions(host, "moving-identity", Vec::new(), false)
-            .await
-            .unwrap();
-        assert!(
-            !survived.default_changed,
-            "the visible default did not move, so nobody is woken"
-        );
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-kept")
-        );
-
-        // A surviving OLDER session is not evidence of a newer choice.
-        let not_replaced = store
-            .replace_host_sessions(
-                host,
-                "moving-identity",
-                vec![sequenced_profiled_session("older", 300, 1, "profile-other")],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(!not_replaced.default_changed);
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-kept"),
-            "an orphaned preference stays opaque rather than being replaced from survivors"
-        );
-
-        // A fresh supervisor's first create restarts sequence numbers low.
-        // With the predecessor's provenance cleared it must win — refused,
-        // it would leave the default permanently stuck on the old id.
         assert!(
             store
-                .remember_profile_default_from_session("profile-new", Some(1), 100, "fresh")
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-new")
-        );
-    }
-
-    /// Old supervisors omit creation sequences, so equal-second drains keep
-    /// the pre-upgrade ascending-id tiebreak.
-    #[farhelm_testtrace::test]
-    async fn drain_provenance_falls_back_to_timestamp_and_id_when_sequence_is_absent() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "fallback@host", "fallback-identity").await;
-        store
-            .replace_host_sessions(
-                host,
-                "fallback-identity",
-                vec![
-                    profiled_session("z-source", 100, "profile-z"),
-                    profiled_session("a-source", 100, "profile-a"),
-                ],
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-a")
-        );
-    }
-
-    /// A caller without the source host cannot assign a domain to supervisor
-    /// sequences. The shared timestamp/id fallback must therefore decide
-    /// between unattributed observations instead of comparing local counters.
-    #[farhelm_testtrace::test]
-    async fn unattributed_remembered_sources_use_the_fleet_wide_fallback() {
-        let (_dir, store) = fresh_store().await;
-        assert!(
-            store
-                .remember_profile_default_from_session("new", Some(10), 100, "new-source",)
-                .await
-                .unwrap()
-        );
-        assert!(
-            store
-                .remember_profile_default_from_session("old", Some(9), 200, "old-source",)
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("old")
-        );
-    }
-
-    /// Independent supervisors restart their creation sequences, so a later
-    /// drain from host B must not lose merely because host A reached a larger
-    /// local number. This drives the production refresh path rather than the
-    /// singleton writer directly, pinning both persisted domain provenance
-    /// and the cross-host timestamp fallback.
-    #[farhelm_testtrace::test]
-    async fn cross_host_drains_do_not_compare_local_sequences() {
-        let (_dir, store) = fresh_store().await;
-        let host_a = host_with_identity(&store, "a@host", "a-identity").await;
-        let host_b = host_with_identity(&store, "b@host", "b-identity").await;
-
-        store
-            .replace_host_sessions(
-                host_a,
-                "a-identity",
-                vec![sequenced_profiled_session(
-                    "a-source",
+                .remember_profile_default_from_host_session(
+                    "profile-user-after-drain",
+                    host,
+                    Some(1),
                     100,
-                    100,
-                    "profile-a",
-                )],
-                false,
-            )
-            .await
-            .unwrap();
-        let newer = store
-            .replace_host_sessions(
-                host_b,
-                "b-identity",
-                vec![sequenced_profiled_session("b-source", 200, 1, "profile-b")],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(newer.default_changed);
-        assert_eq!(
-            store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-b")
+                    "user-after-drain",
+                )
+                .await
+                .unwrap(),
+            "a user create must win despite its older diagnostic timestamp"
         );
-    }
-
-    /// Refreshing host B cannot establish that host A's remembered source
-    /// disappeared. Keeping the provenance prevents an unrelated refresh
-    /// from reopening ordering to a delayed, older observation.
-    #[farhelm_testtrace::test]
-    async fn an_unrelated_host_refresh_keeps_remembered_provenance() {
-        let (_dir, store) = fresh_store().await;
-        let host_a = host_with_identity(&store, "a@host", "a-identity").await;
-        let host_b = host_with_identity(&store, "b@host", "b-identity").await;
-
-        store
-            .replace_host_sessions(
-                host_a,
-                "a-identity",
-                vec![sequenced_profiled_session("a-source", 200, 9, "profile-a")],
-                false,
-            )
-            .await
-            .unwrap();
-        store
-            .replace_host_sessions(host_b, "b-identity", Vec::new(), false)
-            .await
-            .unwrap();
-        let delayed = store
-            .replace_host_sessions(
-                host_a,
-                "a-identity",
-                vec![sequenced_profiled_session("a-old", 100, 8, "profile-old")],
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(!delayed.default_changed);
         assert_eq!(
             store.remembered_profile().await.unwrap().as_deref(),
-            Some("profile-a")
+            Some("profile-user-after-drain")
         );
     }
 

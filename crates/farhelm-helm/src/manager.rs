@@ -3654,15 +3654,8 @@ impl HostActor {
             .await
         {
             Ok(replacement) => {
-                let CacheReplacement {
-                    contested,
-                    changed,
-                    default_changed,
-                } = replacement;
-                debug!(
-                    sessions,
-                    changed, default_changed, "replaced the host's cached session list"
-                );
+                let CacheReplacement { contested, changed } = replacement;
+                debug!(sessions, changed, "replaced the host's cached session list");
                 if let Some(sample) = contested.first() {
                     // ONE bounded line per refresh, not one per colliding
                     // row per tick: a host reporting a thousand ids that
@@ -3693,7 +3686,7 @@ impl HostActor {
                     live: LiveSessions::Clear,
                     contested: Some(Arc::new(contested)),
                     truncated: Some(truncated),
-                    cache_changed: changed || default_changed,
+                    cache_changed: changed,
                 }
             }
             Err(error) => {
@@ -5016,118 +5009,6 @@ mod tests {
             after.list_truncated,
             "the eviction is published as a cut: the list no longer holds everything known"
         );
-    }
-
-    /// A refresh whose session cache is byte-identical still publishes when
-    /// the remembered default alone changes.
-    ///
-    /// The change staged here is a surviving source proving itself NEWER
-    /// than the stored provenance (the stored default's source is gone and
-    /// its sequence is older) — under the bare-id contract, disappearance
-    /// alone no longer replaces a default, so a genuinely newer survivor is
-    /// what makes the default move while the session rows stay identical.
-    #[farhelm_testtrace::test(start_paused = true)]
-    async fn default_changed_alone_bumps_the_fleet_revision() {
-        let profiled = SessionInfo {
-            creation_seq: Some(1),
-            source_profile: Some(farhelm_proto::SourceProfile {
-                id: "profile-a".to_string(),
-                name: "Profile A".to_string(),
-                existence: farhelm_proto::ProfileExistence::Present,
-            }),
-            ..session("source-a", 100)
-        };
-        let fixture = fixture(Cadence::default(), {
-            let profiled = profiled.clone();
-            |store, transport| async move {
-                let host = store
-                    .add_ssh_host("defaults.example", None, None)
-                    .await
-                    .unwrap();
-                record_contact(&store, host, "defaults-identity").await;
-                store
-                    .replace_host_sessions(host, "defaults-identity", vec![profiled.clone()], false)
-                    .await
-                    .unwrap();
-                transport.set_script(
-                    host,
-                    Script {
-                        identity: Some("defaults-identity".to_string()),
-                        sessions: vec![profiled],
-                        ..Script::default()
-                    },
-                );
-            }
-        })
-        .await;
-        let host = fixture.store.list_hosts().await.unwrap()[1].id;
-        fixture
-            .manager
-            .wait_for_state(host, |state| {
-                matches!(
-                    state,
-                    HostState::Connected {
-                        last_refresh: RefreshHealth::Ok { .. },
-                        ..
-                    }
-                )
-            })
-            .await
-            .expect("actor is running");
-
-        fixture
-            .store
-            .remember_profile_default_from_host_session(
-                "profile-b",
-                host,
-                Some(0),
-                100,
-                "gone-source-b",
-            )
-            .await
-            .unwrap();
-        let before = fixture.manager.events().revision();
-        // A fixed count of `advance` calls is not a deterministic wait:
-        // `tokio::time::advance` jumps the paused clock and yields once, and
-        // that single yield does not wait for the multi-hop work the jump
-        // woke up — the drain's request/reply over the test transport, the
-        // store's cache-replace transaction, the publish that follows — to
-        // run to completion. So a fixed number of advances is not a
-        // completion barrier, and three of them could end mid-chain with no
-        // way to tell. That is exactly the one recorded flake (PR #206,
-        // 2026-08-22): the assertion read the `profile-b` the test itself
-        // planted because the repair's last hop had not landed by the third
-        // `advance`, not because the repair was wrong.
-        //
-        // A deadline-bounded `sleep` loop fixes the mechanism rather than
-        // the timeout: under a paused clock, blocking on `sleep` lets the
-        // runtime's auto-advance carry every task through as many internal
-        // hops as a tick actually needs before jumping to the next timer,
-        // so the loop only ever stops once true progress has happened. This
-        // mirrors `a_periodic_refresh_replaces_the_cached_list_wholesale`'s
-        // wait for the same reason: that test hit the identical "how many
-        // ticks does a refresh need" question first.
-        //
-        // The repair is two sequential publications, not one: the store
-        // commits the replacement default first, and the actor bumps the
-        // fleet revision only after the refresh returns. Stopping on the
-        // store alone would leave the revision assertion racing that second
-        // hop, so the loop's terminal condition is BOTH observations.
-        let deadline = tokio::time::Instant::now() + REFRESH_INTERVAL * 4;
-        loop {
-            let remembered = fixture.store.remembered_profile().await.unwrap();
-            let revision = fixture.manager.events().revision();
-            if remembered.as_deref() == Some("profile-a") && revision > before {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the newer-survivor advance never finished publishing: still remembers \
-                 {remembered:?}, fleet revision {revision} (was {before})"
-            );
-            // sleep-ok: let the paused runtime progress while polling both repair publications.
-            tokio::time::sleep(REFRESH_INTERVAL / 2).await;
-        }
     }
 
     // ---- Cadences ---------------------------------------------------
