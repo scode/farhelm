@@ -15,6 +15,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// The environment marker every launched session carries: its own session
 /// id, set by the shim just before `exec`. Two independent consumers rely
@@ -215,15 +216,31 @@ async fn passwd_shell() -> Option<String> {
 
     // getpwuid_r is blocking C code (it may do NSS/network lookups under
     // e.g. sssd or LDAP-backed passwd), so it must not run on the async
-    // runtime's worker threads.
-    match tokio::task::spawn_blocking(passwd_shell_for_euid).await {
-        Ok(shell) => shell,
-        Err(e) => {
+    // runtime's worker threads. The join wait is bounded even though the
+    // blocking task itself cannot be cancelled once it has started.
+    match tokio::time::timeout(
+        NSS_LOOKUP_TIMEOUT,
+        tokio::task::spawn_blocking(passwd_shell_for_euid),
+    )
+    .await
+    {
+        Ok(Ok(shell)) => shell,
+        Ok(Err(e)) => {
             tracing::warn!(error = %e, "passwd lookup task panicked");
+            None
+        }
+        Err(_) => {
+            tracing::warn!(
+                "abandoned getpwuid_r passwd lookup after timeout; its blocking thread will finish on its own"
+            );
             None
         }
     }
 }
+
+/// Bound NSS-dependent shell resolution so a wedged identity service cannot
+/// hold every launch waiting for either lookup rung indefinitely.
+const NSS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The `getent passwd <euid>` rung of [`passwd_shell`]; see that
 /// function's docstring for why `getent` is tried before `getpwuid_r`.
@@ -236,21 +253,46 @@ async fn passwd_shell() -> Option<String> {
 /// would mean `getent`'s contract itself is violated, which is worth a
 /// `warn!` even though the fallback still saves the caller.
 async fn getent_passwd_shell() -> Option<String> {
+    getent_passwd_shell_with_program(Path::new("getent"), NSS_LOOKUP_TIMEOUT).await
+}
+
+/// Run the host `getent` lookup through an injectable executable path and
+/// time bound.
+///
+/// Production passes the bare command name so normal `PATH` lookup remains
+/// unchanged, and [`NSS_LOOKUP_TIMEOUT`]. Tests use the seam to own a
+/// sleeping stand-in without changing the test process's environment or its
+/// `PATH`, and a short REAL bound: the bound races a real child process, so
+/// a paused clock (which elapses the moment the runtime is idle, before the
+/// child has even started) cannot prove the child was killed rather than
+/// never run.
+async fn getent_passwd_shell_with_program(program: &Path, bound: Duration) -> Option<String> {
     // SAFETY: geteuid takes no arguments and cannot fail; it is always
     // safe to call.
     let euid = unsafe { libc::geteuid() };
 
-    let output = match tokio::process::Command::new("getent")
-        .arg("passwd")
-        .arg(euid.to_string())
-        .output()
-        .await
+    let output = match tokio::time::timeout(
+        bound,
+        tokio::process::Command::new(program)
+            .kill_on_drop(true)
+            .arg("passwd")
+            .arg(euid.to_string())
+            .output(),
+    )
+    .await
     {
-        Ok(output) => output,
-        Err(e) => {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
             tracing::debug!(
                 error = %e,
                 "getent unavailable; falling back to direct passwd lookup"
+            );
+            return None;
+        }
+        Err(_) => {
+            tracing::warn!(
+                euid,
+                "getent passwd timed out; falling back to direct passwd lookup"
             );
             return None;
         }
@@ -1503,6 +1545,83 @@ mod tests {
     #[farhelm_testtrace::test]
     fn parse_getent_passwd_line_rejects_empty_shell() {
         assert_eq!(parse_getent_passwd_line("root:x:0:0:root:/root:"), None);
+    }
+
+    /// A `getent` process that never answers must not hold shell resolution
+    /// past the NSS bound. The marker proves the stand-in was actually
+    /// running; checking its recorded PID after the lookup proves the
+    /// timeout dropped the child with `kill_on_drop` instead of orphaning it.
+    ///
+    /// Real time, deliberately: the bound races a real child process, and a
+    /// paused clock elapses the instant the runtime goes idle, which can be
+    /// before the stand-in has run its first line — the marker is then
+    /// missing and the test cannot tell "killed" from "never started". A
+    /// half-second real bound is long enough for `sh` to write one file on a
+    /// loaded machine and short enough to keep the test cheap.
+    #[farhelm_testtrace::test]
+    async fn getent_timeout_kills_the_child() {
+        const TEST_BOUND: Duration = Duration::from_millis(500);
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("getent.pid");
+        let program = tmp.path().join("getent");
+        let script = format!(
+            r#"#!/bin/sh
+printf '%s' "$$" > {}
+exec sleep 60
+"#,
+            marker.display()
+        );
+        std::fs::write(&program, script).unwrap();
+        let mut permissions = std::fs::metadata(&program).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&program, permissions).unwrap();
+
+        let started_at = std::time::Instant::now();
+        let shell = getent_passwd_shell_with_program(&program, TEST_BOUND).await;
+        let elapsed = started_at.elapsed();
+
+        let pid = std::fs::read_to_string(&marker)
+            .expect("stand-in must have started before timeout completed")
+            .parse::<libc::pid_t>()
+            .expect("stand-in PID marker must be numeric");
+        assert_eq!(shell, None);
+        // Generous on the upper side: the point is "the bound fired", not
+        // "it fired promptly under load"; a wedged child would take 60 s.
+        assert!(
+            elapsed < TEST_BOUND * 20,
+            "lookup took {elapsed:?}, bound is {TEST_BOUND:?}"
+        );
+
+        // The kill is asynchronous with respect to this task: `kill_on_drop`
+        // sends SIGKILL when the timed-out future is dropped, and the child's
+        // exit then has to be observed by the kernel and, possibly, reaped by
+        // tokio's own reaper. Polling with WNOHANG behind a real, bounded
+        // interval is the readiness oracle for "the child is gone"; a
+        // yield-only loop was a hundred scheduler turns that a loaded host
+        // finishes long before the kill lands.
+        let mut status = 0;
+        let mut reaped = false;
+        let reap_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < reap_deadline {
+            match unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) } {
+                waited if waited == pid => {
+                    reaped = true;
+                    break;
+                }
+                // WNOHANG above is the actual oracle; this is only the pace.
+                // sleep-ok: polling interval while the killed stand-in exits
+                0 => tokio::time::sleep(Duration::from_millis(10)).await,
+                -1 if std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD) => {
+                    // Tokio may have reaped the child while dropping its
+                    // internal process handle; ECHILD is then the proof
+                    // that no child with this PID remains for this test.
+                    reaped = true;
+                    break;
+                }
+                other => panic!("unexpected waitpid result for stand-in: {other}"),
+            }
+        }
+        assert!(reaped, "timed-out getent child was not reaped");
     }
 
     /// `ERANGE` must actually grow the buffer passed to the next attempt,
