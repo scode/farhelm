@@ -117,9 +117,16 @@ pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// not a checksum file at all — a login page, an error document, a wrong
 /// URL. The cap exists so a hostile or misconfigured server cannot make the
 /// helm buffer an unbounded response while it is still deciding whether to
-/// trust anything at that URL; the ASSETS themselves are streamed and have
-/// no cap, because by then their expected hash is already known.
+/// trust anything at that URL. Release assets have their own much larger
+/// sanity cap because a known digest says nothing about how many bytes a
+/// server may send before the digest can be compared.
 const SUMS_MAX_BYTES: usize = 64 * 1024;
+
+/// Per-download ceiling for release assets. The desktop bundle is the largest
+/// asset the checked-in release configuration carries today, and 1 GiB leaves
+/// generous headroom above any practical release size while still stopping a
+/// pathological response from filling the helm's state directory forever.
+const ASSET_MAX_BYTES: usize = 1024 * 1024 * 1024;
 
 /// The exact trusted comment a release's signature must carry: `farhelm `
 /// followed by `version`'s release TAG, which is `v` + the version.
@@ -261,6 +268,10 @@ pub(super) struct ReleasePayloadSource {
     /// can drive the real verification path with a throwaway test key
     /// instead of needing the production secret key to exist.
     pubkey: &'static str,
+    /// The per-asset download ceiling; production uses [`ASSET_MAX_BYTES`],
+    /// while tests lower it to exercise the same streaming boundary without
+    /// constructing a gigabyte-sized fixture.
+    asset_max_bytes: usize,
     transport: Arc<dyn Transport>,
     /// The verified checksum file, fetched at most once per process
     /// (successes only — a failed fetch leaves this empty so the next "add
@@ -367,11 +378,19 @@ impl ReleasePayloadSource {
             cache_dir,
             version,
             pubkey,
+            asset_max_bytes: ASSET_MAX_BYTES,
             transport,
             sums: OnceCell::new(),
             housekept: OnceCell::new(),
             asset_locks: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Lower the asset ceiling for a test without changing process-wide state.
+    #[cfg(test)]
+    fn with_asset_max_bytes(mut self, limit: usize) -> Self {
+        self.asset_max_bytes = limit;
+        self
     }
 
     /// The async mutex for one asset name, created on first request.
@@ -700,17 +719,37 @@ impl ReleasePayloadSource {
             );
         }
 
+        let limit = u64::try_from(self.asset_max_bytes).expect("asset cap fits in u64");
+        if let Some(length) = response.content_length()
+            && length > limit
+        {
+            return Err(asset_size_refusal(asset, length, limit, Ok(())));
+        }
+
         let part = self.cache_dir.join(format!("{asset}.part"));
         let mut file = tokio::fs::File::create(&part)
             .await
             .with_context(|| format!("creating {}", part.display()))?;
         let mut hasher = Sha256::new();
         let mut stream = response.bytes_stream();
+        let mut received = 0_u64;
         while let Some(chunk) = stream.next().await {
             // The body stream fails with the FINAL request URL attached (a
             // redirect target, possibly a signed object-store URL) — strip
             // it exactly as the transport path does.
             let chunk = chunk.map_err(|error| self.unreachable(transport_error(error)))?;
+            received = received.saturating_add(
+                u64::try_from(chunk.len()).expect("a response chunk length fits in u64"),
+            );
+            if received > limit {
+                drop(file);
+                return Err(asset_size_refusal(
+                    asset,
+                    received,
+                    limit,
+                    remove_if_present(&part),
+                ));
+            }
             hasher.update(&chunk);
             tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
                 .await
@@ -1179,6 +1218,25 @@ fn checksum_refusal(
     }
 }
 
+/// Refuse an asset once its declared or observed size exceeds the sanity cap.
+///
+/// A streamed refusal removes the unverified partial file before returning.
+/// Keeping cleanup in the error constructor preserves the primary refusal while
+/// still reporting a filesystem failure if the partial cannot be removed.
+fn asset_size_refusal(
+    asset: &str,
+    reached: u64,
+    limit: u64,
+    cleanup: anyhow::Result<()>,
+) -> anyhow::Error {
+    let refusal =
+        anyhow!("refused: asset {asset} reached {reached} bytes, over the {limit}-byte cap");
+    match cleanup {
+        Ok(()) => refusal,
+        Err(error) => error.context(format!("{refusal:#}")),
+    }
+}
+
 /// Publish both verified control files into `cache_dir`, creating it first.
 ///
 /// One function so the initial fetch and the later repair write the pair the
@@ -1366,6 +1424,9 @@ pub(super) mod test_support {
         /// signed `SHA256SUMS` from `variants/`, or a body too large to be a
         /// checksum file.
         Body(Vec<u8>),
+        /// Announce an oversized body without sending any bytes, so a test
+        /// can prove the client rejects the declaration before reading.
+        DeclaredLength(u64),
         /// Answer 307 elsewhere, the way GitHub redirects release assets to
         /// its object store. The target is a path on this same loopback
         /// server, or an absolute loopback URL for the cases that need the
@@ -1481,6 +1542,12 @@ pub(super) mod test_support {
         match state.overrides.get(&name).cloned() {
             Some(Override::NotFound) => axum::http::StatusCode::NOT_FOUND.into_response(),
             Some(Override::Body(body)) => body.into_response(),
+            Some(Override::DeclaredLength(length)) => axum::http::Response::builder()
+                .header(axum::http::header::CONTENT_LENGTH, length)
+                .body(axum::body::Body::from_stream(
+                    futures_util::stream::pending::<Result<Vec<u8>, std::io::Error>>(),
+                ))
+                .expect("building the declared-length fixture response"),
             Some(Override::Redirect(target)) => {
                 axum::response::Redirect::temporary(&target).into_response()
             }
@@ -2361,6 +2428,65 @@ mod tests {
             format!("{error:#}"),
             format!("release v{FIXTURE_VERSION} has no asset named {asset} (HTTP 404)")
         );
+    }
+
+    /// Spec: an asset whose declared `Content-Length` exceeds the asset cap
+    /// is refused before its pending response body is read or a staging file
+    /// is created.
+    #[farhelm_testtrace::test]
+    async fn an_oversized_asset_content_length_is_refused_before_reading() {
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let release =
+            FixtureRelease::start(vec![(asset.as_str(), Override::DeclaredLength(17))]).await;
+        let cache = tempfile::tempdir().unwrap();
+        let source = release.source(cache.path()).with_asset_max_bytes(16);
+
+        let error = source
+            .path(PayloadKind::Farhelm, PayloadArch::X86_64)
+            .await
+            .unwrap_err();
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains(asset.as_str()), "{rendered}");
+        assert!(rendered.contains("17 bytes"), "{rendered}");
+        assert!(rendered.contains("16-byte cap"), "{rendered}");
+        let generation = generation(cache.path(), &release.base_url);
+        assert!(!generation.join(format!("{asset}.part")).exists());
+        assert!(!generation.join(asset).exists());
+    }
+
+    /// Spec: an asset without a usable length header is stopped as soon as a
+    /// received chunk crosses the cap, and its unverified staging file is
+    /// removed before the refusal is returned.
+    #[farhelm_testtrace::test]
+    async fn an_oversized_asset_stream_is_removed_at_the_cap() {
+        let asset = assets::archive_name(assets::farhelm_archive_for(PayloadArch::X86_64));
+        let release = FixtureRelease::start(vec![(
+            asset.as_str(),
+            Override::Gated {
+                prefix: vec![b'a'; 17],
+                suffix: vec![b'b'; 1024],
+                gate: Arc::new(tokio::sync::Notify::new()),
+                released: Arc::new(AtomicBool::new(false)),
+            },
+        )])
+        .await;
+        let cache = tempfile::tempdir().unwrap();
+        let source = release.source(cache.path()).with_asset_max_bytes(16);
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            source.path(PayloadKind::Farhelm, PayloadArch::X86_64),
+        )
+        .await
+        .expect("the asset cap must stop the stream without waiting for EOF")
+        .unwrap_err();
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains(asset.as_str()), "{rendered}");
+        assert!(rendered.contains("17 bytes"), "{rendered}");
+        assert!(rendered.contains("16-byte cap"), "{rendered}");
+        let generation = generation(cache.path(), &release.base_url);
+        assert!(!generation.join(format!("{asset}.part")).exists());
+        assert!(!generation.join(asset).exists());
     }
 
     /// Spec: an asset served as a redirect is followed, and the FINAL body

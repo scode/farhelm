@@ -358,12 +358,6 @@ severity.
   where none expired; `Err(wrong_reply("ListSessions", &other))`; add the fourth category to the docs; give
   ResolveProfile its own variant. Fence: keep the Timeout-means-outcome-unknown vocabulary; do not extend fences to make
   the old claim true.
-- **Provisioning download sanity limit.** `A2-C8`. Medium, small; a SPEC requirement with no implementation.
-  `download_verified` (release_payloads.rs:689-742) streams every chunk to `<asset>.part` with no byte counter; the only
-  caps in the file are for the control files. Fix: an `ASSET_MAX_BYTES` constant far above the largest archive, a
-  counter in the loop, a refusal naming the asset and limit, removal of the `.part`, and a corrected `SUMS_MAX_BYTES`
-  docstring, whose "the expected hash is already known" rationale is unsound. Fence: not a quota system; not
-  `install.sh`; not attachment uploads.
 - **Installer terminal states.** `A2-C9`, `A2-C26`, `A2-C6`. High and medium, small. A crash between journal removal and
   backup cleanup (install.sh:1038-1041) strands `.farhelm.old`, which `refuse_unless_absent` (:983) then rejects on
   every later run while the message advises a re-run that cannot help. `is_our_lock` (:334-342) parses `ls -A` output,
