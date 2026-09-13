@@ -22,9 +22,12 @@
 //!   [`crate::client`]'s upload guard sends `AbortUpload` from its `Drop`.
 //!   The explicit arm is the ordinary path; the guard is the one that
 //!   cannot be skipped.
-//! - **The supervisor stops acking.** Credit stops flowing and the
-//!   `CLIENT_UPLOAD_STALL_TIMEOUT` deadline ends the transfer rather than
-//!   letting it hang forever.
+//! - **The browser stops producing body items.** The relay's
+//!   `CLIENT_UPLOAD_STALL_TIMEOUT` bounds that browser-only wait, so an
+//!   idle request cannot hold its upload open forever.
+//! - **The supervisor stops acking.** Credit stops flowing and
+//!   `UploadGuard::wait_for_credit`'s own deadline ends the transfer
+//!   rather than blaming a browser that already sent its bytes.
 //! - **The supervisor aborts.** Its reason is what the caller is told, via
 //!   `upload_ended_error`, because a supervisor's own words are always
 //!   more actionable than a generic failure.
@@ -54,23 +57,25 @@ pub(crate) struct UploadQuery {
     filename: String,
 }
 
-/// How long the browser→helm hop of an attachment upload may go without
-/// the request body producing BYTES before the relay gives up on it.
+/// How long the relay may wait for the browser to produce the next request
+/// body item before it gives up on that browser→helm hop.
 ///
 /// This is the helm's own leg of PLAN_M4.md item 4's per-hop progress
 /// timeout (the pinned REST contract's "per-hop progress timeout per
 /// proto docs"), and it is genuinely a different bound from the
 /// supervisor-facing credit stall `UploadGuard::send_upload_chunk`
-/// applies: this one catches a browser that stops SENDING (a stalled
-/// paste, a dead network path), which would otherwise park this handler —
-/// and the supervisor's upload channel behind it — forever, with nothing
-/// but the browser's own disconnect to ever notice.
+/// applies. This one catches a browser that stops SENDING (a stalled paste,
+/// a dead network path), which would otherwise park this handler — and the
+/// supervisor's upload channel behind it — forever, with nothing but the
+/// browser's own disconnect to ever notice. It deliberately does not run
+/// while forwarding an item already received: waiting for supervisor credit
+/// is a different hop with its own acknowledgement-based deadline.
 ///
 /// Progress means BYTES, not events. A body stream is free to yield
 /// empty chunks, and an endless supply of them is exactly the shape a
 /// no-progress transfer takes; rearming on any yielded item would let a
-/// client hold an upload open indefinitely while relaying nothing, so the
-/// deadline is absolute and only a non-empty relayed chunk moves it.
+/// client hold an upload open indefinitely while relaying nothing, so empty
+/// items take the fast path back to this wait without counting as progress.
 ///
 /// Sixty seconds matches `WRITER_STALL_TIMEOUT` and
 /// `UPLOAD_ACK_STALL_TIMEOUT` (`client.rs`), so every hop of one transfer
@@ -192,9 +197,10 @@ pub(crate) async fn upload_attachment(
     // pieces would put tens of thousands of undersized frames on a
     // connection whose framing discipline exists to bound exactly that.
     let mut pending: Vec<u8> = Vec::new();
-    // Absolute, not per-item: see `CLIENT_UPLOAD_STALL_TIMEOUT` for why
-    // only non-empty body bytes may move it.
-    let mut deadline = tokio::time::Instant::now() + CLIENT_UPLOAD_STALL_TIMEOUT;
+    // An empty body item is not progress, so its next wait inherits this
+    // deadline. A non-empty item clears it before forwarding can wait for
+    // credit; the next actual browser wait then starts a fresh interval.
+    let mut browser_deadline = None;
     loop {
         // Coalescing must never become buffering: bytes are held back
         // only while more are already waiting. The moment the body has
@@ -216,6 +222,14 @@ pub(crate) async fn upload_attachment(
                         return upload_ended_error(reason);
                     }
                 }
+                // This deadline measures only an absent browser body item.
+                // It is armed after flushing because that flush can wait on
+                // supervisor credit; charging such a wait to the browser
+                // would turn a slow acknowledgement into a false client
+                // stall on the next select.
+                let deadline = *browser_deadline.get_or_insert_with(|| {
+                    tokio::time::Instant::now() + CLIENT_UPLOAD_STALL_TIMEOUT
+                });
                 // The select yields a value rather than acting inside its
                 // arms: every arm borrows `upload` or `body`, and the
                 // paths below need `&mut upload` back to abort.
@@ -269,6 +283,10 @@ pub(crate) async fn upload_attachment(
         if chunk.is_empty() {
             continue;
         }
+        // The received bytes end the browser wait. Any time spent checking,
+        // buffering, or forwarding them belongs to this relay or the
+        // supervisor, never to the browser's next-body-item deadline.
+        browser_deadline = None;
         if sent.saturating_add(chunk.len() as u64) > size {
             warn!(
                 session_id = %id, channel, declared = size,
@@ -287,7 +305,6 @@ pub(crate) async fn upload_attachment(
                 .into_response();
         }
         sent += chunk.len() as u64;
-        deadline = tokio::time::Instant::now() + CLIENT_UPLOAD_STALL_TIMEOUT;
         pending.extend_from_slice(&chunk);
         // Only whole frames go out here; the tail waits for either more
         // bytes or the flush above, so no partial frame is ever emitted
@@ -1180,6 +1197,117 @@ mod tests {
             .expect("the response never completed")
             .expect("handler task panicked")
             .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    /// A credit wait is supervisor-side work, even when the browser body
+    /// has already delivered every declared byte. An advancing but
+    /// insufficient acknowledgement keeps `wait_for_credit` alive; a later
+    /// acknowledgement releases the final chunk. The relay must then wait
+    /// for the body's end rather than reuse the browser deadline that
+    /// elapsed while it was parked on supervisor credit.
+    ///
+    /// Paused time makes the competing deadlines explicit. The first ack
+    /// arrives at thirty seconds and rearms the supervisor-credit deadline;
+    /// the final ack arrives at sixty-one seconds, after the browser's
+    /// sixty-second deadline but before the rearmed supervisor deadline.
+    /// That ordering used to make the next body wait report browser stall
+    /// even though the browser had already supplied the whole body.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn upload_attachment_waiting_for_credit_does_not_stall_the_browser() {
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use farhelm_proto::{ControlMsg, UPLOAD_CHUNK_BYTES, UPLOAD_WINDOW_BYTES};
+        use tower::ServiceExt;
+
+        let total = UPLOAD_WINDOW_BYTES as usize + UPLOAD_CHUNK_BYTES;
+        let (client_side, peer_side) = tokio::io::duplex(16 * 1024 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
+        let (mut peer_reader, mut peer_writer) = peer.await.unwrap();
+        let (body_tx, body_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
+        body_tx
+            .send(vec![3u8; UPLOAD_WINDOW_BYTES as usize])
+            .await
+            .unwrap();
+        body_tx.send(vec![4u8; UPLOAD_CHUNK_BYTES]).await.unwrap();
+        let body_stream = futures_util::stream::unfold(body_rx, |mut rx| async move {
+            rx.recv()
+                .await
+                .map(|item| (Ok::<Vec<u8>, std::io::Error>(item), rx))
+        });
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/attachments")
+            .header("host", "127.0.0.1:7433")
+            .header("content-length", total.to_string())
+            .body(axum::body::Body::from_stream(body_stream))
+            .unwrap();
+        let response_task = tokio::spawn(app.oneshot(request));
+
+        let begin = parse_control(&peer_reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::BeginUpload {
+            req_id, channel, ..
+        } = begin
+        else {
+            panic!("expected BeginUpload, got {begin:?}");
+        };
+        peer_writer
+            .write_control(&ControlMsg::UploadStarted { req_id, channel })
+            .await
+            .unwrap();
+
+        let mut received = 0u64;
+        while received < UPLOAD_WINDOW_BYTES {
+            let frame = peer_reader.read_frame().await.unwrap().unwrap();
+            received += frame.body.len() as u64;
+        }
+        assert_eq!(received, UPLOAD_WINDOW_BYTES);
+
+        tokio::time::advance(Duration::from_secs(30)).await;
+        peer_writer
+            .write_control(&ControlMsg::UploadAck {
+                channel,
+                received: 1,
+            })
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        peer_writer
+            .write_control(&ControlMsg::UploadAck {
+                channel,
+                received: UPLOAD_WINDOW_BYTES,
+            })
+            .await
+            .unwrap();
+
+        let final_chunk = peer_reader.read_frame().await.unwrap().unwrap();
+        assert_eq!(final_chunk.body.len(), UPLOAD_CHUNK_BYTES);
+
+        drop(body_tx);
+        let commit = parse_control(&peer_reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CommitUpload { req_id, .. } = commit else {
+            panic!("expected CommitUpload after credit resumed, got {commit:?}");
+        };
+        peer_writer
+            .write_control(&ControlMsg::UploadCommitted {
+                req_id,
+                path: "/tmp/credit-resumed.bin".to_string(),
+            })
+            .await
+            .unwrap();
+
+        let response = response_task.await.unwrap().unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::OK);
     }
 
