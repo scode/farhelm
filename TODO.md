@@ -422,15 +422,6 @@ is safe. Each is its own review unit.
   `read_process` uses it to classify a failed read; correct the `snapshot` docstring's "not killable" premise. Do macOS
   first, Linux second, each with the self-witness above already landed. Fence: ordinary descendants in scope, deliberate
   same-account escape not; never broaden a kill set on identity that has not been revalidated.
-- **Archive preserves a known outcome.** `A3-SP1`, `A6-C23`. High, small, medium risk. `teardown_for_archive`
-  (teardown.rs:385-392) builds `Exited{exit_code: None, annotation: STOP_ANNOTATION}` unconditionally and
-  `archive_session` (supervisor store.rs:3572-3576) runs
-  `UPDATE ... outcome_state = 'exited', exit_code = NULL,
-  annotation = ?2, error_detail = NULL` with no condition on
-  the prior outcome, so an Error with its detail or an Exited with its code is rewritten as "stopped by user". Fix: read
-  the outcome quartet in the same transaction and synthesize the annotated exit only when the archive actually tore down
-  a live agent, in both the SQL and the in-memory entry. Fence: archiving a live agent really is a user-initiated stop;
-  only the Error-to-Exited conversion is a SPEC divergence, so narrow rather than blanket preservation.
 - **Tab close leaves input aimed at the agent pane.** `A5-S4`. High, small, medium risk. `close_tab_window`
   (core.rs:8901-8932) reaps, kills the window, reaps again, and only then calls `detach_closed_tab`; the audited
   `=<session>:.<pane>` target doc (tmux.rs:1552-1559) records that a vanished pane silently degrades to the session's

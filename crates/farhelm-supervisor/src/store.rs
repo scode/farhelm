@@ -101,6 +101,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use subtle::ConstantTimeEq;
+use tracing::warn;
 
 /// How long a query waits on `SQLITE_BUSY` before giving up.
 ///
@@ -3592,14 +3593,22 @@ impl SessionStore {
     }
 
     /// Mark a session archived after its process tree and terminals are
-    /// gone, preserving every other piece of session metadata.
+    /// gone, preserving the stored outcome unless archive stopped a live
+    /// agent itself.
     ///
-    /// The flag and the deliberate annotated exit land in one transaction,
-    /// so no reader can observe an archived row that still claims a live or
-    /// interrupted outcome. `Ok(None)` means the row vanished. `Some(false)`
+    /// The outcome quartet is read in the same transaction as `archived`.
+    /// Only `stopped_live_agent` permits replacing it with the deliberate
+    /// `Exited`/`STOP_ANNOTATION` quartet; otherwise archive leaves every
+    /// outcome column unchanged. If that flag conflicts with an already
+    /// terminal stored outcome, the terminal knowledge wins and a warning
+    /// records both facts. `Ok(None)` means the row vanished. `Some(false)`
     /// is the idempotent already-archived case; `Some(true)` means this call
     /// performed the transition.
-    pub async fn archive_session(&self, id: &str) -> anyhow::Result<Option<bool>> {
+    pub async fn archive_session(
+        &self,
+        id: &str,
+        stopped_live_agent: bool,
+    ) -> anyhow::Result<Option<bool>> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<bool>> {
@@ -3607,25 +3616,56 @@ impl SessionStore {
             let tx = conn
                 .transaction()
                 .context("beginning the session archive transaction")?;
-            let archived = tx
+            let Some((archived, outcome_state, exit_code, annotation, error_detail)) = tx
                 .query_row(
-                    "SELECT archived FROM sessions WHERE id = ?1",
+                    "SELECT archived, outcome_state, exit_code, annotation, error_detail \
+                     FROM sessions WHERE id = ?1",
                     rusqlite::params![id],
-                    |row| row.get::<_, i64>(0),
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<i32>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                        ))
+                    },
                 )
                 .optional()
-                .context("reading the session archive flag")?;
-            let Some(archived) = archived else {
+                .context("reading the session archive flag")?
+            else {
                 return Ok(None);
             };
+            let stored_outcome = LastOutcome::from_columns(
+                &outcome_state,
+                exit_code,
+                annotation,
+                error_detail,
+            )?;
             if archived != 0 {
                 return Ok(Some(false));
             }
-            tx.execute(
-                "UPDATE sessions SET archived = 1, pane = '', outcome_state = 'exited', \
-                 exit_code = NULL, annotation = ?2, error_detail = NULL WHERE id = ?1",
-                rusqlite::params![id, farhelm_proto::STOP_ANNOTATION],
-            )
+            let preserve_terminal = stopped_live_agent && stored_outcome.is_terminal();
+            if preserve_terminal {
+                warn!(
+                    session = %id,
+                    stored_outcome = ?stored_outcome,
+                    stopped_live_agent,
+                    "archive reported stopping a live agent, but the stored outcome is already terminal; preserving it"
+                );
+            }
+            if stopped_live_agent && !preserve_terminal {
+                tx.execute(
+                    "UPDATE sessions SET archived = 1, pane = '', outcome_state = 'exited', \
+                     exit_code = NULL, annotation = ?2, error_detail = NULL WHERE id = ?1",
+                    rusqlite::params![id, farhelm_proto::STOP_ANNOTATION],
+                )
+            } else {
+                tx.execute(
+                    "UPDATE sessions SET archived = 1, pane = '' WHERE id = ?1",
+                    rusqlite::params![id],
+                )
+            }
             .context("archiving the session row")?;
             tx.commit().context("committing the session archive")?;
             Ok(Some(true))
@@ -8124,8 +8164,11 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
 
-        assert_eq!(store.archive_session("s1").await.unwrap(), Some(true));
-        assert_eq!(store.archive_session("s1").await.unwrap(), Some(false));
+        assert_eq!(store.archive_session("s1", true).await.unwrap(), Some(true));
+        assert_eq!(
+            store.archive_session("s1", true).await.unwrap(),
+            Some(false)
+        );
         let archived = store.session("s1").await.unwrap().unwrap();
         assert!(archived.archived);
         assert_eq!(archived.title, "s1", "session metadata survives archive");
@@ -8177,13 +8220,96 @@ mod tests {
         );
     }
 
+    /// Archive must not replace a witnessed exit or launch error with a
+    /// user-stop explanation merely because the row is being hidden. The
+    /// guarded live-stop direction is covered here too: terminal knowledge
+    /// wins even if a caller reports that a live agent was stopped.
+    #[farhelm_testtrace::test]
+    async fn archive_preserves_known_outcomes_and_only_marks_live_stops() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "error").await;
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open fixture");
+            conn.execute(
+                "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
+                 annotation = NULL, error_detail = 'exec failed' WHERE id = 'error'",
+                [],
+            )
+            .expect("plant the witnessed error");
+        }
+        assert_eq!(
+            store.session("error").await.unwrap().unwrap().outcome,
+            LastOutcome::Error {
+                detail: "exec failed".to_string()
+            }
+        );
+        store.archive_session("error", false).await.unwrap();
+        let error = store.session("error").await.unwrap().unwrap();
+        assert!(error.archived);
+        assert_eq!(
+            error.outcome,
+            LastOutcome::Error {
+                detail: "exec failed".to_string()
+            }
+        );
+
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "exited").await;
+        store
+            .transition("exited", 0, Transition::ObservedExit { exit_code: Some(3) })
+            .await
+            .unwrap();
+        store.archive_session("exited", false).await.unwrap();
+        let exited = store.session("exited").await.unwrap().unwrap();
+        assert!(exited.archived);
+        assert_eq!(
+            exited.outcome,
+            LastOutcome::Exited {
+                exit_code: Some(3),
+                annotation: None,
+            }
+        );
+
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "live").await;
+        store.archive_session("live", true).await.unwrap();
+        assert_eq!(
+            store.session("live").await.unwrap().unwrap().outcome,
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
+            }
+        );
+
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "terminal").await;
+        {
+            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open fixture");
+            conn.execute(
+                "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
+                 annotation = NULL, error_detail = 'already failed' WHERE id = 'terminal'",
+                [],
+            )
+            .expect("plant the terminal outcome");
+        }
+        store.archive_session("terminal", true).await.unwrap();
+        let terminal = store.session("terminal").await.unwrap().unwrap();
+        assert!(terminal.archived);
+        assert_eq!(
+            terminal.outcome,
+            LastOutcome::Error {
+                detail: "already failed".to_string()
+            }
+        );
+    }
+
     /// Once archive commits, a delayed observation from the retired pane
     /// cannot repopulate either its terminal handle or its prior outcome.
     #[farhelm_testtrace::test]
     async fn archive_fences_a_stale_outcome_observation() {
         let (_dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
-        store.archive_session("s1").await.unwrap();
+        store.archive_session("s1", true).await.unwrap();
 
         let committed = store
             .transition(
