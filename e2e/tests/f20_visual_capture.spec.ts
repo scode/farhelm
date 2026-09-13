@@ -167,12 +167,12 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
   }, ["complete recent prefill", "all populated chips", "recent heading and first row at scrollTop 0"]);
-  await capture("focus-wrap-reset-visible", narrow, async (form) => {
+  await capture("focus-wrap-launch-visible", narrow, async (form) => {
     // Launch no longer renders last — the action row moved to the top of the
     // dialog — so the wrap boundary is whatever the trap's own query finds
     // last, found the same way `install_composer_focus_trap` does rather
     // than assuming a control name.
-    const reset = form.getByRole("button", { name: "reset choices", exact: true });
+    const launch = form.getByRole("button", { name: /^launch\b/ });
     await selectExplicit(form);
     await form.evaluate((dialog) => {
       const nodes = [...dialog.querySelectorAll(
@@ -186,13 +186,13 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await form.evaluate((node) => { node.scrollTop = node.scrollHeight; });
     await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
     await page.keyboard.press("Tab");
-    await expect(reset).toBeFocused();
-    await expect.poll(() => reset.evaluate((node) => {
+    await expect(launch).toBeFocused();
+    await expect.poll(() => launch.evaluate((node) => {
       const target = node.getBoundingClientRect();
       const viewport = node.closest(".create-session-form")!.getBoundingClientRect();
       return target.top < viewport.bottom && target.bottom > viewport.top;
     })).toBe(true);
-  }, ["Tab wraps from the trap's last control", "reset choices focused", "wrapped target visible in the composer viewport"]);
+  }, ["Tab wraps from the trap's last control", "Launch focused", "wrapped target visible in the composer viewport"]);
   await capture("prefill-default-over-explicit", narrow, async (form) => {
     await selectExplicit(form);
     await prefillSavedDefaults(form);

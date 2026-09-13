@@ -80,7 +80,11 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
 
     const accentFill = await resolveToken(page, "--accent-fill");
     const accentEdge = await resolveToken(page, "--accent-edge");
-    const composerLaunch = await resolveToken(page, "--composer-selected-border");
+    // The composer's Launch is the one saturated fill in its dialog: the
+    // accent at border weight as its fill and the accent itself as its edge
+    // (see the `.launch-composer-actions .create-session-submit` rule).
+    const composerLaunchFill = await resolveToken(page, "--accent-edge");
+    const composerLaunchEdge = await resolveToken(page, "--accent");
     const danger = await resolveToken(page, "--danger");
 
     // `toHaveCSS` (polling) rather than a one-shot `getComputedStyle`
@@ -122,10 +126,10 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     await expectPrimary(".new-session-button");
 
     // --- Primary #2: the composer launch action is deliberately brighter
-    // than the generic sidebar primary, per its supplied interaction study.
+    // than the generic sidebar primary, per the maintainer's composer mockup.
     await page.locator(".new-session-button").click();
     await expect(page.locator(".create-session-form")).toBeVisible();
-    await expectPrimary(".create-session-submit", composerLaunch, composerLaunch);
+    await expectPrimary(".create-session-submit", composerLaunchFill, composerLaunchEdge);
     // Close it again rather than leaving it open into the next section —
     // an open create form is its own dialog surface and this test has no
     // further business with it.
