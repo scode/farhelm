@@ -31,8 +31,8 @@ use super::launch_artifacts::{
     wrapper_failure_detail,
 };
 use super::sweep::{
-    ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree,
-    stop_live_agent,
+    ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit,
+    reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, OutputReapRegistry, SINK_READY_TIMEOUT, SinkRegistry,
@@ -6788,6 +6788,7 @@ impl Supervisor {
                             None,
                             &id,
                             &SweepTarget::AgentOnly,
+                            ScopeKillFailure::Warn,
                         )
                         .await
                         {
@@ -6934,6 +6935,7 @@ impl Supervisor {
                 None,
                 &id,
                 &SweepTarget::AgentOnly,
+                ScopeKillFailure::Warn,
             )
             .await
             {
@@ -6984,6 +6986,7 @@ impl Supervisor {
                 None,
                 &id,
                 &SweepTarget::AgentOnly,
+                ScopeKillFailure::Warn,
             )
             .await
             {
@@ -7449,6 +7452,7 @@ impl Supervisor {
                 None,
                 session_id,
                 &SweepTarget::AgentOnly,
+                ScopeKillFailure::Warn,
             )
             .await
             .context("reaping the prior run's leftover descendants before relaunching")?;
@@ -7979,6 +7983,7 @@ impl Supervisor {
                     None,
                     &id,
                     &SweepTarget::AgentOnly,
+                    ScopeKillFailure::Warn,
                 )
                 .await
                 {
@@ -8167,6 +8172,7 @@ impl Supervisor {
             None,
             id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         {
@@ -9451,6 +9457,7 @@ impl Supervisor {
             root_pid,
             session_id,
             &SweepTarget::Tab(tab_id.to_string()),
+            ScopeKillFailure::Warn,
         )
         .await
     }
