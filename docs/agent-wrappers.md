@@ -116,23 +116,26 @@ would have sent, so a tab close ends inside the grace instead of waiting for the
 marker and are never hung up.
 
 Where this launch recorded a cgroup scope, the manager is still there, and that unit still exists, the scope is killed
-first: SIGTERM to everything in it, about 500 ms, then SIGKILL, then a bounded wait for the unit to be collected. The
-process-table sweep runs afterwards regardless — as the backstop there, and as the whole mechanism on a host with no
-user manager. It SIGTERMs everything the first enumeration found, waits the same 500 ms, then RE-ENUMERATES and SIGSTOPs
-the refreshed set: the refresh comes first so that a process forked inside a TERM handler is frozen along with
-everything else rather than escaping with the parent. Stopped processes cannot fork, so what is left only shrinks — up
-to five further passes re-enumerate and SIGSTOP whatever is newly there, then everything found gets SIGKILL and is
-polled until each pid is confirmed gone: exited, replaced by an unrelated process on the same number, or a zombie nobody
-has reaped yet, all three of which mean it can no longer run anything. Both bounds fail loudly rather than quietly: a
-fifth pass that still finds something new, or a pid still alive when the poll gives up, makes the stop report a failure.
-A supervisor restart does not kill sessions, and a host reboot takes everything down with the machine.
+first: SIGTERM to everything in it, up to five seconds for the unit to retire on its own (the wait ends the moment it
+does), then SIGKILL if it has not, then a bounded wait for the unit to be collected. The process-table sweep runs
+afterwards regardless — as the backstop there, and as the whole mechanism on a host with no user manager. It SIGTERMs
+everything the first enumeration found, waits up to the same five seconds for every one of those pids to be confirmed
+gone (again ending as soon as they are), then RE-ENUMERATES and SIGSTOPs the refreshed set: the refresh comes first so
+that a process forked inside a TERM handler is frozen along with everything else rather than escaping with the parent.
+Stopped processes cannot fork, so what is left only shrinks — up to five further passes re-enumerate and SIGSTOP
+whatever is newly there, then everything found gets SIGKILL and is polled until each pid is confirmed gone: exited,
+replaced by an unrelated process on the same number, or a zombie nobody has reaped yet, all three of which mean it can
+no longer run anything. Both bounds fail loudly rather than quietly: a fifth pass that still finds something new, or a
+pid still alive when the poll gives up, makes the stop report a failure. A supervisor restart does not kill sessions,
+and a host reboot takes everything down with the machine.
 
 There is no ordering between parent and child: the wrapper and the agent are signalled in one pass over an unordered
-set, and nothing waits for either before signalling the other. What is offered is about half a second between SIGTERM
-and SIGKILL, and only to what the first enumeration found — something that first appears AFTER the grace period is
-picked up by a later pass and gets SIGSTOP and SIGKILL without ever seeing a SIGTERM at all.
+set, and nothing waits for either before signalling the other. What is offered is up to five seconds between SIGTERM and
+SIGKILL, and only to what the first enumeration found — something that first appears AFTER the grace period is picked up
+by a later pass and gets SIGSTOP and SIGKILL without ever seeing a SIGTERM at all. The wait is not a fixed delay: it
+ends as soon as everything signalled is gone, so exiting promptly is what makes a stop feel prompt.
 
-For a wrapper author that means three things. A TERM handler has a budget of about half a second of wall clock, and a
+For a wrapper author that means three things. A TERM handler has a budget of about five seconds of wall clock, and a
 budget is not a guarantee: the timer starts when the signal goes out, not when your handler is scheduled, and a loaded
 host or a slow disk spends it for you. Plan for less than you measure. Unlinking a marker or writing a small state file
 fits; waiting on the child, syncing a large tree, or a network round trip does not. A handler still running when the
