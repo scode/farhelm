@@ -77,7 +77,7 @@ It never prints a diagnostic, on either descriptor. It does print one deliberate
 that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that
 `farhelm agent instructions` explains it. Both vendors feed a `SessionStart` hook's plain-text stdout into the model's
 context, which is the whole delivery mechanism — nothing is written to disk and nothing reaches your terminal. See the
-README's "Talking to Farhelm from inside a session", and `FARHELM_AGENT_INSTRUCTIONS` below.
+"Talking to Farhelm from inside a session" in [old_readme.md](old_readme.md), and `FARHELM_AGENT_INSTRUCTIONS` below.
 
 ## What you will see
 
