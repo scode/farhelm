@@ -31,7 +31,8 @@ use super::launch_artifacts::{
     wrapper_failure_detail,
 };
 use super::sweep::{
-    StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree, stop_live_agent,
+    ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit, reap_process_tree,
+    stop_live_agent,
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, OutputReapRegistry, SINK_READY_TIMEOUT, SinkRegistry,
@@ -6783,7 +6784,7 @@ impl Supervisor {
                         // rather than orphaning what it could not reach.
                         if let Err(sweep) = reap_process_tree(
                             &self.seams.scopes,
-                            launch_scope.as_slice(),
+                            ScopeUnits::recorded(launch_scope.clone()),
                             None,
                             &id,
                             &SweepTarget::AgentOnly,
@@ -6929,7 +6930,7 @@ impl Supervisor {
             // path can still do for whoever reads the log.
             if let Err(sweep) = reap_process_tree(
                 &self.seams.scopes,
-                launch_scope.as_slice(),
+                ScopeUnits::recorded(launch_scope.clone()),
                 None,
                 &id,
                 &SweepTarget::AgentOnly,
@@ -6979,7 +6980,7 @@ impl Supervisor {
             // path may still go on to remove the row.
             if let Err(sweep) = reap_process_tree(
                 &self.seams.scopes,
-                launch_scope.as_slice(),
+                ScopeUnits::recorded(launch_scope.clone()),
                 None,
                 &id,
                 &SweepTarget::AgentOnly,
@@ -7444,7 +7445,7 @@ impl Supervisor {
             // shell that has been happily running across the restart.
             reap_process_tree(
                 &self.seams.scopes,
-                entry.scope.as_slice(),
+                ScopeUnits::recorded(entry.scope.clone()),
                 None,
                 session_id,
                 &SweepTarget::AgentOnly,
@@ -7974,7 +7975,7 @@ impl Supervisor {
                 let mut teardown = Vec::new();
                 if let Err(e) = reap_process_tree(
                     &self.seams.scopes,
-                    scope.as_slice(),
+                    ScopeUnits::recorded(scope.clone()),
                     None,
                     &id,
                     &SweepTarget::AgentOnly,
@@ -8162,7 +8163,7 @@ impl Supervisor {
         // now reports nothing running.
         if let Err(sweep) = reap_process_tree(
             &self.seams.scopes,
-            scope.map(str::to_string).as_slice(),
+            ScopeUnits::recorded(scope.map(str::to_string)),
             None,
             id,
             &SweepTarget::AgentOnly,
@@ -9436,15 +9437,17 @@ impl Supervisor {
             },
             TabReapAnchor::MarkerOnly => None,
         };
-        let units: Vec<String> = crate::scope::tab_unit_name(session_id, tab_id)
-            .into_iter()
-            .collect();
+        let units = ScopeUnits::derived(
+            crate::scope::tab_unit_name(session_id, tab_id)
+                .into_iter()
+                .collect(),
+        );
         // `session_id` is carried purely for the log lines inside the
         // sweep; `SweepTarget::Tab` is what actually selects processes
         // here, by the session marker AND this tab's own id.
         reap_process_tree(
             &self.seams.scopes,
-            &units,
+            units,
             root_pid,
             session_id,
             &SweepTarget::Tab(tab_id.to_string()),
