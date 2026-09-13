@@ -41,12 +41,22 @@ impl TmuxDriver {
     /// until tmux already has this one (see `silence_pane_args`).
     pub async fn open_session_sink(&self, session: &str) -> anyhow::Result<SessionSink> {
         let deadline = tokio::time::Instant::now() + self.exchange_timeout;
+        // `=` forces exact-name resolution. A bare `-t` target falls back
+        // to prefix matching, and this client never issues a
+        // session-paired command afterwards that would catch the
+        // mismatch — it just drains bytes — so without it a vanished
+        // session with a name-extending neighbour would leave the intended
+        // session sinkless (its filtered panes freeze on their next write)
+        // while a stranger's session gained a silent extra consumer, and
+        // the sink supervisor would see a successful open and stop
+        // retrying. With `=`, the attach fails and that retry loop handles
+        // it.
         let mut child = self
             .command()
             .arg("-C")
             .arg("attach")
             .arg("-t")
-            .arg(session)
+            .arg(format!("={session}"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -440,5 +450,56 @@ mod tests {
             "the sink stopped draining, so the recovery above proves nothing"
         );
         shutdown_test_stream(stream).await;
+    }
+
+    /// The sink attaches by exact name, never by tmux's prefix fallback.
+    /// A bare `-t fh-abcd1234` with no such session would attach to
+    /// `fh-abcd1234extra` and announce it only through `%session-changed`,
+    /// which nothing here inspects — so the intended session would go
+    /// sinkless (its filtered panes freeze on their next write) while a
+    /// stranger's session gained a silent extra consumer, and the sink
+    /// supervisor, seeing a successful open, would stop retrying. With
+    /// exact resolution the open fails, which is what that retry loop
+    /// expects. The neighbour is created on the private socket the way
+    /// anything holding `TMUX` in a pane could.
+    #[farhelm_testtrace::test]
+    async fn open_session_sink_does_not_prefix_match_a_name_extending_neighbour() {
+        let server = ScratchServer::start().await;
+        server
+            .driver
+            .create_session(
+                "fh-abcd1234extra",
+                "/",
+                80,
+                24,
+                &[],
+                &ticking_pane("NEIGHBOUR"),
+            )
+            .await
+            .expect("neighbour session");
+        assert!(
+            server
+                .driver
+                .has_session("fh-abcd1234extra")
+                .await
+                .expect("liveness probe"),
+            "test premise: the name-extending neighbour must exist before the attach is attempted"
+        );
+        let opened = server.driver.open_session_sink("fh-abcd1234").await;
+        assert!(
+            opened.is_err(),
+            "a missing session must fail the attach rather than resolve to its name-extending neighbour"
+        );
+        // The exact name still attaches, proven by an orderly shutdown
+        // rather than a bare `expect`: `shutdown` needs a reachable,
+        // attached client, and it is also the documented safe way to end
+        // an output-bearing control client (killing one abruptly is the
+        // shape that aborts a tmux 3.7b server).
+        let mut own = server
+            .driver
+            .open_session_sink("fh-abcd1234extra")
+            .await
+            .expect("the exact name still attaches");
+        own.shutdown().await.expect("orderly sink teardown");
     }
 }

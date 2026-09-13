@@ -307,16 +307,6 @@ client-scale decisions.
 Mechanism verified on main, fix is trivial or small, and the notes attach no design question. Ordered roughly by
 severity.
 
-- **Exact tmux targets.** `A7-C1`, `A7-C2`, `A7-C3`, `A7-C14`. Critical, trivial. `kill_session` (tmux.rs:2297), the
-  session sink's attach (tmux/sink.rs:47), and the replay stream's attach (tmux/stream.rs:283) all pass a bare
-  `-t
-  <name>`, which tmux resolves by exact, then glob, then prefix match, so a vanished `fh-<id>` can kill or attach
-  to a neighbour whose name extends it; `has_session` already uses the exact `={name}` form and its docstring says why.
-  Any pane can create such a neighbour on the private socket. Fix: spell all three targets `={name}`; the tolerated
-  "can't find session" arm in `kill_session` already handles the exact-form miss. In the same change convert
-  `pane_process` (tmux.rs:2680) and `kill_session`'s identical arm from `e.to_string().contains(...)` to
-  `tmux_said_any`, the anchored raw-stderr form the module documents as the safe one. Fence: no wrong-target outcome was
-  reproduced; generated names cannot prefix each other, so reachability needs a foreign session.
 - **Session token in tmux failure diagnostics.** `A5-S5`, `A7-S2`. Critical, small. `run_bytes` (tmux.rs:2016, and the
   tail variant at :2962) formats the whole argv into the failure context, `new_window` pushes every `-e NAME=VALUE` pair
   including `FARHELM_SESSION_TOKEN` (built at service/core.rs:8594), and `open_tab_window` renders the chain with
