@@ -1780,6 +1780,86 @@ pub(crate) async fn wait_until_pid_gone(pid: u32, secs: u64) {
     }
 }
 
+/// Poll until a systemd user-manager scope `unit` is no longer known,
+/// failing the test if it never is.
+///
+/// Shared by every scope-gated test that needs to confirm a torn-down
+/// scope's unit was actually collected, rather than each inlining its own
+/// poll loop (`.agents/test-authoring.md`'s "use shared polling helpers"
+/// rule). By the time a delete or archive RPC has returned success, the
+/// production teardown path (`kill_scope`'s own `confirm_scope_gone` in
+/// sweep.rs) should already have settled this — this wait is a small
+/// margin for the manager's answer to lag by a beat, not a substitute for
+/// that confirmation.
+pub(crate) async fn wait_until_scope_gone(
+    scopes: &farhelm_supervisor::scope::ScopeManager,
+    unit: &str,
+    secs: u64,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Ok(false) = scopes.exists(unit).await {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "scope {unit} was still reported as existing after {secs}s"
+        );
+        // sleep-ok: poll the systemd user manager's own view of unit existence until it reports this scope collected.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Assert the premise of the `stubborn-threads` fake-agent fixture holds
+/// for `pid` RIGHT NOW: the process is multithreaded, ignores SIGTERM, and
+/// (when `unit` is given) is a member of that cgroup scope.
+///
+/// The systemd-255 scope-kill tests pass just as well on a host without
+/// the quirk, so nothing in their outcome proves the fixture had the shape
+/// that triggers it. A future edit that dropped the fixture's thread loop
+/// or its `SIG_IGN`, or a launch-path change that left the agent outside
+/// its scope, would leave those tests green while guarding nothing; this
+/// is the `.agents/test-authoring.md` "assert the fixture premise" rule
+/// for exactly that fixture. Read straight from `/proc` because all three
+/// facts are kernel-reported and need no wait: the fixture sets them all
+/// before it prints READY.
+pub(crate) fn assert_stubborn_threads_premise(pid: u32, unit: Option<&str>) {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .unwrap_or_else(|e| panic!("test setup: reading /proc/{pid}/status: {e}"));
+    let field = |name: &str| -> String {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(name))
+            .unwrap_or_else(|| panic!("test setup: /proc/{pid}/status has no {name} line"))
+            .trim()
+            .to_string()
+    };
+    let threads: u32 = field("Threads:")
+        .parse()
+        .expect("test setup: Threads: must be a count");
+    assert!(
+        threads > 1,
+        "test setup: the fixture must be multithreaded, but pid {pid} has {threads} thread(s)"
+    );
+    // `SigIgn` is a hex bitmask with signal N at bit N-1; SIGTERM is 15.
+    let ignored =
+        u64::from_str_radix(&field("SigIgn:"), 16).expect("test setup: SigIgn: must be a hex mask");
+    assert!(
+        ignored & (1 << (libc::SIGTERM - 1)) != 0,
+        "test setup: the fixture must ignore SIGTERM, but pid {pid} has SigIgn {ignored:#x}"
+    );
+    if let Some(unit) = unit {
+        let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            .unwrap_or_else(|e| panic!("test setup: reading /proc/{pid}/cgroup: {e}"));
+        assert!(
+            cgroup
+                .lines()
+                .any(|line| line.trim_end_matches('/').ends_with(&format!("/{unit}"))),
+            "test setup: pid {pid} must be a member of scope {unit}; /proc/{pid}/cgroup says:\n{cgroup}"
+        );
+    }
+}
+
 /// Every currently-live pid whose parent is `parent`, read directly from
 /// `/proc`. Used to discover a grandchild the fake-agent `spawner`
 /// scripts never print themselves (only `SELF-PID`/`CHILD-PID`) — `sh -c

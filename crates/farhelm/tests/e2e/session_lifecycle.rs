@@ -5708,6 +5708,242 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     wait_until_pid_gone(cloaked_pid, 15).await;
 }
 
+/// Delete must still succeed through the cgroup when the agent is
+/// MULTITHREADED and ignores SIGTERM — the fixture shape that trips a
+/// systemd 255 quirk: `systemctl --user kill --signal=SIGKILL` against a
+/// scope whose sole member is a multithreaded process can exit 1 ("Failed
+/// to send signal SIGKILL to auxiliary processes: Invalid argument") even
+/// though the kill worked and the scope is retired within the same
+/// second (reproduced on this project's own Ubuntu/systemd 255.4/kernel
+/// 6.8 development host; see [`Script::StubbornThreads`]'s own docs for
+/// the exact repro). `reap_process_tree`'s `ScopeKillFailure::Refuse`
+/// (PR #597) turns ANY such scope-teardown error into a kept-row refusal
+/// for delete, even when — as here — the process-tree sweep run
+/// immediately afterward finds nothing left alive at all.
+///
+/// This is not a test of `kill_scope`'s internals; it holds delete to
+/// what a real user experiences with a real multithreaded agent (every
+/// node-based one, `claude` chiefly) that does not exit within the
+/// SIGTERM grace period, on an affected host. The contract it pins:
+/// delete returns `Ok`, the pane process is gone, the row is gone, and
+/// the scope unit is collected — the manager's exit status for the kill
+/// never decides the outcome, the unit's disappearance does. On
+/// 0.6.0-rc.4 this exact sequence failed with `kill_scope`'s refusal
+/// message quoting the systemd text above (every Replace of a running
+/// claude session hit it), which is the regression this test guards.
+#[farhelm_testtrace::test]
+async fn a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the_cgroup() {
+    let Some((h, scopes)) = scope_gated_harness(
+        "a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the_cgroup",
+    )
+    .await
+    else {
+        return;
+    };
+    let work = farhelm_teststate::tempdir().unwrap();
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &agent_cmd("internal fake-agent --script stubborn-threads"),
+            None,
+            80,
+            24,
+        )
+        .await
+        .expect("create");
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let (_chan, rx_replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 80, 24)
+        .await
+        .expect("attach");
+    let mut seen = rx_replay;
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    let self_pid = extract_pid(&seen, "SELF-PID:");
+    let _pid_cleanup = PidKillGuard::arm(self_pid);
+
+    // The fixture premise: a LIVE, multithreaded, SIGTERM-ignoring pane
+    // process under a recorded launch scope. Without both halves of this
+    // holding at once, a pass here would prove nothing about the quirk
+    // under test.
+    assert!(
+        !process_is_gone(self_pid),
+        "test setup: the fixture must still be running before delete is asked to tear it down"
+    );
+    let unit = launch_scope_of(&h, &session.id)
+        .await
+        .expect("test setup: a launch on a manager-equipped host must record its scope");
+    assert_stubborn_threads_premise(self_pid, Some(&unit));
+
+    h.client.delete_session(&session.id).await.expect("delete");
+
+    wait_until_pid_gone(self_pid, 15).await;
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .expect("list after delete")
+            .sessions
+            .into_iter()
+            .all(|row| row.id != session.id),
+        "delete must remove the session row"
+    );
+    wait_until_scope_gone(&scopes, &unit, 5).await;
+}
+
+/// Standalone reproduction of the systemd 255 quirk the delete/archive
+/// tests above document — with no supervisor and no tmux anywhere in the
+/// loop, so it isolates the quirk to systemd's own behavior rather than to
+/// anything farhelm's launch or teardown path does.
+///
+/// Against a scope whose sole member is a MULTITHREADED process,
+/// `systemctl --user kill --signal=SIGKILL` can exit 1 ("Failed to send
+/// signal SIGKILL to auxiliary processes: Invalid argument") even though
+/// the kill itself worked and the unit is retired within the same second
+/// (reproduced empirically on Ubuntu/systemd 255.4/cgroup v2/kernel 6.8).
+/// This test PASSES on this tree, and passes just as well on a systemd
+/// build without the quirk — a plain successful kill reaches the same end
+/// state through the unremarkable path. Its purpose is not to fix
+/// anything here: it exists so that a later cleanup of the `kill_scope`
+/// workaround this quirk provoked cannot casually go back to trusting
+/// `systemctl kill`'s own exit status again, because this fixture is
+/// exactly the input that exit status lies about.
+#[farhelm_testtrace::test]
+async fn a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_down() {
+    let Some(scopes) = probed_scope_manager(
+        "a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_down",
+    )
+    .await
+    else {
+        return;
+    };
+
+    // A fresh, unrecorded session id: this scope belongs to no supervisor
+    // launch at all, so `unit_name`'s generation-0 shape only needs to be
+    // syntactically valid, never durable.
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let unit = farhelm_supervisor::scope::unit_name(&session_id, 0)
+        .expect("a freshly minted v4 UUID is always unit-name-shaped");
+
+    let mut child = tokio::process::Command::new("systemd-run")
+        .arg("--user")
+        .arg("--scope")
+        .arg("--collect")
+        .arg(format!("--unit={unit}"))
+        .arg("--")
+        .arg(farhelm_bin())
+        .arg("internal")
+        .arg("fake-agent")
+        .arg("--script")
+        .arg("stubborn-threads")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawning the stubborn-threads fixture under systemd-run");
+
+    let seen = wait_for_ready_on_stdout(
+        child
+            .stdout
+            .take()
+            .expect("this child was spawned with a piped stdout"),
+        20,
+    )
+    .await;
+    let pid = extract_pid(&seen, "SELF-PID:");
+    let _pid_cleanup = PidKillGuard::arm(pid);
+
+    // `systemd-run --scope` execs in place (see `scope.rs`'s module docs),
+    // so the child handle's own pid must still name the same process the
+    // fixture reported — the same tree-shape audit the cgroup stop test
+    // above performs against tmux, adapted to a plain child handle here.
+    assert_eq!(
+        child.id(),
+        Some(pid),
+        "systemd-run must exec in place: the spawned child's pid must still be the fixture's own"
+    );
+
+    assert!(
+        matches!(scopes.exists(&unit).await, Ok(true)),
+        "test setup: the transient scope must exist before its kill is asked to tear it down"
+    );
+    assert_stubborn_threads_premise(pid, Some(&unit));
+
+    // DELIBERATELY IGNORED as a `Result` a caller would act on: the whole
+    // point of this test is the systemd 255 host where this exact call
+    // reports failure despite the kill actually working. Recorded only so
+    // a failure below can name what the call reported, never used to gate
+    // anything.
+    let kill_result = scopes.kill(&unit, "SIGKILL").await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Ok(false) = scopes.exists(&unit).await {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "scope {unit} was still reported as existing 2s after SIGKILL (the kill call \
+             itself reported: {kill_result:?})"
+        );
+        // sleep-ok: poll the systemd user manager's own view of unit existence within the bounded 2s confirmation window production's own workaround uses.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        process_is_gone(pid),
+        "the SIGKILL must have actually reached the multithreaded pane process regardless of \
+         what systemctl's exit status claimed (the kill call itself reported: {kill_result:?})"
+    );
+
+    let _ = child.wait().await;
+}
+
+/// Read `stdout` until `FAKE-AGENT READY` appears in the accumulated
+/// bytes, returning everything read so far — so a caller can still pull a
+/// marker like `SELF-PID:` out of it with [`extract_pid`].
+///
+/// A dedicated reader rather than routing through the harness's
+/// `TermStream`-based [`wait_for`]: the systemd-255 probe test this
+/// serves deliberately runs with no tmux and no supervisor anywhere in
+/// the loop, so its fixture's only output surface is an ordinary pipe.
+async fn wait_for_ready_on_stdout(stdout: tokio::process::ChildStdout, secs: u64) -> Vec<u8> {
+    use tokio::io::AsyncBufReadExt as _;
+
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        if String::from_utf8_lossy(&seen).contains("FAKE-AGENT READY") {
+            return seen;
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "the fixture never printed FAKE-AGENT READY within {secs}s; seen so far: {}",
+            String::from_utf8_lossy(&seen)
+        );
+        // Bounded by the overall deadline above, not by a fixed poll step:
+        // this waits directly on the next line of real output rather than
+        // sleeping and re-checking, so no `sleep-ok` accounting applies —
+        // `timeout` here bounds one read attempt, not an unconditional
+        // delay.
+        match tokio::time::timeout(remaining, lines.next_line()).await {
+            Ok(Ok(Some(line))) => {
+                seen.extend_from_slice(line.as_bytes());
+                seen.push(b'\n');
+            }
+            Ok(Ok(None)) => panic!(
+                "the fixture's stdout closed before FAKE-AGENT READY; seen so far: {}",
+                String::from_utf8_lossy(&seen)
+            ),
+            Ok(Err(e)) => panic!("reading the fixture's stdout: {e:#}"),
+            Err(_) => {}
+        }
+    }
+}
+
 /// A launch whose cgroup WRAPPER failed must classify as error, not as a
 /// plain exit — PLAN_M3.md item 10's one new failure mode, and the one gap
 /// the wrapper opened in item 3's sentinel contract.
@@ -5861,7 +6097,12 @@ async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2(
 /// actually about. The NAME is derived here exactly as the supervisor
 /// derives it, never read back, because the database deliberately does not
 /// store one (`store::StoredSession::launch_scoped`).
-async fn launch_scope_of(h: &Harness, session_id: &str) -> Option<String> {
+///
+/// `pub(crate)` rather than private because `archive.rs`'s systemd-255
+/// scope-kill test needs the identical lookup against its own live harness;
+/// sharing this one function keeps the derivation in a single place
+/// instead of a second copy drifting from it.
+pub(crate) async fn launch_scope_of(h: &Harness, session_id: &str) -> Option<String> {
     stored_launch_scope(h.state.path(), session_id).await
 }
 

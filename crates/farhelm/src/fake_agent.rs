@@ -80,6 +80,20 @@ pub enum Script {
     /// cannot otherwise observe when that has happened (the child's own
     /// stdio is not connected to the terminal).
     SpawnerStubborn,
+    /// The PANE PROCESS ITSELF — not a spawned child, and it spawns none
+    /// — ignores SIGTERM and carries four extra sleeping threads. This is
+    /// the fixture for a systemd 255 quirk found by empirical
+    /// reproduction on this project's own development host (Ubuntu,
+    /// systemd 255.4, cgroup v2, kernel 6.8): `systemctl --user kill
+    /// --signal=SIGKILL` against a transient scope whose sole member is a
+    /// MULTITHREADED process can exit 1 ("Failed to send signal SIGKILL
+    /// to auxiliary processes: Invalid argument") even though every
+    /// thread in the scope dies and the unit is retired within the same
+    /// second — the kill worked; only its reported exit status lied. A
+    /// single-threaded scope member does not trip this. See
+    /// `stubborn_threads`'s own docs for the exact shape and why it must
+    /// be the PANE process rather than a descendant of it.
+    StubbornThreads,
     /// A doubly-forked daemon that reparents to init while still carrying
     /// the session's environment marker — see `spawner_reparent`'s docs.
     /// The acceptance fixture for the marker-scan half of
@@ -295,6 +309,7 @@ pub fn run(
             "trap '' TERM; touch stubborn-ready; sleep 3600",
             "spawner-stubborn",
         ),
+        Script::StubbornThreads => stubborn_threads(),
         Script::SpawnerReparent => spawner_reparent(),
         Script::SpawnerCloaked => spawner_cloaked(),
         Script::SpawnerForkStorm => spawn_and_echo(
@@ -2260,6 +2275,68 @@ fn spawn_and_echo(child_shell_cmd: &str, script_name: &str) -> anyhow::Result<()
         write!(out, "> ")?;
         out.flush()?;
     }
+    Ok(())
+}
+
+/// A multithreaded, SIGTERM-ignoring PANE PROCESS with no children at
+/// all — the acceptance fixture for [`Script::StubbornThreads`].
+///
+/// The pane process itself is the fixture, unlike `SpawnerStubborn`'s
+/// child, because that is the shape a real agent has: `claude` and every
+/// other node-based agent IS the multithreaded pane process, with nothing
+/// forked underneath it that the quirk needs. Any multithreaded member of
+/// the scope would trip the same thread walk (the reproduction that
+/// established the quirk used a bare `systemd-run --scope python3` with
+/// threads, no farhelm anywhere), so spawning children here would add
+/// process-tree shape the test is not about; keeping the fixture to one
+/// process makes "the scope holds exactly one multithreaded,
+/// SIGTERM-ignoring member" the whole premise.
+///
+/// The SIGTERM disposition is set to IGNORE — not a custom handler, unlike
+/// `altscreen`'s — before anything else observable happens, for the same
+/// reason `altscreen` installs its own handler first: a test attaches and
+/// may signal the moment it observes READY, and a signal landing before
+/// this call would hit the default (terminating) disposition instead of
+/// the one this fixture exists to hold under signal.
+///
+/// Self-expiring like `SpawnerForkStorm`: the main thread's own sleep is
+/// capped at 120s rather than run forever, so a test that panics before
+/// ever stopping its session cannot leave behind a process immune to
+/// SIGTERM. SIGKILL is never ignorable, so an ordinary teardown ends this
+/// well before that cap regardless.
+fn stubborn_threads() -> anyhow::Result<()> {
+    let mut out = std::io::stdout().lock();
+    write!(out, "\x1b[?2004h")?;
+    writeln!(
+        out,
+        "\x1b[1;32mfake-agent\x1b[0m starting (script=stubborn-threads)\r"
+    )?;
+
+    // SAFETY: `signal(2)` only needs a valid signal number and disposition;
+    // `SIG_IGN` installs no handler, so unlike `altscreen`'s custom handler
+    // there is no handler code whose async-signal-safety would need
+    // arguing, and no state it could observe half-written.
+    unsafe {
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+
+    // Four idle threads: the whole point of this fixture is a pane
+    // process that is multithreaded when its scope is torn down. Each
+    // thread's own sleep is bounded for tidiness; it is the MAIN thread's
+    // cap below that actually bounds this process's self-expiry, since
+    // the process exits as soon as `main` returns regardless of what its
+    // other threads are still doing.
+    for _ in 0..4 {
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(120));
+        });
+    }
+
+    writeln!(out, "SELF-PID:{}\r", std::process::id())?;
+    writeln!(out, "FAKE-AGENT READY\r")?;
+    out.flush()?;
+
+    std::thread::sleep(std::time::Duration::from_secs(120));
     Ok(())
 }
 

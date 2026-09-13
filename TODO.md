@@ -25,23 +25,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
   must not.
 
-- Let a confirmed-gone scope override a failed `systemctl kill` exit status. Observed on 0.6.0-rc.4: "Replace" on a
-  running claude session created the replacement and then refused to remove the original with "tearing down cgroup scope
-  ... Failed to send signal SIGKILL to auxiliary processes: Invalid argument", while the journal shows systemd killed
-  the process and retired the scope in the same second. Reproduced outside farhelm: on systemd 255 with cgroup v2,
-  `systemctl --user kill --signal=SIGKILL` on a scope holding a multithreaded process exits 1 with that message although
-  every process dies and the unit is collected (a single-threaded `sleep` exits 0). Every node-based agent is
-  multithreaded and claude does not exit within the 500 ms SIGTERM grace, so this is the common case for delete and
-  archive, and #597 turned what rc.3 logged as a warning into a refusal. Fix in `kill_scope` (sweep.rs): when
-  `confirm_scope_gone` succeeds, the SIGTERM/SIGKILL exit errors are stale information and the teardown is a success;
-  keep the refusal when the unit survives. Do not match the error string. Coverage to add with it: unit tests combining
-  `fake_failing_kills` with `fake_vanishing` (kills fail, unit vanishes, refuse policy succeeds; kills fail, unit stays,
-  refuse policy still refuses; the same pair under the warn policy); a scope-gated e2e delete and archive of a session
-  running a fake-agent script that ignores SIGTERM and spawns threads, asserting the row is gone and the scope retired;
-  and a scope-gated probe that SIGKILLs a multithreaded process through `ScopeManager::kill` and asserts the unit
-  retires regardless of exit status, with a docstring naming the systemd quirk so a later cleanup does not go back to
-  trusting the exit status.
-
 - Make the SIGTERM grace a bounded wait, then raise it to about 5 seconds. Do this after the scope-verdict fix above.
   `KILL_GRACE` (sweep.rs) is an unconditional sleep in both `kill_scope` and `kill_process_tree`, and the two run
   sequentially on a scoped stop, so every stop pays about a second even when the agent exits in 20 ms; raising the
