@@ -3143,9 +3143,11 @@ samp {
   color: var(--danger);
 }
 
-/* The composer is a bounded dialog because its choices are about one launch,
-   not persistent sidebar state. Its inner controls deliberately use the
-   supplied dark blue option treatment instead of inheriting generic buttons. */
+/* The mockup makes this a 960px dialog with two useful columns once a 1000px
+   viewport can hold it and its required margins. One 6/8/12px radius scale
+   and Launch as the only saturated fill keep the denser surface coherent:
+   the shape removes the scrolling and wasted label columns the maintainer
+   called out without turning a one-action composer into a wizard. */
 .launch-composer-backdrop {
   position: fixed;
   z-index: 40;
@@ -3165,11 +3167,14 @@ samp {
 .launch-composer-backdrop .create-session-form {
   display: flex;
   flex-direction: column;
-  width: min(760px, 100%);
+  /* `100%` of the backdrop's content box, which already excludes the
+     backdrop's own 20px padding: subtracting a margin here again would
+     shave the dialog to 920px at the very viewport the breakpoint targets. */
+  width: min(960px, 100%);
   box-sizing: border-box;
   max-height: calc(100vh - 40px);
   margin: 0;
-  padding: 22px;
+  padding: 24px;
   overflow: auto;
   background: var(--composer-bg);
   border: 1px solid var(--composer-border);
@@ -3184,8 +3189,9 @@ samp {
   margin-bottom: 8px;
 }
 
-.launch-composer-eyebrow,
 .launch-composer-section-label {
+  display: block;
+  margin-bottom: 6px;
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3207,7 +3213,28 @@ samp {
 .launch-composer-recents,
 .launch-composer-browser {
   display: grid;
-  gap: 4px;
+  gap: 8px;
+}
+
+/* A 1000px viewport is the first place the 960px dialog keeps its promised
+   40px breathing room. Below it, two narrow columns make host controls and
+   segmented choices harder to use than the single-column fallback. */
+.launch-composer-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px 32px;
+}
+
+/* Each column carries the 20px section rhythm itself: its children used to
+   be direct children of the form and inherited its flex gap, and a plain
+   wrapper would let harness, model, and the segmented pair touch. The
+   columns stretch to equal height, so `align-content: start` keeps the
+   shorter one's sections at the top instead of spreading them to fill. */
+.launch-composer-column-destination,
+.launch-composer-column-choices {
+  display: grid;
+  align-content: start;
+  gap: 20px;
 }
 
 /* The structured destination is one fact split across host and folder. Keep
@@ -3264,8 +3291,9 @@ samp {
 }
 
 .launch-composer-folder-links > button {
-  padding: 0;
-  border: 0;
+  padding: 2px 4px;
+  border: 1.5px solid transparent;
+  border-radius: 6px;
   background: transparent;
   color: var(--composer-control-fg);
   cursor: pointer;
@@ -3274,6 +3302,8 @@ samp {
 }
 
 .launch-composer-folder-links > button.selected {
+  border-color: var(--composer-selected-border);
+  background: var(--composer-selected-bg);
   color: var(--composer-selected-fg);
   text-decoration: underline solid;
 }
@@ -3305,7 +3335,11 @@ samp {
    the controls below may move when there is nothing to offer. */
 .launch-composer-recents {
   display: grid;
-  gap: 4px;
+  gap: 8px;
+  /* The form's inherited 8px flex gap plus this 12px margin preserves the
+     20px section rhythm below a band that is absent entirely when history
+     has no matches. */
+  margin-bottom: 12px;
 }
 
 .launch-composer-recent-slots {
@@ -3319,9 +3353,16 @@ samp {
 
 .launch-composer-choice {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px 16px;
+  gap: 8px;
+}
+
+.launch-composer-choice-pair {
+  /* The two short segmented decisions fit beside one another in a desktop
+     choice column. A 24px gutter keeps their borders distinct without
+     competing with the column's wider 32px destination-to-choices gap. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
 }
 
 .launch-composer-options {
@@ -3337,7 +3378,7 @@ samp {
   padding: 0 14px;
   box-sizing: border-box;
   border: 1.5px solid var(--composer-border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--composer-control-bg);
   color: var(--composer-control-fg);
   font-size: 14px;
@@ -3354,18 +3395,9 @@ samp {
    release. Keep that snapshot readable, then state why Launch is disabled so
    a clone never appears to have silently changed its requested agent. */
 .launch-composer-choice-error {
-  margin: -4px 0 0 176px;
+  margin: 0;
   color: var(--warn);
   font-size: 12px;
-}
-
-/* Compact labels and inline catalog counts keep the repeated choice rows
-   scannable without competing with the choices themselves. */
-.launch-composer-section-label {
-  color: var(--composer-control-fg);
-  font-size: 11px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
 }
 
 /* The field and its "<n> for <Harness>" hint share a row that may wrap: at
@@ -3431,15 +3463,17 @@ samp {
 
 .launch-composer-listbox > button {
   min-height: 32px;
-  border: 0;
-  border-radius: 5px;
+  border: 1.5px solid transparent;
+  border-radius: 6px;
   background: transparent;
   color: var(--composer-selected-fg);
   text-align: left;
 }
 
 .launch-composer-listbox > button.selected {
+  border-color: var(--composer-selected-border);
   background: var(--composer-selected-bg);
+  color: var(--composer-selected-fg);
 }
 
 /* Pointer feedback without borrowing the navigated row's fill, the same
@@ -3482,6 +3516,7 @@ samp {
 }
 
 .launch-composer-segmented > button.selected {
+  box-shadow: inset 0 0 0 1.5px var(--composer-selected-border);
   background: var(--composer-selected-bg);
   color: var(--composer-selected-fg);
   font-weight: 600;
@@ -3518,15 +3553,17 @@ samp {
 
 .launch-composer-search-group > button {
   min-height: 32px;
-  border: 0;
-  border-radius: 5px;
+  border: 1.5px solid transparent;
+  border-radius: 6px;
   background: transparent;
   color: var(--composer-selected-fg);
   text-align: left;
 }
 
 .launch-composer-search-group > button.selected {
+  border-color: var(--composer-selected-border);
   background: var(--composer-selected-bg);
+  color: var(--composer-selected-fg);
 }
 
 /* The combobox owns keyboard focus, so `.selected` names the one result
@@ -3561,8 +3598,8 @@ samp {
 .launch-composer-browser > button,
 .create-session-form label:has(select) select {
   min-height: 38px;
-  border: 1px solid var(--composer-border);
-  border-radius: 8px;
+  border: 1.5px solid var(--composer-border);
+  border-radius: 6px;
   background: var(--composer-control-bg);
   color: var(--composer-control-fg);
   font-size: 14px;
@@ -3634,7 +3671,7 @@ samp {
 }
 
 .launch-composer-recent-slots > button:focus-visible {
-  box-shadow: inset 3px 0 0 var(--composer-selected-border);
+  box-shadow: inset 0 0 0 1.5px var(--composer-selected-border);
 }
 
 .launch-composer-recent-slots > button:focus-visible .launch-composer-recent-hint {
@@ -3687,7 +3724,8 @@ samp {
 
 /* The context is what the button will do, in a lighter weight than the verb;
    capped and ellipsized so a deep folder path cannot grow the button past
-   the row (see `.launch-composer-actions`). */
+   the row (see `.launch-composer-actions`). The phone-width media query
+   lifts the cap, where the row wraps anyway. */
 .launch-composer-launch-context {
   display: inline-block;
   max-width: 34ch;
@@ -3713,6 +3751,12 @@ samp {
   color: var(--danger);
 }
 
+@media (max-width: 999px) {
+  .launch-composer-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 560px) {
   .launch-composer-backdrop {
     padding: 8px;
@@ -3720,7 +3764,7 @@ samp {
 
   .launch-composer-backdrop .create-session-form {
     max-height: calc(100vh - 16px);
-    padding: 14px;
+    padding: 16px;
   }
 
   /* Reset is secondary, so a narrow row gives it the trailing line instead
@@ -3734,14 +3778,19 @@ samp {
     text-align: right;
   }
 
-  .launch-composer-choice {
+  /* A phone cannot carry two segmented decisions side by side without
+     shrinking their labels into ambiguity, so the pair returns to reading
+     order before either control can cause horizontal overflow. */
+  .launch-composer-choice-pair {
     grid-template-columns: 1fr;
-    gap: 4px;
   }
 
-  .launch-composer-choice-error {
-    margin-left: 0;
-    grid-column: 1;
+  /* On a phone the row already wraps (Reset takes its own line), so the
+     launch context may wrap too: reading the whole destination beats an
+     ellipsis when there is no second column of controls to protect. This
+     reverses the base rule's single-line cap on purpose. */
+  .launch-composer-launch-context {
+    white-space: normal;
   }
 }
 
