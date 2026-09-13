@@ -233,7 +233,7 @@ where
     // through this queue so frames never interleave mid-write. Bounded
     // since M2.5 — see CONNECTION_WRITER_QUEUE for what the bound buys
     // and what it costs.
-    let (tx, mut rx) = mpsc::channel::<Frame>(CONNECTION_WRITER_QUEUE);
+    let (tx, rx) = mpsc::channel::<Frame>(CONNECTION_WRITER_QUEUE);
     // The upload family's own queue, drained ahead of the one above.
     //
     // `UploadAck`'s contract requires acks that "must not queue behind
@@ -245,7 +245,7 @@ where
     // few per transfer; a transfer that fills even this is one whose
     // client has stopped reading entirely, which the writer stall timeout
     // already covers.
-    let (priority_tx, mut priority_rx) = mpsc::channel::<Frame>(UPLOAD_PRIORITY_QUEUE);
+    let (priority_tx, priority_rx) = mpsc::channel::<Frame>(UPLOAD_PRIORITY_QUEUE);
     // A full-authority connection is a candidate for agent upcalls; a
     // session-authenticated one never is. The distinction is admission, not
     // the hello's `role` string, which is diagnostic free text and never an
@@ -274,6 +274,11 @@ where
         None
     };
     let (writer_failed_tx, mut writer_failed_rx) = oneshot::channel();
+    // The shutdown tail owns the sender. It closes both receiver halves
+    // after the last reply-producing task has been reaped, so the writer can
+    // finish queued frames without waiting for unrelated sender clones to
+    // disappear.
+    let (writer_close_tx, writer_close_rx) = oneshot::channel();
     // Progress counter for the shutdown-tail drain: `drain_writer` reads
     // this to tell "peer merely slow" apart from "peer gone" instead of
     // enforcing one flat deadline. Relaxed is enough on both ends — this
@@ -281,37 +286,20 @@ where
     let frames_written = Arc::new(AtomicU64::new(0));
     let frames_written_for_writer = Arc::clone(&frames_written);
     let writer_stall = sup.timeouts.writer_stall;
-    let mut writer_task = tokio::spawn(async move {
-        loop {
-            // Biased, so an upload's control frame goes out ahead of
-            // whatever terminal output is queued — see `priority_tx`'s own
-            // comment for why that is a contract rather than a
-            // preference. `else` fires only when BOTH queues are closed,
-            // which is this task's ordinary end.
-            let frame = tokio::select! {
-                biased;
-                Some(frame) = priority_rx.recv() => frame,
-                Some(frame) = rx.recv() => frame,
-                else => break,
-            };
-            // A write that makes NO PROGRESS for a whole window is
-            // treated exactly like a write that failed. See
-            // WRITER_STALL_TIMEOUT: without this, bounding the queue would
-            // let a peer that stops reading park every producer —
-            // including this connection's own read loop, via the admission
-            // permits — so the connection could never notice the peer was
-            // gone. Breaking here drops `rx`, which is what unblocks those
-            // producers with a closed-channel error.
-            if let Err(detail) =
-                write_frame_before_stall(&mut writer, &bytes_written, &frame, writer_stall).await
-            {
-                warn!(error = %detail, "frame write to client failed");
-                let _ = writer_failed_tx.send(detail);
-                break;
-            }
-            frames_written_for_writer.fetch_add(1, Ordering::Relaxed);
-        }
-    });
+    let mut writer_task = spawn_writer_task(
+        writer,
+        WriterTaskChannels {
+            ordinary_rx: rx,
+            priority_rx,
+            close_rx: writer_close_rx,
+            failed_tx: writer_failed_tx,
+        },
+        WriterTaskProgress {
+            bytes_written,
+            frames_written: frames_written_for_writer,
+            stall_window: writer_stall,
+        },
+    );
 
     // Which terminal each of this connection's data channels types into.
     // Connection-local by necessity: channel ids are unique only within a
@@ -701,6 +689,11 @@ where
         // lock a still-cancelling task had not yet released.
         while tasks.join_next().await.is_some() {}
     }
+    // All handlers that were allowed to enqueue a final reply have now
+    // finished. Close the receiver halves from inside the writer task so
+    // those replies drain, while sender clones owned by links and detached
+    // upload work can no longer keep an otherwise idle writer alive.
+    let _ = writer_close_tx.send(());
     // Progress-bounded drain, not an unconditional await: see
     // WRITER_DRAIN_TIMEOUT and drain_writer. A peer that stopped reading
     // without erroring leaves the writer parked mid-write forever, with no
@@ -764,6 +757,91 @@ async fn drain_writer(
         let _ = writer_task.await;
         return;
     }
+}
+
+/// The two queues and one-shot signal consumed by a connection's writer.
+///
+/// Closing the receiver halves is deliberately a writer-owned transition:
+/// the shutdown tail can signal it after all reply-producing tasks have been
+/// reaped, while the writer can then drain frames already accepted by either
+/// queue. Sender lifetime is otherwise intentionally independent of this
+/// connection's shutdown ordering.
+struct WriterTaskChannels {
+    ordinary_rx: mpsc::Receiver<Frame>,
+    priority_rx: mpsc::Receiver<Frame>,
+    close_rx: oneshot::Receiver<()>,
+    failed_tx: oneshot::Sender<String>,
+}
+
+/// Progress and timing state shared by the writer loop and its drain waiter.
+struct WriterTaskProgress {
+    bytes_written: Arc<AtomicU64>,
+    frames_written: Arc<AtomicU64>,
+    stall_window: Duration,
+}
+
+/// Run the single writer for a connection and honor its shutdown signal.
+fn spawn_writer_task<W>(
+    mut writer: FrameWriter<W>,
+    channels: WriterTaskChannels,
+    progress: WriterTaskProgress,
+) -> tokio::task::JoinHandle<()>
+where
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    let WriterTaskChannels {
+        mut ordinary_rx,
+        mut priority_rx,
+        mut close_rx,
+        failed_tx,
+    } = channels;
+    let WriterTaskProgress {
+        bytes_written,
+        frames_written,
+        stall_window,
+    } = progress;
+    tokio::spawn(async move {
+        let mut queues_closed = false;
+        loop {
+            // Biased, so an upload's control frame goes out ahead of
+            // whatever terminal output is queued — see `priority_tx`'s own
+            // comment for why that is a contract rather than a
+            // preference. `else` fires only when BOTH queues are closed,
+            // which is this task's ordinary end.
+            let frame = tokio::select! {
+                biased;
+                _ = &mut close_rx, if !queues_closed => {
+                    // `Receiver::close` preserves frames already queued while
+                    // refusing sends from the detached task clones. The
+                    // select guard makes this a one-time transition, after
+                    // which the normal receive arms drain those frames.
+                    ordinary_rx.close();
+                    priority_rx.close();
+                    queues_closed = true;
+                    continue;
+                }
+                Some(frame) = priority_rx.recv() => frame,
+                Some(frame) = ordinary_rx.recv() => frame,
+                else => break,
+            };
+            // A write that makes NO PROGRESS for a whole window is
+            // treated exactly like a write that failed. See
+            // WRITER_STALL_TIMEOUT: without this, bounding the queue would
+            // let a peer that stops reading park every producer —
+            // including this connection's own read loop, via the admission
+            // permits — so the connection could never notice the peer was
+            // gone. Breaking here drops `rx`, which is what unblocks those
+            // producers with a closed-channel error.
+            if let Err(detail) =
+                write_frame_before_stall(&mut writer, &bytes_written, &frame, stall_window).await
+            {
+                warn!(error = %detail, "frame write to client failed");
+                let _ = failed_tx.send(detail);
+                break;
+            }
+            frames_written.fetch_add(1, Ordering::Relaxed);
+        }
+    })
 }
 
 /// Build the frame for a per-request reply, degrading to `ControlMsg::Error`
@@ -1928,6 +2006,54 @@ mod tests {
         drop(writer);
         drop(reader);
         server.await.unwrap().expect("clean client close");
+    }
+
+    /// A writer signaled after its final frame is queued must close both
+    /// receiver halves and finish naturally instead of waiting for sender
+    /// clones owned by the supervisor's link and background tasks. The paused
+    /// clock makes a completion bound shorter than
+    /// `WRITER_DRAIN_TIMEOUT` deterministic, while reading the queued frame
+    /// proves closure did not discard the shutdown backlog.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_signaled_writer_drains_queued_frames_without_the_drain_window() {
+        let (server_side, client_side) = tokio::io::duplex(64 * 1024);
+        let (server_read, server_write) = tokio::io::split(server_side);
+        let (client_read, _client_write) = tokio::io::split(client_side);
+        drop(server_read);
+        let (server_write, bytes_written) = ProgressWrite::new(server_write);
+        let frames_written = Arc::new(AtomicU64::new(0));
+        let (tx, rx) = mpsc::channel(1);
+        let (_priority_tx, priority_rx) = mpsc::channel(1);
+        let (close_tx, close_rx) = oneshot::channel();
+        let (writer_failed_tx, _writer_failed_rx) = oneshot::channel();
+        tx.send(Frame::data(1, b"queued before close".to_vec()))
+            .await
+            .expect("ordinary writer queue is open");
+        let mut writer_task = spawn_writer_task(
+            FrameWriter::new(server_write),
+            WriterTaskChannels {
+                ordinary_rx: rx,
+                priority_rx,
+                close_rx,
+                failed_tx: writer_failed_tx,
+            },
+            WriterTaskProgress {
+                bytes_written,
+                frames_written: Arc::clone(&frames_written),
+                stall_window: Duration::from_secs(5),
+            },
+        );
+        close_tx.send(()).expect("writer close signal is open");
+
+        let mut client_reader = FrameReader::new(client_read);
+        let frame = tokio::time::timeout(Duration::from_millis(1), client_reader.read_frame())
+            .await
+            .expect("queued frame must not wait for the writer drain window")
+            .expect("read queued frame")
+            .expect("queued frame must reach the peer");
+        assert_eq!(frame, Frame::data(1, b"queued before close".to_vec()));
+        drain_writer(&mut writer_task, &frames_written, Duration::from_millis(1)).await;
+        assert_eq!(frames_written.load(Ordering::Relaxed), 1);
     }
 
     /// A valid credential enters the restricted request loop rather than
