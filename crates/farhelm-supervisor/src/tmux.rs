@@ -238,9 +238,18 @@ fn control_cleanup_retry_delay(failures: u32) -> std::time::Duration {
 }
 
 /// The format is deliberately comma-separated. See [`PaneModes::parse`].
+///
+/// Field order is the parse order, and new fields go at the END: `parse`
+/// reads positionally and defaults a missing trailing field, so appending
+/// keeps every older format expansion (and every positional test fixture)
+/// meaning what it meant. Each tmux format name maps to one DEC mode:
+/// `wrap_flag` is DECAWM (`?7`, auto-wrap), `keypad_flag` is DECKPAM
+/// (`ESC =`, application keypad), `keypad_cursor_flag` is DECCKM (`?1`,
+/// application cursor keys), `cursor_flag` is DECTCEM (`?25`).
 const PANE_MODE_FORMAT: &str = "#{alternate_on},#{bracket_paste_flag},#{mouse_all_flag},\
                                 #{mouse_button_flag},#{mouse_standard_flag},#{mouse_sgr_flag},\
-                                #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y}";
+                                #{cursor_flag},#{keypad_cursor_flag},#{cursor_x},#{cursor_y},\
+                                #{wrap_flag},#{keypad_flag}";
 
 /// How long `OutputStream::foreign_panes` gives tmux to list a
 /// session's panes, independently of the attach's own budget.
@@ -1084,7 +1093,7 @@ fn is_executable_file(path: &Path) -> bool {
 /// attached all along. Captured from tmux format variables at attach
 /// time; content replay alone silently loses these (SPEC_impl.md:
 /// bracketed paste and mouse reporting are the headline casualties).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneModes {
     pub alternate_on: bool,
     pub bracket_paste: bool,
@@ -1108,15 +1117,55 @@ pub struct PaneModes {
     pub cursor_x: u16,
     /// Cursor row, 0-based; see `cursor_x`.
     pub cursor_y: u16,
+    /// DECAWM (`?7`), from `#{wrap_flag}`. Defaults ON because that is a
+    /// terminal's reset state and the common one; the replay only has to
+    /// act when a pane turned wrapping OFF, which a reattach at the same
+    /// dimensions would otherwise silently undo (a different-size
+    /// reattach triggers a SIGWINCH repaint that heals it, which is why
+    /// the gap went unnoticed).
+    pub auto_wrap: bool,
+    /// DECKPAM (`ESC =`), from `#{keypad_flag}`: application keypad mode,
+    /// which changes what the numeric keypad sends. Distinct from
+    /// `app_cursor_keys` (DECCKM), which tmux reports separately.
+    pub app_keypad: bool,
+}
+
+/// The reset state of a fresh terminal, which is what `parse` falls back
+/// to for a missing field and what test fixtures start from. Written by
+/// hand rather than derived because two modes are ON at reset — the
+/// cursor is visible and lines auto-wrap — and a derived all-`false`
+/// default would make a fixture that never mentions wrapping restore it
+/// OFF on every reattach.
+impl Default for PaneModes {
+    fn default() -> Self {
+        PaneModes {
+            alternate_on: false,
+            bracket_paste: false,
+            mouse_all: false,
+            mouse_button: false,
+            mouse_standard: false,
+            mouse_sgr: false,
+            cursor_visible: true,
+            app_cursor_keys: false,
+            cursor_x: 0,
+            cursor_y: 0,
+            auto_wrap: true,
+            app_keypad: false,
+        }
+    }
 }
 
 impl PaneModes {
     /// Parse the comma-separated format expansion produced by
     /// `TmuxDriver::pane_modes`. Empty or unparseable fields take the
-    /// mode's default (off, except cursor visibility which defaults on),
-    /// so a tmux build lacking one format name loses exactly that one
-    /// mode rather than corrupting the rest.
+    /// mode's reset-state default (off, except cursor visibility and
+    /// auto-wrap, which are on), so a tmux build lacking one format name
+    /// loses exactly that one mode rather than corrupting the rest.
     fn parse(line: &str) -> PaneModes {
+        // One source for every reset-state default: a missing or
+        // unparseable field takes the value `Default` gives it, so a mode
+        // whose reset state is ON has exactly one place to say so.
+        let reset = PaneModes::default();
         let mut it = line.split(',');
         let mut flag = |default: bool| -> bool {
             match it.next() {
@@ -1124,17 +1173,28 @@ impl PaneModes {
                 Some(v) => v == "1",
             }
         };
-        let alternate_on = flag(false);
-        let bracket_paste = flag(false);
-        let mouse_all = flag(false);
-        let mouse_button = flag(false);
-        let mouse_standard = flag(false);
-        let mouse_sgr = flag(false);
-        let cursor_visible = flag(true);
-        let app_cursor_keys = flag(false);
+        let alternate_on = flag(reset.alternate_on);
+        let bracket_paste = flag(reset.bracket_paste);
+        let mouse_all = flag(reset.mouse_all);
+        let mouse_button = flag(reset.mouse_button);
+        let mouse_standard = flag(reset.mouse_standard);
+        let mouse_sgr = flag(reset.mouse_sgr);
+        let cursor_visible = flag(reset.cursor_visible);
+        let app_cursor_keys = flag(reset.app_cursor_keys);
         let mut num = || -> u16 { it.next().and_then(|v| v.parse().ok()).unwrap_or(0) };
         let cursor_x = num();
         let cursor_y = num();
+        // Trailing fields, appended after the cursor position so an
+        // older expansion (or a positional fixture) with only ten fields
+        // still parses; both take their reset-state default when absent.
+        let mut flag = |default: bool| -> bool {
+            match it.next() {
+                Some("") | None => default,
+                Some(v) => v == "1",
+            }
+        };
+        let auto_wrap = flag(reset.auto_wrap);
+        let app_keypad = flag(reset.app_keypad);
         PaneModes {
             alternate_on,
             bracket_paste,
@@ -1146,6 +1206,8 @@ impl PaneModes {
             app_cursor_keys,
             cursor_x,
             cursor_y,
+            auto_wrap,
+            app_keypad,
         }
     }
 
@@ -1209,6 +1271,20 @@ impl PaneModes {
         }
         if self.app_cursor_keys {
             s.push_str("\x1b[?1h");
+        }
+        if self.app_keypad {
+            s.push_str("\x1b=");
+        }
+        // Auto-wrap is the one mode restored by turning it OFF: on is the
+        // reset state every fresh terminal already has, so only a pane
+        // that disabled wrapping needs a sequence. Its position is not
+        // load-bearing for the content: the prefill is one grid row per
+        // line with explicit breaks, so it renders the same under either
+        // mode. It sits here, after the content, so the pre-content half
+        // stays limited to the alternate-screen switch that genuinely must
+        // precede the replay.
+        if !self.auto_wrap {
+            s.push_str("\x1b[?7l");
         }
         // Cursor position is 1-based in the escape sequence.
         s.push_str(&format!(
@@ -3472,6 +3548,8 @@ mod tests {
             ("0,0,1,0,0,0,1,0,0,0", "\x1b[?1003h"),
             ("0,0,0,0,0,1,1,0,0,0", "\x1b[?1006h"),
             ("0,0,0,0,0,0,1,1,0,0", "\x1b[?1h"),
+            ("0,0,0,0,0,0,1,0,0,0,1,1", "\x1b="),
+            ("0,0,0,0,0,0,1,0,0,0,0,0", "\x1b[?7l"),
         ];
         for (fields, expected) in cases {
             let output = PaneModes::parse(fields).post_content_sequences();
@@ -3480,6 +3558,33 @@ mod tests {
                 "{fields} did not restore {expected:?}: {output:?}"
             );
         }
+    }
+
+    /// Auto-wrap and application keypad are the two modes whose ABSENCE
+    /// from the restore matters as much as their presence: a fresh
+    /// terminal already wraps, so emitting `?7l` for a pane that never
+    /// turned wrapping off would break every long line on reattach, and
+    /// `ESC =` for a pane that never asked would rewire the numeric
+    /// keypad. Both also default to the reset state when the expansion
+    /// ends early, which is what keeps a ten-field fixture (or a tmux
+    /// that lacks either format name) meaning what it meant.
+    #[farhelm_testtrace::test]
+    fn wrap_and_keypad_restore_only_when_the_pane_left_the_reset_state() {
+        let on_defaults = PaneModes::parse("0,0,0,0,0,0,1,0,0,0").post_content_sequences();
+        assert!(!on_defaults.contains("\x1b[?7l"), "{on_defaults:?}");
+        assert!(!on_defaults.contains("\x1b="), "{on_defaults:?}");
+        let explicit_reset = PaneModes::parse("0,0,0,0,0,0,1,0,0,0,1,0").post_content_sequences();
+        assert!(!explicit_reset.contains("\x1b[?7l"), "{explicit_reset:?}");
+        assert!(!explicit_reset.contains("\x1b="), "{explicit_reset:?}");
+        let both_changed = PaneModes::parse("0,0,0,0,0,0,1,0,0,0,0,1").post_content_sequences();
+        assert!(both_changed.contains("\x1b[?7l"), "{both_changed:?}");
+        assert!(both_changed.contains("\x1b="), "{both_changed:?}");
+        // The wrap-off escape lands after the content and before the
+        // cursor placement, so the prefill wraps as tmux's grid did while
+        // the final cursor position is authoritative.
+        let cursor = both_changed.find("\x1b[1;1H").expect("cursor placement");
+        let wrap = both_changed.find("\x1b[?7l").expect("wrap off");
+        assert!(wrap < cursor, "{both_changed:?}");
     }
 
     /// One DECSET code per real tmux state, with the OTHER two mouse

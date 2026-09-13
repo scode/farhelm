@@ -423,14 +423,6 @@ severity.
   error so an unlink failure surfaces as `EADDRINUSE` on a directory this process just proved it owns. Fix: match
   `WouldBlock` for contention and propagate `Error(e)` naming the lock path; remove unconditionally, treat `NotFound` as
   success, propagate anything else with the socket path.
-- **Query strip and replay modes.** `A7-C6`, `A7-C9`, `A7-C10`. Medium and low, small. `next_output`
-  (tmux/stream.rs:1072-1080) wraps `fill_buf` in `timeout_at`, which polls the inner future first, so the stripper's 50
-  ms flush deadline is never consulted while the control stream has bytes and held output stalls past its documented
-  bound; `read_control_line` below it has no deadline either. `PANE_MODE_FORMAT` (tmux.rs:241-243) omits `#{wrap_flag}`
-  and `#{keypad_flag}`, so DECAWM-off and application keypad are not restored on a same-dimension reattach. Fix: check
-  the clock before polling the reader and bound the partial-line read; collect both flags and emit `\x1b[?7l` and
-  `\x1b=` from `post_content_sequences`. Fence: display latency only for the first; a different-dimension reattach heals
-  the mode cases via SIGWINCH.
 - **Small contained items.** `A2-C3`, `A1-C9`, `A6-D26`. Low, trivial. `is_stale_generation`
   (release_payloads.rs:1020-1024) splits a name at `len - 12` bytes and panics on a non-boundary; the panic is contained
   by `spawn_blocking` but the `OnceCell` stays uninitialised so every download retries and fails while the entry exists.
