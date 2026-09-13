@@ -1060,6 +1060,16 @@ fn is_stale_generation(name: &str, current_version: &str) -> bool {
     let Some(split) = name.len().checked_sub(12) else {
         return false;
     };
+    // The split is by BYTE count, and a directory name is arbitrary UTF-8:
+    // a multibyte character straddling the boundary would make `split_at`
+    // panic. The panic used to be contained by `spawn_blocking`, but it left
+    // the housekeeping cell uninitialised, so every later download retried
+    // the pass and failed again for as long as the entry existed. A name
+    // that cannot be split is not one this predicate recognizes, and the
+    // rule for anything unrecognized is to keep it.
+    if !name.is_char_boundary(split) {
+        return false;
+    }
     let (version, digest) = name.split_at(split);
     if !digest
         .chars()
@@ -2999,6 +3009,10 @@ mod tests {
             "0123456789ab",
             "..",
             "",
+            // A multibyte character straddling the byte offset the digest
+            // split lands on: `é` occupies the two bytes the split would cut
+            // between. This used to panic instead of answering "keep".
+            "v0.0.1-é0123456789a",
         ] {
             assert!(!is_stale_generation(kept, current), "{kept} must be kept");
         }
