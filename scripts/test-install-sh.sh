@@ -1446,6 +1446,10 @@ fixture_dir="${F27_FIXTURE_DIR}"
 out=""
 prev=""
 last=""
+proto=0
+proto_redir=0
+proto_value=""
+proto_redir_value=""
 want_code=0
 for arg in "\$@"; do
   if [ "\$prev" = "-o" ]; then
@@ -1454,9 +1458,26 @@ for arg in "\$@"; do
   if [ "\$arg" = "%{http_code}" ]; then
     want_code=1
   fi
+  if [ "\$arg" = "--proto" ]; then
+    proto=1
+  fi
+  if [ "\$arg" = "--proto-redir" ]; then
+    proto_redir=1
+  fi
+  if [ "\$prev" = "--proto" ]; then
+    proto_value="\$arg"
+  fi
+  if [ "\$prev" = "--proto-redir" ]; then
+    proto_redir_value="\$arg"
+  fi
   prev="\$arg"
   last="\$arg"
 done
+if [ "\$proto" -ne 1 ] || [ "\$proto_redir" -ne 1 ] || \
+   [ "\$proto_value" != "=https" ] || [ "\$proto_redir_value" != "=https" ]; then
+  echo "curl double: default request omitted HTTPS protocol pins" >&2
+  exit 1
+fi
 case "\$last" in
   "\${expected_prefix}"*)
     asset=\${last#"\$expected_prefix"}
@@ -1689,7 +1710,7 @@ INSTALLLOCKMODE="$HOMELOCKMODE/.local/bin"
 mkdir -p "$INSTALLLOCKMODE"
 mkdir "$INSTALLLOCKMODE/.farhelm-install.lock"
 chmod 0770 "$INSTALLLOCKMODE/.farhelm-install.lock"
-run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$INSTALLLOCKMODE" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOMELOCKMODE" "$INSTALLLOCKMODE" "$BASE/good" 1.2.3 QUOTING_STYLE=shell-always
 check "F6: a group-writable shaped lock is refused" [ "$RC" -ne 0 ]
 check "F6: a writable lock refusal keeps the existing message" \
   contains "$ERR" "not a farhelm install lock"
@@ -1704,26 +1725,54 @@ check "F6: an owner-only stale lock is removed after recovery" \
   [ ! -e "$INSTALLLOCKMODE/.farhelm-install.lock" ]
 
 # ===========================================================================
-# Scenario: a reserved backup path already has something at it before a
-# FRESH transaction starts (F7) -- refused before any mutation, whatever it
-# is preserved exactly.
+# Scenario: a backup with no journal is committed debris (F7). A backup with
+# a journal remains recovery state and follows the existing stale-lock path;
+# an unrelated neighboring file is never swept.
 # ===========================================================================
 echo
-echo "== F7: a pre-existing backup path aborts before any mutation =="
-HOMEBACKUPCOLLISION="$WORKDIR/homebackupcollision"
-INSTALLBACKUPCOLLISION="$HOMEBACKUPCOLLISION/.local/bin"
-mkdir -p "$INSTALLBACKUPCOLLISION"
-printf '#!/bin/sh\necho "farhelm 1.2.3"\n' >"$INSTALLBACKUPCOLLISION/farhelm"
-chmod 755 "$INSTALLBACKUPCOLLISION/farhelm"
-mkdir -p "$INSTALLBACKUPCOLLISION/.farhelm.old"
-echo "unexpected" >"$INSTALLBACKUPCOLLISION/.farhelm.old/stray"
-run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPCOLLISION" "$INSTALLBACKUPCOLLISION" "$BASE/good" 1.2.3
-check "F7: pre-existing backup-path collision exits 1" [ "$RC" -ne 0 ]
-check "F7: pre-existing backup-path collision names the problem" contains "$ERR" "already exists"
-check "F7: the collision directory's contents are untouched" \
-  [ "$(cat "$INSTALLBACKUPCOLLISION/.farhelm.old/stray")" = "unexpected" ]
-check "F7: the existing farhelm is untouched (refused before ANY move)" \
-  [ "$("$INSTALLBACKUPCOLLISION/farhelm" --version)" = "farhelm 1.2.3" ]
+echo "== F7: journal-free backups are committed debris =="
+HOMEBACKUPDEBRIS="$WORKDIR/homebackupdebris"
+INSTALLBACKUPDEBRIS="$HOMEBACKUPDEBRIS/.local/bin"
+mkdir -p "$INSTALLBACKUPDEBRIS"
+printf 'committed old bytes\n' >"$INSTALLBACKUPDEBRIS/.farhelm.old"
+printf 'foreign bytes\n' >"$INSTALLBACKUPDEBRIS/.not-a-farhelm-backup"
+run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPDEBRIS" "$INSTALLBACKUPDEBRIS" "$BASE/good" 1.2.3
+check "F7: journal-free backup debris is removed by a successful run" [ "$RC" -eq 0 ]
+check "F7: journal-free backup debris is gone" [ ! -e "$INSTALLBACKUPDEBRIS/.farhelm.old" ]
+check "F7: debris cleanup emits one notice" contains "$ERR" "removed committed backup debris"
+check "F7: a foreign neighboring file is untouched" \
+  [ "$(cat "$INSTALLBACKUPDEBRIS/.not-a-farhelm-backup")" = "foreign bytes" ]
+check "F7: override source is reported" contains "$ERR" "using FARHELM_RELEASE_BASE_URL=$BASE/good"
+
+HOMEBACKUPJOURNAL="$WORKDIR/homebackupjournal"
+INSTALLBACKUPJOURNAL="$HOMEBACKUPJOURNAL/.local/bin"
+mkdir -p "$INSTALLBACKUPJOURNAL/.farhelm-install.lock"
+chmod 0700 "$INSTALLBACKUPJOURNAL/.farhelm-install.lock"
+printf '999999\n' >"$INSTALLBACKUPJOURNAL/.farhelm-install.lock/pid"
+printf 'PARK cli\n' >"$INSTALLBACKUPJOURNAL/.farhelm-install.lock/journal"
+printf '#!/bin/sh\necho "farhelm 1.2.3-backup"\n' >"$INSTALLBACKUPJOURNAL/.farhelm.old"
+chmod 755 "$INSTALLBACKUPJOURNAL/.farhelm.old"
+run_install "$TOOLCHAIN_FULL" "$HOMEBACKUPJOURNAL" "$INSTALLBACKUPJOURNAL" "$BASE/good" 1.2.3
+check "F7: journaled backup keeps recovery refusal behavior" [ "$RC" -ne 0 ]
+check "F7: journaled backup is recovered into farhelm" \
+  [ "$("$INSTALLBACKUPJOURNAL/farhelm" --version)" = "farhelm 1.2.3-backup" ]
+check "F7: journaled recovery leaves no backup" [ ! -e "$INSTALLBACKUPJOURNAL/.farhelm.old" ]
+
+HOMEINVALIDBASE="$WORKDIR/homeinvalidbase"
+INSTALLINVALIDBASE="$HOMEINVALIDBASE/.local/bin"
+run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" "$INSTALLINVALIDBASE" \
+  "http://user:pass@127.0.0.1:$SERVER_PORT/good" 1.2.3
+check "F7: override userinfo is refused" [ "$RC" -eq 1 ]
+check "F7: userinfo refusal names FARHELM_RELEASE_BASE_URL" \
+  contains "$ERR" "FARHELM_RELEASE_BASE_URL"
+check "F7: userinfo refusal creates no install state" \
+  [ ! -e "$INSTALLINVALIDBASE" ]
+
+run_install "$TOOLCHAIN_FULL" "$HOMEINVALIDBASE" "$INSTALLINVALIDBASE" \
+  "$BASE/good?query=refused" 1.2.3
+check "F7: override query is refused" [ "$RC" -eq 1 ]
+check "F7: query refusal names FARHELM_RELEASE_BASE_URL" \
+  contains "$ERR" "FARHELM_RELEASE_BASE_URL"
 
 # ===========================================================================
 # Scenario: stale-lock recovery finds its recovery DESTINATION corrupted
