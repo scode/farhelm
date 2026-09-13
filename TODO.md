@@ -263,6 +263,14 @@ is a clean gate.
   worker validation; ordinary CI and the release gate do not run it while this exclusion stands. A single clean combined
   run cannot establish that these latent failures are fixed; retain the release exclusion until the evidence supports
   reversing it.
+- Deflake `events::tests::an_unanswered_keepalive_releases_the_subscriber_seat` in `crates/farhelm-helm/src/events.rs`
+  (keepalive Ping opcode). The deflake sweep's workspace nextest battery failed it once at the keepalive assertion:
+  `left == right` with `left: 1, right: 9` against the expectation that the keepalive be a WebSocket Ping (opcode 9), so
+  the subscriber's slot held an opcode-1 frame instead. All three classification reruns passed. Sweep failure run
+  `02cf3518-4309-473e-9ee7-b968451bf0d7`; reruns `3a79edca-26e0-4cf9-9902-81957bfa8824`,
+  `a9638c60-6170-4a57-8a33-9931ca275832`, `55bcbde4-fc2e-4b00-b7aa-60832bcb3569`. Hypothesis: under full-suite load
+  another frame was interleaved ahead of the keepalive Ping. On recurrence retain the full frame sequence around the
+  keepalive before changing the assertion or the keepalive path.
 
 ### Systematic deflake
 

@@ -830,3 +830,20 @@ fixed in this PR; the TODO.md entry is removed.
 Class: product
 
 Cause: established
+
+## 2026-09-13 — `events::tests::an_unanswered_keepalive_releases_the_subscriber_seat` (crates/farhelm-helm/src/events.rs)
+
+The deflake sweep's workspace nextest battery failed this helm subscriber-seat test once: the keepalive assertion
+(`the keepalive must be a WebSocket Ping`) reported `left: 1, right: 9`, so the frame in the keepalive slot carried
+opcode 1 where a Ping (opcode 9) was expected. All three classification reruns of the exact test passed. Sweep failure
+retained run `02cf3518-4309-473e-9ee7-b968451bf0d7`; reruns `3a79edca-26e0-4cf9-9902-81957bfa8824`,
+`a9638c60-6170-4a57-8a33-9931ca275832`, `55bcbde4-fc2e-4b00-b7aa-60832bcb3569`. Tested commit `b475c5c6` with a clean
+tree. Selection `workspace Rust targets` (`cargo nextest run --workspace --exclude farhelm-desktop`, minus the recorded
+exclusions); concurrency `4 nextest slots; retries 0` with `--test-threads 4`, on a Linux x86_64 worker. Pinned tmux
+3.7c executable SHA256 `c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient
+`FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` present in the test process). Suspected frame interleaving ahead of
+the keepalive Ping under full-suite load; not established. Disposition: open (TODO.md).
+
+Class: peer-lifecycle
+
+Cause: hypothesis
