@@ -307,13 +307,6 @@ client-scale decisions.
 Mechanism verified on main, fix is trivial or small, and the notes attach no design question. Ordered roughly by
 severity.
 
-- **Session token in tmux failure diagnostics.** `A5-S5`, `A7-S2`. Critical, small. `run_bytes` (tmux.rs:2016, and the
-  tail variant at :2962) formats the whole argv into the failure context, `new_window` pushes every `-e NAME=VALUE` pair
-  including `FARHELM_SESSION_TOKEN` (built at service/core.rs:8594), and `open_tab_window` renders the chain with
-  `{e:#}` into a client-visible error (core.rs:8652). Reproduced with a synthetic token by the investigation. Fix:
-  render `-e` values as `NAME=<redacted>` when composing the context, keep raw stderr in `TmuxCommandFailure` for the
-  exact classifiers, and add a driver-level regression asserting the token never appears. Fence: redaction defect, not
-  escalation; no generic credential framework or launch redesign.
 - **Snapshot self-witness.** `A3-C3`. High, trivial. `procs::snapshot` (procs.rs:372-402) returns `Ok` with an empty map
   when `/proc` is present but unmounted, and the macOS path (procs.rs:765) returns `Ok(Vec::new())` for a zero-sized
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
