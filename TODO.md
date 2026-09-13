@@ -25,14 +25,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
   must not.
 
-- Fix the vertical misalignment inside the launch button. In the new-session dialog the bold "launch" verb sits visibly
-  lower than the lighter "host · folder" context beside it, so the two halves of one button read as two baselines. The
-  verb is the button's own text node and the context is the inline-block `.launch-composer-launch-context` span
-  (app.css, under `.launch-composer-actions .create-session-submit`), and an inline-block with `overflow: hidden` for
-  the ellipsis takes a different baseline from surrounding text. Likely fix is to make the button an inline-flex row
-  with `align-items: baseline` (or `center`, since the two weights share a font size) instead of relying on inline
-  baseline alignment; check the phone-width media query that lifts the width cap still wraps correctly.
-
 - Default the permissions choice to whatever was used last. When the structured composer opens, the permissions segment
   always starts on "default", so someone who almost always launches with yolo re-picks it every time. Wanted: the last
   permissions choice that actually launched becomes the preselected value on the next open, the same way the remembered
