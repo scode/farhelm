@@ -344,17 +344,6 @@ severity.
   where none expired; `Err(wrong_reply("ListSessions", &other))`; add the fourth category to the docs; give
   ResolveProfile its own variant. Fence: keep the Timeout-means-outcome-unknown vocabulary; do not extend fences to make
   the old claim true.
-- **Installer terminal states.** `A2-C9`, `A2-C26`, `A2-C6`. High and medium, small. A crash between journal removal and
-  backup cleanup (install.sh:1038-1041) strands `.farhelm.old`, which `refuse_unless_absent` (:983) then rejects on
-  every later run while the message advises a re-run that cannot help. `is_our_lock` (:334-342) parses `ls -A` output,
-  which an inherited `QUOTING_STYLE` reshapes, so release silently skips and every later run refuses. The download
-  channel takes `FARHELM_RELEASE_BASE_URL` unvalidated, passes no `--proto` pins, and never reports a non-default
-  source. Fix: sweep reserved `.old` backups right after `acquire_lock` succeeds with no journal (committed debris by
-  the file's own invariant); enumerate the lock with a glob or `QUOTING_STYLE=literal`; add
-  `--proto
-  '=https' --proto-redir '=https'` on the default path, validate a set base URL like
-  `parse_release_base_url`, and name a non-default one in the output. Fence: never delete a foreign collision; an
-  operator-selected source is not an attacker; no bundled signatures or URL restrictions.
 - **Small contained items.** `A1-C9`, `A6-D26`. Low, trivial. `safe_cell` (farhelm main.rs:1713-1729) escapes only Cc,
   so U+2028/U+2029 and bidi controls reach the agent-facing table whose widths are computed after sanitizing.
   `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the annotation is set only by a user-initiated stop,

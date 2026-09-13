@@ -37,6 +37,7 @@
   RELEASES_PAGE="$REPO_URL/releases"
   LATEST_URL="$RELEASES_PAGE/latest"
   DOWNLOAD_PREFIX="$REPO_URL/releases/download"
+  CURL_PROTOCOL_MODE=default
 
   # ---------------------------------------------------------------------
   # The install transaction, in one place
@@ -150,6 +151,28 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     esac
   }
 
+  # Validate the optional mirror before any work that could make a failed
+  # configuration look like a network or release failure. This deliberately
+  # mirrors the helm's release-base parser: credentials, queries, and
+  # fragments are refused because they are either unsafe to expose or do not
+  # survive the asset URL joining contract faithfully.
+  validate_release_base_url() {
+    vrbu_value=$1
+    case "$vrbu_value" in
+      http://* | https://*) ;;
+      *) return 1 ;;
+    esac
+    case "$vrbu_value" in
+      *[\?\#]* | *"$NEWLINE"* | *"$CR"*) return 1 ;;
+    esac
+    vrbu_authority=${vrbu_value#*://}
+    vrbu_host=${vrbu_authority%%/*}
+    [ -n "$vrbu_host" ] || return 1
+    case "$vrbu_host" in
+      *@* | :*) return 1 ;;
+    esac
+  }
+
   # Emits $1 as one single-quoted POSIX shell word (embedded single quotes
   # escaped the standard '\'' way), so a printed `export PATH=...` line stays
   # safe to paste even when the install directory contains spaces or shell
@@ -171,7 +194,12 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # stalled release host can delay failure: a little over 10 minutes per
   # request, from --max-time 600.
   curl_get() {
-    curl -q --connect-timeout 15 --max-time 600 "$@"
+    if [ "$CURL_PROTOCOL_MODE" = default ]; then
+      curl -q --connect-timeout 15 --max-time 600 \
+        --proto '=https' --proto-redir '=https' "$@"
+    else
+      curl -q --connect-timeout 15 --max-time 600 "$@"
+    fi
   }
 
   # Computes the SHA-256 of $1 as a lowercase hex string, using whichever
@@ -303,22 +331,6 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     fi
   }
 
-  # Refuses (exit 1) unless PATH is completely absent. Used only for the
-  # reserved backup paths (.farhelm.old, .farhelm-desktop.old) at the START
-  # of a FRESH transaction: acquire_lock already resolves any recovery state
-  # a previous crashed run left behind before a new transaction is allowed
-  # to begin, so seeing anything at these paths here means something else
-  # (a user file, a race, external interference) put it there, and this
-  # script must not silently overwrite what might be someone's data or an
-  # unrecovered backup.
-  refuse_unless_absent() {
-    rua_target=$1
-    if [ -e "$rua_target" ] || [ -L "$rua_target" ]; then
-      printf '%s already exists; refusing to start a new install/update while it does (if a previous run left recovery state behind, re-run this script once more first to let it finish repairing)\n' "$rua_target" >&2
-      exit 1
-    fi
-  }
-
   # True iff DIR has one of the only three shapes this script's own lock
   # ever takes: empty (the brief window right after `mkdir` but before the
   # pid file is written), just "pid", or "pid" plus the recovery "journal"
@@ -327,22 +339,39 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # not our lock, and every caller must refuse to touch it rather than
   # guess.
   #
-  # Both the listing and the per-name file tests are load-bearing. The
-  # listing is what catches an EXTRA entry; the `-f` tests are what stop a
-  # single crafted entry whose name embeds a newline from impersonating
-  # the two-line listing a real lock produces.
+  # Both the complete enumeration and the per-name file tests are
+  # load-bearing. The enumeration catches an EXTRA entry; the `-f` tests
+  # stop a crafted entry whose name embeds a newline from impersonating the
+  # expected names. A shell glob is used instead of `ls`: inherited
+  # QUOTING_STYLE and locale settings must not change lock ownership.
   # A group- or world-writable lock directory is never trusted, even when
   # its entries have the expected names: another account could change those
   # entries after this check and redirect recovery or ownership decisions.
   is_our_lock() {
     [ -d "$1" ] || return 1
-    [ -z "$(find "$1" -prune -perm -020 -print 2>/dev/null)" ] || return 1
-    [ -z "$(find "$1" -prune -perm -002 -print 2>/dev/null)" ] || return 1
-    iol_entries=$(ls -A "$1" 2>/dev/null)
-    case "$iol_entries" in
-      '') return 0 ;;
-      'pid') [ -f "$1/pid" ] ;;
-      "journal${NEWLINE}pid") [ -f "$1/pid" ] && [ -f "$1/journal" ] ;;
+    iol_dir=$1
+    [ -z "$(find "$iol_dir" -prune -perm -020 -print 2>/dev/null)" ] || return 1
+    [ -z "$(find "$iol_dir" -prune -perm -002 -print 2>/dev/null)" ] || return 1
+    iol_count=0
+    iol_has_pid=0
+    iol_has_journal=0
+    for iol_entry in "$iol_dir"/* "$iol_dir"/.[!.]* "$iol_dir"/..?*; do
+      [ -e "$iol_entry" ] || [ -L "$iol_entry" ] || continue
+      iol_count=$((iol_count + 1))
+      case "$iol_entry" in
+        "$iol_dir/pid")
+          [ -f "$iol_entry" ] || return 1
+          iol_has_pid=1
+          ;;
+        "$iol_dir/journal")
+          [ -f "$iol_entry" ] || return 1
+          iol_has_journal=1
+          ;;
+        *) return 1 ;;
+      esac
+    done
+    case "$iol_count:$iol_has_pid:$iol_has_journal" in
+      0:0:0 | 1:1:0 | 2:1:1) return 0 ;;
       *) return 1 ;;
     esac
   }
@@ -707,6 +736,18 @@ EOF
     HAS_DESKTOP=0
     [ "$TARGET" = "aarch64-apple-darwin" ] && HAS_DESKTOP=1
 
+    # An explicit base URL is a test/mirror channel. Keep HTTP usable there
+    # (the fixture server is intentionally loopback HTTP), while the normal
+    # GitHub channel remains pinned against HTTPS downgrade redirects.
+    if [ -n "${FARHELM_RELEASE_BASE_URL:-}" ]; then
+      if ! validate_release_base_url "$FARHELM_RELEASE_BASE_URL"; then
+        printf 'FARHELM_RELEASE_BASE_URL must be an http or https URL with a host and no userinfo, query, or fragment; refusing it\n' >&2
+        exit 1
+      fi
+      CURL_PROTOCOL_MODE=override
+      printf 'using FARHELM_RELEASE_BASE_URL=%s\n' "$FARHELM_RELEASE_BASE_URL" >&2
+    fi
+
     # 2. Prerequisites.
     #
     # Checked before anything network-bound so a missing tool is reported
@@ -978,15 +1019,26 @@ EOF
     binaries="farhelm"
     [ "$HAS_DESKTOP" -eq 1 ] && binaries="farhelm farhelm-desktop"
 
+    # A journal-free interruption after commit can strand backups between
+    # journal removal and cleanup. At this point the lock is ours and no
+    # journal means recovery has already been ruled out, so remove only the
+    # exact backup names this script owns before checking for collisions.
+    committed_backup_debris=0
+    for name in $binaries; do
+      if [ -e "$INSTALL_DIR/.$name.old" ] || [ -L "$INSTALL_DIR/.$name.old" ]; then
+        committed_backup_debris=1
+        rm -f "$INSTALL_DIR/.$name.old"
+      fi
+    done
+    if [ "$committed_backup_debris" -eq 1 ]; then
+      printf 'removed committed backup debris left by an interrupted cleanup\n' >&2
+    fi
+
     # Refuse before touching anything if a public destination is neither
-    # absent nor a regular file, or if either reserved backup path already
-    # has something at it (a fresh transaction must never find one:
-    # acquire_lock already resolved any recovery state a previous crash
-    # left behind, so anything here now is a collision this script must
-    # not overwrite).
+    # absent nor a regular file. The reserved backups were swept above only
+    # after ownership and the no-journal invariant were established.
     for name in $binaries; do
       refuse_unless_absent_or_regular "$INSTALL_DIR/$name"
-      refuse_unless_absent "$INSTALL_DIR/.$name.old"
     done
 
     replaced_something=0
