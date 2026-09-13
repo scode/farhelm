@@ -312,11 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Terminal WebSocket bounds and exits.** `A4-C6`, `A4-C1`. Medium, trivial each. The inbound task's `JoinError` is
-  handled with `?` before `client.detach` runs, so a panic breaks the module's "detach runs on every exit path"
-  invariant. An authenticated non-upgrade GET on a WebSocket route gets axum's 500 naming
-  `farhelm_helm::auth::AuthenticatedSocket`, because the handlers extract the extension before `WebSocketUpgrade`. Fix:
-  fold the `JoinError` into the result so the detach tail still runs, and extract `WebSocketUpgrade` first.
 - **Store one-liners.** `A6-C3`, `A6-C14`, `A6-C2`. Medium, trivial to small. `register_probed_ssh_host` (helm
   store.rs:3307-3311) builds `IdentityMismatch` with `expected` and `actual` reversed relative to the variant's doc and
   every other site, so the operator reads the opposite of reality when re-provisioning a reinstalled machine.

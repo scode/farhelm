@@ -125,8 +125,8 @@ pub(crate) const MAX_SUBSCRIBERS: usize = 64;
 /// failure this socket can have is a transport failure (see [`serve_events`]).
 pub(crate) async fn events_ws(
     State(state): State<Arc<AppState>>,
-    Extension(auth): Extension<AuthenticatedSocket>,
     upgrade: WebSocketUpgrade,
+    Extension(auth): Extension<AuthenticatedSocket>,
 ) -> impl IntoResponse {
     let events = Arc::clone(state.manager.events());
     let capacity = state.event_subscriber_cap;
@@ -274,12 +274,37 @@ where
 mod tests {
     use crate::manager::FleetEvents;
     use crate::rest_harness::{self, WsTestClient};
+    use axum::body::to_bytes;
+    use axum::http::{Request, StatusCode};
     use std::time::Duration;
+    use tower::ServiceExt;
 
     /// How long a test waits for a notification that should be immediate.
     /// Generous because the failure it reports ("nothing arrived") is not
     /// diagnosed any better by a shorter wait.
     const NOTICE: Duration = Duration::from_secs(10);
+
+    /// A browser that forgets to request an upgrade must receive Axum's
+    /// ordinary missing-upgrade response, not an internal error naming the
+    /// authentication extension. The authenticated request matters: without
+    /// it, middleware would reject the request before handler extraction.
+    #[farhelm_testtrace::test]
+    async fn an_authenticated_plain_events_get_is_not_an_internal_error() {
+        let harness = rest_harness::idle_helm().await;
+        let request = Request::builder()
+            .uri("/api/events")
+            .header("host", "127.0.0.1:7433")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = harness.router().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = String::from_utf8(to_bytes(response.into_body(), 4096).await.unwrap().to_vec())
+            .unwrap();
+        assert!(
+            !body.contains("AuthenticatedSocket"),
+            "unexpected body: {body}"
+        );
+    }
 
     /// One text frame off the feed, as its revision number.
     ///
