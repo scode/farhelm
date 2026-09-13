@@ -351,12 +351,6 @@ is safe. Each is its own review unit.
   attachment and return the first whose queue matches a registered link, correcting the lease-versus- connection
   docstring. Fence: do not assert all hosts or all creation fail; the alias contract's fail-closed behaviour is optional
   UX; no lease redesign.
-- **`token show` migrates under a running helm.** `A6-C1`. Medium, medium, medium risk. `HelmStore::open` takes no
-  `may_migrate` and its module doc argues none is needed, but `token_control::show` (token_control.rs:120-124) opens the
-  store with no ownership lock, so the ordinary install-then-`token show` sequence migrates `helm.db` under the
-  incumbent; today's top rungs are additive, so the incumbent survives by luck. Fix: a `may_migrate` or read-only
-  distinction on `open`, `false` from `show` or the token lock taken first, and corrected module docs. Fence: a
-  mixed-version workflow item; do not declare incumbent breakage without an actual destructive crossed migration.
 
 ### Later: low confidence or needs an argument first
 

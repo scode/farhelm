@@ -19,14 +19,13 @@
 //!
 //! ## Divergences from the supervisor store, and why
 //!
-//! - **No `may_migrate` gate.** `SessionStore::open` takes one because a
-//!   supervisor restart can briefly overlap its predecessor holding the
-//!   SAME state directory (a handoff), and upgrading a database the
-//!   incumbent still owns would brick it the moment it next opens its own,
-//!   now-unreadable schema. SPEC.md's helm has no analogous overlap:
-//!   "exactly one helm runs at a time" is the whole model, so there is
-//!   never a second, older process this database's owner must protect from
-//!   its own upgrade. [`HelmStore::open`] therefore always migrates.
+//! - **Serving and offline opens have different migration authority.** The
+//!   serving helm always migrates its database while it owns the state
+//!   directory. Offline readers such as `token show` must not migrate under a
+//!   serving helm: a newer CLI may know a schema the incumbent does not, and
+//!   a non-additive migration could make that incumbent unable to continue.
+//!   [`HelmStore::open`] remains the migrating entry point, while
+//!   [`HelmStore::open_without_migration`] is the incumbent-safe reader.
 //! - **Concurrent-open safety despite the single-helm rule.** The token-control
 //!   ownership lock prevents two serving helms or an offline rotation from
 //!   claiming the state directory together, but this storage type remains
@@ -1280,6 +1279,7 @@ pub enum FirstContactOutcome {
 #[derive(Clone, Debug)]
 pub struct HelmStore {
     conn: Arc<Mutex<Connection>>,
+    schema_version: i64,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -2506,12 +2506,26 @@ impl HelmStore {
     /// it, so a permissive umask leaves a create-then-chmod window only the
     /// private directory itself closes.
     ///
-    /// No `may_migrate` parameter, unlike the supervisor store's `open` —
-    /// see the module docs' "Divergences" section for why the handoff
-    /// scenario that parameter exists for cannot happen here.
+    /// This is the migrating entry point. Callers that may be running beside
+    /// an incumbent helm must use [`Self::open_without_migration`] instead;
+    /// see the module docs' "Divergences" section for the boundary.
     pub async fn open(path: &Path) -> anyhow::Result<HelmStore> {
+        Self::open_inner(path, true).await
+    }
+
+    /// Open an existing database without migrating or initializing rows.
+    ///
+    /// This protects a serving helm when an offline CLI is newer than the
+    /// process that owns the state directory. Older schemas remain readable
+    /// until an operation needs a schema feature they do not have; newer
+    /// schemas are refused by the same version check as [`Self::open`].
+    pub async fn open_without_migration(path: &Path) -> anyhow::Result<HelmStore> {
+        Self::open_inner(path, false).await
+    }
+
+    async fn open_inner(path: &Path, may_migrate: bool) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
-        let conn = tokio::task::spawn_blocking(move || -> anyhow::Result<Connection> {
+        let (conn, schema_version) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
             // Explicit flags rather than `Connection::open`'s defaults —
             // see the supervisor store's identical `open` for why
             // `SQLITE_OPEN_URI` is deliberately left out (a state-dir path
@@ -2541,14 +2555,29 @@ impl HelmStore {
             // `session_cache` DDL for the `ON DELETE CASCADE` it enables.
             conn.pragma_update(None, "foreign_keys", true)
                 .context("enabling sqlite foreign key enforcement")?;
-            apply_schema(&mut conn)?;
-            ensure_local_row(&conn)?;
-            Ok(conn)
+            let schema_version = if may_migrate {
+                apply_schema(&mut conn)?;
+                ensure_local_row(&conn)?;
+                SCHEMA_VERSION
+            } else {
+                let version = conn
+                    .query_row("PRAGMA user_version", [], |row| row.get(0))
+                    .context("reading schema version")?;
+                if version > SCHEMA_VERSION {
+                    anyhow::bail!(
+                        "helm.db has schema version {version}, but this build only understands version \
+                         {SCHEMA_VERSION}; refusing to open it rather than risk misreading it"
+                    );
+                }
+                version
+            };
+            Ok((conn, schema_version))
         })
         .await
         .context("helm store open task panicked")??;
         Ok(HelmStore {
             conn: Arc::new(Mutex::new(conn)),
+            schema_version,
         })
     }
 
@@ -2563,6 +2592,13 @@ impl HelmStore {
     /// Keeping this read separate lets callers avoid consuming randomness or
     /// consulting the clock on the overwhelmingly common existing-token path.
     pub async fn web_token(&self) -> anyhow::Result<Option<String>> {
+        const WEB_TOKEN_SCHEMA: i64 = 7;
+        if self.schema_version < WEB_TOKEN_SCHEMA {
+            anyhow::bail!(
+                "helm.db schema version {} is older than the version {WEB_TOKEN_SCHEMA} required to read the web token",
+                self.schema_version
+            );
+        }
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
             conn.lock()

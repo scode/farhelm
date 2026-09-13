@@ -294,6 +294,18 @@ pub(crate) async fn show_token(store: &HelmStore) -> anyhow::Result<String> {
         .await
 }
 
+/// Return the stored bootstrap token without creating one.
+///
+/// This is the read-only path for a CLI that observed a serving helm owning
+/// the state directory. That helm must remain the only process allowed to
+/// initialize authentication state while it is running.
+pub(crate) async fn show_existing_token(store: &HelmStore) -> anyhow::Result<String> {
+    store
+        .web_token()
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("the serving helm has no token"))
+}
+
 /// Rotate directly in storage. Used only when no serving helm control socket
 /// exists, so there can be no live WebSocket in that process to revoke.
 pub(crate) async fn rotate_offline(store: &HelmStore) -> anyhow::Result<String> {

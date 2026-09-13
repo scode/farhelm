@@ -1,4 +1,4 @@
-//! Local coordination for `farhelm helm token rotate`.
+//! Local coordination for `farhelm helm token show` and `rotate`.
 //!
 //! Token management is a separate CLI invocation, but rotation must run in
 //! the serving helm when one exists: that process owns the authenticated
@@ -137,8 +137,17 @@ pub(crate) async fn serve(state_dir: &Path, auth: AuthState) -> anyhow::Result<C
 pub async fn show(state_dir: Option<PathBuf>) -> anyhow::Result<String> {
     let state_dir = state_dir_or_default(state_dir)?;
     farhelm_supervisor::ensure_private_dir(&state_dir).await?;
-    let store = HelmStore::open(&state_dir.join("helm.db")).await?;
-    auth::show_token(&store).await
+    match acquire_ownership(state_dir.clone()).await {
+        Ok(_ownership) => {
+            let store = HelmStore::open(&state_dir.join("helm.db")).await?;
+            auth::show_token(&store).await
+        }
+        Err(error) if error.downcast_ref::<OwnershipBusy>().is_some() => {
+            let store = HelmStore::open_without_migration(&state_dir.join("helm.db")).await?;
+            auth::show_existing_token(&store).await
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Rotate in the serving helm when possible, falling back to an offline
@@ -477,6 +486,51 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(1), socket.revoked())
             .await
             .expect("a live socket must be revoked as part of rotation");
+    }
+
+    /// A token read must not upgrade a database while another helm owns its
+    /// directory: the CLI may be newer than the serving process, and changing
+    /// the schema under that process can make its next access fail.
+    #[farhelm_testtrace::test]
+    async fn show_reads_an_older_schema_without_migrating() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let expected = auth::show_token(&store).await.unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 24).unwrap();
+        let before: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+
+        let ownership = acquire_ownership(dir.path().to_path_buf()).await.unwrap();
+        let error = match acquire_ownership(dir.path().to_path_buf()).await {
+            Ok(_) => panic!("the held ownership lock must reject a second holder"),
+            Err(error) => error,
+        };
+        assert!(error.downcast_ref::<OwnershipBusy>().is_some());
+        assert_eq!(
+            show(Some(dir.path().to_path_buf())).await.unwrap(),
+            expected
+        );
+
+        let after: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(before, 24);
+        assert_eq!(after, before);
+        drop(ownership);
+    }
+
+    /// With no serving helm, token show keeps its bootstrap workflow: opening
+    /// the fresh directory initializes storage and mints its first token.
+    #[farhelm_testtrace::test]
+    async fn show_mints_a_token_without_an_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let token = show(Some(dir.path().to_path_buf())).await.unwrap();
+        assert!(!token.is_empty());
+        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(auth::show_token(&store).await.unwrap(), token);
     }
 
     /// Starting a second helm against the same state directory must not
