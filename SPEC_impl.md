@@ -1703,11 +1703,11 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells). The id is the
   one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as `--session` — so a
   confirmation on stdout would make the two verbs that need parsing the two that cannot be. The listings are parsed too
-  (the relay fixture reads the hosts table, and the README shows the same), but they are parsed as TABLES: a table that
-  grew a column is still a table, while an id that grew a sentence beside it is not an id. The stderr line is written
-  through a fallible `write!` whose result is discarded rather than through `eprintln!`, because the macro panics on an
-  unwritable stderr and the session already exists by then — turning a create that succeeded into a command that failed
-  would tell a caller holding the id to retry a create it must not repeat.
+  (the relay fixture reads the hosts table, and `docs/old_readme.md` shows the same), but they are parsed as TABLES: a
+  table that grew a column is still a table, while an id that grew a sentence beside it is not an id. The stderr line is
+  written through a fallible `write!` whose result is discarded rather than through `eprintln!`, because the macro
+  panics on an unwritable stderr and the session already exists by then — turning a create that succeeded into a command
+  that failed would tell a caller holding the id to retry a create it must not repeat.
 
   `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
   every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
