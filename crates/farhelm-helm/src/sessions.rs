@@ -1314,6 +1314,14 @@ pub(crate) async fn do_create_session(
                 &session,
                 session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
                 &cwd,
+                // Only a USER-initiated create may move the helm-wide
+                // remembered permissions default — the same authority
+                // boundary already drawn around the remembered legacy
+                // profile default a few lines below, and for the same
+                // reason: an agent acting on its own (a relay clone, say)
+                // must not silently change what the next human "New" open
+                // preselects.
+                origin == CreateOrigin::User,
             )
             .await
         {

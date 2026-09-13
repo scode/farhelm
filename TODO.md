@@ -25,15 +25,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
   must not.
 
-- Default the permissions choice to whatever was used last. When the structured composer opens, the permissions segment
-  always starts on "default", so someone who almost always launches with yolo re-picks it every time. Wanted: the last
-  permissions choice that actually launched becomes the preselected value on the next open, the same way the remembered
-  destination already carries over. NOTE: SPEC.md's launch-composer rule says absent optional choices mean the harness
-  defaults and that New does not preselect a harness or profile; preselecting a remembered permissions mode is a
-  deliberate change to that rule for this one choice and the spec must be updated in the same PR, with the harness and
-  model rules left as they are. Decide whether the memory is per harness or global (the yolo flag differs per harness
-  but the intent "skip permissions" is the same), and whether "reset choices" clears it.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly

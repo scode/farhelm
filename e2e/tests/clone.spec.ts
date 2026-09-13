@@ -373,6 +373,9 @@ test("each clone restores every field after an intervening draft edit", async ({
  * create. Either one skipped, or ordered wrong, would let the NEXT ordinary
  * New inherit clone-only title and agent state. Its directory remains the
  * deliberate ordinary-New context: the currently selected session's folder.
+ * "Fresh defaults" means the harness unpreselected; the permissions segment
+ * carries the helm-wide remembered mode on every fresh open, which is not
+ * clone state and is not what this test checks.
  */
 test("closing a clone without submitting, or submitting it, both leave the next New Session with fresh defaults", async ({
   page,

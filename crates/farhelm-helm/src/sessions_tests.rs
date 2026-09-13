@@ -390,6 +390,148 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
     peer.await.expect("join scripted supervisor");
 }
 
+/// A successful STRUCTURED launch is the only kind that may move the
+/// helm-wide "last permissions used" memory (SPEC.md's launch-composer
+/// carve-out, decided alongside this test): a yolo launch sets it, a
+/// LEGACY (raw) launch in between leaves it exactly as it was — proving
+/// non-interference against a non-default baseline, not merely against an
+/// already-empty one — and a later structured launch with explicit default
+/// permissions clears it again.
+///
+/// Driven through the real `POST /api/sessions` handler end to end, not
+/// `HelmStore::record_create_history` directly: the write lives at the same
+/// instrumentation point as `launch_history`'s own recording
+/// (`sessions::do_create_session`), and what this test pins is that an
+/// ordinary browser-facing request reaches it — `store.rs`'s own
+/// preference tests already cover the store function in isolation.
+#[farhelm_testtrace::test]
+async fn a_successful_structured_launch_remembers_its_permissions_choice() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, LaunchPermission, LaunchSelection, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .expect("complete supervisor handshake");
+        // One scripted reply per create below, in the exact order the test
+        // drives them: yolo, then a legacy raw create, then an
+        // explicit-default structured create.
+        let replies: [(&str, Option<LaunchSelection>); 3] = [
+            (
+                "yolo-launch",
+                Some(LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: Some(LaunchPermission::Yolo),
+                }),
+            ),
+            ("legacy-launch", None),
+            (
+                "default-launch",
+                Some(LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Codex,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                }),
+            ),
+        ];
+        for (id, launch) in replies {
+            let request = parse_control(
+                &reader
+                    .read_frame()
+                    .await
+                    .expect("read create frame")
+                    .expect("create frame present"),
+            )
+            .expect("decode create frame");
+            let ControlMsg::CreateSession { req_id, .. } = request else {
+                panic!("expected CreateSession, got {request:?}");
+            };
+            writer
+                .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        parent: None,
+                        archived: false,
+                        id: id.into(),
+                        title: id.into(),
+                        created_at: 1_700_000_000,
+                        last_activity_at: 1_700_000_000,
+                        creation_seq: Some(1),
+                        cwd: "/work".into(),
+                        canonical_cwd: None,
+                        invocation: "codex".into(),
+                        resume_template: None,
+                        launch,
+                        status: farhelm_proto::SessionStatus::Unknown,
+                        annotation: None,
+                        restart_offer: farhelm_proto::RestartOffer::default(),
+                        tabs: Vec::new(),
+                        source_profile: None,
+                    },
+                }))
+                .await
+                .expect("reply to create");
+        }
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+
+    let (status, _) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({
+            "cwd": "/work",
+            "launch": { "harness": "codex", "model": null, "effort": null, "permissions": "yolo" },
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences["remembered_permissions"], "yolo",
+        "a successful structured launch with yolo sets the preference"
+    );
+
+    let (status, _) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({ "cwd": "/work", "invocation": "codex" }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences["remembered_permissions"], "yolo",
+        "a legacy (raw) launch leaves the remembered permissions mode alone"
+    );
+
+    let (status, _) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({
+            "cwd": "/work",
+            "launch": { "harness": "codex", "model": null, "effort": null, "permissions": null },
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, preferences) = get_json(&harness, "/api/preferences").await;
+    assert_eq!(
+        preferences.get("remembered_permissions"),
+        None,
+        "a following structured launch with default permissions clears the memory"
+    );
+
+    peer.await.expect("join scripted supervisor");
+}
+
 /// The create body's `intent_key`, `agent_kind`, and `resume_template`
 /// all reach the supervisor verbatim (PLAN_M3.md items 6 and 7).
 ///

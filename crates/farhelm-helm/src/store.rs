@@ -160,7 +160,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 25;
+const SCHEMA_VERSION: i64 = 26;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -724,6 +724,17 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
     }
 }
 
+/// The `remembered_permissions` wire vocabulary this build knows.
+///
+/// One word today (`"yolo"`), but a function rather than an inline `==` at
+/// each of its two call sites — the route's write-time refusal
+/// ([`crate::preferences::put_preferences`]) and this module's read-time
+/// normalization ([`HelmStore::preferences`]) — because both must agree the
+/// moment a future harness needs a second remembered mode.
+pub fn is_known_remembered_permissions_word(text: &str) -> bool {
+    text == "yolo"
+}
+
 /// The client preference this helm remembers for every client at once
 /// (SPEC.md, Session list): the chosen list order, session the user last
 /// selected, and compact-row choice. One row, one shape — the stored row and
@@ -737,6 +748,15 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
 /// own database and not client storage is where it belongs. A `PUT` sends a
 /// [`PreferencePatch`], not this type: a patch has to tell "leave alone"
 /// from "clear", and a plain `Option` cannot.
+///
+/// `remembered_permissions` is the odd one out among these four: every other
+/// field is a client-declared choice, while this one is written only by the
+/// helm itself, as a side effect of a successful structured launch
+/// (`record_create_history_with_paths`) — see that function's doc for why
+/// origin-gating it to a user-initiated launch matters. The wire route still
+/// accepts it on `PUT` like the others (kept uniform with the rest of this
+/// type rather than carved into a read-only exception), but no shipped
+/// client ever sends one.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -746,6 +766,13 @@ pub struct Preferences {
     pub last_selected: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compact: Option<bool>,
+    /// The wire word for the permissions mode of the last successful
+    /// structured launch (currently only `"yolo"`), or `None` when nothing
+    /// is remembered. A word this build does not recognize reads back as
+    /// `None` (see [`HelmStore::preferences`]) rather than being forwarded
+    /// to a client that could not act on it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remembered_permissions: Option<String>,
 }
 
 /// A sparse change to [`Preferences`]: each field is absent (leave it as
@@ -781,6 +808,15 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub compact: Option<Option<bool>>,
+    /// See [`Preferences::remembered_permissions`]. Accepted here for wire
+    /// uniformity even though the shipped UI never sends it; the route
+    /// validates the word the same way it validates `list_sort`.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub remembered_permissions: Option<Option<String>>,
 }
 
 /// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
@@ -1609,17 +1645,24 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  created_at  INTEGER NOT NULL
              ) STRICT;
              -- The ONE client preference row (SPEC.md, Session list): the
-             -- chosen list order, last user-selected session, and compact rows, shared
-             -- by every client of this helm. Singleton for the same reason
-             -- web_token is: no client keeps its own copy, so there is
-             -- exactly one answer to remember. Preference columns are nullable — an
-             -- unset preference is a real state (the default) and the row
-             -- may hold one without the other.
+             -- chosen list order, last user-selected session, compact rows,
+             -- and the permissions mode the last successful STRUCTURED
+             -- launch used, shared by every client of this helm. Singleton
+             -- for the same reason web_token is: no client keeps its own
+             -- copy, so there is exactly one answer to remember. Preference
+             -- columns are nullable — an unset preference is a real state
+             -- (the default) and the row may hold one without the other.
+             -- `remembered_permissions` is written only by a successful
+             -- structured create (`record_create_history_with_paths`), never
+             -- by a client PUT: SPEC.md's launch-composer carve-out makes
+             -- this one choice a server-observed fact rather than a
+             -- client-declared preference like the other three columns.
              CREATE TABLE preferences (
-                 singleton     INTEGER PRIMARY KEY CHECK (singleton = 1),
-                 list_sort     TEXT,
-                 last_selected TEXT,
-                 compact       INTEGER CHECK (compact IN (0, 1))
+                 singleton              INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 list_sort              TEXT,
+                 last_selected          TEXT,
+                 compact                INTEGER CHECK (compact IN (0, 1)),
+                 remembered_permissions TEXT
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -1704,7 +1747,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- Must equal SCHEMA_VERSION exactly — see the Rust comment
              -- above this whole `execute_batch` call for what goes wrong
              -- when the two drift.
-             PRAGMA user_version = 25;",
+             PRAGMA user_version = 26;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2396,6 +2439,20 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 25")?;
         version = 25;
     }
+    if version == 25 {
+        // A structured launch's permissions choice is a server-OBSERVED
+        // fact (which flag a successful create actually used), not
+        // something any prior schema recorded. An upgraded helm therefore
+        // starts remembering nothing, exactly the same starting point every
+        // other preference column began from, until the next successful
+        // structured launch sets it.
+        tx.execute_batch(
+            "ALTER TABLE preferences ADD COLUMN remembered_permissions TEXT; \
+             PRAGMA user_version = 26;",
+        )
+        .context("migrating helm.db to schema version 26")?;
+        version = 26;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -2896,13 +2953,25 @@ impl HelmStore {
             conn.lock()
                 .expect("helm db mutex poisoned")
                 .query_row(
-                    "SELECT list_sort, last_selected, compact FROM preferences WHERE singleton = 1",
+                    "SELECT list_sort, last_selected, compact, remembered_permissions \
+                     FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
+                        let remembered_permissions: Option<String> = row.get(3)?;
                         Ok(Preferences {
                             list_sort: row.get(0)?,
                             last_selected: row.get(1)?,
                             compact: row.get(2)?,
+                            // Unlike `list_sort` (whose tolerance for an
+                            // unrecognized word is the UI's job — the row
+                            // outlives the build that validated it), this
+                            // column's unknown-word handling belongs to the
+                            // STORE itself: a word planted by a newer helm
+                            // build, or surviving a rolled-back one, reads
+                            // back as "nothing remembered" rather than being
+                            // forwarded to a client that has no flag for it.
+                            remembered_permissions: remembered_permissions
+                                .filter(|word| is_known_remembered_permissions_word(word)),
                         })
                     },
                 )
@@ -2938,26 +3007,33 @@ impl HelmStore {
             let sort_present = patch.list_sort.is_some();
             let selected_present = patch.last_selected.is_some();
             let compact_present = patch.compact.is_some();
+            let remembered_permissions_present = patch.remembered_permissions.is_some();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
+            let remembered_permissions = patch.remembered_permissions.flatten();
             conn.lock()
                 .expect("helm db mutex poisoned")
                 .execute(
-                    "INSERT INTO preferences (singleton, list_sort, last_selected, compact) \
-                     VALUES (1, ?1, ?2, ?3) \
+                    "INSERT INTO preferences \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions) \
+                     VALUES (1, ?1, ?2, ?3, ?4) \
                      ON CONFLICT (singleton) DO UPDATE SET \
-                         list_sort = CASE WHEN ?4 THEN excluded.list_sort ELSE list_sort END, \
-                         last_selected = CASE WHEN ?5 THEN excluded.last_selected \
+                         list_sort = CASE WHEN ?5 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?6 THEN excluded.last_selected \
                                               ELSE last_selected END, \
-                         compact = CASE WHEN ?6 THEN excluded.compact ELSE compact END",
+                         compact = CASE WHEN ?7 THEN excluded.compact ELSE compact END, \
+                         remembered_permissions = CASE WHEN ?8 \
+                             THEN excluded.remembered_permissions ELSE remembered_permissions END",
                     rusqlite::params![
                         sort,
                         selected,
                         compact,
+                        remembered_permissions,
                         sort_present,
                         selected_present,
-                        compact_present
+                        compact_present,
+                        remembered_permissions_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -4396,7 +4472,14 @@ impl HelmStore {
     /// arrival time. A keyed replay therefore changes neither recency nor
     /// frequency, and recording this best-effort fact can never make a
     /// completed create look failed to its caller.
-    pub async fn record_create_history(
+    ///
+    /// Test-only: production has exactly one caller of the full form,
+    /// `sessions::do_create_session`, which must pass the origin gate
+    /// explicitly. Keeping this defaulting wrapper out of the shipped
+    /// binary means no production path can remember a permissions choice
+    /// without having decided whose choice it was.
+    #[cfg(test)]
+    pub(crate) async fn record_create_history(
         &self,
         host: HostId,
         identity: &str,
@@ -4406,8 +4489,18 @@ impl HelmStore {
         // fact. Its spelling is still a safe distinct key, unlike resolving
         // it on the helm's filesystem, which may name another machine.
         let folder_identity = entry.canonical_cwd.as_deref().unwrap_or(&entry.cwd);
-        self.record_create_history_with_paths(host, identity, entry, folder_identity, &entry.cwd)
-            .await
+        // Test/fixture callers of this convenience wrapper are simulating an
+        // ordinary successful create, so they get the same remembering
+        // behavior a real user-initiated one would.
+        self.record_create_history_with_paths(
+            host,
+            identity,
+            entry,
+            folder_identity,
+            &entry.cwd,
+            true,
+        )
+        .await
     }
 
     /// Record a successful create with its target-verified identity and the
@@ -4422,6 +4515,27 @@ impl HelmStore {
     /// later search find the path the person recognizes. When the canonical
     /// fact is absent, callers pass the display spelling as a distinct key;
     /// the helm must never resolve it itself.
+    ///
+    /// `remember_permissions` gates a SECOND, independent side effect that
+    /// piggybacks on this same admitted-create transaction: when `entry` is
+    /// a structured launch, its permissions choice (`"yolo"` or absent)
+    /// becomes the helm-wide `preferences.remembered_permissions` memory
+    /// (SPEC.md's launch-composer carve-out). The caller passes `false` for
+    /// an agent-relay-originated create (`sessions::CreateOrigin::Agent`):
+    /// that memory is the interactive user's own dialog default, and an
+    /// agent replaying or cloning a structured session on its own initiative
+    /// must not silently move what the next human "New" open preselects —
+    /// the same authority boundary SPEC.md already draws around the
+    /// remembered legacy-profile default. Piggybacked on the launch-history
+    /// admission (rather than written unconditionally from `entry.launch`)
+    /// so a stale, out-of-order replayed create — one old enough that its
+    /// own history entry is rejected below — cannot overwrite a newer
+    /// remembered choice with older information. "Last" is therefore
+    /// admission order, not creation order: a delayed reply for an older
+    /// create that still falls inside the history window is admitted and
+    /// overwrites the memory a newer create just set. Two creates racing
+    /// within that window is the only way to observe it, and the cost is
+    /// one wrong preselection on the next open.
     pub async fn record_create_history_with_paths(
         &self,
         host: HostId,
@@ -4429,6 +4543,7 @@ impl HelmStore {
         entry: &SessionInfo,
         canonical_cwd: &str,
         display_cwd: &str,
+        remember_permissions: bool,
     ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
@@ -4637,28 +4752,52 @@ impl HelmStore {
                 != 0;
 
             let launch_changed = if let Some(selection) = &entry.launch {
+                // Captured before `selection` is shadowed by its serialized
+                // form just below: this is the fact the permissions-memory
+                // write a few lines down needs, and it must come from the
+                // same admitted selection `launch_history` is about to
+                // record, not from a separately re-read one.
+                let permissions_word =
+                    selection.permissions.map(|farhelm_proto::LaunchPermission::Yolo| "yolo");
                 let selection = serde_json::to_string(selection)
                     .context("serializing structured launch history")?;
-                tx.execute(
-                    "INSERT INTO launch_history (
-                         host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, cwd, canonical_cwd, launch_json
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                     ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
-                    rusqlite::params![
-                        host,
-                        identity,
-                        entry.id,
-                        entry.created_at,
-                        sequence,
-                        ordering_kind,
-                        ordering_value,
-                        &display_cwd,
-                        entry.canonical_cwd.as_deref(),
-                        selection,
-                    ],
-                )
-                .context("recording structured launch")?
-                    != 0
+                let changed = tx
+                    .execute(
+                        "INSERT INTO launch_history (
+                             host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, cwd, canonical_cwd, launch_json
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                         ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
+                        rusqlite::params![
+                            host,
+                            identity,
+                            entry.id,
+                            entry.created_at,
+                            sequence,
+                            ordering_kind,
+                            ordering_value,
+                            &display_cwd,
+                            entry.canonical_cwd.as_deref(),
+                            selection,
+                        ],
+                    )
+                    .context("recording structured launch")?
+                    != 0;
+                // The second, independent side effect this admitted create
+                // triggers: see `record_create_history_with_paths`'s own doc
+                // for why this is gated on `remember_permissions` and placed
+                // here rather than written unconditionally from
+                // `entry.launch`.
+                if remember_permissions {
+                    tx.execute(
+                        "INSERT INTO preferences (singleton, remembered_permissions) \
+                         VALUES (1, ?1) \
+                         ON CONFLICT (singleton) DO UPDATE SET \
+                             remembered_permissions = excluded.remembered_permissions",
+                        rusqlite::params![permissions_word],
+                    )
+                    .context("remembering the launched permissions choice")?;
+                }
+                changed
             } else {
                 false
             };
@@ -5893,6 +6032,73 @@ mod tests {
                 .len(),
             1,
             "the associated folder is admitted by the same session boundary"
+        );
+    }
+
+    /// `remember_permissions` is the one thing distinguishing a user-
+    /// initiated structured create from an agent-relay-originated one at
+    /// this function's call site (`sessions::do_create_session` passes
+    /// `origin == CreateOrigin::User`): a user create updates the helm-wide
+    /// "last permissions used" memory and an agent create must not, since
+    /// that memory is the interactive user's own dialog default (SPEC.md's
+    /// launch-composer carve-out). Pinned directly at this gate rather than
+    /// through a full agent-relay fixture, because the gate itself — not
+    /// which real caller passes which origin — is the risk this test
+    /// exists to catch.
+    #[farhelm_testtrace::test]
+    async fn remember_permissions_gates_whether_a_structured_create_updates_the_memory() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "permissions.example", "identity-a").await;
+        let yolo = |id: &str, seq: u64| SessionInfo {
+            creation_seq: Some(seq),
+            launch: Some(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Codex,
+                model: None,
+                effort: None,
+                permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            }),
+            ..session(id, 100)
+        };
+
+        let agent_origin = yolo("agent-origin", 1);
+        store
+            .record_create_history_with_paths(
+                host,
+                "identity-a",
+                &agent_origin,
+                &agent_origin.cwd,
+                &agent_origin.cwd,
+                false,
+            )
+            .await
+            .expect("record an agent-originated structured create");
+        assert_eq!(
+            store.preferences().await.unwrap().remembered_permissions,
+            None,
+            "remember_permissions: false must leave the memory untouched"
+        );
+
+        let user_origin = yolo("user-origin", 2);
+        store
+            .record_create_history_with_paths(
+                host,
+                "identity-a",
+                &user_origin,
+                &user_origin.cwd,
+                &user_origin.cwd,
+                true,
+            )
+            .await
+            .expect("record a user-originated structured create");
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .as_deref(),
+            Some("yolo"),
+            "remember_permissions: true sets the memory"
         );
     }
 
@@ -7224,6 +7430,7 @@ mod tests {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("session-1".to_string()),
                 compact: Some(true),
+                remembered_permissions: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -7239,6 +7446,7 @@ mod tests {
                 list_sort: Some("created".to_string()),
                 last_selected: Some("session-1".to_string()),
                 compact: Some(true),
+                remembered_permissions: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -7253,6 +7461,7 @@ mod tests {
                 list_sort: Some("created".to_string()),
                 last_selected: None,
                 compact: Some(true),
+                remembered_permissions: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -7274,6 +7483,51 @@ mod tests {
             store.preferences().await.unwrap().compact,
             None,
             "null restores the absent compact choice without touching other fields"
+        );
+
+        // The permissions memory round-trips the same three-way merge as
+        // every other field, even though the shipped UI never PUTs it
+        // itself (the helm writes it as a side effect of a launch — see
+        // `record_create_history_with_paths`) — the wire route makes no
+        // distinction, so it deserves the same coverage.
+        store
+            .update_preferences(patch(r#"{"remembered_permissions":"yolo"}"#))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .as_deref(),
+            Some("yolo"),
+            "a remembered_permissions write round-trips through the merge like any other field"
+        );
+        store.update_preferences(patch("{}")).await.unwrap();
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .as_deref(),
+            Some("yolo"),
+            "a patch that omits the field leaves the remembered mode alone"
+        );
+        store
+            .update_preferences(patch(r#"{"remembered_permissions":null}"#))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("created".to_string()),
+                last_selected: None,
+                compact: None,
+                remembered_permissions: None,
+            },
+            "null clears exactly the permissions memory and disturbs nothing else"
         );
     }
 
@@ -8009,6 +8263,17 @@ mod tests {
                      host_identity TEXT NOT NULL, cutoff_sequence INTEGER NOT NULL,
                      PRIMARY KEY (host_id, host_identity)
                  ) STRICT;
+                 -- This fixture starts from a freshly created (CURRENT
+                 -- schema) database and rewrites only the four history
+                 -- tables to their schema-22 shape; `preferences` is
+                 -- otherwise untouched, so it still carries every column a
+                 -- fresh create adds. Schema 26's `remembered_permissions`
+                 -- must be dropped here too, or the version-25→26 migration
+                 -- step tries to re-add a column already present and fails
+                 -- with \"duplicate column name\" — exactly the class of bug
+                 -- `apply_schema`'s own comment on its fresh-create branch
+                 -- warns about.
+                 ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  PRAGMA user_version = 22;",
             )
             .expect("replace current history with the schema-22 shape");
@@ -8118,6 +8383,7 @@ mod tests {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN compact;
+                 ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected)
                  VALUES (1, 'title', 'session-before-compact');
                  PRAGMA user_version = 17;",
@@ -8132,8 +8398,47 @@ mod tests {
                 list_sort: Some("title".to_string()),
                 last_selected: Some("session-before-compact".to_string()),
                 compact: None,
+                remembered_permissions: None,
             },
             "the new field defaults absent while both existing choices survive"
+        );
+    }
+
+    /// Schema 26 adds the remembered structured-launch permissions mode to
+    /// an existing singleton without disturbing any preference an older
+    /// client already wrote — the same contract `schema_18_preserves_the_
+    /// version_17_preference_row` pins for `compact`, one column later.
+    ///
+    /// This starts from the exact schema-25 difference (the new column
+    /// absent, the other three populated) rather than a fresh database,
+    /// because the property under test is migration fidelity, not creation.
+    #[farhelm_testtrace::test]
+    async fn schema_26_preserves_the_version_25_preference_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("helm.db");
+        {
+            let store = HelmStore::open(&path).await.expect("create current schema");
+            drop(store);
+            let conn = Connection::open(&path).expect("reopen raw");
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN remembered_permissions;
+                 INSERT INTO preferences (singleton, list_sort, last_selected, compact)
+                 VALUES (1, 'title', 'session-before-permissions-memory', 1);
+                 PRAGMA user_version = 25;",
+            )
+            .expect("plant schema-25 preferences");
+        }
+
+        let migrated = HelmStore::open(&path).await.expect("migrate schema 25");
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            Preferences {
+                list_sort: Some("title".to_string()),
+                last_selected: Some("session-before-permissions-memory".to_string()),
+                compact: Some(true),
+                remembered_permissions: None,
+            },
+            "the new field defaults absent while every existing choice survives"
         );
     }
 
@@ -8386,9 +8691,11 @@ mod tests {
     /// whether a session had been looked at, so there is nothing TO carry).
     ///
     /// Planted by removing the later additions from a current database:
-    /// version 17 added the seen table, and version 18 added compactness.
-    /// Both must be absent before assigning version 16, or the migration
-    /// would run against a shape no released version could have created.
+    /// version 17 added the seen table, version 18 added compactness, and
+    /// version 26 added the remembered structured-launch permissions mode.
+    /// All three must be absent before assigning version 16, or the
+    /// migration would run against a shape no released version could have
+    /// created.
     #[farhelm_testtrace::test]
     async fn a_version_16_database_gains_the_session_seen_table() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -8399,8 +8706,13 @@ mod tests {
         };
         {
             let conn = Connection::open(&path).expect("reopen raw");
-            conn.execute_batch("DROP TABLE session_seen; ALTER TABLE preferences DROP COLUMN compact; PRAGMA user_version = 16;")
-                .expect("downgrade to version 16");
+            conn.execute_batch(
+                "DROP TABLE session_seen;
+                 ALTER TABLE preferences DROP COLUMN compact;
+                 ALTER TABLE preferences DROP COLUMN remembered_permissions;
+                 PRAGMA user_version = 16;",
+            )
+            .expect("downgrade to version 16");
         }
 
         let migrated = HelmStore::open(&path).await.expect("migrate");
@@ -9643,9 +9955,9 @@ mod tests {
     /// "a version-N database" fixtures
     /// (`a_version_5_bare_default_is_dropped_by_schema_15` and its
     /// siblings) that anchor at the schema immediately preceding the
-    /// migration under test. Removing the later seen table and compact
-    /// preference restores that historical shape before reversing schema
-    /// 16's alias addition.
+    /// migration under test. Removing the later seen table and every later
+    /// preference column restores that historical shape before reversing
+    /// schema 16's alias addition.
     #[farhelm_testtrace::test]
     async fn a_version_15_database_migrates_hosts_to_a_null_alias() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -9659,6 +9971,7 @@ mod tests {
             conn.execute_batch(
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
+                 ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE hosts DROP COLUMN alias;
                  PRAGMA user_version = 15;",
             )

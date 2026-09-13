@@ -4297,6 +4297,10 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   await form.locator("#launch-composer-model-results").getByRole("option", { name: "reviewable-codex (Codex)", exact: true }).click();
   await expect(model).toHaveValue("reviewable-codex");
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
+  // The summary's "permissions: default" is this test's own choice: a fresh
+  // dialog preselects the helm-wide remembered mode, which an earlier launch
+  // in this invocation may have set to yolo.
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
   await expect(form.locator(".launch-composer-summary")).toHaveText(
     "model: reviewable-codex · effort: default · permissions: default",
   );
@@ -6246,6 +6250,12 @@ test("composer busy guard preserves one structured create through queued edits a
     await form.getByRole("button", { name: "Codex", exact: true }).click();
     await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await form.getByLabel("name (optional)").fill(title);
+    // Deliberate: the premise below (the first submit carries DEFAULT
+    // permissions) must not depend on whatever this stack's helm-wide
+    // memory currently remembers (SPEC.md's launch-composer carve-out) —
+    // an earlier structured launch elsewhere in this file may have already
+    // remembered yolo, which would otherwise preselect it here too.
+    await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
 
     await form.locator('button[type="submit"]').click();
     await dispatched;
