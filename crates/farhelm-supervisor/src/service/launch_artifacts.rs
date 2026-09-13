@@ -232,10 +232,34 @@ pub(crate) async fn remove_launch_artifacts_for_session(
         };
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if crate::launch::parse_launch_file_name(&name).is_some_and(|(id, _)| id == session_id) {
+        if crate::launch::parse_launch_file_name(&name).is_some_and(|(id, _)| id == session_id)
+            || staged_name_belongs_to(&name, session_id)
+        {
             remove_fail_closed(&entry.path(), "launch file").await?;
         }
     }
+}
+
+/// Whether a staged launch artifact belongs to `session_id`.
+///
+/// Staging prefixes the final launch name with a dot and appends `.tmp-<uuid>`;
+/// a failed post-publication unlink can therefore leave a second,
+/// credential-bearing copy beside the published file. The broad
+/// [`crate::files::is_staged_temp_name`] predicate is enough for the startup
+/// sweep, but teardown must identify the owner before deleting anything so a
+/// concurrent launch for another session is not disturbed. Invalid stems are
+/// deliberately rejected rather than treated as abandoned launch files.
+fn staged_name_belongs_to(name: &str, session_id: &str) -> bool {
+    if !crate::files::is_staged_temp_name(name) || !name.starts_with('.') {
+        return false;
+    }
+    let Some(stem) = name.strip_prefix('.') else {
+        return false;
+    };
+    let Some(stem) = stem.split_once(".tmp-").map(|(stem, _)| stem) else {
+        return false;
+    };
+    crate::launch::parse_launch_file_name(stem).is_some_and(|(id, _)| id == session_id)
 }
 
 /// Best-effort credential-hygiene cleanup: remove `path`, treating its
@@ -439,6 +463,57 @@ mod tests {
         assert_eq!(crate::launch::parse_launch_file_name("sess-1.x.json"), None);
         assert_eq!(crate::launch::parse_launch_file_name("tmux.conf"), None);
         assert_eq!(crate::launch::parse_launch_file_name(".0.json"), None);
+    }
+
+    /// A staged copy is safe for session teardown only when its de-dotted
+    /// stem identifies that session. This protects another session's
+    /// in-flight write and leaves unrelated temporary files for their owner.
+    #[farhelm_testtrace::test]
+    fn staged_launch_name_belongs_only_to_its_parsed_session() {
+        assert!(staged_name_belongs_to(
+            ".this-session.0.json.tmp-deadbeef",
+            "this-session"
+        ));
+        assert!(staged_name_belongs_to(
+            ".this-session.0.status.tmp-deadbeef",
+            "this-session"
+        ));
+        assert!(!staged_name_belongs_to(
+            "this-session.0.json.tmp-deadbeef",
+            "this-session"
+        ));
+        assert!(!staged_name_belongs_to(
+            ".not-a-launch-file.tmp-deadbeef",
+            "not-a-launch-file"
+        ));
+    }
+
+    /// Delete and archive must remove an orphaned staged copy for the same
+    /// session, while preserving another session's active write and a temp
+    /// file whose stem is not a launch name.
+    #[farhelm_testtrace::test]
+    async fn remove_launch_artifacts_for_session_removes_its_staged_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch_dir = tmp.path().join("launch");
+        std::fs::create_dir(&launch_dir).unwrap();
+        let session = "this-session";
+        let other = "other-session";
+        let own_spec = launch_dir.join(format!("{session}.0.json"));
+        let own_staged = launch_dir.join(format!(".{session}.0.json.tmp-deadbeef"));
+        let other_staged = launch_dir.join(format!(".{other}.0.json.tmp-deadbeef"));
+        let unrelated = launch_dir.join(".not-a-launch-file.tmp-deadbeef");
+        for path in [&own_spec, &own_staged, &other_staged, &unrelated] {
+            std::fs::write(path, b"credential-bearing launch data").unwrap();
+        }
+
+        remove_launch_artifacts_for_session(tmp.path(), session)
+            .await
+            .unwrap();
+
+        assert!(!own_spec.exists());
+        assert!(!own_staged.exists());
+        assert!(other_staged.exists());
+        assert!(unrelated.exists());
     }
 
     /// Item 22's restart race: a spec whose session id IS still present
