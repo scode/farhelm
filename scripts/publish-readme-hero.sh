@@ -85,12 +85,21 @@ raw_base() {
   printf 'https://raw.githubusercontent.com/%s' "$path"
 }
 
-# Replace exactly the span between the two README markers. Refuses a README
-# with zero or several marker pairs rather than guessing, and rewrites in
-# place only after the replacement succeeded.
+# Replace the link destination of the one `![...](...)` found between the
+# two README markers. The markers wrap the whole image element rather than
+# sitting inside its parens: a link destination is parsed as a literal
+# string, not run through inline-HTML handling, so an HTML comment placed
+# inside it becomes part of the URL instead of being hidden, and the
+# embedded space in "<!-- readme-hero-url -->" then truncates the
+# destination at the first space and breaks the whole image markdown (this
+# broke the README once already — GitHub fell back to rendering the raw
+# `![...](...)` text). Keeping the markers outside the parens lets them do
+# their job as ordinary invisible HTML comments while the destination stays
+# a plain, unbroken URL.
 rewrite_readme() {
   local readme="$1" url="$2"
   python3 - "$readme" "$url" "$MARKER_OPEN" "$MARKER_CLOSE" <<'EOF' || die "README rewrite failed"
+import re
 import sys
 readme, url, open_marker, close_marker = sys.argv[1:5]
 text = open(readme, encoding="utf-8").read()
@@ -100,8 +109,12 @@ start = text.index(open_marker) + len(open_marker)
 end = text.index(close_marker)
 if end < start:
     raise SystemExit(f"{readme}: the closing marker precedes the opening one")
+span = text[start:end]
+new_span, count = re.subn(r"\]\([^)]*\)", f"]({url})", span, count=1)
+if count != 1:
+    raise SystemExit(f"{readme}: no single image link destination found between the markers")
 with open(readme, "w", encoding="utf-8") as out:
-    out.write(text[:start] + url + text[end:])
+    out.write(text[:start] + new_span + text[end:])
 EOF
 }
 
@@ -176,7 +189,7 @@ self_test() {
   mkdir -p "$checkout/docs/readme-hero" "$checkout/e2e" || die "mkdir failed"
   cp "$script_repo/docs/readme-hero/scenario.json5" "$checkout/docs/readme-hero/" || die "cannot copy the scenario"
   ln -s "$script_repo/e2e/node_modules" "$checkout/e2e/node_modules" || die "cannot link node_modules"
-  printf '# t\n\n![hero](%sOLD%s)\n' "$MARKER_OPEN" "$MARKER_CLOSE" >"$checkout/README.md"
+  printf '# t\n\n%s\n![hero](OLD)\n%s\n' "$MARKER_OPEN" "$MARKER_CLOSE" >"$checkout/README.md"
   git -C "$checkout" init -q || die "checkout init failed"
   git -C "$checkout" -c user.name=t -c user.email=t@invalid add -A >/dev/null || die "add failed"
   git -C "$checkout" -c user.name=t -c user.email=t@invalid commit -q -m init || die "commit failed"
@@ -220,8 +233,9 @@ self_test() {
   second="$(git -C "$bare" rev-parse "$BRANCH")"
   test "$first" != "$second" || { echo "FAIL second publish did not replace the commit"; fail=1; }
 
-  # The README span is exactly the second commit's URL and nothing else moved.
-  test "$(cat "$checkout/README.md")" = "$(printf '# t\n\n![hero](%shttps://raw.githubusercontent.com/example/repo/%s/%s%s)\n' "$MARKER_OPEN" "$second" "$ASSET" "$MARKER_CLOSE")" || {
+  # The image destination is exactly the second commit's URL and nothing
+  # else moved, including the alt text and the markers themselves.
+  test "$(cat "$checkout/README.md")" = "$(printf '# t\n\n%s\n![hero](https://raw.githubusercontent.com/example/repo/%s/%s)\n%s\n' "$MARKER_OPEN" "$second" "$ASSET" "$MARKER_CLOSE")" || {
     echo "FAIL README rewrite: $(cat "$checkout/README.md")"; fail=1
   }
   printf '%s\n%s\n' "$MARKER_OPEN" "$MARKER_OPEN" >"$checkout/dup.md"
