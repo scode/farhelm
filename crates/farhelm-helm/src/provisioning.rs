@@ -2507,6 +2507,16 @@ mod tests {
         };
         assert!(missing.needs_tmux);
         assert_eq!(missing.distro_id, "ubuntu");
+        let newline_id = supported("ubuntu\nplan-step", "x86_64", "", "", "usable");
+        assert!(
+            parse_reach_output(newline_id.as_bytes()).is_err(),
+            "a control character in the host claim must remain malformed output"
+        );
+        let oversized_id = supported(&"x".repeat(65), "x86_64", "", "", "usable");
+        assert!(
+            parse_reach_output(oversized_id.as_bytes()).is_err(),
+            "an oversized host claim must remain malformed output"
+        );
         let ReachOutcome::Supported(old) = parse_reach_output(
             supported("ubuntu", "aarch64", "/usr/bin/tmux", "tmux 3.2", "usable").as_bytes(),
         )
@@ -3146,7 +3156,12 @@ mod tests {
     /// reject bytes that cannot cross the text command boundary unchanged.
     #[farhelm_testtrace::test]
     fn remote_shell_path_encoding_round_trips_and_rejects_text_hazards() {
-        for path in ["/tmp/a b", "/tmp/it's-here", "-leading-dash"] {
+        for path in [
+            "/tmp/a b",
+            "/tmp/it's-here",
+            "/tmp/{a,b}/$value",
+            "-leading-dash",
+        ] {
             let encoded = shell_path(Path::new(path)).unwrap();
             let output = std::process::Command::new("sh")
                 .args(["-c", &format!("set -- {encoded}; printf '%s' \"$1\"")])
@@ -3184,13 +3199,21 @@ mod tests {
     /// authorization refusals; unrelated command failures remain fatal.
     #[farhelm_testtrace::test]
     fn linger_classifier_separates_refusal_from_failure() {
-        assert!(linger_was_refused(Some(1), "Access denied"));
         assert!(linger_was_refused(
             Some(1),
-            "Interactive authentication required"
+            "loginctl: Access denied while enabling linger"
+        ));
+        assert!(linger_was_refused(
+            Some(1),
+            "loginctl: Interactive authentication required for linger"
         ));
         assert!(!linger_was_refused(Some(1), "Failed to connect to bus"));
         assert!(!linger_was_refused(Some(0), "Access denied"));
+        assert!(!linger_was_refused(
+            Some(255),
+            "Permission denied (publickey)"
+        ));
+        assert!(!linger_was_refused(Some(1), "Access denied"));
     }
 
     /// Remote absence has a dedicated exit while inspection failures retain

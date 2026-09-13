@@ -402,16 +402,6 @@ is safe. Each is its own review unit.
   it, distinguishing agent create and clone origin in `do_create_session`; reconcile the discovery and default prose and
   tests in the same change. Fence: a timestamp clamp is insufficient by design; keep profile-catalog discovery
   independent of default selection; its own review unit.
-- **Provisioning quoting and provenance.** `A2-S3`, `A2-C5`, `A2-C18`. Medium, small, medium risk. `shell_path`
-  (backend.rs:1627-1629) uses `shell_words::quote`, whose minimal set excludes braces, so a path can brace-expand into
-  several remote words under `sh -c`; the same helper builds the steady-state argv in ssh.rs. `parse_reach_output`
-  (backend.rs:1761) stores the host's `os-release` ID unvalidated, `confirmation()` (plan.rs:217-222) splices it into a
-  line, and `PeerBlock` splits on `lines()` so a newline in it becomes a plan step the operator approves.
-  `linger_was_refused` (backend.rs:1726-1740) substring-matches "permission denied" against whole stderr, so ssh's own
-  refusal with exit 255 is reported as a benign degraded linger. Fix: an always-single-quote helper used by both layers;
-  reject or sanitize newlines and bound the length in `distro_id` at the boundary; require positive evidence the linger
-  command reached the host before accepting degradation. Fence: correctness for the operator's own path, no new
-  authority; no double escaping at the GUI; neither an unconditional success claim nor a blanket exit-255 classifier.
 - **Credential cap self-eviction.** `A6-C15`. Medium, small, medium risk. `exchange_device_session_inner` (helm
   store.rs:2755-2769) inserts, then deletes rows past `OFFSET 64` ordered by `created_at DESC, cookie_hash DESC`, with
   nothing excluding the new row, and returns `Ok(true)` regardless; a clock rollback or tie evicts the credential just
