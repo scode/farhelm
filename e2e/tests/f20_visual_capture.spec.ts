@@ -125,7 +125,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   await capture("three-recents-defaults", desktop, async (form) => {
     await expect(form.getByTitle(new RegExp("alpha-the-ending-that-matters"))).toBeVisible();
     await expect(form.getByTitle(new RegExp("bravo-the-different-ending"))).toBeVisible();
-  }, ["three 44px recent rows", "two long shared-prefix destinations", "default and explicit selections"]);
+  }, ["three 36px recent rows", "two long shared-prefix destinations", "default and explicit selections"]);
   await capture("claude-search-recents", desktop, async (form) => {
     await form.locator('.launch-composer-search input[role="combobox"]').fill("Claude");
     await expect(form.getByRole("group", { name: "Harnesses" })).toBeVisible();
@@ -148,7 +148,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   }, ["keyboard active descendant", "different pointer-hovered option"]);
   await capture("three-recents-defaults", narrow, async (form) => {
     await expect(form.getByTitle(new RegExp("alpha-the-ending-that-matters"))).toBeVisible();
-  }, ["three 44px recent rows", "wrapped folder choices expose complete long spellings without launch"]);
+  }, ["three 36px recent rows", "one-line rows truncate long detail without launch"]);
   await capture("explicit-long-folder", narrow, async (form) => {
     await selectExplicit(form);
     await form.evaluate((node) => { node.scrollTop = 0; });

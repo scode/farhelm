@@ -200,10 +200,11 @@ Session creation is one action, not a wizard. Only the working directory is fund
   default profile for sessions on other hosts. This does not make the structured composer preselect a harness or
   profile. See the maintainer-confirmed decisions below.
 - Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
-  identity. A recent row fills every saved choice and directory but never launches. A retargeted registry row cannot
-  expose the replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk;
-  explicit browsing asks the selected supervisor for one bounded directory level. Recent-setup rows appear only when the
-  current filter actually matches history; the dialog reserves no space for them when it does not.
+  identity. A recent row fills every saved choice and directory; clicking it never launches, and pressing Enter on a
+  focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
+  replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk; explicit
+  browsing asks the selected supervisor for one bounded directory level. Recent-setup rows appear only when the current
+  filter actually matches history; the dialog reserves no space for them when it does not.
 - Host: defaults to the host of the currently open session, else the helm's own host. "The host of the currently open
   session" means the install the user was looking at, not merely its registry row id: a row retargeted or adopted onto a
   different install after the session was selected falls back to the helm's own host rather than silently aiming the
