@@ -481,19 +481,6 @@ is safe. Each is its own review unit.
   attachment and return the first whose queue matches a registered link, correcting the lease-versus- connection
   docstring. Fence: do not assert all hosts or all creation fail; the alias contract's fail-closed behaviour is optional
   UX; no lease redesign.
-- **Unlisted launch rows after ambiguous failure.** `A5-C2`, `A5-C3`, `A5-C10`, `A3-C11`. High, medium, medium risk;
-  needs a focused failure reproduction first. The retain-the-row exits of the create path (core.rs:6551-6556 and
-  :6576-6596) return `Err` without publishing a `SessionEntry`, so a possibly-running agent is unlisted and unstoppable
-  until restart while the error text tells the user to stop or delete it; `reload_sessions` has exactly two call sites,
-  both at startup. The keyed-retry takeover removes the existing entry at :6341 and never restores it on those exits,
-  rewrites the row at `generation: 0` (:6303, :6256, :6683) rolling back a counter the module treats as monotonic, and
-  clears the previous attempt's launch artifacts (:6251-6262) before `restart_pending_launch` decides the takeover is
-  warranted. `Supervisor::relaunch` (core.rs:7084-7122) already re-publishes after a failed restart. Fix: a shared
-  helper publishing a Launching-shaped entry on every retaining exit, paired with delete's durable `tmux_name` fallback;
-  read `generation` in the takeover's snapshot and thread it through; move the artifact clear into the
-  `RetryClaim::Acquired` arm. Fence: the removal is load-bearing for serializing against stop and delete; the original
-  new-session-timeout premise was wrong; do not claim the probe established every interleaving; separate unit from the
-  Error-reload fix.
 - **`token show` migrates under a running helm.** `A6-C1`. Medium, medium, medium risk. `HelmStore::open` takes no
   `may_migrate` and its module doc argues none is needed, but `token_control::show` (token_control.rs:120-124) opens the
   store with no ownership lock, so the ordinary install-then-`token show` sequence migrates `helm.db` under the

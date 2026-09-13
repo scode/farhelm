@@ -747,12 +747,23 @@ pub enum RetryClaim {
     /// every list served by this process shows the pre-rename label until
     /// the next reload — the user's rename accepted, acknowledged, and then
     /// apparently reverted. Returning it here is what lets the caller adopt
-    /// the committed value instead of its own stale one.
+    /// the committed value instead of its own stale one. `generation` is
+    /// returned for the corresponding launch-safety reason: every artifact,
+    /// transition, and in-memory fence must use the value this transaction
+    /// preserved rather than an independently assumed zero.
     Acquired {
         created_at: i64,
         creation_seq: u64,
         title: String,
         session_token: String,
+        /// The generation already assigned to the row being retried.
+        ///
+        /// A keyed retry repeats the interrupted create; it is not a
+        /// restart and therefore does not allocate a generation. Returning
+        /// the stored value keeps every generation-scoped side effect in
+        /// agreement with the replacement row, including for defensive
+        /// recovery of a row whose generation is no longer zero.
+        generation: i64,
     },
     /// The reservation is no longer pending — something settled it first
     /// (most often a concurrent delete, which tombstones as `Created`). The
@@ -819,8 +830,8 @@ type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i
 
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
 /// transaction: the outcome state, the pane, `created_at`, the title, the
-/// session token, the creation sequence, `last_activity_at`, and
-/// `conversation_source` — in that positional order.
+/// session token, the creation sequence, `last_activity_at`, the generation,
+/// and `conversation_source` — in that positional order.
 ///
 /// The first two and the last are the takeover's CONDITIONS (evidence that
 /// a launch happened); the rest are the values a takeover must carry across
@@ -836,6 +847,7 @@ type LaunchTakeoverColumns = (
     i64,
     String,
     String,
+    i64,
     i64,
     i64,
     Option<String>,
@@ -2689,9 +2701,11 @@ impl SessionStore {
     /// reply and its replacement in-memory entry are built from a snapshot
     /// resolved before the race, so preserving the rename in SQLite alone
     /// would leave every list this process serves showing the old label
-    /// until the next reload. Those two are
-    /// the whole of what survives — every other column on the replaced row
-    /// describes a launch that provably never happened.
+    /// until the next reload. Generation survives too, because only
+    /// `begin_relaunch` allocates it and a create retry must not move that
+    /// fence backwards. Those three are the whole of what survives — every
+    /// other column on the replaced row describes a launch that provably
+    /// never happened.
     pub async fn restart_pending_launch(
         &self,
         row: StoredSession,
@@ -2715,7 +2729,7 @@ impl SessionStore {
             let current: Option<LaunchTakeoverColumns> = tx
                 .query_row(
                     "SELECT outcome_state, pane, created_at, title, session_token, \
-                     creation_seq, last_activity_at, conversation_source FROM sessions \
+                     creation_seq, last_activity_at, generation, conversation_source FROM sessions \
                      WHERE id = ?1",
                     rusqlite::params![row.id],
                     |r| {
@@ -2728,6 +2742,7 @@ impl SessionStore {
                             r.get(5)?,
                             r.get(6)?,
                             r.get(7)?,
+                            r.get(8)?,
                         ))
                     },
                 )
@@ -2755,18 +2770,19 @@ impl SessionStore {
             // that ignored it would start a second agent against a session
             // that already has a live one.
             //
-            // `created_at` rides along in the same read as a matched pair
-            // with `outcome_state`/`pane`: whichever row this transaction
-            // is about to act on (refuse, or replace) is also the row whose
-            // timestamp the reply must honor, so reading all three off one
-            // committed snapshot rules out a second query ever disagreeing
-            // with the first about which row it saw.
+            // `created_at` and `generation` ride along in the same read as
+            // a matched pair with `outcome_state`/`pane`: whichever row this
+            // transaction is about to act on (refuse, or replace) is also
+            // the row whose timestamp and launch fence the caller must
+            // honor. Reading them from one committed snapshot rules out a
+            // second query disagreeing about which row it saw.
             let (
                 preserved_created_at,
                 preserved_title,
                 preserved_token,
                 preserved_sequence,
                 preserved_last_activity_at,
+                preserved_generation,
             ) = match current {
                 Some((
                     state,
@@ -2776,6 +2792,7 @@ impl SessionStore {
                     token,
                     sequence,
                     last_activity_at,
+                    generation,
                     conversation_source,
                 )) => {
                     if !pane.is_empty()
@@ -2790,6 +2807,7 @@ impl SessionStore {
                         Some(token),
                         Some(u64::try_from(sequence).context("negative creation sequence")?),
                         last_activity_at,
+                        generation,
                     )
                 }
                 // Contradicts `SessionStore::insert_session`'s own
@@ -2814,6 +2832,7 @@ impl SessionStore {
                     None,
                     None,
                     row.last_activity_at,
+                    row.generation,
                 ),
             };
             tx.execute(
@@ -2845,6 +2864,11 @@ impl SessionStore {
                 last_activity_at: preserved_last_activity_at,
                 creation_seq: 0,
                 title: preserved_title,
+                // A retry repeats the launch generation already assigned
+                // to this create. Only `begin_relaunch` may advance it;
+                // replacing it with the caller's usual zero would move a
+                // durable generation fence backwards.
+                generation: preserved_generation,
                 ..row
             };
             let inserted = insert_session_row(
@@ -2860,6 +2884,7 @@ impl SessionStore {
                 creation_seq: inserted.creation_seq,
                 title: preserved_title,
                 session_token: inserted.session_token,
+                generation: preserved_generation,
             })
         })
         .await
