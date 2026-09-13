@@ -28,8 +28,9 @@
 //! user is reading; two rename implementations would drift on exactly the
 //! validation rule that matters (SPEC.md's control-character refusal); two
 //! create implementations would drift on the cache seed that makes a new
-//! session appear in the UI without a refresh, and on the remembered-
-//! default write that decides what the user's next create dialog suggests.
+//! session appear in the UI without a refresh. The remembered-default write
+//! is deliberately not shared: only a user-originated REST create decides
+//! what the user's next create dialog suggests.
 //!
 //! # The creating verbs are what could not have been built anywhere else
 //!
@@ -1002,6 +1003,7 @@ async fn create_for_agent(
                 // already states them.
                 agent_kind: None,
                 resume_template: None,
+                origin: crate::sessions::CreateOrigin::Agent,
                 // `create` names a directory and an agent rather than a
                 // session, so no answer of the target's is forbidden — a
                 // keyed replay is the caller's own earlier create coming
@@ -1141,6 +1143,7 @@ async fn clone_for_agent(
                 intent_key: request.intent_key,
                 agent_kind: None,
                 resume_template: None,
+                origin: crate::sessions::CreateOrigin::Agent,
                 // A clone that comes back as the ASKING session is refused
                 // rather than reported, and this is not a defensive nicety —
                 // it is reachable by ordinary means. A same-host clone with
@@ -4318,12 +4321,15 @@ mod tests {
         assert_eq!(seen[0].intent_key.as_deref(), Some("resolved-key"));
     }
 
-    /// Muse's built-ins must reach the supervisor as ordinary generic launches.
+    /// Muse's built-ins must reach the supervisor as ordinary generic launches
+    /// without changing the user's remembered default.
+    ///
     /// Pin both command spellings and the absence of integration/resume data:
     /// a catalog entry alone would not catch a resolver that changed the bundle.
-    /// The remembered default must retain the built-in ID like any stored ID.
+    /// The pre-seeded user choice proves a successful profile-backed relay
+    /// create has no authority over the next dialog's suggestion.
     #[farhelm_testtrace::test]
-    async fn muse_profiles_forward_generic_launches_and_remember_their_ids() {
+    async fn muse_profiles_forward_generic_launches_without_remembering_them() {
         for (name, invocation, id) in [
             ("muse", "muse", "builtin-muse"),
             ("muse-yolo", "muse --yolo", "builtin-muse-yolo"),
@@ -4331,6 +4337,10 @@ mod tests {
             let (client_side, peer) = tokio::io::duplex(64 * 1024);
             let seen = spawn_create_responder(peer, None);
             let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+            h.store
+                .remember_profile_default("profile-chosen-by-user")
+                .await
+                .expect("seed the user's existing default");
             let definition = h.store.profile(id).await.unwrap().expect("built-in exists");
             assert_eq!(definition.invocation, invocation);
             assert!(definition.builtin);
@@ -4374,7 +4384,8 @@ mod tests {
             );
             assert_eq!(
                 h.store.remembered_profile().await.unwrap().as_deref(),
-                Some(id)
+                Some("profile-chosen-by-user"),
+                "an agent's successful profile create must not move the user's default"
             );
         }
     }

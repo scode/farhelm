@@ -1086,6 +1086,7 @@ pub(crate) async fn create_session(
             intent_key: req.intent_key,
             agent_kind: req.agent_kind,
             resume_template: req.resume_template,
+            origin: CreateOrigin::User,
             // A REST create takes whatever session the target answers with,
             // replays included: the client asked for a session on that host
             // and the reply names one. Only the relay's clone has a result
@@ -1109,14 +1110,14 @@ pub(crate) async fn create_session(
 /// Shared VERBATIM with the agent relay's `Create`/`Clone` verbs
 /// (`agent_requests::HelmAgentRequests::handle`), which is the whole reason
 /// it exists as a function. Both callers need the same three things to
-/// happen in the same order — the supervisor call, the cache seed, and the
-/// remembered-default write for a profile create — and a create is exactly
+/// happen in the same order — the supervisor call and cache seed, followed
+/// by a remembered-default write only for a user profile create — and a
+/// create is exactly
 /// the operation where a second implementation would be most expensive to
 /// get subtly wrong: an agent-initiated create that skipped
 /// [`record_session`] would leave a real session running that the UI could
-/// not route to for a refresh interval, and one that skipped
-/// [`remember_default_profile`] would silently make the two creation
-/// surfaces disagree about what this helm's last-used profile is.
+/// not route to for a refresh interval. The deliberate difference is that
+/// an agent's profile-backed create must not move the user's dialog default.
 ///
 /// What is deliberately NOT here is routing. Naming the target host is where
 /// the two callers genuinely differ — the REST edge takes a registry id from
@@ -1165,6 +1166,7 @@ pub(crate) async fn do_create_session(
         intent_key,
         agent_kind,
         resume_template,
+        origin,
         accept_result,
     } = spec;
     let (mut session, profile_names) = match &mode {
@@ -1342,7 +1344,9 @@ pub(crate) async fn do_create_session(
         // default.
         CreateMode::Structured(_) => None,
     };
-    if let Some(profile_id) = remembered {
+    if origin == CreateOrigin::User
+        && let Some(profile_id) = remembered
+    {
         remember_default_profile(state, claim.host, &profile_id, &session).await;
     }
     Ok(session)
@@ -1370,6 +1374,11 @@ pub(crate) struct CreateSpec {
     pub(crate) intent_key: Option<String>,
     pub(crate) agent_kind: Option<farhelm_proto::AgentKind>,
     pub(crate) resume_template: Option<Vec<String>>,
+    /// Identifies whether this create expresses the user's dialog choice or
+    /// an agent's request. Only the former may update the helm-wide default:
+    /// an agent creating work must not silently move the user's next-dialog
+    /// suggestion.
+    pub(crate) origin: CreateOrigin,
     /// A veto on the session the target answered with, run before any of
     /// [`do_create_session`]'s bookkeeping. `None` accepts whatever the
     /// target says it created, which is the REST edge's position: it asked
@@ -1379,6 +1388,18 @@ pub(crate) struct CreateSpec {
     /// be the ASKING session; see [`do_create_session`]'s "Two phases" note
     /// for why the check cannot simply run at the call site afterwards.
     pub(crate) accept_result: Option<CreatedSessionCheck>,
+}
+
+/// Whose successful create may affect the helm-wide profile suggestion.
+///
+/// The shared creation pipeline serves both browser REST requests and relay
+/// requests from agents. They produce the same session side effects except
+/// for the remembered default, which belongs to the user rather than an
+/// agent that happens to create a profile-backed session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CreateOrigin {
+    User,
+    Agent,
 }
 
 /// [`CreateSpec::accept_result`]'s hook: judge the session a create came
@@ -1400,8 +1421,8 @@ pub(crate) type CreatedSessionCheck =
 ///
 /// Owned rather than borrowed from the body, because the mode outlives the
 /// request that produced it: it decides which call to make, and is consulted
-/// AGAIN after the reply lands (only a profile-backed create writes a
-/// remembered default), by which point the body's other fields have been
+/// AGAIN after the reply lands (only a user-originated profile-backed create
+/// writes a remembered default), by which point the body's other fields have been
 /// moved into the call. Taken out of the body rather than cloned — nothing
 /// else reads them afterwards.
 ///
@@ -1594,12 +1615,16 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<CreateMode> {
     }
 }
 
-/// Record `profile_id` as the helm-wide last-used profile, and invalidate.
+/// Record a successful user's `profile_id` as the helm-wide last-used profile,
+/// and invalidate.
 ///
 /// The remembered id belongs to the helm rather than a host registry row.
-/// `host` is diagnostic context and records the ordering domain of the
-/// supervisor-issued creation sequence; it does not make the default
-/// host-owned or bind it to an installation.
+/// `host` is diagnostic context for the supervisor-issued creation sequence;
+/// it does not order choices, make the default host-owned, or bind it to an
+/// installation.
+/// [`do_create_session`] calls this only for [`CreateOrigin::User`]: an
+/// agent-relay create may seed its session into the cache but must not change
+/// the profile the user's next dialog suggests.
 ///
 /// Best effort, on the same terms as [`record_session`]: the session has
 /// been created and the caller is about to be told so, and a preference that
@@ -2260,6 +2285,7 @@ pub(crate) async fn do_replace_session(
             // structured mode, where `do_create_session` forwards it.
             agent_kind: None,
             resume_template: None,
+            origin: CreateOrigin::User,
             // Unlike an ordinary REST create, replace DOES have a session an
             // idempotency replay can collide with: the SOURCE itself. A
             // same-host replace with no field overrides reconstructs the

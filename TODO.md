@@ -354,16 +354,6 @@ is safe. Each is its own review unit.
   `send-keys`; verify input delivery separately from output capture. A focused real-tmux reproduction on pinned tmux
   3.7c instead got `tmux send-keys input command failed: can't find pane: %1`; the next attempt should start by checking
   whether the production connection path changes that control-client reply.
-- **Helm-owned default profile.** `A6-S1`. Critical, medium, medium risk. `source_is_newer` (helm store.rs:569) falls
-  back to raw `candidate.created_at > stored.created_at` for any cross-host pair, and `replace_host_sessions`
-  (:4227-4283) feeds it drain-derived timestamps with no sanity check before writing `remembered_profile`; a remote
-  session naming a different starter profile with a high timestamp pins the fleet-wide default and the user's later
-  direct choice is rejected as older. Reproduced through real store APIs by the investigation probe, which also showed
-  recovery after complete source disappearance. Contradicts SPEC's "the helm owns the remembered default". Fix: give
-  user-originated creates unconditional authority over the remembered default and stop drain observations from replacing
-  it, distinguishing agent create and clone origin in `do_create_session`; reconcile the discovery and default prose and
-  tests in the same change. Fence: a timestamp clamp is insufficient by design; keep profile-catalog discovery
-  independent of default selection; its own review unit.
 - **Helm store resilience.** `A6-C13`, `A6-C4`, `A1-C14`. Medium and low, small. `HelmStore::profiles` (helm
   store.rs:5445-5460) collects decode results into one `Result`, so one undecodable stored row fails the catalogue read
   that host refresh and create reach through `load_profile_name_index`. `update_ssh_destination` (:3530-3562) runs the
