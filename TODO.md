@@ -531,15 +531,6 @@ is safe. Each is its own review unit.
   in `.agents/test-authoring.md`. Fix: drop the env channel and read only the persisted storage state, after confirming
   a clean-tree run supplies it before config load. Fence: preserve global-setup, config-load, and worker-refresh
   ordering rather than deleting the fallback blind.
-- **Likely but unreproduced, cheap.** `A4-SP7`, `A5-C24`, `A3-C14`. Medium to high, trivial to small. lib.rs:1621 caches
-  the bootstrap token before `token_control::serve` takes the flock, so an offline rotation in that gap leaves the helm
-  refusing both tokens until restart. The Codex hook-collision check (core.rs:2184-2188) recognizes `-c` but not
-  `--config`, so a user hook table spelled the long way gets farhelm's appended over it. `StopSession` (handlers.rs:856)
-  runs its sweep on the connection's `JoinSet`, which `abort_all`s on shutdown, and the sweep SIGSTOPs at sweep.rs:925
-  with no SIGCONT anywhere, so an aborted stop can leave a tree stopped. Fix: swap the two startup lines with a comment;
-  treat `--config` and `--config=` like `-c` after confirming the flag against the vendor; spawn the stop's sweep on a
-  supervisor-owned task and await its handle, optionally with a drop guard over the SIGSTOP region. Fence: the race
-  window is one flock hop; no vendor audit was done; the exact interleaving is unproven.
 
 ### Later: low confidence or needs an argument first
 

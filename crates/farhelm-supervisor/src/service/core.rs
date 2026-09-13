@@ -2204,10 +2204,11 @@ fn with_hook_argv_using(
 /// - a `-c` override whose value assigns into `hooks.` or
 ///   `features.hooks`, which is precisely the namespace the tail writes.
 ///
-/// Both `-c value` and `-cvalue` count, mirroring the two spellings the
-/// Claude `--settings` rule above accepts for the same reason: they are
-/// one flag to the vendor's parser, so a check that saw only one spelling
-/// would be trivially and silently bypassed by the other.
+/// Both short and long forms count in their separated and joined spellings,
+/// mirroring the two spellings the Claude `--settings` rule above accepts for
+/// the same reason: they are one flag to the vendor's parser, so a check that
+/// saw only one spelling would be trivially and silently bypassed by the
+/// other.
 ///
 /// Deliberately NOT a general "does this argv touch config" test: an
 /// invocation carrying unrelated `-c` overrides (`-c model=...`) has no
@@ -2227,10 +2228,13 @@ fn codex_invocation_configures_hooks(argv: &[String]) -> bool {
         // element is examined again on the next turn, where it matches
         // neither arm, which keeps this loop a plain scan rather than a
         // half-implementation of the vendor's argument grammar.
-        let value = if element == "-c" {
+        let value = if element == "-c" || element == "--config" {
             elements.peek().map(|next| next.as_str())
         } else {
-            element.strip_prefix("-c").filter(|value| !value.is_empty())
+            element
+                .strip_prefix("-c")
+                .or_else(|| element.strip_prefix("--config="))
+                .filter(|value| !value.is_empty())
         };
         if value.is_some_and(steers_hook_tables) {
             return true;
@@ -16193,6 +16197,8 @@ pub(crate) mod tests {
             vec!["-chooks.SessionStart=[]".to_string()],
             vec!["-c".to_string(), "features.hooks=true".to_string()],
             vec!["-cfeatures.hooks=true".to_string()],
+            vec!["--config".to_string(), "hooks.SessionStart=[]".to_string()],
+            vec!["--config=features.hooks=true".to_string()],
         ] {
             let argv = [vec!["agent".to_string()], user_flags.clone()].concat();
             let (result, hooked) = with_hook_argv_using(

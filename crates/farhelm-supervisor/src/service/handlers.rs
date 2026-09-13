@@ -830,20 +830,11 @@ where
     }
 }
 
-/// Spawned for the same reason as `ListSessions`: the process-
-/// tree sweep (`service::sweep`'s `reap_process_tree`) is a grace-period
-/// sleep plus repeated `/proc` walks and confirmation polls
-/// that can take real wall-clock seconds (see that function's
-/// own docs), and awaiting it inline would stall every OTHER
-/// session's attach, input, and list/stop/delete behind this
-/// one stop. Safe for the same locking reason: this handler's
-/// `sessions` lookup is a single lock-guarded clone, and stop
-/// never takes the attachment-map lock at all — it leaves every
-/// attachment entry intact — and never touches `input_routes`
-/// either (see `ControlMsg::StopSession`'s
-/// own docs on why the existing attachment is left untouched).
-/// Tracked and admitted exactly like `ListSessions` above — see
-/// `HANDLER_ADMISSION_PERMITS`/`HANDLER_SHUTDOWN_TIMEOUT`.
+/// Start a stop without making its process sweep connection-cancellable.
+/// The supervisor-owned mutation keeps the lifecycle claim and admission
+/// permit until intent, sweep, and outcome are complete; the connection's
+/// `JoinSet` tracks only a reply waiter, so disconnect cleanup cannot strand a
+/// SIGSTOPped tree.
 async fn handle_stop_session(
     sup: &Arc<Supervisor>,
     tx: &mpsc::Sender<Frame>,
@@ -851,10 +842,17 @@ async fn handle_stop_session(
     req_id: u64,
     session_id: String,
 ) {
-    let sup2 = Arc::clone(sup);
+    let permit = Arc::clone(&sup.admission)
+        .acquire_owned()
+        .await
+        .expect("admission semaphore is never closed");
+    let mutation_sup = Arc::clone(sup);
+    let mutation_id = session_id.clone();
     let tx = tx.clone();
-    spawn_admitted(&sup.admission, tasks, async move {
-        let sup = sup2;
+    let mutation = tokio::spawn(async move {
+        let _permit = permit;
+        let sup = mutation_sup;
+        let session_id = mutation_id;
         // This session's lifecycle claim, held for the whole stop —
         // the intent, the sweep, and the outcome. Without it a
         // restart running concurrently would have this sweep reap
@@ -1148,8 +1146,12 @@ async fn handle_stop_session(
             }
             None => send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await,
         }
-    })
-    .await;
+    });
+    tasks.spawn(async move {
+        if let Err(join) = mutation.await {
+            tracing::error!(error = %join, "the supervisor-owned session stop task failed");
+        }
+    });
 }
 
 /// Delete's mutation belongs to the supervisor, not to the connection that
@@ -4333,6 +4335,123 @@ mod tests {
             !sup.tmux.has_session("fh-s1").await.unwrap(),
             "archive must kill the durable tmux name even when SessionEntry has no Terminal"
         );
+    }
+
+    /// Once a stop has quiesced its marked process, cancelling the connection
+    /// waiter must not cancel the supervisor-owned sweep. This drives the
+    /// same terminal-less, marker-only stop path used for a lost pane and
+    /// observes the child disappear after the connection task is aborted.
+    #[farhelm_testtrace::test]
+    async fn stop_survives_connection_task_cancellation() {
+        let state = StateDir::new();
+        let session_id = "s1";
+        let mut child =
+            crate::procs::sleeper::spawn(&[(crate::launch::SESSION_ID_ENV_VAR, session_id)]);
+        let pid = child.id();
+        let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+        assert_eq!(result, 0, "SIGSTOP must reach the owned fixture");
+        let mut status = 0;
+        let waited = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WUNTRACED) };
+        assert_eq!(
+            waited, pid as libc::pid_t,
+            "the fixture must report stopped"
+        );
+        assert!(libc::WIFSTOPPED(status), "fixture premise must be stopped");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor construction must not touch the fixture process");
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    id: session_id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "t".to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: "fh-s1".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("store fixture");
+        sup.sessions.lock().await.insert(
+            session_id.to_string(),
+            fake_entry(session_id, 1_700_000_000),
+        );
+
+        let (tx, _rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::StopSession {
+                req_id: 51,
+                session_id: session_id.to_string(),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+
+        // The lifecycle claim is acquired at the start of the mutation. It
+        // proves the supervisor-owned task has begun before the connection-
+        // owned waiter is cancelled, while the pre-stopped fixture prevents
+        // the initial SIGTERM from ending the test process before the sweep.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if sup.lifecycle_locks.claimed_for_test(session_id) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "supervisor-owned stop task did not begin"
+            );
+            // sleep-ok: poll for the supervisor-owned mutation to claim the session.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let gone = matches!(
+                crate::procs::read_process(pid),
+                Ok(None) | Ok(Some((_, _, crate::procs::ProcessState::Zombie)))
+            );
+            if gone {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "cancelling the connection waiter cancelled the stop sweep"
+            );
+            // sleep-ok: poll for completion of the detached supervisor-owned sweep.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        child.wait().expect("the owned fixture must be reaped");
     }
 
     /// Archive keeps the lifecycle claim for its complete teardown, so a
