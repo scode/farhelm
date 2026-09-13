@@ -141,7 +141,7 @@ pub(crate) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>,
 /// them mean the same thing to the caller: no marker could be read here,
 /// so this process is not claimed. That is the SAFE direction (a sweep
 /// never signals what it could not identify) and it is also the accepted
-/// residual documented on `sweep::environ_marker_verdict`: an
+/// residual documented on `sweep::environ_markers_of`: an
 /// environment-scrubbing descendant escapes the marker scan, and only a
 /// cgroup can close that.
 ///
@@ -988,6 +988,12 @@ pub(crate) mod sleeper {
     /// own environment is never touched (a repo-wide rule).
     const SLEEPER_MODE_ENV: &str = "FARHELM_TEST_SLEEPER_MODE";
 
+    /// Set on a sleeper CHILD (via `extra_env`) to make it ignore SIGTERM,
+    /// the way an interactive shell does: the fixture for the sweep's
+    /// hang-up of tab processes. Like [`SLEEPER_MODE_ENV`] it is only ever
+    /// set on a child's command, never in the test process's environment.
+    pub(crate) const SLEEPER_IGNORE_TERM_ENV: &str = "FARHELM_TEST_SLEEPER_IGNORE_TERM";
+
     /// Build the sleeper's command: the test binary re-invoked in sleeper
     /// mode, carrying exactly the farhelm markers `extra_env` declares and
     /// no others.
@@ -1114,6 +1120,17 @@ pub(crate) mod sleeper {
             return;
         }
         use std::io::Write as _;
+        if std::env::var_os(SLEEPER_IGNORE_TERM_ENV).is_some() {
+            // Installed BEFORE the readiness line, so a parent that
+            // signals the moment it reads READY can never catch the
+            // default disposition instead of the ignoring one.
+            //
+            // SAFETY: `signal(2)` needs only a valid signal number and
+            // disposition; `SIG_IGN` installs no handler code.
+            unsafe {
+                libc::signal(libc::SIGTERM, libc::SIG_IGN);
+            }
+        }
         println!("{READY_LINE}");
         std::io::stdout()
             .flush()
@@ -1305,7 +1322,7 @@ mod tests {
     /// This pins a LIMITATION, deliberately: the sweep's marker scan
     /// cannot see a reparented descendant whose exec'd image is a platform
     /// binary (shells, chiefly), which is an accepted residual documented
-    /// on `sweep::environ_marker_verdict` — the deferred follow-up is a
+    /// on `sweep::environ_markers_of` — the deferred follow-up is a
     /// session-id membership channel. If this test ever FAILS, Apple has
     /// started returning environments for platform binaries again: good
     /// news, and the cue to update that documentation rather than a bug.

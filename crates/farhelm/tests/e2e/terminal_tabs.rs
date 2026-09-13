@@ -589,6 +589,80 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
     );
 }
 
+/// Closing a tab returns well inside the SIGTERM grace even though the
+/// tab's interactive shell ignores SIGTERM: the teardown hangs the tab up
+/// as well, and a shell exits on SIGHUP.
+///
+/// Why this exists: an interactive bash ignores SIGTERM absent a trap, so
+/// a teardown that only terminated would sit out the whole grace and end
+/// the shell with the SIGKILL, and every tab close would cost the full
+/// bound. The bound is small in the commit that adds this test and grows
+/// to five seconds afterwards; the four-second threshold is written
+/// against that larger bound (a close that sat the grace out cannot come
+/// in under it, and a hung-up shell ends the close in well under a
+/// second, so a loaded host has seconds of margin) and passes trivially
+/// until then.
+///
+/// The shell is pinned to bash rather than taken from the host, so the
+/// premise — a pane shell that ignores SIGTERM — is made true instead of
+/// hoped for, and asserted on Linux, where `/proc` can say so; a shell
+/// that died to SIGTERM would let this pass without exercising the
+/// hangup at all.
+#[farhelm_testtrace::test]
+async fn closing_a_tab_returns_well_inside_the_sigterm_grace() {
+    let h = harness_with_shell("/bin/bash").await;
+    let (session, _work) = basic_session(&h).await;
+    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
+
+    let tab = h.client.open_tab(&session.id).await.expect("open the tab");
+    let (chan, initial_replay, mut rx) = h
+        .client
+        .attach_terminal_live(
+            &session.id,
+            80,
+            24,
+            TerminalSelector::Tab { id: tab.id.clone() },
+            "one-client",
+        )
+        .await
+        .expect("attach the tab");
+    let mut seen = initial_replay;
+    wait_for_shell(&h.client, chan, &mut rx, &mut seen, "T").await;
+    let pane_pid = pane_pid_of(&h, &tab_pane(&h, &session.id, &tab.id).await).await;
+    let _pane_cleanup = PidKillGuard::arm(pane_pid);
+
+    // The fixture premise, asserted where the kernel can be asked: the
+    // tab's shell really does ignore SIGTERM (bit 15 of `SigIgn`), so the
+    // close cannot be ending it with the SIGTERM alone.
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string(format!("/proc/{pane_pid}/status"))
+            .expect("test setup: reading the tab shell's /proc status");
+        let ignored = status
+            .lines()
+            .find_map(|line| line.strip_prefix("SigIgn:"))
+            .map(|mask| u64::from_str_radix(mask.trim(), 16).expect("SigIgn is a hex mask"))
+            .expect("test setup: /proc status has a SigIgn line");
+        assert!(
+            ignored & (1 << (libc::SIGTERM - 1)) != 0,
+            "test setup: the tab's bash must ignore SIGTERM (SigIgn {ignored:#x}), or the latency \
+             below proves nothing about the hangup"
+        );
+    }
+
+    let started = tokio::time::Instant::now();
+    h.client
+        .close_tab(&session.id, &tab.id)
+        .await
+        .expect("close the tab");
+    let elapsed = started.elapsed();
+    wait_until_pid_gone(pane_pid, 15).await;
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "closing a tab must not sit out the SIGTERM grace, but the close took {elapsed:?}"
+    );
+}
+
 /// Closing a tab kills its shell AND a deliberately daemonized child of
 /// that shell, while the agent terminal and the session's OTHER tab are
 /// untouched (PLAN_M4.md acceptance 3).
