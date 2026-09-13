@@ -149,7 +149,11 @@
 
 use super::capture::CaptureReason;
 use super::core::{SampleRead, SessionEntry, Supervisor};
+use super::launch_artifacts::cleanup_launch_artifacts;
+use super::status::observe_entry;
 use super::terminals::{Terminal, tabs_from_pane_states};
+use crate::store::LastOutcome;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -895,6 +899,94 @@ async fn sample_pass(
     // still hold tabs, and the early return on an all-dead fleet would
     // otherwise leave their corpses unreaped forever.
     reap_dead_tabs(sup, &states, &entries, stop).await;
+
+    // The ticker has just witnessed the same exit evidence a list request
+    // would. Keep that evidence before the liveness filter discards dead
+    // and missing panes: a reboot can erase the pane — and its exit code —
+    // before any client next asks, while a generation-fenced durable
+    // outcome remains knowledge rather than a later reconstruction.
+    //
+    // `observe_entry` is also the launch-failure precedence rule shared by
+    // listing. In particular, it reads a sentinel before offering a
+    // pane-based exit, so a command that never exec'd is not misreported as
+    // one that ran and finished. A sentinel read failure defers only that
+    // entry; sampling the rest of the fleet remains useful and the next
+    // tick retries the unread file.
+    let mut observations = Vec::new();
+    let mut sentinel_hits = HashSet::new();
+    for entry in &entries {
+        let terminal_is_dead_or_absent = entry.terminal.as_ref().is_none_or(|terminal| {
+            let Some(state) = states.get(&terminal.pane) else {
+                return true;
+            };
+            // A pane now named under another session is not a vanished
+            // pane: it is evidence we cannot attribute to this entry. The
+            // ticker must leave it alone instead of letting an id-only
+            // match stamp a recycled or moved pane's state onto this row.
+            state.session_name == terminal.tmux_name && state.dead
+        });
+        if !terminal_is_dead_or_absent {
+            continue;
+        }
+        match observe_entry(sup, entry, &states).await {
+            Ok(observed) => {
+                if observed.settled_error {
+                    // A prior writer may have crashed between recording
+                    // the durable error and deleting launch artifacts.
+                    // Matching LIST's idempotent cleanup keeps that
+                    // credential-bearing residue from waiting for a poll.
+                    cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation)
+                        .await;
+                    continue;
+                }
+                if observed.sentinel.is_some() {
+                    sentinel_hits.insert(entry.info.id.clone());
+                }
+                if let Some(transition) = observed.transition {
+                    observations.push((entry.info.id.clone(), entry.generation, transition));
+                }
+            }
+            Err(e) => error!(
+                session = %entry.info.id, error = %format!("{e:#}"),
+                "could not read this session's launch sentinel; deferring its ticker exit \
+                 observation rather than risking a durable misclassification from pane state alone"
+            ),
+        }
+    }
+    if !observations.is_empty() {
+        match sup.store.transition_many(observations).await {
+            Ok(committed) => {
+                // `transition_many` returns the current durable value when
+                // a restart or archive beat this snapshot. Mirroring that
+                // value, rather than the proposed transition, prevents an
+                // old pane's death from overwriting a fresh launch in RAM.
+                for entry in &entries {
+                    if let Some(outcome) = committed.get(&entry.info.id) {
+                        *entry.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
+                    }
+                }
+                // A sentinel is disposable only after its Error reached
+                // SQLite. Retaining it after a failed batch lets the next
+                // tick retry instead of turning a real launch failure into
+                // an ordinary exit.
+                for entry in &entries {
+                    if sentinel_hits.contains(&entry.info.id)
+                        && matches!(
+                            committed.get(&entry.info.id),
+                            Some(LastOutcome::Error { .. })
+                        )
+                    {
+                        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation)
+                            .await;
+                    }
+                }
+            }
+            Err(e) => warn!(
+                error = %format!("{e:#}"),
+                "could not record ticker-observed session outcomes; the next tick will retry"
+            ),
+        }
+    }
     let mut live: Vec<(Arc<SessionEntry>, Terminal)> = entries
         .into_iter()
         .filter_map(|entry| {
@@ -1309,6 +1401,76 @@ mod tests {
         let tmux_name = format!("fh-{id}");
         let pane = spawn_pane(sup, &tmux_name, command).await;
         install_entry_of_kind(sup, id, Terminal { tmux_name, pane }, kind).await;
+    }
+
+    /// Install one `Running` session in both places a witnessed exit must
+    /// reach: the durable row the ticker transitions and the entry it must
+    /// immediately mirror for replies from this supervisor.
+    ///
+    /// This deliberately bypasses `create_session`. The pane is started by
+    /// the fixture, so the test can make it exit at a known code without
+    /// involving the launch shim; what matters here is the ticker's bridge
+    /// from a real tmux observation to the already-existing session row.
+    async fn install_durable_running_entry(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        terminal: Terminal,
+    ) -> Arc<SessionEntry> {
+        let now = now_unix();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: now,
+                    last_activity_at: now,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: terminal.tmux_name.clone(),
+                    pane: terminal.pane.clone(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert the row the ticker must update");
+        let mut entry = entry_with(Some(terminal), LastOutcome::Running);
+        entry.info.id = id.to_string();
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::clone(&entry));
+        entry
+    }
+
+    /// Read the durable outcome rather than the live entry, so an assertion
+    /// distinguishes a ticker that only changed its reply cache from one
+    /// that retained the witnessed fact across a future supervisor restart.
+    async fn stored_outcome(sup: &Arc<Supervisor>, id: &str) -> LastOutcome {
+        sup.store
+            .load_all()
+            .await
+            .expect("read the durable session row")
+            .into_iter()
+            .find(|row| row.id == id)
+            .expect("the session row survives the tick")
+            .outcome
     }
 
     /// What a `ListSessions` reply would say about this session right now,
@@ -1868,6 +2030,127 @@ mod tests {
         assert!(
             tabs_from_pane_states(states.values(), tmux_name).is_empty(),
             "no tab may remain discoverable on the dead-agent session after the reap"
+        );
+    }
+
+    /// A tick retains an agent exit even when no client asks for a list,
+    /// while a read-only supervisor leaves the same observed fact unwritten.
+    ///
+    /// The durable assertion is the important half: without it, an exit
+    /// caught between list requests would be lost on the next host reboot,
+    /// when reload can no longer recover the dead pane's status code. The
+    /// read-only case uses a second real dead pane so it verifies that the
+    /// `may_record` gate covers ticker witnessing itself, not merely a
+    /// later failure to mirror a successful write.
+    #[farhelm_testtrace::test]
+    async fn a_tick_retains_a_witnessed_agent_exit_but_read_only_does_not() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+
+        let recorded_name = "fh-ticker-exit";
+        let recorded_pane = spawn_pane(&sup, recorded_name, "exit 7").await;
+        let recorded = install_durable_running_entry(
+            &sup,
+            "ticker-exit",
+            Terminal {
+                tmux_name: recorded_name.to_string(),
+                pane: recorded_pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &recorded_pane).await;
+        let states = sup.tmux.pane_states().await.expect("pane states");
+        assert_eq!(
+            states.get(&recorded_pane).and_then(|pane| pane.exit_code),
+            Some(7),
+            "the fixture must retain tmux's real exit code before the ticker observes it"
+        );
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = never_stopped();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        assert_eq!(
+            stored_outcome(&sup, "ticker-exit").await,
+            LastOutcome::Exited {
+                exit_code: Some(7),
+                annotation: None,
+            },
+            "one tick must retain the observed exit without a list request"
+        );
+        assert_eq!(
+            *recorded.outcome.lock().expect("outcome mutex"),
+            LastOutcome::Exited {
+                exit_code: Some(7),
+                annotation: None,
+            },
+            "the ticker must mirror its committed outcome for immediate replies"
+        );
+
+        let readonly_name = "fh-ticker-read-only";
+        let readonly_pane = spawn_pane(&sup, readonly_name, "exit 7").await;
+        let readonly = install_durable_running_entry(
+            &sup,
+            "ticker-read-only",
+            Terminal {
+                tmux_name: readonly_name.to_string(),
+                pane: readonly_pane.clone(),
+            },
+        )
+        .await;
+        wait_for_dead_pane(&sup, &readonly_pane).await;
+        sup.may_record.store(false, Ordering::SeqCst);
+
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        assert_eq!(
+            stored_outcome(&sup, "ticker-read-only").await,
+            LastOutcome::Running,
+            "a supervisor without write standing must not persist an observed exit"
+        );
+        assert_eq!(
+            *readonly.outcome.lock().expect("outcome mutex"),
+            LastOutcome::Running,
+            "a read-only observation must not turn this supervisor's reply cache into a claim"
+        );
+    }
+
+    /// A pane id that now belongs to another tmux session is not evidence
+    /// about the entry that remembered the old name.
+    ///
+    /// tmux recycles pane ids after a server restart, and a manual rename
+    /// has the same observable shape. This fixture keeps the pane alive so
+    /// an incorrect id-only match would be visible as a false conclusion;
+    /// the required result is no transition at all, not an exit inferred
+    /// from a pane Farhelm does not positively own.
+    #[farhelm_testtrace::test]
+    async fn a_moved_pane_never_produces_a_ticker_exit_transition() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let moved_pane = spawn_pane(&sup, "fh-current-owner", "sleep 600").await;
+        let entry = install_durable_running_entry(
+            &sup,
+            "moved",
+            Terminal {
+                tmux_name: "fh-previous-owner".to_string(),
+                pane: moved_pane,
+            },
+        )
+        .await;
+
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = never_stopped();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        assert_eq!(
+            stored_outcome(&sup, "moved").await,
+            LastOutcome::Running,
+            "a pane assigned to another tmux session must not update this row"
+        );
+        assert_eq!(
+            *entry.outcome.lock().expect("outcome mutex"),
+            LastOutcome::Running,
+            "an unmatched pane must not change the in-memory outcome either"
         );
     }
 

@@ -492,12 +492,6 @@ is safe. Each is its own review unit.
   `RetryClaim::Acquired` arm. Fence: the removal is load-bearing for serializing against stop and delete; the original
   new-session-timeout premise was wrong; do not claim the probe established every interleaving; separate unit from the
   Error-reload fix.
-- **Ticker witnesses agent exits.** `A5-C5`. Medium, medium, medium risk. `sample_pass` (ticker.rs:898-905) drops dead
-  or missing panes and the file contains no `Transition` or `record` call, so an exit that happens while nobody polls is
-  durably lost if the host then reboots; `reload_sessions` blanket-converts live rows to Interrupted on a boot-id change
-  (core.rs:4419-4426). Fix: before the liveness filter, collect `ObservedExit` transitions for positively owned dead or
-  absent panes and commit them via `transition_many`, gated on `may_record()`, fenced on the entry generation, behind
-  the launch-sentinel check. Fence: do not infer exits from moved or unmatched panes; no generalized reconciliation.
 - **`token show` migrates under a running helm.** `A6-C1`. Medium, medium, medium risk. `HelmStore::open` takes no
   `may_migrate` and its module doc argues none is needed, but `token_control::show` (token_control.rs:120-124) opens the
   store with no ownership lock, so the ordinary install-then-`token show` sequence migrates `helm.db` under the
