@@ -9,24 +9,19 @@ use std::time::Duration;
 
 /// Raw session rows do not read or decode the profile catalog.
 ///
-/// The store's public writers reject malformed profiles, so this fixture
-/// plants one through SQLite as a damaged database could. A catalog read
-/// would fail on its unknown agent kind; successful resolution therefore
+/// The fixture breaks the catalog at the schema level (the store skips a
+/// merely undecodable row, so a planted bad row would no longer fail the
+/// read). Every catalog read now errors; successful resolution therefore
 /// proves the raw-only early return happens before any store access.
 #[farhelm_testtrace::test]
-async fn raw_only_profile_resolution_ignores_a_corrupt_catalog_row() {
+async fn raw_only_profile_resolution_ignores_a_broken_catalog() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = dir.path().join("helm.db");
     let store = store::HelmStore::open(&db).await.expect("open store");
-    {
-        let conn = rusqlite::Connection::open(&db).expect("open corruption fixture");
-        conn.execute(
-            "INSERT INTO profiles (id, name, invocation, agent_kind, resume_template) \
-             VALUES ('corrupt-profile', 'broken', 'agent', 'unknown', NULL)",
-            [],
-        )
-        .expect("plant corrupt profile");
-    }
+    store
+        .break_profile_catalog_for_test()
+        .await
+        .expect("break the profile catalog");
     assert!(
         store.profiles().await.is_err(),
         "the fixture must fail a real catalog read"
@@ -5457,11 +5452,12 @@ async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
 
 /// Every session mutation reads the catalog before it asks the supervisor.
 ///
-/// A corrupt catalog must not turn a completed create, restart, rename, or
+/// A broken catalog must not turn a completed create, restart, rename, or
 /// archive into an error reply. This test keeps routing healthy while making
-/// only profile decoding fail, then proves all four handlers refuse without
-/// sending a mutation frame. The profile-backed create also pins that its
-/// otherwise necessary bundle lookup shares this preflight read.
+/// only the profile catalog read fail (at the schema level, since the store
+/// skips a merely undecodable row), then proves all four handlers refuse
+/// without sending a mutation frame. The profile-backed create also pins
+/// that its otherwise necessary bundle lookup shares this preflight read.
 #[farhelm_testtrace::test]
 async fn catalog_failure_precedes_every_session_mutation() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
@@ -5489,9 +5485,9 @@ async fn catalog_failure_precedes_every_session_mutation() {
     .await;
     harness
         .store
-        .plant_invalid_profile_for_test()
+        .break_profile_catalog_for_test()
         .await
-        .expect("plant corrupt catalog row");
+        .expect("break the profile catalog");
     assert!(
         harness.store.profiles().await.is_err(),
         "the fixture must make the mutation preflight fail"

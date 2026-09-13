@@ -580,8 +580,7 @@ impl Supervisor {
         link.fail_all().await;
     }
 
-    /// The link belonging to the helm that holds an attachment to
-    /// `session_id`, if any.
+    /// The registered helm that owns an attachment to `session_id`, if any.
     ///
     /// THE ROUTING RULE: "the helm holding this session's attachment". It
     /// is chosen over anything simpler — first registered link, only link,
@@ -591,18 +590,14 @@ impl Supervisor {
     /// selects the helm the user is actually looking at, which is the whole
     /// mental model this feature is built on.
     ///
-    /// What makes it WELL DEFINED is the session-wide LEASE TAKEOVER rule,
-    /// not the one-attachment-per-`(session, terminal)` rule. Those are
-    /// different invariants and only the first is strong enough here:
-    /// per-terminal uniqueness permits one session to have several
-    /// attachments at once (its agent pane and a shell tab, say), so on its
-    /// own it says nothing about whether those attachments belong to one
-    /// client. Lease takeover is what does: claiming a session's lease
-    /// displaces the previous owner across that session's terminals, so the
-    /// attachments matching a session id are one client's. This function
-    /// takes the FIRST match and calls it the owner, which is sound under
-    /// that rule and would silently start picking an arbitrary one of two
-    /// helms if a refactor preserved only the weaker one.
+    /// Several terminals may be attached for one session. A stale attachment
+    /// can remain briefly while its helm link is being reconnected, so it
+    /// must not shadow another matching attachment whose link is still
+    /// registered.
+    /// Lease takeover guarantees that all attachments matching a session id
+    /// belong to one helm, so the first registered match is that helm; if
+    /// takeover weakened to per-terminal uniqueness, this choice could become
+    /// arbitrary.
     ///
     /// Two lock hops rather than one: the attachment identifies its owning
     /// connection only by that connection's writer queue (see
@@ -615,18 +610,16 @@ impl Supervisor {
         if let Some(link) = self.test_helm_links.lock().await.get(session_id) {
             return Some(Arc::clone(link));
         }
-        let owner = {
+        let owners = {
             let attachments = self.attachments.lock().await;
             attachments
                 .iter()
-                .find(|(key, _)| key.session == session_id)
-                .map(|(_, attachment)| attachment.notify.clone())?
+                .filter(|(key, _)| key.session == session_id)
+                .map(|(_, attachment)| attachment.notify.clone())
+                .collect::<Vec<_>>()
         };
         let links = self.helm_links.lock().await;
-        links
-            .iter()
-            .find(|link| link.notify.same_channel(&owner))
-            .map(Arc::clone)
+        registered_link_for_attachments(owners.iter(), &links)
     }
 
     /// Forward one session's request to the helm attached to it and return
@@ -684,6 +677,21 @@ impl Supervisor {
     }
 }
 
+/// Select the first registered link identified by any matching attachment.
+/// Keeping this selection separate makes the stale-first case directly
+/// testable without manufacturing a live terminal forwarder.
+fn registered_link_for_attachments<'a>(
+    mut attachments: impl Iterator<Item = &'a mpsc::Sender<Frame>>,
+    links: &[Arc<HelmLink>],
+) -> Option<Arc<HelmLink>> {
+    attachments.find_map(|owner| {
+        links
+            .iter()
+            .find(|link| link.notify.same_channel(owner))
+            .map(Arc::clone)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::core::KeyedLocks;
@@ -700,6 +708,26 @@ mod tests {
     /// at each call site that the number is deliberately inert, instead of
     /// having to work out whether it could be reached.
     const RETAIN_FOREVER: Duration = Duration::from_secs(86_400);
+
+    /// A reconnecting stale attachment must not hide a second terminal whose
+    /// owning helm connection is still registered for the same session.
+    #[test]
+    fn registered_link_skips_stale_matching_attachment() {
+        let (stale_tx, _stale_rx) = mpsc::channel(1);
+        let (live_tx, _live_rx) = mpsc::channel(1);
+        let (live_shutdown, _) = tokio::sync::watch::channel(false);
+        let live_link = Arc::new(HelmLink {
+            notify: live_tx.clone(),
+            shutdown: live_shutdown,
+            pending: Mutex::new(Pending::default()),
+            next_req: AtomicU64::new(1),
+        });
+
+        let owners = [stale_tx, live_tx];
+        let selected =
+            registered_link_for_attachments(owners.iter(), std::slice::from_ref(&live_link));
+        assert!(selected.is_some_and(|link| Arc::ptr_eq(&link, &live_link)));
+    }
 
     /// A bare link with nothing behind it but a channel, so the endings can
     /// be produced directly rather than by staging a helm that dies.
