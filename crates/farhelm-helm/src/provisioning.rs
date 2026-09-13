@@ -49,7 +49,7 @@ mod tests {
     use crate::AppState;
     use crate::manager::{ConnectionManager, HostState};
     use crate::rest_harness::{FleetBuilder, Harness, HostScript};
-    use crate::store::{DialedAs, HelmStore, HostId, HostKind};
+    use crate::store::{DialedAs, HelmStore, HostId, HostKind, HostRow};
     use anyhow::{Context as _, bail};
     use async_trait::async_trait;
     use axum::body::{Body, to_bytes};
@@ -508,6 +508,84 @@ mod tests {
             override_unit_dir: Some(root.join("units")),
             unit_name: format!("farhelm-provisioning-test-{}.service", uuid::Uuid::new_v4()),
         }
+    }
+
+    /// A stored executable value with no file name must fail planning rather
+    /// than reach the old temporary-name expectation and panic the request.
+    #[farhelm_testtrace::test]
+    fn update_plan_refuses_componentless_remote_farhelm_values() {
+        let root = tempfile::tempdir().unwrap();
+        let reach = Reach {
+            home: root.path().join("home"),
+            user_unit_dir: root.path().join("units"),
+            arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
+            needs_tmux: true,
+            host_tmux: None,
+        };
+
+        for value in [".", "/", ".."] {
+            let row = HostRow {
+                id: 1,
+                kind: HostKind::Ssh,
+                destination: Some("user@host".to_string()),
+                alias: None,
+                remote_farhelm: Some(value.to_string()),
+                remote_state_dir: None,
+                host_identity: None,
+                cache_truncated: false,
+            };
+            let error = layout(root.path())
+                .plan_for_row(
+                    &row,
+                    ProvisioningTarget::Ssh {
+                        destination: "user@host".to_string(),
+                    },
+                    &reach,
+                    "nonce",
+                )
+                .expect_err("a componentless executable must be refused, not panic");
+            assert!(error.rendered().contains(value), "{error}");
+        }
+    }
+
+    /// A bare executable name is valid for SSH steady state, but an update
+    /// must not install a guessed absolute copy that the remote PATH ignores.
+    #[farhelm_testtrace::test]
+    fn update_plan_refuses_relative_remote_farhelm_with_actionable_context() {
+        let root = tempfile::tempdir().unwrap();
+        let row = HostRow {
+            id: 1,
+            kind: HostKind::Ssh,
+            destination: Some("user@host".to_string()),
+            alias: None,
+            remote_farhelm: Some("farhelm".to_string()),
+            remote_state_dir: None,
+            host_identity: None,
+            cache_truncated: false,
+        };
+        let reach = Reach {
+            home: root.path().join("home"),
+            user_unit_dir: root.path().join("units"),
+            arch: PayloadArch::X86_64,
+            distro_id: "ubuntu".to_string(),
+            needs_tmux: true,
+            host_tmux: None,
+        };
+        let error = layout(root.path())
+            .plan_for_row(
+                &row,
+                ProvisioningTarget::Ssh {
+                    destination: "user@host".to_string(),
+                },
+                &reach,
+                "nonce",
+            )
+            .expect_err("a PATH-resolved executable cannot be updated in place");
+        let rendered = error.rendered();
+        assert!(rendered.contains("absolute remote_farhelm"), "{rendered}");
+        assert!(rendered.contains("\"farhelm\""), "{rendered}");
+        assert!(rendered.contains("remote PATH"), "{rendered}");
     }
 
     fn service(
@@ -1896,13 +1974,15 @@ mod tests {
     /// Host removal waits behind an in-flight run's write authority, then
     /// purges retained progress and unconsumed UPDATE confirmations with the
     /// durable row instead of leaving process-local ghosts.
+    /// The registered executable path is absolute because update planning
+    /// intentionally refuses relative `remote_farhelm` values.
     #[farhelm_testtrace::test]
     async fn removal_serializes_with_runs_and_purges_provisioning_memory() {
         let harness = harness().await;
         let root = tempfile::tempdir().unwrap();
         let host = harness
             .store
-            .add_ssh_host("remove.example", Some("farhelm"), Some("/tmp/state"))
+            .add_ssh_host("remove.example", Some("/opt/farhelm"), Some("/tmp/state"))
             .await
             .unwrap();
         harness.manager.sync_registry().await.unwrap();

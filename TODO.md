@@ -312,14 +312,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **`remote_farhelm` panics and empty install directories.** `A2-C4`, `A2-C21`. High and medium, small.
-  `PlanLayout::plan` (provisioning/plan.rs:283-289) does `file_name().expect(...)`, and `plan_for_row` feeds it the
-  stored `remote_farhelm` verbatim; `add_ssh_host` (helm store.rs:3208-3239) validates only the ssh destination, so
-  `POST /api/hosts` with `"remote_farhelm": "."` followed by an update panics the request handler. A bare relative name
-  instead yields `Some("")` as `override_lib_dir` and a plan whose first step creates an empty path. Fix: return a
-  `BackendFailure` when `file_name()` is `None`, validate the field at the store or API boundary with a 400, and treat
-  an empty or relative parent as "no override". Fence: keep valid relative and PATH registrations working; check the
-  bare-name probe path before choosing a blanket absolute-only rule.
 - **Provisioning sha256sum with backslash paths.** `A2-C1`, `A2-C2`. Medium, trivial. Both the post-upload digest check
   (provisioning/backend.rs:661-670) and the metadata probe (:465-490) pass the path as an argument, so GNU coreutils
   escapes the line and prefixes `\`, and the parse fails as a bogus "digest mismatch" or "malformed output" on any home

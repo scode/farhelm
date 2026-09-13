@@ -1035,6 +1035,13 @@ pub enum HostStoreError {
     /// literal sense: neither layer is load-bearing alone.
     #[error("{0:?} is not a usable ssh destination")]
     InvalidDestination(String),
+    /// A registered remote Farhelm value is empty, contains a NUL byte, or
+    /// has no file-name component. Relative executable names are deliberately
+    /// allowed here because SSH runs them through the remote PATH; this
+    /// refusal only prevents values that cannot later name a safe install
+    /// destination.
+    #[error("{0:?} is not a usable remote farhelm path")]
+    InvalidRemoteFarhelm(String),
     /// An alias failed a LOCAL, syntax-only rule — a control character, or
     /// the 64-character cap — checked before any comparison against other
     /// hosts runs. A collision with another host's current display name is
@@ -1261,6 +1268,15 @@ impl DialedAs {
 /// stored is the string that will be dialed.
 pub(crate) fn destination_is_usable(destination: &str) -> bool {
     !destination.is_empty() && !destination.starts_with('-') && !destination.contains('\0')
+}
+
+/// Whether a remote executable value can be stored without making a later
+/// provisioning plan panic or lose its destination name. Bare relative names
+/// remain valid because the remote shell resolves them through PATH.
+fn remote_farhelm_is_usable(remote_farhelm: &str) -> bool {
+    !remote_farhelm.is_empty()
+        && !remote_farhelm.contains('\0')
+        && Path::new(remote_farhelm).file_name().is_some()
 }
 
 /// The non-error result of [`HelmStore::record_first_contact`] — a
@@ -3194,6 +3210,11 @@ impl HelmStore {
     /// see that variant's docs for why the registry, and not only the ssh
     /// argv builder, takes a position on this.
     ///
+    /// `remote_farhelm` is also checked before the write. Relative executable
+    /// names are valid because the remote shell resolves them through PATH,
+    /// but empty, NUL-containing, and component-less values cannot safely
+    /// become provisioning destinations later.
+    ///
     /// A destination matching another host's current ALIAS is refused as
     /// [`HostStoreError::AliasTaken`], inside the same transaction as the
     /// insert (`alias_collision`'s own doc explains why only aliases, not
@@ -3214,6 +3235,13 @@ impl HelmStore {
         if !destination_is_usable(&destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
                 destination,
+            )));
+        }
+        if let Some(remote_farhelm) = remote_farhelm
+            && !remote_farhelm_is_usable(remote_farhelm)
+        {
+            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
+                remote_farhelm.to_string(),
             )));
         }
         let remote_farhelm = remote_farhelm.map(str::to_string);
@@ -3278,6 +3306,13 @@ impl HelmStore {
         if !destination_is_usable(destination) {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
                 destination.to_string(),
+            )));
+        }
+        if let Some(remote_farhelm) = remote_farhelm
+            && !remote_farhelm_is_usable(remote_farhelm)
+        {
+            return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
+                remote_farhelm.to_string(),
             )));
         }
         let conn = Arc::clone(&self.conn);
@@ -3415,6 +3450,13 @@ impl HelmStore {
                  directory",
                 entry.destination
             );
+            if let Some(remote_farhelm) = entry.remote_farhelm.as_deref()
+                && !remote_farhelm_is_usable(remote_farhelm)
+            {
+                return Err(anyhow::Error::new(HostStoreError::InvalidRemoteFarhelm(
+                    remote_farhelm.to_string(),
+                )));
+            }
         }
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<HostId>> {
@@ -9056,6 +9098,35 @@ mod tests {
             Some("real@host"),
             "no refused edit may have rewritten the existing row"
         );
+    }
+
+    /// Registration keeps both supported executable forms — an absolute path
+    /// and a bare PATH name — while refusing values that cannot later name an
+    /// install destination. The typed refusal is important because the REST
+    /// layer maps it to a client error rather than an internal failure.
+    #[farhelm_testtrace::test]
+    async fn remote_farhelm_values_are_validated_at_registration() {
+        let (_dir, store) = fresh_store().await;
+        for (index, rejected) in ["", ".", "bad\0path"].into_iter().enumerate() {
+            let error = store
+                .add_ssh_host(&format!("invalid-{index}@host"), Some(rejected), None)
+                .await
+                .expect_err("invalid remote executable must not be stored");
+            assert!(
+                matches!(
+                    error.downcast_ref::<HostStoreError>(),
+                    Some(HostStoreError::InvalidRemoteFarhelm(value)) if value == rejected
+                ),
+                "must name the rejected remote executable: {error:#}"
+            );
+        }
+
+        for accepted in ["/opt/farhelm", "farhelm"] {
+            store
+                .add_ssh_host(accepted, Some(accepted), None)
+                .await
+                .expect("absolute and PATH-resolved executables are valid registrations");
+        }
     }
 
     /// The same duplicate check on the update path — `UPDATE OR IGNORE`
