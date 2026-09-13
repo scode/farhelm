@@ -3152,6 +3152,34 @@ impl SessionStore {
         .context("session read task panicked")?
     }
 
+    /// The durable tmux session name recorded for `id`, or `None` when no
+    /// row exists.
+    ///
+    /// A separate, one-column projection rather than a call to
+    /// [`Self::session`] on purpose: that reader refuses a row whose other
+    /// columns cannot be honored (an integrated agent kind without a usable
+    /// resume template, a corrupt outcome), which is the right answer for
+    /// anything that would relaunch or describe the session and the wrong
+    /// one for a teardown. Delete must be able to find and kill the tmux
+    /// side of exactly such a row — a row it cannot decode is one the user
+    /// can only get rid of by deleting it.
+    pub async fn tmux_name(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.query_row(
+                "SELECT tmux_name FROM sessions WHERE id = ?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading a session's tmux name")
+        })
+        .await
+        .context("tmux name read task panicked")?
+    }
+
     /// Recover the credential one session's current and future launches use.
     ///
     /// This is intentionally a separate projection from [`Self::session`]:
