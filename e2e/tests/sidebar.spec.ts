@@ -79,6 +79,28 @@ function stripAnsi(text: string): string {
 }
 
 /**
+ * Choose a catalog model through the composer combobox rather than reaching
+ * into its transient listbox structure. The visible option is the readiness
+ * oracle here: typing alone deliberately leaves a draft until the user picks
+ * it, so a click proves the model-selection handler actually ran.
+ */
+async function pickModel(form: Locator, id: string): Promise<void> {
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.focus();
+  await model.fill(id);
+  await form.locator("#launch-composer-model-results").getByRole("option", { name: id, exact: true }).click();
+}
+
+/**
+ * Restore the selected harness's model default through the same listbox that
+ * exposes catalog choices. Keeping this separate makes default restoration
+ * explicit at call sites whose behavior depends on clearing a model.
+ */
+async function resetModel(form: Locator): Promise<void> {
+  await pickModel(form, "harness default");
+}
+
+/**
  * The id of the shared, always-present `e2e-session` fixture
  * (`terminal-suite.ts`'s `resetStack` relaunches it before every spec
  * file), for pinning auto-select away from a test's OWN fixture rows —
@@ -4205,34 +4227,22 @@ test("composer search reconciles a custom model like a harness button", async ({
   // Harness buttons exist before their catalog arrives. Waiting for this
   // fixture-only model instead establishes the premise the later `high`
   // selection needs: both controlled harness vocabularies have rendered.
-  await expect(
-    form.getByRole("button", { name: "composer-test-codex (Codex)", exact: true }),
-  ).toBeVisible();
+  await expect(form.getByRole("combobox", { name: "model", exact: true })).toBeVisible();
 
-  const customModel = form.locator('input[placeholder="custom model id"]');
-  // Selected controls prepend a visible checkmark, so their accessible name
-  // changes from `high` to `✓ high`; the stable trailing label identifies
-  // the same control before and after the state transition.
+  const customModel = form.getByRole("combobox", { name: "model", exact: true });
   const high = form
     .locator(".launch-composer-effort-choice")
     .getByRole("button", { name: /high$/ });
   const seedCustomCodexChoice = async () => {
     await form.getByRole("button", { name: "Codex", exact: true }).click();
-    const customModelDetails = form.locator("details.launch-composer-more");
-    // Reset clears choices but deliberately leaves the disclosure's reading
-    // state alone. Opening it only when closed gives both transition paths
-    // the same editable input without turning a second setup into a hidden
-    // control by accident.
-    if ((await customModelDetails.getAttribute("open")) === null) {
-      await customModelDetails.locator("summary").click();
-    }
     await customModel.fill("private-codex-model");
+    await customModel.press("Enter");
     await high.click();
     await expect(customModel).toHaveValue("private-codex-model");
     await expect(high).toHaveAttribute("aria-pressed", "true");
   };
   const expectClaudeReconciliation = async () => {
-    await expect(customModel).toHaveValue("");
+    await expect(customModel).toHaveValue("harness default");
     await expect(high).toHaveAttribute("aria-pressed", "true");
     await expect(
       form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Claude$/ }),
@@ -4279,11 +4289,13 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   await expect(form).toBeVisible({ timeout: 20_000 });
-  await expect(form.getByRole("button", { name: "reviewable-codex (Codex)", exact: true })).toBeVisible();
-  await expect(form.getByRole("button", { name: "reviewable-claude (Claude)", exact: true })).toBeVisible();
-
-  await form.getByRole("button", { name: "reviewable-codex (Codex)", exact: true }).click();
-  await expect(form.getByRole("button", { name: /reviewable-claude(?: \(Claude\))?$/, exact: false })).toHaveCount(0);
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.focus();
+  // With no harness chosen every harness's models are already listed, each
+  // suffixed with its owner; there is no toggle to press first.
+  await expect(form.locator("#launch-composer-model-results").getByRole("option", { name: "show every harness's models", exact: true })).toHaveCount(0);
+  await form.locator("#launch-composer-model-results").getByRole("option", { name: "reviewable-codex (Codex)", exact: true }).click();
+  await expect(model).toHaveValue("reviewable-codex");
   await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
   await expect(form.locator(".launch-composer-summary")).toHaveText(
     "model: reviewable-codex · effort: default · permissions: default",
@@ -4389,9 +4401,9 @@ test("composer holds offered history steady until destination and search promoti
     const form = page.locator(".create-session-form");
     await page.locator(".new-session-button").click();
     await form.getByRole("button", { name: "Codex", exact: true }).click();
-    await form.getByRole("button", { name: "offered-old", exact: true }).click();
+    await pickModel(form, "offered-old");
     await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/i }).click();
-    await form.getByRole("button", { name: "YOLO", exact: true }).click();
+    await form.getByRole("button", { name: "yolo", exact: true }).click();
     await form.getByRole("button", { name: "/offered-history/folder-a", exact: true }).click();
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await search.fill("offered-history");
@@ -4420,9 +4432,9 @@ test("composer holds offered history steady until destination and search promoti
     const formB = pageB.locator(".create-session-form");
     await pageB.locator(".new-session-button").click();
     await formB.getByRole("button", { name: "Codex", exact: true }).click();
-    await formB.getByRole("button", { name: "client-b-nondefault", exact: true }).click();
+    await pickModel(formB, "client-b-nondefault");
     await formB.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/i }).click();
-    await formB.getByRole("button", { name: "YOLO", exact: true }).click();
+    await formB.getByRole("button", { name: "yolo", exact: true }).click();
     await formB.getByLabel("folder", { exact: true }).fill("/tmp");
     const [response] = await Promise.all([
       pageB.waitForResponse((candidate) =>
@@ -4577,12 +4589,12 @@ test("composer saved defaults clear explicit choices without posting", async ({ 
   const form = page.locator(".create-session-form");
   await page.locator(".new-session-button").click();
   await form.getByRole("button", { name: "Codex", exact: true }).click();
-  await form.getByRole("button", { name: "explicit-default-test", exact: true }).click();
+  await pickModel(form, "explicit-default-test");
   await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ }).click();
-  await form.getByRole("button", { name: "YOLO", exact: true }).click();
-  await expect(form.getByRole("button", { name: "explicit-default-test", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await form.getByRole("button", { name: "yolo", exact: true }).click();
+  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("explicit-default-test");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.getByRole("button", { name: "YOLO", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("saved-defaults");
   await form.getByRole("group", { name: "Recent setups" }).getByRole("option").click();
@@ -4617,7 +4629,9 @@ test("composer keeps a deliberate structured choice through a late catalog", asy
   await catalogRequest;
   release!();
   await catalogReply;
-  await expect(form.getByRole("button", { name: "late-codex-sentinel", exact: true }), "the sentinel proves the held catalog reply reached the mounted picker").toBeVisible();
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.focus();
+  await expect(form.locator("#launch-composer-model-results").getByRole("option", { name: "late-codex-sentinel", exact: true }), "the sentinel proves the held catalog reply reached the mounted picker").toBeVisible();
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Codex ·");
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /Codex$/ })).toHaveAttribute("aria-pressed", "true");
 });
@@ -4825,9 +4839,7 @@ test("composer escapes a restored custom model while submitting its raw bytes", 
   const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
   await expect(recent, "the controlled recent must be rendered before selection").toBeVisible();
   await recent.click();
-  const customDetails = form.locator("details.launch-composer-more");
-  if ((await customDetails.getAttribute("open")) === null) await customDetails.locator("summary").click();
-  const custom = form.getByPlaceholder("custom model id");
+  const custom = form.getByRole("combobox", { name: "model", exact: true });
   const escaped = "private<U+202E>-model";
   await expect(custom).toHaveValue(escaped);
   await expect(form.locator(".launch-composer-summary")).toContainText(escaped);
@@ -4971,7 +4983,7 @@ test("composer local-home reset takes over a remote clone destination", async ({
     await expect(destinationPeers).toHaveCount(2);
     await expect(destinationPeers.nth(0)).toHaveText(remote.name);
     await expect(destinationPeers.nth(1)).toHaveText(cwd);
-    const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ });
+    const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
     await expect(codex, "the structured clone retains its inherited harness before reset").toHaveAttribute("aria-pressed", "true");
     await form.getByRole("button", { name: "reset destination to local home" }).click();
     await expect(hostSelect).toHaveValue(String(local));
@@ -5098,11 +5110,10 @@ test("composer mounted clone generation replaces the prior draft and notice", as
 
     await expect(form.getByLabel("folder", { exact: true }), "clone B must reseed the mounted form before clone A is restored").toHaveValue("/");
     await expect(form.getByLabel("name (optional)"), "the second clone must replace source A's title before A is restored").toHaveValue(second.title);
-    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
-    await form.locator("details.launch-composer-more summary").click();
-    await expect(form.getByPlaceholder("custom model id")).toHaveValue("mounted-new-custom");
-    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /harness default$/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /harness default$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("mounted-new-custom");
+    await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
     await firstRow.locator(".session-row-menu").evaluate((node) => {
       node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -5122,10 +5133,10 @@ test("composer mounted clone generation replaces the prior draft and notice", as
     await expect(form.locator("select.create-session-host")).toHaveValue(String(local));
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
     await expect(form.getByLabel("name (optional)")).toHaveValue(first.title);
-    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.getByPlaceholder("custom model id")).toHaveValue("mounted-old-custom");
+    await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue("mounted-old-custom");
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.getByRole("status"), "the final clone generation must discard notice prose from the replaced draft").toHaveCount(0);
     await expect(form, "the ready replacement draft must still be the original form node").toHaveAttribute("data-mounted-generation", "owned");
     expect(await formHandle!.evaluate((node) => node.isConnected)).toBe(true);
@@ -5497,14 +5508,13 @@ test("composer reset notices follow every restored-choice transition", async ({ 
     // Recent visibility follows the active harness. Return to the source
     // harness before measuring an ordinary restoration; reset choices clears
     // dependent fields but does not promise to choose that filter for us.
-    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ }).click();
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
     await form.locator(".launch-composer-recent-slots").getByRole("button").first().click();
     await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   };
   const status = form.getByRole("status");
-  const custom = form.getByPlaceholder("custom model id");
-  const customDetails = form.locator("details.launch-composer-more");
+  const custom = form.getByRole("combobox", { name: "model", exact: true });
   const recentSlots = form.locator(".launch-composer-recent-slots > button");
   const allConflictRecent = recentSlots.filter({ hasText: "fixture-codex-all-conflict" });
   const savedHighEffortRecent = form.locator(".launch-composer-recent-slots").getByTitle(
@@ -5521,10 +5531,10 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status, "a restored choice is not itself a reset").toHaveCount(0);
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
   await expect(form.getByRole("status")).toContainText("not in this harness's Farhelm offering");
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(custom).toHaveValue("");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(custom).toHaveValue("harness default");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
   await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
   await expect(form.locator(".launch-composer-summary .launch-composer-danger")).toHaveText("yolo");
@@ -5534,9 +5544,9 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   // replacement model matches the saved Low row, so it can remain offered
   // while its effort-clearing notice is live; the next recent click alone
   // retires that notice.
-  await form.getByRole("button", { name: "fixture-codex-low-only", exact: true }).click();
+  await pickModel(form, "fixture-codex-low-only");
   await expect(status, "the low-only Codex model must genuinely clear high effort").toContainText("the selected effort is not in Farhelm's offering for that model, so it was cleared");
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveCount(0);
   const ordinaryRecent = form.locator(".launch-composer-recent-slots").getByTitle(
     "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: Low · permissions: Yolo",
@@ -5546,32 +5556,32 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(savedHighEffortRecent, "an absent effort filter still permits a saved explicit High effort").toBeVisible();
   await expect(status, "the old-draft notice must still exist immediately before ordinary restoration").toBeVisible();
   await ordinaryRecent.click();
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator("select.create-session-host")).toHaveValue("1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /low$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(status).toHaveCount(0);
   // The low-only restoration intentionally replaced the earlier draft.
   // Pointer/search reconciliation needs its own custom High/YOLO premise.
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
-  if ((await customDetails.getAttribute("open")) === null) await customDetails.locator("summary").click();
   await custom.fill("restored-custom");
+  await custom.press("Enter");
   await form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ }).click();
-  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "YOLO", exact: true }).click();
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true }).click();
   const search = form.locator('.launch-composer-search input[role="combobox"]');
   await search.fill("Claude");
   await expect(form.getByRole("option", { name: "Harness: Claude", exact: true })).toBeVisible();
   await expect(status, "the search transition starts without stale pointer prose").toHaveCount(0);
   await form.getByRole("option", { name: "Harness: Claude", exact: true }).click();
   await expect(form.getByRole("status")).toContainText("not in this harness's Farhelm offering");
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Claude$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(custom).toHaveValue("");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(custom).toHaveValue("harness default");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
   await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
 
@@ -5580,20 +5590,24 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
   await expect(status).toContainText("not in this harness's Farhelm offering");
   await expect(status).toContainText("not in Farhelm's offering for that model or harness");
-  await expect(custom).toHaveValue("");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(custom).toHaveValue("harness default");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo");
 
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
   await expect(status).toHaveCount(0);
-  if ((await customDetails.getAttribute("open")) === null) await customDetails.locator("summary").click();
+  // A typed id that names a KNOWN model is not a custom id: it identifies
+  // its owner (SPEC.md), so Enter switches the harness to Muse rather than
+  // leaving an incompatible Codex draft that could never launch. Nothing was
+  // cleared by that switch, so no reset notice may appear.
   await custom.fill("fixture-muse-owned");
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await custom.press("Enter");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(custom).toHaveValue("fixture-muse-owned");
-  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /harness default$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator("button[type=submit]"), "a known Muse model is incompatible while Codex remains selected").toBeDisabled();
-  await expect(status, "an absent effort must not invent an effort-reset notice in the incompatible-input branch").toHaveCount(0);
+  await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: "default", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator("button[type=submit]"), "a known model carried to its owner harness is launchable").toBeEnabled();
+  await expect(status, "an absent effort must not invent an effort-reset notice when the harness follows a known model").toHaveCount(0);
 
   await refill();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Muse", exact: true }).click();
@@ -5605,18 +5619,133 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status, "the old-draft notice must still exist immediately before search restoration").toBeVisible();
   await customSearchRecent.click();
   await expect(status, "a search recent also replaces the whole draft and its old notice").toHaveCount(0);
-  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: /^(?:✓\s*)?Codex$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator("select.create-session-host")).toHaveValue("1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
   await expect(custom).toHaveValue("restored-custom");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: /YOLO$/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
 /**
- * The combobox owns keyboard focus while its options scroll beneath it. Its
+ * A model query must narrow the selected harness's offered vocabulary without
+ * making selection depend on a pointer. Arrow navigation, rather than typing,
+ * makes the highlighted row active; without navigation, Enter must preserve an
+ * empty selection draft or apply the canonical owner of an exact catalog id.
+ */
+test("composer model combobox filters the chosen harness's catalog and applies with Enter", async ({ page, request }) => {
+  await installComposerChoices(page, request, [], [
+    { id: "codex-alpha", harness: "codex", efforts: ["high"] },
+    { id: "codex-beta", harness: "codex", efforts: ["low"] },
+    { id: "claude-alpha", harness: "claude", efforts: ["high"] },
+  ]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.fill("alpha");
+  const options = form.locator("#launch-composer-model-results").getByRole("option");
+  await expect(options.filter({ hasText: "codex-alpha" })).toHaveCount(1);
+  await expect(options.filter({ hasText: "claude-alpha" })).toHaveCount(0);
+  await model.press("ArrowDown");
+  await model.press("ArrowDown");
+  await model.press("Enter");
+  await expect(model).toHaveValue("codex-alpha");
+  await expect(form.locator(".launch-composer-summary")).toContainText("model: codex-alpha");
+  // Focus is still in the field after the pick. A second Enter is the
+  // keystroke a person reaches for to submit; it must not resurrect the
+  // "alpha" filter as a custom id over the model just chosen.
+  await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
+  await model.press("Enter");
+  await expect(model, "Enter on the closed field leaves the picked model alone").toHaveValue("codex-alpha");
+  await expect(form.locator(".launch-composer-summary")).toContainText("model: codex-alpha");
+
+  await form.getByLabel("folder", { exact: true }).focus();
+  await model.focus();
+  await expect(model, "opening the picker starts with an empty draft").toHaveValue("");
+  await model.press("Enter");
+  await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
+  await expect(model, "an empty draft must not clear the chosen model").toHaveValue("codex-alpha");
+
+  await model.fill("CLAUDE-ALPHA");
+  await model.press("Enter");
+  await expect(model).toHaveValue("claude-alpha");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+/**
+ * Custom ids have no catalog ownership to infer. The combobox must therefore
+ * preserve an uncommitted draft and explain the missing harness, then accept
+ * exactly the same text after the user supplies that explicit ownership.
+ */
+test("composer model combobox refuses a custom id until a harness is chosen", async ({ page, request }) => {
+  await installComposerChoices(page, request, [], [{ id: "codex-offered", harness: "codex", efforts: ["high"] }]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.fill("private-model");
+  await model.press("Enter");
+  await expect(model).toHaveAttribute("aria-invalid", "true");
+  await expect(form.locator(".launch-composer-choice-error")).toHaveText("choose a harness before a custom model id");
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await model.fill("private-model");
+  await model.press("Enter");
+  await expect(model).toHaveValue("private-model");
+  await expect(model).not.toHaveAttribute("aria-invalid", "true");
+});
+
+/**
+ * The expanded catalog is an intentional cross-harness action, not an
+ * accidental side effect of filtering. Selecting its labelled foreign option
+ * must use the same reconciliation path as an explicit harness change.
+ */
+test("composer model combobox can show every harness's models and switching model switches harness", async ({ page, request }) => {
+  await installComposerChoices(page, request, [], [
+    { id: "codex-offered", harness: "codex", efforts: ["high"] },
+    { id: "claude-offered", harness: "claude", efforts: ["high"] },
+  ]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.focus();
+  await form.locator("#launch-composer-model-results").getByRole("option", { name: "show every harness's models", exact: true }).click();
+  await form.locator("#launch-composer-model-results").getByRole("option", { name: "claude-offered (Claude)", exact: true }).click();
+  await expect(model).toHaveValue("claude-offered");
+  await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+/**
+ * Escape belongs to the focused model combobox before it belongs to the
+ * dialog. Reverting the visible draft while keeping the form open prevents a
+ * keyboard correction from silently cancelling a valid launch setup.
+ */
+test("composer Escape in the model combobox reverts the field and keeps the dialog open", async ({ page, request }) => {
+  await installComposerChoices(page, request, [], [{ id: "codex-offered", harness: "codex", efforts: ["high"] }]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+  await pickModel(form, "codex-offered");
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  await model.fill("unapplied-model");
+  // Premise: the list is open, so this Escape belongs to the combobox. With
+  // it closed the same key would cancel the whole dialog and the assertion
+  // below would fail for the wrong reason.
+  await expect(form.locator("#launch-composer-model-results")).toBeVisible();
+  await model.press("Escape");
+  await expect(form.locator("#launch-composer-model-results")).toHaveCount(0);
+  await expect(form).toBeVisible();
+  await expect(model).toHaveValue("codex-offered");
+});
+
+/**
+ * The search combobox owns keyboard focus while its options scroll beneath it. Its
  * active descendant must therefore always name a visible real option, and a
  * pointer result must return focus to the dialog before Tab can escape it.
  * A hovered peer must not borrow the active result's fill: Enter follows the
@@ -6064,7 +6193,7 @@ test("composer busy guard preserves one structured create through queued edits a
 
     await form.locator('button[type="submit"]').click();
     await dispatched;
-    const yolo = form.getByRole("button", { name: "YOLO", exact: true });
+    const yolo = form.getByRole("button", { name: "yolo", exact: true });
     await expect(yolo).toBeDisabled();
     expect(bodies).toHaveLength(1);
     expect(bodies[0].intent_key).toBeTruthy();

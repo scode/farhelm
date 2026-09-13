@@ -32,21 +32,27 @@ test("OpenCode keeps composer controls while requiring a suggested or custom Zen
   await harness.getByRole("button", { name: "OpenCode", exact: true }).click();
   const modelRow = form.locator(".launch-composer-model-choice");
   await expect(harness.locator(".launch-composer-model-choice")).toHaveCount(0);
-  await expect(modelRow.getByRole("button", { name: /harness default$/ })).toHaveCount(0);
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
   await expect(harness.getByRole("button", { name: "other / command", exact: true })).toBeVisible();
   await expect(form.getByText("choose an OpenCode model before launching", { exact: true })).toBeVisible();
   await expect(form.locator(".create-session-submit")).toBeDisabled();
-  const choices = modelRow.locator(":scope > .launch-composer-options > button");
-  await expect(choices).toHaveCount(4);
+  const model = modelRow.getByRole("combobox", { name: "model", exact: true });
+  await model.focus();
+  // Premise: focusing opened the list (its toggle row is present), so the
+  // missing default row below is an omission, not an unopened listbox.
+  await expect(modelRow.locator("#launch-composer-model-results").getByRole("option", { name: "show every harness's models", exact: true })).toBeVisible();
+  await expect(modelRow.getByRole("option", { name: "harness default", exact: true })).toHaveCount(0);
   for (const id of ids) {
-    const choice = choices.filter({ hasText: id }).filter({ hasText: new RegExp(`${id.replaceAll(".", "\\.")}$`) });
-    await choice.click();
-    await expect(choice).toHaveAttribute("aria-pressed", "true");
+    await model.fill(id);
+    await modelRow.getByRole("option", { name: id, exact: true }).click();
+    await expect(model).toHaveValue(id);
     await expect(form.locator(".create-session-submit")).toBeEnabled();
   }
-  await modelRow.locator("summary").click();
-  await modelRow.getByPlaceholder("custom model id").fill("custom'42;$literal");
+  await model.fill("custom'42;$literal");
+  await model.press("Enter");
+  // The submit click below blurs the field; if Enter had not applied the
+  // draft, blur would discard it and the POST would carry the previous id.
+  await expect(model).toHaveValue("custom'42;$literal");
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     await route.fulfill({ status: 400, headers: { "x-farhelm-build": build }, body: "fixture captured launch" });
