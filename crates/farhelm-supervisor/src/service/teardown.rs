@@ -58,20 +58,23 @@
 //! tab, removes terminal-only launch artifacts, and detaches
 //! every viewer. It then KEEPS the database row and committed attachment
 //! directory, marks the row archived, and records the deliberate teardown
-//! as `Exited` with `STOP_ANNOTATION`. That separate path is intentional:
-//! treating archive as a delete mode would make the files it must preserve
-//! depend on branches inside delete's fail-closed removal sequence.
+//! as `Exited` with `STOP_ANNOTATION` only when it actually stopped a live
+//! agent. If the pane was already dead, archive retains the last witnessed
+//! outcome instead; treating that case as a fresh user stop would discard an
+//! exit code or an error detail that the supervisor already knows.
 
 use super::connection::notify_detached;
 use super::core::{ArchiveStage, SessionEntry, Supervisor, unknown_pane_owner_refusal};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
+use super::status::session_status;
 use super::sweep::{SweepTarget, reap_process_tree};
 use super::terminals::{ActiveAttach, AttachmentKey};
 use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
 use crate::store::LastOutcome;
 use crate::tmux::PaneProbe;
-use farhelm_proto::{STOP_ANNOTATION, SessionStatus};
+use farhelm_proto::STOP_ANNOTATION;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -147,14 +150,17 @@ pub(crate) enum ArchiveError {
 }
 
 impl Supervisor {
-    /// Shut down an entire session while preserving its durable metadata
-    /// and committed attachments.
+    /// Shut down an entire session while preserving its durable metadata,
+    /// committed attachments, and any already-known outcome.
     ///
     /// The caller holds the session lifecycle claim across this function.
     /// The archive flag is committed only after every process, tab, tmux
     /// terminal, and terminal-only artifact is gone; a failure therefore
     /// leaves an ordinary visible session that can be retried. Committed
-    /// attachment files are never moved or removed.
+    /// attachment files are never moved or removed. The outcome is replaced
+    /// with an annotated exit only when the pane probe found a live owned
+    /// agent and this teardown killed it; an already-ended session keeps its
+    /// exit code, annotation, or error detail.
     pub(crate) async fn teardown_for_archive(
         &self,
         entry: &SessionEntry,
@@ -231,6 +237,7 @@ impl Supervisor {
             None => None,
         };
         let root_pid = live_pane.filter(|pane| !pane.dead).map(|pane| pane.pid);
+        let stopped_live_agent = root_pid.is_some();
 
         // Archive reaches the same whole-session ownership boundary as
         // delete: tabs carry separate cgroup units, and the manager is the
@@ -358,7 +365,7 @@ impl Supervisor {
             // metadata an archive promises to retain.
             remove_launch_artifacts_for_session(&self.state_dir, session_id).await?;
             self.store
-                .archive_session(session_id)
+                .archive_session(session_id, stopped_live_agent)
                 .await
                 .map_err(|error| format!("recording the archived session: {error:#}"))?
                 .ok_or_else(|| {
@@ -382,16 +389,23 @@ impl Supervisor {
             return Err(ArchiveError::FailClosed(message));
         }
 
-        let outcome = LastOutcome::Exited {
-            exit_code: None,
-            annotation: Some(STOP_ANNOTATION.to_string()),
+        let prior_outcome = entry
+            .outcome
+            .lock()
+            .expect("outcome mutex poisoned")
+            .clone();
+        let outcome = if stopped_live_agent && !prior_outcome.is_terminal() {
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(STOP_ANNOTATION.to_string()),
+            }
+        } else {
+            prior_outcome
         };
         let mut info = entry.info.clone();
         info.archived = true;
-        info.status = SessionStatus::Exited { exit_code: None };
-        info.annotation = Some(STOP_ANNOTATION.to_string());
         info.tabs.clear();
-        let archived = Arc::new(SessionEntry {
+        let mut archived = Arc::new(SessionEntry {
             info,
             terminal: None,
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
@@ -421,6 +435,14 @@ impl Supervisor {
             // partial external cleanup.
             scope: entry.scope.clone(),
         });
+        // Use the normal classifier for the published wire fields. Archive
+        // has no live pane after teardown, but the classifier still carries
+        // terminal codes, annotations, errors, and interrupted outcomes by
+        // their established precedence.
+        let (status, annotation) = session_status(&archived, &HashMap::new());
+        let archived_entry = Arc::get_mut(&mut archived).expect("new archive entry is unique");
+        archived_entry.info.status = status;
+        archived_entry.info.annotation = annotation;
         self.sessions
             .lock()
             .await
@@ -910,7 +932,10 @@ mod tests {
                     launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
-                    outcome: LastOutcome::Running,
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(3),
+                        annotation: None,
+                    },
                     agent_kind: farhelm_proto::AgentKind::Claude,
                     // An integrated kind with the resume template its
                     // snapshot is required to carry: archive reads the row
@@ -938,7 +963,13 @@ mod tests {
             .await
             .expect("seed the session being archived");
 
-        let mut entry = entry_with(None, LastOutcome::Running);
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(3),
+                annotation: None,
+            },
+        );
         entry.info.id = id.to_string();
         let entry = Arc::new(entry);
         // The launch was hooked and the tripwire has not spoken yet: the
@@ -952,6 +983,20 @@ mod tests {
         let Ok(archived) = sup.teardown_for_archive(&entry, id).await else {
             panic!("a terminal-less session archives without tmux");
         };
+
+        assert_eq!(
+            archived.outcome.lock().unwrap().clone(),
+            LastOutcome::Exited {
+                exit_code: Some(3),
+                annotation: None,
+            },
+            "archiving an already-ended agent must retain its witnessed exit"
+        );
+        assert_eq!(
+            archived.info.status,
+            farhelm_proto::SessionStatus::Exited { exit_code: Some(3) }
+        );
+        assert_eq!(archived.info.annotation, None);
 
         assert!(
             Arc::ptr_eq(&entry.hooked, &archived.hooked),
@@ -975,6 +1020,93 @@ mod tests {
         assert!(
             archived.hooked.load(std::sync::atomic::Ordering::Relaxed),
             "and the archived entry must still describe the launch as hooked"
+        );
+    }
+
+    /// A live owned pane is the one archive case that creates a new outcome:
+    /// the teardown itself is the evidence for the user-stop annotation.
+    /// This uses the supervisor's private tmux server and the ordinary entry
+    /// fixture so the assertion covers the pane probe, process sweep, store
+    /// write, and published in-memory entry together.
+    #[farhelm_testtrace::test]
+    async fn archiving_a_live_agent_records_the_stop_annotation() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = "live-archive";
+        let tmux_name = format!("fh-{id}");
+        let pane = sup
+            .tmux
+            .create_session(
+                &tmux_name,
+                "/tmp",
+                80,
+                24,
+                &[],
+                &["sleep".to_string(), "60".to_string()],
+            )
+            .await
+            .expect("create the owned live pane");
+        assert!(
+            matches!(
+                sup.tmux.pane_process(&tmux_name, &pane).await,
+                Ok(PaneProbe::Owned(process)) if !process.dead
+            ),
+            "the fixture must prove the pane is live before archive relies on it"
+        );
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "sleep 60".to_string(),
+                    launch: None,
+                    tmux_name: tmux_name.clone(),
+                    pane: pane.clone(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: Some("/tmp".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the live session row");
+        let entry = Arc::new(entry_with(
+            Some(super::super::terminals::Terminal { tmux_name, pane }),
+            LastOutcome::Running,
+        ));
+
+        let Ok(archived) = sup.teardown_for_archive(&entry, id).await else {
+            panic!("archive the live session");
+        };
+
+        assert_eq!(
+            archived.outcome.lock().unwrap().clone(),
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: Some(STOP_ANNOTATION.to_string()),
+            }
+        );
+        assert_eq!(archived.info.annotation.as_deref(), Some(STOP_ANNOTATION));
+        assert_eq!(
+            archived.info.status,
+            farhelm_proto::SessionStatus::Exited { exit_code: None }
         );
     }
 }
