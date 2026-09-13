@@ -222,7 +222,11 @@ impl HelmLink {
     /// completed by [`HelmLink::fail_all`] when the link dies. Every other
     /// ending drops it immediately, and each is a point at which the
     /// mutation provably cannot still be running: never queued, the queue
-    /// gone, or an answer already in hand.
+    /// gone, or an answer already in hand. A fourth ending is a connection
+    /// loss after the request was queued but before an answer arrived; the
+    /// mutation may still be running on the helm, so the fence is not held
+    /// across that ending. That is a known gap accepted by this relay: the
+    /// connection loss is the only terminal event this side can observe.
     ///
     /// The hold is therefore bounded by the LINK's life rather than by any
     /// clock, and that is the intended shape rather than a leak: while a
@@ -663,14 +667,18 @@ impl Supervisor {
             .await;
         if let AgentOutcome::Err {
             kind: ErrorKind::Timeout,
-            ..
+            message,
         } = &outcome
         {
-            warn!(
-                session = %session_id,
-                budget = ?self.timeouts.agent_upcall,
-                "the attached helm did not answer an agent request in time"
-            );
+            if message.contains("did not answer within") {
+                warn!(
+                    session = %session_id,
+                    budget = ?self.timeouts.agent_upcall,
+                    "{message}"
+                );
+            } else {
+                warn!(session = %session_id, "{message}");
+            }
         }
         outcome
     }

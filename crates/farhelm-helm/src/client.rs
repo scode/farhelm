@@ -2544,7 +2544,7 @@ impl SupervisorClient {
                 sessions,
                 truncated,
             }),
-            other => bail!("unexpected reply to list_sessions: {other:?}"),
+            other => Err(wrong_reply("ListSessions", &other)),
         }
     }
 
@@ -3908,6 +3908,55 @@ mod tests {
             );
             peer.await.unwrap();
         }
+    }
+
+    /// A malformed listing reply must name only protocol variants: session
+    /// invocations and working directories can contain secrets and are
+    /// never appropriate in an agent-visible transport error.
+    #[farhelm_testtrace::test]
+    async fn list_sessions_redacts_session_details_from_wrong_reply_errors() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ListSessions { req_id } = request else {
+                panic!("unexpected request: {request:?}");
+            };
+            let mut wrong = session("s1");
+            wrong.invocation = "agent --api-key super-secret".to_string();
+            wrong.cwd = "/private/secret-project".to_string();
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: wrong,
+                })
+                .await
+                .unwrap();
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+
+        let error = client
+            .list_sessions()
+            .await
+            .expect_err("a wrong reply cannot succeed");
+        assert!(
+            matches!(
+                error.downcast_ref::<SupervisorTransportError>(),
+                Some(SupervisorTransportError::SentWrongReply { request, reply })
+                    if *request == "ListSessions" && *reply == "SessionRenamed"
+            ),
+            "the wrong reply must be named by variant: {error:#}"
+        );
+        let rendered = format!("{error:#}");
+        assert!(!rendered.contains("super-secret"), "{rendered}");
+        assert!(!rendered.contains("/private/secret-project"), "{rendered}");
+        peer.await.expect("peer task");
     }
 
     /// A broken write half must fail pending requests and detach

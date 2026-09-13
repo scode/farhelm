@@ -312,23 +312,10 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Relay diagnostics and redaction.** `A1-C11`, `A1-C8`, `A1-C19`, `A1-C6`. Medium to low, trivial. The relay's only
-  warn line for a failed upcall (agent_relay.rs:637-647) asserts the helm "did not answer in time" with a budget field
-  for three endings where no budget elapsed. `list_sessions` (helm client.rs:2547) is the one wrong-reply site still
-  using `{other:?}`, which restores raw invocation argv into an agent-visible message; its five siblings use
-  `wrong_reply()`. The delete-fence docs (agent_relay.rs:222-225, core.rs:3566) claim every non-retained ending means
-  the mutation cannot still be running, omitting the two post-queue connection-loss exits. `ResolveProfile` shares
-  `ReplyKind::Created` with the creating verbs (farhelm main.rs:1387, :1398), so a wrong reply to create or clone
-  bypasses the outcome-unknown remedy and hits a bare bail. Fix: log the outcome's own message and drop the budget field
-  where none expired; `Err(wrong_reply("ListSessions", &other))`; add the fourth category to the docs; give
-  ResolveProfile its own variant. Fence: keep the Timeout-means-outcome-unknown vocabulary; do not extend fences to make
-  the old claim true.
-- **Small contained items.** `A1-C9`, `A6-D26`. Low, trivial. `safe_cell` (farhelm main.rs:1713-1729) escapes only Cc,
-  so U+2028/U+2029 and bidi controls reach the agent-facing table whose widths are computed after sanitizing.
-  `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the annotation is set only by a user-initiated stop,
-  but archive writes it too. Fix: widen `safe_cell` (ideally one shared predicate with its two siblings) to emit visible
-  `\u{...}` escapes; name both writers in the doc without blessing the archive overwrite. Fence: leave the acceptance
-  checks alone, they are specified policy; no prompt-injection promise.
+- **Small contained items.** `A6-D26`. Low, trivial. `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the
+  annotation is set only by a user-initiated stop, but archive writes it too. Fix: name both writers in the doc without
+  blessing the archive overwrite. Fence: leave the acceptance checks alone, they are specified policy; no
+  prompt-injection promise.
 
 ### Next: high confidence, needs care
 

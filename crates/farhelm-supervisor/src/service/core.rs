@@ -3633,7 +3633,11 @@ pub struct Supervisor {
     /// (`super::handlers`) wait on the SAME key before it tears a session
     /// down, closes that window: a delete targeting an id with an
     /// in-flight fence waits for the fence to clear, by which point the
-    /// mutation it authorized has already completed.
+    /// mutation it authorized has already completed. A connection can also
+    /// be lost after queueing and before an answer; the mutation may still be
+    /// running on the helm then, so the fence is not held across that ending.
+    /// This is a known gap accepted because the connection loss is the only
+    /// terminal event this side can observe.
     ///
     /// TWO PROPERTIES MAKE THAT TRUE, and both are easy to lose in a
     /// refactor of the handler:
