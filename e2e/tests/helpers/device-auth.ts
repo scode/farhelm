@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { BrowserContext } from "@playwright/test";
 
-/** Environment handoff from global setup to newly launched workers. */
-export const DEVICE_SECRET_ENV = "FARHELM_E2E_DEVICE_SECRET";
 /** Browser-local key consumed by the UI's authenticated send path. */
 export const DEVICE_SECRET_KEY = "farhelm.device-secret";
 /** Shared state rewritten whenever the auth spec rotates the credential. */
@@ -52,17 +50,12 @@ function storedDeviceSecret(): string | undefined {
 /** Build the ambient request header used by every authenticated test client.
  *
  * The file is authoritative because auth.spec.ts can rotate the credential.
- * The environment fallback covers a first run before any storage state exists
- * and is also the explicit handoff from global setup to Playwright workers.
+ * Keeping it as the only source also prevents a test-body refresh from
+ * leaking a device secret through the test process environment.
  */
 export function harnessAuthorizationHeaders(): Record<string, string> | undefined {
-  const secret = storedDeviceSecret() ?? process.env[DEVICE_SECRET_ENV];
+  const secret = storedDeviceSecret();
   return secret ? { Authorization: `Bearer ${secret}` } : undefined;
-}
-
-/** Publish a newly minted credential to children of the current process. */
-export function exposeHarnessDeviceSecret(secret: string): void {
-  process.env[DEVICE_SECRET_ENV] = secret;
 }
 
 /** Advance a running worker and its future contexts after token rotation. */
@@ -74,7 +67,6 @@ export function refreshHarnessAuthorization(
     throw new Error("the Playwright worker has no harness Authorization headers");
   }
   headers.Authorization = `Bearer ${secret}`;
-  exposeHarnessDeviceSecret(secret);
 }
 
 /** Force page traffic to use the product's own credential transports.

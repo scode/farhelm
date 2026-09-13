@@ -2,9 +2,9 @@
 //
 // start-stack.sh uses the same CLI and exchange for its curl bootstrap, but
 // browser state is minted independently here. The resulting device secret is
-// handed to both sides of Playwright's transport: storageState supplies page
-// localStorage, while the process environment supplies request headers when
-// the config is reloaded in each worker.
+// persisted once for both sides of Playwright's transport: storageState
+// supplies page localStorage, and the config reads the same file for request
+// headers when each worker starts.
 import { expect, FullConfig, request } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -13,7 +13,6 @@ import { promisify } from "node:util";
 import {
   AUTH_STORAGE_STATE_PATH,
   DEVICE_SECRET_KEY,
-  exposeHarnessDeviceSecret,
 } from "./tests/helpers/device-auth";
 
 const run = promisify(execFile);
@@ -23,7 +22,7 @@ interface StackInfo {
   state: string;
 }
 
-/** Mint one device identity and publish it to every Playwright transport. */
+/** Mint one device identity and persist it before any browser worker starts. */
 export default async function globalSetup(config: FullConfig) {
   const info = JSON.parse(
     await readFile(path.join(__dirname, ".stack-info.json"), "utf8"),
@@ -58,6 +57,5 @@ export default async function globalSetup(config: FullConfig) {
   }];
   await writeFile(AUTH_STORAGE_STATE_PATH, JSON.stringify(state), { mode: 0o600 });
   await chmod(AUTH_STORAGE_STATE_PATH, 0o600);
-  exposeHarnessDeviceSecret(body.device_secret);
   await client.dispose();
 }
