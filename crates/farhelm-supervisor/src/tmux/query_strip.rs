@@ -11,10 +11,18 @@
 //!
 //! The supervisor owns this transform because it is the one place that knows
 //! which bytes came from tmux's live pane stream, and the result then behaves
-//! consistently for every rendering client. The table is deliberately the
-//! exact set answered by the pinned tmux version. It contains literal byte
-//! strings, not a grammar: a sequence with parameters or a similar-looking
-//! terminal protocol must pass through because tmux may not answer it.
+//! consistently for every rendering client. The table is the parameterless,
+//! literal queries the pinned tmux answers — NOT every query it answers. It
+//! contains literal byte strings, not a grammar: a sequence with parameters
+//! or a similar-looking terminal protocol must pass through because tmux may
+//! not answer it. tmux also answers whole parameterised families (DECRQM as
+//! both `CSI Pm $ p` and `CSI ? Pm $ p` for any mode number, DECRQSS
+//! `DCS $ q <spec> ST` for any spec), which no literal table can hold; those
+//! are suppressed at the other end instead, where the browser's terminal
+//! declines to mint its duplicate reply (`terminal.js` registers both CSI
+//! `$p` forms and a DCS `$q` handler that return "handled"). One policy, two
+//! halves: strip the fixed spellings here, decline the parameterised
+//! families in the browser.
 //! Payload unwrapped from a tmux passthrough wrapper bypasses this matcher:
 //! tmux forwarded that payload without parsing or answering it, so filtering
 //! it would leave the pane program waiting for an answer that never arrives.

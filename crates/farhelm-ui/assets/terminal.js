@@ -4106,6 +4106,25 @@
           { intermediates: "$", final: "p" },
           swallowDecrqm,
         );
+        // Same treatment for DECRQSS (DCS $ q <spec> ST, "report the
+        // current setting of X"). The pinned tmux (3.7c; Farhelm ships its
+        // own build, and the guarantee rests on that pin) answers every
+        // DECRQSS itself inside the pane — including a `DCS 0 $ r ST` "not
+        // recognized" reply for specs it does not implement, so there is
+        // no spelling it stays silent on — and xterm.js's built-in
+        // responder would answer a
+        // second time, with a reply that begins with ESC and lands in the
+        // pane as keystrokes (Escape, then `P`, `1`, `$`, `r` ...), exactly
+        // the stray-input shape the DECRQM swallow above exists to prevent.
+        // This family cannot be stripped supervisor-side: the query
+        // carries a variable-length payload terminated by ST, so no
+        // literal table can hold it, and `query_strip.rs` is deliberately
+        // not a VT parser. The browser is the one place that can decline
+        // to answer it. Returning true stops xterm's responder.
+        term.parser.registerDcsHandler(
+          { intermediates: "$", final: "q" },
+          () => true,
+        );
         // Named (rather than inlined into the `term.onData` wrapper below)
         // so every outbound TEXT-input chunk — ordinary keystrokes, pastes,
         // and the merged Shift+Enter sequence alike — leaves through one

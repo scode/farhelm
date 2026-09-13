@@ -976,6 +976,103 @@ test("DECRPM auto-replies to a mode query are dropped, not forwarded as pane inp
   }
 });
 
+// The DECRQSS half of the same policy. DECRQSS (`DCS $ q <spec> ST`,
+// "report the current setting of X") is the other parameterised query
+// family tmux answers inside the pane for every spelling — including a
+// `DCS 0 $ r ST` "not recognized" reply for specs it does not implement —
+// and xterm.js ships a built-in responder for it too. Unlike DECRQM its
+// query is DCS-framed with a variable-length payload, so the supervisor's
+// literal strip table cannot hold it (query_strip.rs is deliberately not a
+// VT parser); the browser declining to answer is the only place the
+// duplicate can be stopped. The late reply lands in the pane as input the
+// same way a late DECRPM did (the stray-'y' bug above); being DCS-framed,
+// a program that does not parse DCS sees an Escape and then literal text
+// up to the string terminator. The fix is the DCS `$q` handler terminal.js
+// registers beside `swallowDecrqm`.
+//
+// Same shape as the DECRQM test above and for the same reasons: assert on
+// the frames that actually left the browser, with a passthrough-wrapped
+// DSR-6 as the positive control proving xterm's auto-replies were live on
+// this exact path, and a pasted probe line so the escape bytes arrive
+// intact or not at all.
+test("DECRQSS auto-replies to a status query are dropped, not forwarded as pane input", async ({
+  page,
+  request,
+}) => {
+  await page.addInitScript(() => {
+    const realSend = WebSocket.prototype.send;
+    (window as any).__sentInput = [];
+    WebSocket.prototype.send = function (this: WebSocket, data: any) {
+      if (data instanceof Uint8Array) {
+        (window as any).__sentInput.push(Array.from(data));
+      } else if (data instanceof ArrayBuffer) {
+        (window as any).__sentInput.push(Array.from(new Uint8Array(data)));
+      } else {
+        (window as any).__sentInput.push(data);
+      }
+      return realSend.call(this, data);
+    };
+  });
+
+  const title = `decrqss-probe-${Date.now()}`;
+  const created = await request.post("/api/sessions", {
+    data: { cwd: "/tmp", invocation: "bash", title },
+  });
+  expect(created.status()).toBe(200);
+  const { id } = await created.json();
+
+  try {
+    await page.goto("/");
+    const row = page.locator(`[data-session-id="${id}"]`);
+    await expect(row).toBeVisible();
+    await row.click();
+    await waitForSessionRevealed(page, id);
+
+    await page.locator("#terminal").click();
+    // DSR-6 wrapped in tmux passthrough is the positive control, as in the
+    // DECRQM test. The DECRQSS query for the SGR setting (`DCS $ q m ST`)
+    // stays on the ordinary supervisor path, where tmux answers it inside
+    // the pane and the browser must mint nothing. `$q` is inside single
+    // quotes, so the shell never expands it.
+    const probeLine =
+      "printf '\\ePtmux;\\e\\e[6n\\e\\\\\\eP$qm\\e\\\\'; sleep 1; printf 'PROBE-%s\\n' DONE";
+    await page.evaluate(
+      (line) => (window as any).__farhelmTerm.paste(line),
+      probeLine,
+    );
+    await page.keyboard.press("Enter");
+    await waitForTermText(page, "PROBE-DONE", 15_000);
+    // Premise, both halves at once: tmux answered the DECRQSS inside the
+    // pane, and that answer travelled the same `%output` stream the
+    // browser reads. While `sleep 1` holds the tty in cooked mode with
+    // echo on, the line discipline echoes tmux's reply as typed input, so
+    // its `$r` shows up in the pane text. Without this, a later change
+    // that dropped DCS bytes before the WebSocket would leave the negative
+    // assertion below passing for the wrong reason.
+    await waitForTermText(page, "$r", 5_000);
+
+    const recordedFrames = () =>
+      page.evaluate(() =>
+        ((window as any).__sentInput as unknown[]).map((f) =>
+          Array.isArray(f)
+            ? String.fromCharCode(...(f as number[]))
+            : String(f),
+        ),
+      );
+
+    await expect
+      .poll(recordedFrames, { timeout: 5_000 })
+      .toContainEqual(expect.stringMatching(/\x1b\[[0-9]+;[0-9]+R/));
+    // The fix: no DECRQSS reply (`DCS 1 $ r ... ST` for a recognized spec,
+    // `DCS 0 $ r ST` otherwise) ever reached the WebSocket as input.
+    expect(await recordedFrames()).not.toContainEqual(
+      expect.stringMatching(/\x1bP[01]\$r/),
+    );
+  } finally {
+    await cleanupSession(request, id);
+  }
+});
+
 // MT-6 regression test: a select-and-copy in the terminal leaves TWO
 // selections behind, and both stay painted over content the user is no
 // longer selecting once input moves the buffer underneath them. xterm's
