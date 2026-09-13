@@ -389,14 +389,6 @@ severity.
   archive never touch (reproduced by the investigation). Fix: in the same fail-closed removal, also accept entries where
   `is_staged_temp_name` holds and the de-dotted stem parses to this session id. Fence: only this session's staging
   names; never other sessions' active writes; keep publication-success semantics.
-- **Error rows on reload.** `A5-C4`, `A5-C15`. Medium and low, small. `reload_sessions` (service/core.rs:4471-4474)
-  `continue`s for `LastOutcome::Error` rows before the pane lookup at :4491-4505, so the entry is built terminal-less,
-  attach refuses, and delete (teardown.rs:714-718) skips its conditional tmux kill with no durable `tmux_name` fallback,
-  leaking the session and its scrollback forever; the sentinel branch at :4529 keeps its pane for exactly this stated
-  reason. The same early branch also calls `cleanup_launch_artifacts` unconditionally while every other durable step in
-  the pass is gated on `may_write`. Reproduced once by the investigation; its fix and test were reverted for scope. Fix:
-  hoist the pane resolution above the early-continue and insert it into `found_panes`; gate the cleanup on `may_write`;
-  optionally add delete's durable `tmux_name` fallback. Fence: leave the archived-row skip alone.
 - **Small contained items.** `A2-C3`, `A1-C9`, `A6-D26`. Low, trivial. `is_stale_generation`
   (release_payloads.rs:1020-1024) splits a name at `len - 12` bytes and panics on a non-boundary; the panic is contained
   by `spawn_blocking` but the `OnceCell` stays uninitialised so every download retries and fails while the entry exists.

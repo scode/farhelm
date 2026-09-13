@@ -711,9 +711,54 @@ impl Supervisor {
             if let Some(error) = forwarder_error {
                 return Err(error);
             }
-            if let Some(terminal) = entry.terminal.as_ref() {
+            // Reload can deliberately retain a row without a terminal when
+            // tmux has not exposed its pane yet. The durable name still
+            // identifies the whole session, so delete must use it as the
+            // kill target rather than leaving a same-named tmux husk behind.
+            // For that terminal-less case the name is only a CANDIDATE: a
+            // session whose tmux side never existed (a launch that failed
+            // before its window, a supervisor whose private tmux server was
+            // never started) must still delete cleanly, so the kill runs
+            // only when tmux confirms the session is there. A server that
+            // is not running at all is the same answer as "not there".
+            let tmux_name = match entry.terminal.as_ref() {
+                Some(terminal) => Some(terminal.tmux_name.clone()),
+                None => match self.store.tmux_name(session_id).await {
+                    Ok(Some(tmux_name)) => match self.tmux.has_session(&tmux_name).await {
+                        Ok(true) => Some(tmux_name),
+                        Ok(false) => None,
+                        // tmux spells "there is no server" two ways depending
+                        // on version: `no server running on <path>` and
+                        // `error connecting to <path> (No such file or
+                        // directory)`. Both mean nothing to kill.
+                        Err(error)
+                            if error.to_string().contains("no server running")
+                                || error.to_string().contains("error connecting to") =>
+                        {
+                            None
+                        }
+                        Err(error) => {
+                            return Err(format!(
+                                "checking whether the durable tmux session still exists before \
+                                 delete: {error:#}"
+                            ));
+                        }
+                    },
+                    Ok(None) => {
+                        return Err(format!(
+                            "session {session_id} vanished before its tmux terminal could be removed"
+                        ));
+                    }
+                    Err(error) => {
+                        return Err(format!(
+                            "reading the durable tmux name before delete: {error:#}"
+                        ));
+                    }
+                },
+            };
+            if let Some(tmux_name) = tmux_name {
                 self.tmux
-                    .kill_session(&terminal.tmux_name)
+                    .kill_session(&tmux_name)
                     .await
                     .map_err(|e| format!("killing tmux session: {e:#}"))?;
             }

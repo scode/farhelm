@@ -4518,17 +4518,40 @@ impl Supervisor {
         // having landed; see that loop for the lifecycle rationale.
         let mut sentinel_hits: HashMap<String, String> = HashMap::new();
         for row in &rows {
+            // Deterministic pane lookup, computed ONCE and reused by every
+            // reconciliation branch below. Error rows need the same lookup
+            // even though their durable outcome skips reconciliation: an
+            // existing pane must remain reachable for Attach and for
+            // DeleteSession's tmux kill sweep.
+            let found = if row.pane.is_empty() {
+                // Marker-led, not positional (PLAN_M4.md item 2): with tabs
+                // on the same tmux session, "the lowest pane id" could hand
+                // this row a TAB's pane. See `agent_pane_from_states` for the
+                // preference ladder and its legacy fallback.
+                agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
+            } else {
+                pane_states
+                    .get(&row.pane)
+                    .filter(|state| state.session_name == row.tmux_name)
+                    .map(|state| (row.pane.clone(), state.clone()))
+            };
+
             // Idempotent cleanup (item 4 of the review-swarm fix batch): a
             // row already durably `Error` on load may still have a
             // lingering sentinel/spec file from a crash between an
             // EARLIER pass's commit and the cleanup that should have
             // followed it — including the reboot-override branch above,
             // whose own cleanup cannot rule out a crash on some PREVIOUS
-            // startup. Harmless no-op when both files are already gone,
-            // so this runs unconditionally rather than trying to prove it
-            // is necessary first.
+            // startup. Harmless no-op when both files are already gone. A
+            // read-only reload must not remove files, though, because this
+            // pass does not own the state directory's durable writes.
             if matches!(row.outcome, LastOutcome::Error { .. }) {
-                cleanup_launch_artifacts(state_dir, &row.id, row.generation).await;
+                if may_write {
+                    cleanup_launch_artifacts(state_dir, &row.id, row.generation).await;
+                }
+                if let Some((pane, state)) = found {
+                    found_panes.insert(row.id.clone(), (pane, state));
+                }
                 continue;
             }
 
@@ -4539,29 +4562,6 @@ impl Supervisor {
             if row.archived {
                 continue;
             }
-
-            // Deterministic pane lookup, computed ONCE and reused by both
-            // the sentinel branch below and the ordinary reconciliation
-            // branch further down (item 6 of the review-swarm fix batch):
-            // a multi-pane tmux session must resolve to the SAME pane
-            // regardless of which branch is asking, and a second,
-            // independent `iter().find()` in the sentinel branch used to
-            // risk disagreeing with this `min_by` tie-break.
-            let found = if row.pane.is_empty() {
-                // Marker-led, not positional (PLAN_M4.md item 2): with
-                // tabs on the same tmux session, "the lowest pane id"
-                // could hand this row a TAB's pane — after which stop
-                // would reap that tab and restart would respawn into it.
-                // See `agent_pane_from_states` for the preference ladder
-                // and the legacy fallback it keeps for sessions created
-                // before markers existed.
-                agent_pane_from_states(&pane_states, &row.tmux_name, &row.id)
-            } else {
-                pane_states
-                    .get(&row.pane)
-                    .filter(|state| state.session_name == row.tmux_name)
-                    .map(|state| (row.pane.clone(), state.clone()))
-            };
 
             // A launch sentinel discovered now outranks every pane-based
             // inference (PLAN_M3.md item 3) — including "no pane was even
@@ -11796,6 +11796,158 @@ pub(crate) mod tests {
             );
             assert_ne!(row.outcome, LastOutcome::Launching);
         }
+    }
+
+    /// An Error row still owns an existing pane, and a read-only reload still
+    /// has to leave its launch artifacts for the owner to remove. This pins
+    /// both sides of the startup boundary: the in-memory entry stays
+    /// attachable without proposing a new outcome, while a later
+    /// write-capable pass performs the durable cleanup.
+    #[farhelm_testtrace::test]
+    async fn reload_restores_error_pane_and_gates_artifact_cleanup() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = "error-with-pane";
+        let tmux_name = "fh-error-with-pane";
+        let pane = sup
+            .tmux
+            .create_session(
+                tmux_name,
+                "/tmp",
+                80,
+                24,
+                &[],
+                &["sh".to_string(), "-c".to_string(), "sleep 300".to_string()],
+            )
+            .await
+            .expect("create the retained Error-row pane");
+        let pane_states = sup.tmux.pane_states().await.expect("pane states");
+        assert!(
+            pane_states
+                .get(&pane)
+                .is_some_and(|state| state.session_name == tmux_name),
+            "the fixture must prove the Error row's pane exists before reload: {pane}"
+        );
+
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "error row".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: tmux_name.to_string(),
+                    pane: pane.clone(),
+                    outcome: LastOutcome::Error {
+                        detail: "exec failed".to_string(),
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert the Error row");
+
+        let spec_path = crate::launch::spec_path_for_launch(state.path(), id, 0);
+        std::fs::create_dir_all(spec_path.parent().expect("launch spec parent"))
+            .expect("create launch artifact directory");
+        let status_path = crate::launch::status_path_for_spec(&spec_path);
+        std::fs::write(&spec_path, "credential-bearing launch spec")
+            .expect("write launch spec fixture");
+        std::fs::write(&status_path, "exec failed").expect("write launch sentinel fixture");
+
+        let (read_only_sessions, may_write) = Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            false,
+        )
+        .await
+        .expect("read-only reload");
+        assert!(
+            !may_write,
+            "the caller's read-only ownership must survive reload"
+        );
+        let read_only_entry = &read_only_sessions[id];
+        assert_eq!(
+            read_only_entry
+                .terminal
+                .as_ref()
+                .map(|terminal| terminal.pane.as_str()),
+            Some(pane.as_str()),
+            "an existing Error-row pane must remain attachable after reload"
+        );
+        assert_eq!(
+            read_only_entry
+                .terminal
+                .as_ref()
+                .map(|terminal| terminal.tmux_name.as_str()),
+            Some(tmux_name),
+            "the restored terminal must name the row's tmux session"
+        );
+        assert_eq!(
+            *read_only_entry.outcome.lock().unwrap(),
+            LastOutcome::Error {
+                detail: "exec failed".to_string()
+            },
+            "reload must not propose a transition for a durable Error row"
+        );
+        assert!(
+            spec_path.exists(),
+            "read-only reload must retain the launch spec"
+        );
+        assert!(
+            status_path.exists(),
+            "read-only reload must retain the launch sentinel"
+        );
+
+        let (write_sessions, may_write) = Supervisor::reload_sessions(
+            &sup.state_dir,
+            &sup.store,
+            &sup.tmux,
+            &SupervisorSeams::default(),
+            true,
+        )
+        .await
+        .expect("write-capable reload");
+        assert!(
+            may_write,
+            "the write-capable fixture must retain write ownership"
+        );
+        assert_eq!(
+            *write_sessions[id].outcome.lock().unwrap(),
+            LastOutcome::Error {
+                detail: "exec failed".to_string()
+            },
+            "artifact cleanup must not change the durable Error outcome"
+        );
+        assert!(
+            !spec_path.exists(),
+            "write-capable reload removes the launch spec"
+        );
+        assert!(
+            !status_path.exists(),
+            "write-capable reload removes the launch sentinel"
+        );
     }
 
     /// PLAN_M3.md item 10's other reload contract, and the one host-
