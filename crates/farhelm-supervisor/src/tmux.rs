@@ -196,8 +196,9 @@ pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 /// the attach request instead of leaving it holding the global
 /// attachment lock forever.
 ///
-/// This is the PRODUCTION value and must stay tight: it bounds how long a
-/// wedged tmux can hold the supervisor-wide attachments mutex, and every
+/// This is the PRODUCTION value and must stay tight: it bounds one attach
+/// exchange and, through [`InputClient::send`]'s whole-call budget, one input
+/// frame's hold on the supervisor-wide attachments mutex. Every
 /// [`TmuxDriver`] defaults to it. The e2e suite runs with a longer budget
 /// instead — see the `SUITE_TMUX_EXCHANGE_TIMEOUT` doc in the e2e harness
 /// for why (PLAN.md's M6.5 tracks this as a leading hypothesis for a class

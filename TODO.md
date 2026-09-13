@@ -444,26 +444,22 @@ is safe. Each is its own review unit.
   Stalled arm and aborts with "no body progress from the client". Fix: arm the deadline immediately before the select in
   the body-not-ready arm instead of at chunk receipt, keeping the empty-chunk fast path. Fence: trace
   `wait_for_credit`'s own re-arming in client.rs first; the magnitude depends on credit waits exceeding 60 s.
-- **Dispatch under the attachments and lifecycle locks.** `A1-C1`, `A1-C3`, `A1-C4`, `A5-C1`, `A1-C2`. Medium, small to
-  medium, medium risk; one unit per finding. `InputClient::send` (tmux/input.rs:212-277) gives every write, flush and
-  reply read its own fresh exchange timeout with no whole-call budget while connection.rs:475-495 holds the
-  supervisor-wide attachments mutex across it, and `CONTROL_EXCHANGE_TIMEOUT`'s docstring (tmux.rs:198-208) claims to
-  bound that hold. A tab attach (handlers.rs:1440) claims the session's lifecycle lock inline on the read loop with no
-  timeout, behind a stop or delete that holds it for the whole sweep. The restricted create arm (handlers.rs:2858)
-  claims the parent's lifecycle lock across a `ResolveProfile` round trip to the helm. The writer task's
-  `else =>
-  break` (connection.rs:286-296) is unreachable at shutdown because `priority_tx` and a full-authority link's
-  `tx` clone outlive the drop at :669, so every teardown burns the full drain window and force-aborts with a false
-  warning; the addendum rules out sender accounting because upload and detach tasks hold more clones. A delete parked on
-  a retained agent fence (handlers.rs:1166, :1187) holds one of eight process-wide admission permits for up to the 600 s
-  retention while the reply that would free it is dispatched by the loop those permits park. Fix: one `Instant` at the
-  top of `send` clamping each per-exchange timeout, plus an honest docstring; a short timeout on the tab-attach claim
-  refusing with the Conflict shape `handle_attach` already uses; resolve the profile before taking the parent claim,
-  then claim and re-check the credential; `rx.close()` and `priority_rx.close()` in the shutdown tail; claim the fence
-  before the permit or bound the wait well under retention with a retry-safe Conflict. Fence: takeover ownership across
-  every chunk; the credential re-check stays under the claim; ordinary unrelated controls must progress; no fair
-  scheduling for hostile local workloads; the shipped helm chunks input at 32 KiB so the 8 MiB frame is not an ordinary
-  paste.
+- **Dispatch under the attachments and lifecycle locks.** `A1-C3`, `A1-C4`, `A5-C1`, `A1-C2`. Medium, small to medium,
+  medium risk; one unit per finding. A tab attach (handlers.rs:1440) claims the session's lifecycle lock inline on the
+  read loop with no timeout, behind a stop or delete that holds it for the whole sweep. The restricted create arm
+  (handlers.rs:2858) claims the parent's lifecycle lock across a `ResolveProfile` round trip to the helm. The writer
+  task's `else =>
+  break` (connection.rs:286-296) is unreachable at shutdown because `priority_tx` and a full-authority
+  link's `tx` clone outlive the drop at :669, so every teardown burns the full drain window and force-aborts with a
+  false warning; the addendum rules out sender accounting because upload and detach tasks hold more clones. A delete
+  parked on a retained agent fence (handlers.rs:1166, :1187) holds one of eight process-wide admission permits for up to
+  the 600 s retention while the reply that would free it is dispatched by the loop those permits park. Fix: a short
+  timeout on the tab-attach claim refusing with the Conflict shape `handle_attach` already uses; resolve the profile
+  before taking the parent claim, then claim and re-check the credential; `rx.close()` and `priority_rx.close()` in the
+  shutdown tail; claim the fence before the permit or bound the wait well under retention with a retry-safe Conflict.
+  Fence: takeover ownership across every chunk; the credential re-check stays under the claim; ordinary unrelated
+  controls must progress; no fair scheduling for hostile local workloads; the shipped helm chunks input at 32 KiB so the
+  8 MiB frame is not an ordinary paste.
 - **Helm-owned default profile.** `A6-S1`. Critical, medium, medium risk. `source_is_newer` (helm store.rs:569) falls
   back to raw `candidate.created_at > stored.created_at` for any cross-host pair, and `replace_host_sessions`
   (:4227-4283) feeds it drain-derived timestamps with no sanity check before writing `remembered_profile`; a remote
