@@ -1615,11 +1615,20 @@ async fn run_with_ready(
     state
         .manager
         .set_agent_requests(agent_requests::HelmAgentRequests::for_state(&state));
+    // The control socket's flock comes FIRST, and only then is the bootstrap
+    // token read into its cache. Taking them in the other order left a gap:
+    // an offline `token rotate` can run between the cache fill and the flock
+    // (it takes the offline path exactly because no helm owns the directory
+    // yet), and a helm that then took the flock served with the pre-rotation
+    // token cached while the database held the new one, refusing both until
+    // a restart. With the flock held, an offline rotation is impossible and
+    // a live one goes through this process's control socket, which updates
+    // the same cache.
+    let mut token_control = token_control::serve(&state_dir, state.auth.clone()).await?;
     // First run owns token creation. Browser serving must never begin with a
     // database whose bootstrap secret exists only after somebody invokes the
     // separate `token show` command.
     state.auth.token().await?;
-    let mut token_control = token_control::serve(&state_dir, state.auth.clone()).await?;
     let ui = select_ui_source(args.ui_dist.clone(), embedded_ui());
     warn_if_no_ui(&ui);
     let app = build_router(Arc::clone(&state), ui, addr.port());
