@@ -363,12 +363,6 @@ is safe. Each is its own review unit.
   `send-keys`; verify input delivery separately from output capture. A focused real-tmux reproduction on pinned tmux
   3.7c instead got `tmux send-keys input command failed: can't find pane: %1`; the next attempt should start by checking
   whether the production connection path changes that control-client reply.
-- **Upload stall attributed to the browser.** `A4-C12`. High, small, medium risk. uploads.rs arms the stall deadline at
-  :197 and re-arms only when a non-empty chunk arrives (:289), immediately before the potentially long
-  `send_upload_chunk` (:293) that waits on supervisor credit; the biased select at :222-227 then takes the expired
-  Stalled arm and aborts with "no body progress from the client". Fix: arm the deadline immediately before the select in
-  the body-not-ready arm instead of at chunk receipt, keeping the empty-chunk fast path. Fence: trace
-  `wait_for_credit`'s own re-arming in client.rs first; the magnitude depends on credit waits exceeding 60 s.
 - **Helm-owned default profile.** `A6-S1`. Critical, medium, medium risk. `source_is_newer` (helm store.rs:569) falls
   back to raw `candidate.created_at > stored.created_at` for any cross-host pair, and `replace_host_sessions`
   (:4227-4283) feeds it drain-derived timestamps with no sanity check before writing `remembered_profile`; a remote

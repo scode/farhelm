@@ -3203,7 +3203,7 @@ impl UploadGuard {
     /// or until the transfer ends.
     ///
     /// Two independent ways out besides success: a terminal outcome
-    /// (reported verbatim), and the per-hop stall deadline
+    /// (reported verbatim), and the supervisor-credit stall deadline
     /// ([`UPLOAD_ACK_STALL_TIMEOUT`]) that fires when the window stays
     /// shut with no ADVANCING ack. Only a strictly advancing ack rearms
     /// the deadline — the demultiplexer does not even wake this wait for a
