@@ -1633,12 +1633,10 @@ impl PaneState {
 
 /// tmux's raw, unmodified stderr from a non-zero exit — attached as the
 /// ROOT CAUSE of the `anyhow::Error` [`TmuxDriver::run`]/`run_bytes`
-/// return (with the human-readable "tmux {args:?} failed (...): ..."
-/// message layered on top via `.context(...)`), so a caller can recover
-/// exactly what tmux printed via `downcast_ref` regardless of how much
-/// further context piles on afterward — the same `anyhow` pattern
-/// `service.rs`'s `RequestError` uses, and for the same reason: searching
-/// the RENDERED error string is not always safe.
+/// return — so classifiers can recover exactly what tmux printed via
+/// `downcast_ref`. The display copy is scrubbed because the error chain is
+/// rendered into client-visible request errors, and tmux can echo an
+/// environment value in that chain.
 ///
 /// [`TmuxDriver::pane_states`] is the one caller that needs this: it must
 /// recognize a handful of tmux's own diagnostic shapes exactly, and doing
@@ -1652,9 +1650,23 @@ impl PaneState {
 #[derive(Debug)]
 struct TmuxCommandFailure {
     stderr: Vec<u8>,
+    /// The client-visible copy of stderr. Raw bytes remain separate because
+    /// classifiers need tmux's exact diagnostic, while the rendered error
+    /// chain can reach the helm and therefore the user's client.
+    display_stderr: String,
 }
 
 impl TmuxCommandFailure {
+    /// Keep exact stderr for classifiers while computing its safe display copy
+    /// once, before the error is layered into a client-visible context chain.
+    fn new(stderr: Vec<u8>, secrets: &[String]) -> Self {
+        let display_stderr = scrub_secrets(&String::from_utf8_lossy(&stderr), secrets);
+        Self {
+            stderr,
+            display_stderr,
+        }
+    }
+
     /// tmux's stderr with surrounding whitespace stripped — the exact text
     /// every diagnostic [`is_tolerated_list_panes_diagnostic`] recognizes
     /// must equal VERBATIM (never merely contain), since tmux emits each
@@ -1667,7 +1679,7 @@ impl TmuxCommandFailure {
 
 impl std::fmt::Display for TmuxCommandFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.stderr_trimmed())
+        write!(f, "{}", self.display_stderr.trim())
     }
 }
 
@@ -1732,6 +1744,52 @@ fn env_assignments(env: &[(String, String)]) -> Vec<String> {
     env.iter()
         .map(|(name, value)| format!("{name}={value}"))
         .collect()
+}
+
+/// Values shorter than this are too likely to occur as ordinary diagnostic
+/// text to replace safely. Credentials are not meaningfully protected at this
+/// length, while replacing values such as `1` can mangle tmux's wording.
+const MIN_STDERR_SECRET_LEN: usize = 8;
+
+/// Render a tmux argv for diagnostics and return the values that must not
+/// appear in the same diagnostic. Every `-e` value can contain a credential,
+/// not only the session token, so the assignment name is retained while its
+/// value is replaced. A final `-e` has no value to redact and remains visible.
+fn redacted_tmux_args(args: &[&str]) -> (String, Vec<String>) {
+    let mut rendered = Vec::with_capacity(args.len());
+    let mut secrets = Vec::new();
+    let mut redact_next = false;
+    for arg in args {
+        if redact_next {
+            if let Some((name, value)) = arg.split_once('=') {
+                rendered.push(format!("{name}=<redacted>"));
+                if value.len() >= MIN_STDERR_SECRET_LEN {
+                    secrets.push(value.to_owned());
+                }
+            } else {
+                rendered.push(format!("{arg}=<redacted>"));
+            }
+            redact_next = false;
+        } else {
+            rendered.push((*arg).to_owned());
+            redact_next = *arg == "-e";
+        }
+    }
+    (format!("{rendered:?}"), secrets)
+}
+
+/// Replace long secret values in diagnostic text, longest first so overlapping
+/// values cannot make the result depend on their input order. A credential is
+/// never meaningfully protected by replacing a value shorter than eight bytes,
+/// while those values commonly occur in unrelated diagnostics (`1` in an exit
+/// status, for example), so the length floor avoids mangling useful text.
+fn scrub_secrets(text: &str, secrets: &[String]) -> String {
+    let mut secrets = secrets.to_vec();
+    secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    secrets.dedup();
+    secrets.iter().fold(text.to_owned(), |text, secret| {
+        text.replace(secret, "<redacted>")
+    })
 }
 
 impl TmuxDriver {
@@ -2069,7 +2127,7 @@ impl TmuxDriver {
             .context("list-clients timed out during the stale-control-client reap")?
             .context("running list-clients for the stale-control-client reap")?;
         if !out.status.success() {
-            let error = anyhow::Error::new(TmuxCommandFailure { stderr: out.stderr });
+            let error = anyhow::Error::new(TmuxCommandFailure::new(out.stderr, &[]));
             if self.is_definitively_empty(&error) {
                 return Ok(None);
             }
@@ -2161,24 +2219,23 @@ impl TmuxDriver {
         if !out.status.success() {
             // The human-readable message is layered on TOP of
             // `TmuxCommandFailure` via `.context(...)` rather than built by
-            // `bail!` directly, so that struct — carrying tmux's raw,
-            // unmodified stderr — survives as the root cause and stays
-            // reachable via `downcast_ref` at any depth (see its own docs).
+            // `bail!` directly. The argv and stderr in that message must be
+            // scrubbed because this chain is eventually rendered to the
+            // client, while the root cause keeps raw stderr for classifiers.
             // `{}`'s rendering of the returned error is unaffected: anyhow
             // displays only the outermost context by default, which is
             // exactly this formatted string, so every existing caller that
             // pattern-matches `e.to_string()` sees the same text as before.
-            // Context formatted BEFORE the move, so the raw stderr can be
-            // handed to `TmuxCommandFailure` without cloning the buffer.
+            let (rendered_args, secrets) = redacted_tmux_args(args);
+            let stderr = scrub_secrets(&String::from_utf8_lossy(&out.stderr), &secrets);
             let context = format!(
-                "tmux {:?} failed ({}): {}",
-                args,
+                "tmux {rendered_args} failed ({}): {}",
                 out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
+                stderr.trim()
             );
-            return Err(anyhow::Error::new(TmuxCommandFailure {
-                stderr: out.stderr,
-            }))
+            return Err(anyhow::Error::new(TmuxCommandFailure::new(
+                out.stderr, &secrets,
+            )))
             .context(context);
         }
         Ok(out.stdout)
@@ -3103,8 +3160,9 @@ impl TmuxDriver {
             let _ = child.kill().await;
             let _ = child.wait().await;
             let _ = stderr_task.await;
+            let (rendered_args, _) = redacted_tmux_args(args);
             anyhow::bail!(
-                "tmux {args:?} did not finish within {:?}",
+                "tmux {rendered_args} did not finish within {:?}",
                 self.pane_list_timeout
             );
         };
@@ -3115,15 +3173,17 @@ impl TmuxDriver {
         let stderr_bytes = stderr_task.await.unwrap_or_default();
         let status = child.wait().await.context("waiting for tmux to exit")?;
         if !status.success() {
+            let (rendered_args, secrets) = redacted_tmux_args(args);
+            let stderr = scrub_secrets(&String::from_utf8_lossy(&stderr_bytes), &secrets);
             let context = format!(
-                "tmux {:?} failed ({}): {}",
-                args,
+                "tmux {rendered_args} failed ({}): {}",
                 status,
-                String::from_utf8_lossy(&stderr_bytes).trim()
+                stderr.trim()
             );
-            return Err(anyhow::Error::new(TmuxCommandFailure {
-                stderr: stderr_bytes,
-            }))
+            return Err(anyhow::Error::new(TmuxCommandFailure::new(
+                stderr_bytes,
+                &secrets,
+            )))
             .context(context);
         }
         Ok(tail)
@@ -3591,6 +3651,96 @@ mod tests {
         assert!(
             !directory.exists(),
             "fixture directory must be released after teardown"
+        );
+    }
+
+    /// The rendered argv is allowed to identify which environment name was
+    /// passed, but must not expose any environment value. The separate secret
+    /// list is then used to scrub values tmux may echo in its stderr.
+    #[farhelm_testtrace::test]
+    fn tmux_failure_redaction_hides_environment_values_and_stderr_occurrences() {
+        let args = [
+            "new-window",
+            "-t",
+            "target",
+            "-e",
+            "FIRST=first-secret",
+            "-e",
+            "FARHELM_SESSION_TOKEN=token-secret",
+            "-e",
+            "SHORT=1",
+            "--",
+            "echo",
+            "verbatim",
+            "-e",
+        ];
+        let (rendered, secrets) = redacted_tmux_args(&args);
+        assert_eq!(
+            rendered,
+            "[\"new-window\", \"-t\", \"target\", \"-e\", \"FIRST=<redacted>\", \"-e\", \"FARHELM_SESSION_TOKEN=<redacted>\", \"-e\", \"SHORT=<redacted>\", \"--\", \"echo\", \"verbatim\", \"-e\"]"
+        );
+        assert_eq!(secrets, ["first-secret", "token-secret"]);
+        let scrubbed = scrub_secrets(
+            "tmux echoed token-secret and first-secret; exit status 1",
+            &secrets,
+        );
+        assert_eq!(
+            scrubbed,
+            "tmux echoed <redacted> and <redacted>; exit status 1"
+        );
+    }
+
+    /// Raw stderr remains the classifier input, but displaying the failure
+    /// must use its scrubbed copy because this text is part of the error chain
+    /// that can reach the helm's client.
+    #[farhelm_testtrace::test]
+    fn tmux_command_failure_displays_scrubbed_stderr_but_keeps_raw_stderr() {
+        let raw = b"can't use token-secret\n".to_vec();
+        let failure = TmuxCommandFailure::new(raw.clone(), &["token-secret".to_owned()]);
+        assert_eq!(format!("{failure}"), "can't use <redacted>");
+        assert_eq!(failure.stderr_trimmed(), "can't use token-secret");
+    }
+
+    /// A real `new-window` refusal must not return the session credential in
+    /// the rendered anyhow chain. This exercises the same tmux diagnostic that
+    /// the client sees when opening a tab fails, rather than testing only the
+    /// formatter in isolation.
+    #[farhelm_testtrace::test]
+    async fn new_window_failure_does_not_expose_session_token() {
+        let server = ScratchServer::start().await;
+        let session = "fh-redaction-missing";
+        assert!(
+            !server
+                .driver
+                .has_session(session)
+                .await
+                .expect("checking the absent session premise"),
+            "the failure test requires a session that does not exist"
+        );
+
+        let token = "SENTINEL-TOKEN-VALUE-0xDEADBEEF";
+        let error = server
+            .driver
+            .new_window(
+                session,
+                "/",
+                &[("FARHELM_SESSION_TOKEN".to_owned(), token.to_owned())],
+                &["true".to_owned()],
+            )
+            .await
+            .expect_err("new-window against an absent session must fail");
+        let message = format!("{error:#}");
+        assert!(
+            !message.contains(token),
+            "token leaked into error: {message}"
+        );
+        assert!(
+            message.contains("FARHELM_SESSION_TOKEN=<redacted>"),
+            "redacted assignment is missing: {message}"
+        );
+        assert!(
+            message.contains("can't find session") || message.contains("no current target"),
+            "tmux's diagnostic must remain useful: {message}"
         );
     }
 
