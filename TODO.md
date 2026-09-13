@@ -400,12 +400,6 @@ is safe. Each is its own review unit.
   incumbent; today's top rungs are additive, so the incumbent survives by luck. Fix: a `may_migrate` or read-only
   distinction on `open`, `false` from `show` or the token lock taken first, and corrected module docs. Fence: a
   mixed-version workflow item; do not declare incumbent breakage without an actual destructive crossed migration.
-- **Event-feed seats never reclaimed.** `A4-C7`. Medium, small, medium risk. `serve_events` (events.rs:204-236) has no
-  idle or ping arm, `WRITE_DEADLINE` bounds a blocked write rather than a dead peer, and no `SO_KEEPALIVE` is set, so a
-  subscriber lost without a FIN keeps its seat in the 64 cap for the helm's life; at 64 every new subscriber gets 503
-  and the fleet reverts to polling. Fix: an idle arm sending a Ping and ending the subscription when no Pong arrives by
-  the next interval; correct the module header's bounding claim. Fence: the ratchet is argued, not observed; the
-  64-enrollment decision does not excuse stale seats.
 - **Harness environment mutation.** `A4-T7`. Low, small, medium risk. `exposeHarnessDeviceSecret`
   (e2e/tests/helpers/device-auth.ts:63-65) assigns into `process.env` from a test-body path, against the standing rule
   in `.agents/test-authoring.md`. Fix: drop the env channel and read only the persisted storage state, after confirming
