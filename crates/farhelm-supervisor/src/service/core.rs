@@ -312,6 +312,14 @@ pub const AGENT_DELIVER_TIMEOUT: Duration = Duration::from_secs(5);
 /// ever be reached by something genuinely broken.
 pub const AGENT_FENCE_RETAIN_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// The maximum time a tab attach waits for the session lifecycle claim.
+///
+/// This is deliberately short because the claim is taken on the connection's
+/// shared read loop, while a stop or delete may hold it for a multi-second
+/// process sweep. A caller can retry after the conflict instead of queueing
+/// every other request on that connection behind the sweep.
+pub const TAB_ATTACH_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// The timeouts a `Supervisor` treats as "this consumer is gone, not
 /// merely slow".
 ///
@@ -381,6 +389,9 @@ pub struct SupervisorTimeouts {
     /// runtime is otherwise idle, so an unreachable value is an
     /// indefinitely parked test rather than a slow one.
     pub agent_fence_retain: Duration,
+    /// See [`TAB_ATTACH_LIFECYCLE_TIMEOUT`]: how long a tab attach may wait
+    /// for the session claim before returning a retryable conflict.
+    pub tab_attach_lifecycle: Duration,
 }
 
 impl Default for SupervisorTimeouts {
@@ -396,6 +407,7 @@ impl Default for SupervisorTimeouts {
             agent_upcall: AGENT_UPCALL_TIMEOUT,
             agent_deliver: AGENT_DELIVER_TIMEOUT,
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
+            tab_attach_lifecycle: TAB_ATTACH_LIFECYCLE_TIMEOUT,
         }
     }
 }

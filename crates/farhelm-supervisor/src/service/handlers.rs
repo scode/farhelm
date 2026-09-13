@@ -1440,7 +1440,31 @@ async fn handle_attach(
     // taking the claim for it would queue every ordinary attach
     // behind a multi-second stop or delete for no gain.
     let _lifecycle = match &terminal_id {
-        TerminalId::Tab(_) => Some(sup.lifecycle_locks.claim(&session_id).await),
+        TerminalId::Tab(_) => {
+            match tokio::time::timeout(
+                sup.timeouts.tab_attach_lifecycle,
+                sup.lifecycle_locks.claim(&session_id),
+            )
+            .await
+            {
+                Ok(claim) => Some(claim),
+                Err(_) => {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!(
+                                "session {} is being stopped or deleted; retry attaching",
+                                truncate_for_error(&session_id)
+                            ),
+                            kind: ErrorKind::Conflict,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
         TerminalId::Agent => None,
     };
     let entry = sup.sessions.lock().await.get(&session_id).cloned();
@@ -3439,7 +3463,7 @@ mod tests {
     use super::super::capture::{CaptureState, FirstInput};
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
-    use super::super::core::{ArchiveStage, SupervisorSeams};
+    use super::super::core::{ArchiveStage, SupervisorSeams, SupervisorTimeouts};
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
@@ -5482,6 +5506,90 @@ mod tests {
         };
         assert_eq!(kind, ErrorKind::InvalidRequest);
         assert!(message.contains("archived") && message.contains("restart"));
+    }
+
+    /// A tab attach must give the shared connection read loop back when a
+    /// lifecycle operation holds the session claim. The claim protects tab
+    /// resolution and takeover, but waiting for a stop or delete to finish
+    /// must not park unrelated requests on the same connection indefinitely.
+    #[farhelm_testtrace::test]
+    async fn tab_attach_lifecycle_claim_times_out_and_hands_off() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe_and_timeouts(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts {
+                tab_attach_lifecycle: Duration::from_secs(2),
+                ..SupervisorTimeouts::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        tokio::time::pause();
+        let held = sup.lifecycle_locks.claim("session-1").await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        let attach = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            async move {
+                handle_control(
+                    &sup,
+                    ControlMsg::Attach {
+                        req_id: 44,
+                        session_id: "session-1".to_string(),
+                        channel: 1,
+                        cols: 80,
+                        rows: 24,
+                        terminal: TerminalSelector::Tab {
+                            id: "tab-1".to_string(),
+                        },
+                        lease: "timeout-test".to_string(),
+                        if_unowned: false,
+                    },
+                    ConnectionCtx {
+                        tx: &tx,
+                        priority: &tx,
+                        input_routes: &mut input_routes,
+                        upload_routes: &mut no_uploads(),
+                        tasks: &mut tasks,
+                    },
+                )
+                .await;
+            }
+        });
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.lifecycle_locks.claims_reached_for_test("session-1", 2),
+        )
+        .await
+        .expect("the tab attach must reach the held lifecycle claim");
+
+        tokio::time::advance(Duration::from_secs(2)).await;
+        attach.await.expect("tab attach task must not panic");
+        let reply: ControlMsg = serde_json::from_slice(
+            &rx.recv()
+                .await
+                .expect("the timed-out attach must reply")
+                .body,
+        )
+        .expect("the attach reply must decode");
+        let ControlMsg::Error { kind, message, .. } = reply else {
+            panic!("a held lifecycle claim must produce an error reply");
+        };
+        assert_eq!(kind, ErrorKind::Conflict);
+        assert!(
+            message.contains("being stopped or deleted") && message.contains("retry"),
+            "the conflict must explain the retryable lifecycle race: {message}"
+        );
+
+        drop(held);
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            sup.lifecycle_locks.claim("session-1"),
+        )
+        .await
+        .expect("releasing the lifecycle operation must let a retry claim the session");
     }
 
     /// A session-authenticated peer has a SHORT list of operations, and a
