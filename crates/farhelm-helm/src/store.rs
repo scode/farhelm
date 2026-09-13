@@ -2780,10 +2780,17 @@ impl HelmStore {
                 rusqlite::params![device_hash.as_slice(), created_at],
             )
             .context("recording a device session")?;
+            // Eviction is by INSERTION order (`rowid`), never by the
+            // caller-supplied `created_at`: the row just inserted is the
+            // newest by construction and must survive its own exchange. A
+            // clock rollback, or a tie on `created_at` broken by the hash,
+            // would otherwise rank the fresh row past the cap and delete it
+            // in the same transaction that reports success, handing the
+            // browser a secret no later request can present.
             tx.execute(
                 "DELETE FROM device_sessions WHERE cookie_hash IN (\
                      SELECT cookie_hash FROM device_sessions \
-                     ORDER BY created_at DESC, cookie_hash DESC LIMIT -1 OFFSET ?1\
+                     ORDER BY rowid DESC LIMIT -1 OFFSET ?1\
                  )",
                 [i64::try_from(MAX_DEVICE_SESSIONS).expect("device-session cap fits i64")],
             )
@@ -8641,6 +8648,65 @@ mod tests {
                 .await
                 .unwrap(),
             "new-token"
+        );
+    }
+
+    /// The credential an exchange just issued must survive that exchange's
+    /// own cap eviction, whatever `created_at` it carries.
+    ///
+    /// Spec: with the cap already full, a successful exchange whose stamp is
+    /// OLDER than every stored row (a clock rollback) still leaves exactly
+    /// the cap's worth of rows, the new row among them, and the row evicted
+    /// is the one inserted first. Eviction therefore follows insertion
+    /// order, not the stamp: ranking by stamp would delete the fresh secret
+    /// in the same transaction that reports success, and the browser would
+    /// be handed a cookie no request can present.
+    #[farhelm_testtrace::test]
+    async fn device_exchange_never_evicts_the_credential_it_just_issued() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .web_token_or_insert("token".to_string(), 100)
+            .await
+            .unwrap();
+        for n in 0..MAX_DEVICE_SESSIONS {
+            let mut hash = [0u8; 32];
+            hash[0] = 1;
+            hash[1] = u8::try_from(n).expect("the cap fits one byte");
+            store
+                .insert_device_session(hash, 1_000 + n as i64)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            store.device_session_count().await.unwrap(),
+            MAX_DEVICE_SESSIONS,
+            "the fixture must start exactly at the cap"
+        );
+
+        let fresh = [9u8; 32];
+        // Older than every row already stored: the clock went backwards.
+        assert!(
+            store
+                .exchange_device_session("token".to_string(), fresh, 5)
+                .await
+                .unwrap(),
+            "a valid token must be accepted"
+        );
+
+        assert_eq!(
+            store.device_session_count().await.unwrap(),
+            MAX_DEVICE_SESSIONS,
+            "the cap holds by eviction"
+        );
+        assert!(
+            store.has_device_session(fresh).await.unwrap(),
+            "the credential just issued must be usable"
+        );
+        let mut first_inserted = [0u8; 32];
+        first_inserted[0] = 1;
+        assert!(
+            !store.has_device_session(first_inserted).await.unwrap(),
+            "the row inserted first is the one evicted"
         );
     }
 

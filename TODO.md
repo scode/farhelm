@@ -364,11 +364,6 @@ is safe. Each is its own review unit.
   it, distinguishing agent create and clone origin in `do_create_session`; reconcile the discovery and default prose and
   tests in the same change. Fence: a timestamp clamp is insufficient by design; keep profile-catalog discovery
   independent of default selection; its own review unit.
-- **Credential cap self-eviction.** `A6-C15`. Medium, small, medium risk. `exchange_device_session_inner` (helm
-  store.rs:2755-2769) inserts, then deletes rows past `OFFSET 64` ordered by `created_at DESC, cookie_hash DESC`, with
-  nothing excluding the new row, and returns `Ok(true)` regardless; a clock rollback or tie evicts the credential just
-  issued and hands the browser an unusable secret. Fix: order eviction by `rowid DESC` so insertion order decides,
-  keeping the offset. Fence: the cap must stay exactly 64; excluding the new row while keeping the offset leaves 65.
 - **Helm store resilience.** `A6-C13`, `A6-C4`, `A1-C14`. Medium and low, small. `HelmStore::profiles` (helm
   store.rs:5445-5460) collects decode results into one `Result`, so one undecodable stored row fails the catalogue read
   that host refresh and create reach through `load_profile_name_index`. `update_ssh_destination` (:3530-3562) runs the
