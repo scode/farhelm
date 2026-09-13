@@ -67,7 +67,7 @@ use super::connection::notify_detached;
 use super::core::{ArchiveStage, SessionEntry, Supervisor, unknown_pane_owner_refusal};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::status::session_status;
-use super::sweep::{ScopeUnits, SweepTarget, reap_process_tree};
+use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree};
 use super::terminals::{ActiveAttach, AttachmentKey};
 use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
@@ -301,6 +301,7 @@ impl Supervisor {
             root_pid,
             session_id,
             &SweepTarget::WholeSession,
+            ScopeKillFailure::Refuse,
         )
         .await
         .map_err(ArchiveError::Sweep)?;
@@ -646,6 +647,7 @@ impl Supervisor {
             root_pid,
             session_id,
             &SweepTarget::WholeSession,
+            ScopeKillFailure::Refuse,
         )
         .await
         .map_err(TeardownError::Sweep)?;
@@ -898,6 +900,200 @@ mod tests {
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::*;
     use crate::store::{LastOutcome, StoredSession};
+
+    /// Seed a terminal-less, scoped session so teardown tests can isolate the
+    /// cgroup verdict from tmux discovery and pane ownership.
+    async fn scoped_session(
+        scopes: crate::scope::ScopeManager,
+        id: &str,
+    ) -> (StateDir, Arc<Supervisor>, Arc<SessionEntry>) {
+        let state = StateDir::new();
+        let unit = crate::scope::unit_name(id, 0).expect("a UUID id must name a scope unit");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(scopes),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: true,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session row");
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        entry.scope = Some(unit);
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::clone(&entry));
+        (state, sup, entry)
+    }
+
+    /// The successful retry manager makes its recorded unit disappear after
+    /// the normal confirmation checks, matching a real collected scope.
+    fn working_scopes() -> crate::scope::ScopeManager {
+        crate::scope::ScopeManager::fake_vanishing(2, Arc::new(|_| {}))
+    }
+
+    /// A failed scope kill must block delete without discarding the only row
+    /// that can name the scope on a later retry.
+    #[farhelm_testtrace::test]
+    async fn delete_keeps_a_session_when_scope_kill_fails_and_retries() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (state, sup, entry) = scoped_session(
+            crate::scope::ScopeManager::fake_failing_kills(Arc::new(|_| {})),
+            &id,
+        )
+        .await;
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read seeded row")
+                .is_some()
+        );
+
+        let result = sup.teardown_session(&entry, &id).await;
+        assert!(matches!(result, Err(TeardownError::Sweep(_))));
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read retained row")
+                .is_some(),
+            "delete refusal must retain the durable row"
+        );
+        assert!(
+            sup.sessions.lock().await.contains_key(&id),
+            "delete refusal must retain the in-memory entry"
+        );
+        drop(sup);
+
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(working_scopes()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("working retry supervisor");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("retained row reloads into memory");
+        assert!(
+            sup.teardown_session(&entry, &id).await.is_ok(),
+            "a working scope manager must allow the retry"
+        );
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read deleted row")
+                .is_none(),
+            "the successful retry must remove the row"
+        );
+    }
+
+    /// Archive must not publish its archived flag after a failed scope kill;
+    /// retaining an ordinary row is what makes the same request retryable.
+    #[farhelm_testtrace::test]
+    async fn archive_keeps_a_session_unarchived_when_scope_kill_fails_and_retries() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (state, sup, entry) = scoped_session(
+            crate::scope::ScopeManager::fake_failing_kills(Arc::new(|_| {})),
+            &id,
+        )
+        .await;
+        let result = sup.teardown_for_archive(&entry, &id).await;
+        assert!(matches!(result, Err(ArchiveError::Sweep(_))));
+        assert!(
+            !sup.store
+                .session(&id)
+                .await
+                .expect("read retained archive row")
+                .expect("row must remain")
+                .archived,
+            "archive refusal must not publish the archived flag"
+        );
+        assert!(
+            sup.sessions.lock().await.contains_key(&id),
+            "archive refusal must retain the in-memory entry"
+        );
+        drop(sup);
+
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(working_scopes()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("working retry supervisor");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("retained row reloads into memory");
+        assert!(
+            sup.teardown_for_archive(&entry, &id).await.is_ok(),
+            "a working scope manager must allow the archive retry"
+        );
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read archived row")
+                .expect("archive must retain the row")
+                .archived,
+            "the successful retry must publish the archived flag"
+        );
+    }
 
     /// Archiving publishes a new entry that SHARES the run's live cells —
     /// here the two hook-diagnostic flags — with the entry it replaced.

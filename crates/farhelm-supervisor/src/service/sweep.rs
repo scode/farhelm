@@ -203,6 +203,20 @@ pub(crate) enum SweepTarget {
     Tab(String),
 }
 
+/// Selects whether a failed cgroup kill is diagnostic or blocks publication.
+///
+/// STOP and restart retain the process-tree sweep's original guarantee even
+/// when a manager operation fails. Delete and archive must also keep their
+/// row so the user can retry: a warning would otherwise publish success while
+/// a scrubbed daemon could remain reachable only through the cgroup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScopeKillFailure {
+    /// Preserve the sweep's result and report the scope failure in logs.
+    Warn,
+    /// Return an error after a successful sweep so teardown remains retryable.
+    Refuse,
+}
+
 impl SweepTarget {
     /// The tab id whose marker this sweep selects on, if any.
     fn selects_tab(&self) -> Option<&str> {
@@ -1114,6 +1128,7 @@ pub(crate) async fn reap_process_tree(
     root_pid: Option<u32>,
     session_id: &str,
     target: &SweepTarget,
+    scope_kill_failure: ScopeKillFailure,
 ) -> anyhow::Result<()> {
     // Captured BEFORE anything is killed, and this ordering is the whole
     // point of doing it here rather than inside the sweep: `kill_scope`
@@ -1187,17 +1202,24 @@ pub(crate) async fn reap_process_tree(
         kill_process_tree(root, session_id, target).await,
         scope_error,
     ) {
-        (Ok(()), Some(e)) => {
-            // The sweep proved the tree is gone, so this stop is complete
-            // by M2's own standard; the scope's trouble is worth knowing
-            // about but is not the user's problem.
-            warn!(
-                session = %session_id, error = %e,
-                "a cgroup scope could not be fully torn down, but the process-tree \
-                 sweep confirmed nothing is left running"
-            );
-            Ok(())
-        }
+        (Ok(()), Some(e)) => match scope_kill_failure {
+            ScopeKillFailure::Warn => {
+                // The sweep proved the tree is gone, so this stop is complete
+                // by M2's own standard; the scope's trouble is worth knowing
+                // about but is not the user's problem.
+                warn!(
+                    session = %session_id, error = %e,
+                    "a cgroup scope could not be fully torn down, but the process-tree \
+                     sweep confirmed nothing is left running"
+                );
+                Ok(())
+            }
+            ScopeKillFailure::Refuse => Err(anyhow::anyhow!(
+                "the process-tree sweep confirmed nothing is running, but the named cgroup \
+                 scope(s) could not be torn down ({e}); the session is kept so the operation \
+                 can be retried"
+            )),
+        },
         (Ok(()), None) => Ok(()),
         (Err(sweep), Some(e)) => Err(sweep.context(format!(
             "a cgroup scope also could not be fully torn down ({e})"
@@ -1461,6 +1483,7 @@ pub(crate) async fn stop_live_agent(
         root_pid,
         session_id,
         &SweepTarget::AgentOnly,
+        ScopeKillFailure::Warn,
     )
     .await
     .map_err(StopFailure::Sweep)?;
@@ -2118,6 +2141,7 @@ mod tests {
             None,
             &session_id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         .expect("the sweep must confirm the marked process is gone");
@@ -2183,6 +2207,7 @@ mod tests {
             None,
             &session_id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         .expect("an unconfirmed scope must not fail a stop the sweep confirmed");
@@ -2200,7 +2225,12 @@ mod tests {
     /// The failure mode this excludes is a stop that reports failure — and,
     /// through `StopFailure::Sweep`, refuses a restart — because a cgroup
     /// operation errored while the sweep it exists to reinforce succeeded
-    /// completely. The sweep's verdict is the whole answer.
+    /// completely. The sweep's verdict is the whole answer for WARN.
+    ///
+    /// The same fixture also checks REFUSE: delete and archive need the
+    /// cgroup error to remain visible after a clean sweep because they are
+    /// about to discard the row that would make a retry possible. The
+    /// refusal names the unit and says why the session stays retained.
     #[farhelm_testtrace::test]
     async fn a_broken_user_manager_never_fails_a_stop_the_sweep_confirmed() {
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -2215,6 +2245,7 @@ mod tests {
             None,
             &session_id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         .expect("a failing scope kill must not fail a stop the sweep confirmed");
@@ -2223,6 +2254,36 @@ mod tests {
             "the sweep must still have reaped the marked process"
         );
         let _ = child.wait();
+
+        let refusal_session_id = uuid::Uuid::new_v4().to_string();
+        let mut refusal_child = spawn_marked_process(&refusal_session_id);
+        let refusal_decoy = refusal_child.id();
+        let refusal_unit =
+            crate::scope::unit_name(&refusal_session_id, 0).expect("a UUID id must name a unit");
+        let error = reap_process_tree(
+            &scopes,
+            ScopeUnits::recorded(Some(refusal_unit.clone())),
+            None,
+            &refusal_session_id,
+            &SweepTarget::AgentOnly,
+            ScopeKillFailure::Refuse,
+        )
+        .await
+        .expect_err("refusal policy must preserve a failed scope-kill verdict");
+        let error = format!("{error:#}");
+        assert!(
+            error.contains(&refusal_unit),
+            "error must name the unit: {error}"
+        );
+        assert!(
+            error.contains("session is kept") && error.contains("retried"),
+            "error must explain retryability: {error}"
+        );
+        assert!(
+            marked_process_gone(refusal_decoy),
+            "the refusal must happen only after the process-tree sweep confirms gone"
+        );
+        let _ = refusal_child.wait();
     }
 
     /// A host with NO user manager must not be asked about derived scope
@@ -2261,6 +2322,7 @@ mod tests {
             None,
             &session_id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         .expect("scope names on a manager-less host must not fail a stop the sweep confirmed");
@@ -2299,9 +2361,16 @@ mod tests {
         let mut units = ScopeUnits::recorded(Some(recorded.clone()));
         units.extend_derived(vec![derived.clone()]);
 
-        reap_process_tree(&scopes, units, None, &session_id, &SweepTarget::AgentOnly)
-            .await
-            .expect("a fake scope that confirms gone must leave a successful sweep");
+        reap_process_tree(
+            &scopes,
+            units,
+            None,
+            &session_id,
+            &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
+        )
+        .await
+        .expect("a fake scope that confirms gone must leave a successful sweep");
 
         let observed = observed.lock().expect("op sink mutex poisoned");
         assert_eq!(
@@ -2343,6 +2412,7 @@ mod tests {
             None,
             &session_id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         .expect("the portable sweep remains complete when the re-probe stays negative");
@@ -2384,6 +2454,7 @@ mod tests {
             Some(gone_pid),
             &session_id,
             &SweepTarget::AgentOnly,
+            ScopeKillFailure::Warn,
         )
         .await
         .expect("a dead pane pid must not fail the sweep");

@@ -398,9 +398,6 @@ severity.
 Mechanism verified on main, but the fix touches lifecycle, locking, or the kill set, or needs a reproduction before it
 is safe. Each is its own review unit.
 
-- **Kill sweep cgroup verdict.** `A3-C13`. High, small, medium risk. A failed scope kill is downgraded to a warning even
-  for delete and archive, after which the row is removed and nothing can retry. Fix: return `Err` for delete and archive
-  on a scope-kill failure so the row stays retryable. Fence: stop and restart keep the warning.
 - **Real uid in the process walk.** `A3-C2` then `A3-C1`. High, small on macOS and medium on Linux, medium risk because
   widening the table widens the kill set. macOS `snapshot` (procs.rs:826) filters `kinfo_proc` rows by `cr_uid`, the
   effective uid, while `p_ruid` sits transcribed at :599 marked "never read"; Linux (procs.rs:391, :343) uses
