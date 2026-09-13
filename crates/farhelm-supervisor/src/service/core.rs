@@ -1086,8 +1086,14 @@ impl StateDirOwnership {
             .write(true)
             .open(&lock_path)
             .context("opening supervisor lock file")?;
-        if lock.try_lock().is_err() {
-            return Ok(None);
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(error).with_context(|| {
+                    format!("locking supervisor lock file {}", lock_path.display())
+                });
+            }
         }
         let owned = Arc::new(StateDirOwnership {
             path: path.clone(),
@@ -3748,6 +3754,19 @@ pub struct SupervisorStartup {
     pub boot_id_file: Option<PathBuf>,
 }
 
+/// Remove a socket left by a supervisor that no longer holds the state-dir
+/// lock. Missing paths are harmless because a concurrent cleanup can win the
+/// unlink race; other failures must remain visible so startup reports the
+/// filesystem problem rather than a misleading bind collision.
+async fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error)
+            .with_context(|| format!("removing stale supervisor socket {}", path.display())),
+    }
+}
+
 impl Supervisor {
     /// Read immediate child directories on this supervisor's filesystem.
     ///
@@ -5121,10 +5140,10 @@ impl Supervisor {
         self.capture_now().await;
         // Holding the lock proves any existing socket file is a leftover
         // from a dead supervisor (the lock dies with its process), so
-        // removing it is safe.
-        if path.exists() {
-            let _ = tokio::fs::remove_file(&path).await;
-        }
+        // removing it is safe. Do this unconditionally: an existence check
+        // is a TOCTOU race, and an unlink failure must name the real cause
+        // instead of being misreported by bind as address-in-use.
+        remove_stale_socket(&path).await?;
         let listener = UnixListener::bind(&path).context("binding supervisor socket")?;
         // Belt to the state dir's braces: connecting to this socket means
         // running commands as this user, so do not inherit the umask.
@@ -12552,6 +12571,42 @@ pub(crate) mod tests {
             session_status(&entry, &HashMap::new()).0,
             SessionStatus::Exited { exit_code: None },
             "it still classifies honestly for its own replies"
+        );
+    }
+
+    /// Stale-socket cleanup must distinguish an absent socket from a real
+    /// filesystem failure: startup can safely ignore a missing path, but an
+    /// unlink error is the only useful explanation for a bind that follows.
+    #[farhelm_testtrace::test]
+    async fn remove_stale_socket_handles_absent_removed_and_unlink_error_paths() {
+        let temp = tempfile::tempdir().expect("temporary socket directory");
+
+        let missing = temp.path().join("missing.sock");
+        remove_stale_socket(&missing)
+            .await
+            .expect("a missing stale socket is already removed");
+
+        let existing = temp.path().join("existing.sock");
+        tokio::fs::write(&existing, b"stale socket placeholder")
+            .await
+            .expect("create stale socket fixture");
+        remove_stale_socket(&existing)
+            .await
+            .expect("an existing stale socket should be removed");
+        assert!(!existing.exists(), "the stale socket file must be gone");
+
+        let parent_file = temp.path().join("parent-file");
+        tokio::fs::write(&parent_file, b"not a directory")
+            .await
+            .expect("create regular-file parent fixture");
+        let blocked = parent_file.join("socket.sock");
+        let error = remove_stale_socket(&blocked)
+            .await
+            .expect_err("a regular-file parent must make unlink fail");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains(&blocked.display().to_string()),
+            "the unlink error must name the socket path: {rendered}"
         );
     }
 

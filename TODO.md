@@ -397,11 +397,6 @@ severity.
   the pass is gated on `may_write`. Reproduced once by the investigation; its fix and test were reverted for scope. Fix:
   hoist the pane resolution above the early-continue and insert it into `found_panes`; gate the cleanup on `may_write`;
   optionally add delete's durable `tmux_name` fallback. Fence: leave the archived-row skip alone.
-- **Startup diagnostics.** `A5-C16`, `A5-C17`. Low, trivial. `try_lock().is_err()` (core.rs:1049) collapses a real flock
-  I/O error into "a supervisor is already running", and the stale-socket `remove_file` (core.rs:5085-5088) discards its
-  error so an unlink failure surfaces as `EADDRINUSE` on a directory this process just proved it owns. Fix: match
-  `WouldBlock` for contention and propagate `Error(e)` naming the lock path; remove unconditionally, treat `NotFound` as
-  success, propagate anything else with the socket path.
 - **Small contained items.** `A2-C3`, `A1-C9`, `A6-D26`. Low, trivial. `is_stale_generation`
   (release_payloads.rs:1020-1024) splits a name at `len - 12` bytes and panics on a non-boundary; the panic is contained
   by `spawn_blocking` but the `OnceCell` stays uninitialised so every download retries and fails while the entry exists.
