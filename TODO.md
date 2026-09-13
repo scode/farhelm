@@ -25,6 +25,50 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
   must not.
 
+- Let a confirmed-gone scope override a failed `systemctl kill` exit status. Observed on 0.6.0-rc.4: "Replace" on a
+  running claude session created the replacement and then refused to remove the original with "tearing down cgroup scope
+  ... Failed to send signal SIGKILL to auxiliary processes: Invalid argument", while the journal shows systemd killed
+  the process and retired the scope in the same second. Reproduced outside farhelm: on systemd 255 with cgroup v2,
+  `systemctl --user kill --signal=SIGKILL` on a scope holding a multithreaded process exits 1 with that message although
+  every process dies and the unit is collected (a single-threaded `sleep` exits 0). Every node-based agent is
+  multithreaded and claude does not exit within the 500 ms SIGTERM grace, so this is the common case for delete and
+  archive, and #597 turned what rc.3 logged as a warning into a refusal. Fix in `kill_scope` (sweep.rs): when
+  `confirm_scope_gone` succeeds, the SIGTERM/SIGKILL exit errors are stale information and the teardown is a success;
+  keep the refusal when the unit survives. Do not match the error string. Coverage to add with it: unit tests combining
+  `fake_failing_kills` with `fake_vanishing` (kills fail, unit vanishes, refuse policy succeeds; kills fail, unit stays,
+  refuse policy still refuses; the same pair under the warn policy); a scope-gated e2e delete and archive of a session
+  running a fake-agent script that ignores SIGTERM and spawns threads, asserting the row is gone and the scope retired;
+  and a scope-gated probe that SIGKILLs a multithreaded process through `ScopeManager::kill` and asserts the unit
+  retires regardless of exit status, with a docstring naming the systemd quirk so a later cleanup does not go back to
+  trusting the exit status.
+
+- Make the SIGTERM grace a bounded wait, then raise it to about 5 seconds. Do this after the scope-verdict fix above.
+  `KILL_GRACE` (sweep.rs) is an unconditional sleep in both `kill_scope` and `kill_process_tree`, and the two run
+  sequentially on a scoped stop, so every stop pays about a second even when the agent exits in 20 ms; raising the
+  constant as-is would slow every stop by the same amount. Poll instead: `kill_scope` on `exists` at the
+  `SCOPE_CONFIRM_POLL` cadence until the unit retires, `kill_process_tree` on its signalled pid set with the start-time
+  validation `confirm_gone` already does. Then a well-behaved agent ends the wait immediately and only one that ignores
+  SIGTERM pays the full window, which makes the SIGKILL path (and the systemd quirk above) the exception rather than the
+  norm for claude. NOTE: the process-tree side may end the grace early only when the ENTIRE enumerated set is gone, not
+  just the root; ending on a partial exit reopens the fork race the SIGSTOP quiesce fixpoint exists to close.
+
+- Fix the vertical misalignment inside the launch button. In the new-session dialog the bold "launch" verb sits visibly
+  lower than the lighter "host · folder" context beside it, so the two halves of one button read as two baselines. The
+  verb is the button's own text node and the context is the inline-block `.launch-composer-launch-context` span
+  (app.css, under `.launch-composer-actions .create-session-submit`), and an inline-block with `overflow: hidden` for
+  the ellipsis takes a different baseline from surrounding text. Likely fix is to make the button an inline-flex row
+  with `align-items: baseline` (or `center`, since the two weights share a font size) instead of relying on inline
+  baseline alignment; check the phone-width media query that lifts the width cap still wraps correctly.
+
+- Default the permissions choice to whatever was used last. When the structured composer opens, the permissions segment
+  always starts on "default", so someone who almost always launches with yolo re-picks it every time. Wanted: the last
+  permissions choice that actually launched becomes the preselected value on the next open, the same way the remembered
+  destination already carries over. NOTE: SPEC.md's launch-composer rule says absent optional choices mean the harness
+  defaults and that New does not preselect a harness or profile; preselecting a remembered permissions mode is a
+  deliberate change to that rule for this one choice and the spec must be updated in the same PR, with the harness and
+  model rules left as they are. Decide whether the memory is per harness or global (the yolo flag differs per harness
+  but the intent "skip permissions" is the same), and whether "reset choices" clears it.
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
