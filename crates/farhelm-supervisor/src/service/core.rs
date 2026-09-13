@@ -6210,6 +6210,57 @@ impl Supervisor {
         })
     }
 
+    /// Keep an ambiguously launched session operable after create returns
+    /// an error.
+    ///
+    /// Retaining the durable row is only half of fail-closed recovery. The
+    /// supervisor serves lifecycle operations from its in-memory map, so a
+    /// row left there without a matching entry hides the only handle that
+    /// can stop or delete an agent which may already be running. Every
+    /// create exit that retains such a row publishes through this helper.
+    ///
+    /// `terminal` is present only when the failed path already received a
+    /// pane from tmux. No discovery belongs here: an unknown pane stays
+    /// unknown, and Delete uses the row's durable tmux name to tear down a
+    /// terminal-less entry. `Launching` is likewise deliberate; the error
+    /// path has not established whether the agent started, only that it is
+    /// unsafe to discard its record.
+    async fn publish_retained_launch(
+        &self,
+        info: &SessionInfo,
+        terminal: Option<Terminal>,
+        snapshot: &IntegrationSnapshot,
+        canonical_cwd: &str,
+        generation: i64,
+        scope: Option<String>,
+    ) {
+        self.sessions.lock().await.insert(
+            info.id.clone(),
+            Arc::new(SessionEntry {
+                info: info.clone(),
+                terminal,
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Launching)),
+                snapshot: snapshot.clone(),
+                canonical_cwd: Some(canonical_cwd.to_string()),
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                    at: None,
+                    durable: true,
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                // The tmux error path does not return whether hook flags
+                // reached the attempted argv. This flag is diagnostic only,
+                // so an honest unknown is safer than arming its tripwire for
+                // a hook that may never have run.
+                hooked: hook_flag(false),
+                hook_warned: hook_flag(false),
+                activity: ActivitySample::unsampled(),
+                last_activity_at: activity_stamp(info.last_activity_at),
+                generation,
+                scope,
+            }),
+        );
+    }
+
     /// Perform one launch: the durable launching record, the launch spec,
     /// the tmux session, and the confirmation — under whatever the
     /// reservation table owes for it (see [`Reserved`]).
@@ -6310,14 +6361,18 @@ impl Supervisor {
         let mut title = title;
         let mut creation_seq = 0;
         let mut session_token = None;
+        let mut generation = 0;
+        let mut retry_intent_key = None;
         let id = reserved.session_id().to_string();
         let tmux_name = reserved.tmux_name().to_string();
         // Decided ONCE, here, and carried into every durable write below —
-        // never re-decided per write. A create's launch is generation 0 by
-        // construction (only a restart ever bumps it), so the unit name is
-        // fully determined at this point, and committing the selection with
-        // the launching row is what makes it survive a crash straddling the
-        // launch (PLAN_M3.md items 2 and 10).
+        // never re-decided per write. An ordinary create's launch is
+        // generation 0 by construction (only a restart allocates one), while
+        // a defensive keyed retry adopts the generation already in its row.
+        // The unit name is derived after that takeover decides which value
+        // applies. Committing this selection with the launching row is what
+        // makes it survive a crash straddling the launch (PLAN_M3.md items 2
+        // and 10).
         let scoped = self.scope_selected(&id).await;
         // Sampled HERE, after `scope_selected`'s await — not before it —
         // because that call's FIRST invocation anywhere in the process can
@@ -6345,24 +6400,12 @@ impl Supervisor {
         // retry's reply matches the row a concurrent `ListSessions` could
         // already have shown for it (`StoredSession::created_at`'s docs
         // again, for why that matters) — this is also why sampling here,
-        // slightly before the retry branch's OWN awaits
-        // (`clear_launch_artifacts_fail_closed`, `restart_pending_launch`),
-        // is safe: nothing on that path ever keeps this fallback value once
-        // a preserved timestamp is found.
+        // slightly before the retry branch's OWN takeover await is safe:
+        // nothing on that path keeps this fallback value once a preserved
+        // timestamp is found. Artifact cleanup happens only after that
+        // preserved state has been adopted.
         let mut created_at = now_unix();
-        let launch_scope = launch_scope_unit(&id, 0, scoped);
         if let Reserved::Retry(reservation) = reserved {
-            // Clear the interrupted attempt's leftovers before reusing its
-            // identities; `clear_launch_artifacts_fail_closed` carries the
-            // full argument for why this is fail-closed, and item 9's
-            // restart takes the same step for the same reason.
-            if let Err(e) = clear_launch_artifacts_fail_closed(&self.state_dir, &id, 0).await {
-                return Err(anyhow::anyhow!(
-                    "not relaunching intent key {}: {e}; the intent stays pending, so a \
-                     retry can resolve it once the cause is cleared",
-                    truncate_for_error(&reservation.intent_key)
-                ));
-            }
             // The atomic re-check of the decision that got us here: the
             // evidence was gathered a moment ago, and a delete or a
             // late-landing launch since then must win over it. See
@@ -6403,6 +6446,9 @@ impl Supervisor {
                 captured_record: None,
                 capture_ambiguous: false,
                 first_input_at: None,
+                // Fallback for the invariant-breaking no-row case. A row
+                // found by the transaction supplies its own generation and
+                // overwrites this value before reinsertion.
                 generation: 0,
                 launch_scoped: scoped,
                 source_profile: source_profile.clone(),
@@ -6468,11 +6514,14 @@ impl Supervisor {
                     creation_seq: preserved_sequence,
                     title: preserved_title,
                     session_token: preserved_token,
+                    generation: preserved_generation,
                 } => {
                     created_at = preserved;
                     creation_seq = preserved_sequence;
                     title = preserved_title;
                     session_token = Some(preserved_token);
+                    generation = preserved_generation;
+                    retry_intent_key = Some(reservation.intent_key.clone());
                 }
                 RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
                 RetryClaim::Launched => return self.settle_and_replay(reservation).await,
@@ -6570,6 +6619,95 @@ impl Supervisor {
                 }
             }
         }
+
+        let launch_scope = launch_scope_unit(&id, generation, scoped);
+        let info = SessionInfo {
+            parent,
+            archived: false,
+            id: id.clone(),
+            title,
+            // The same value just persisted: a fresh mint for a first-time
+            // insert, or — on a retry takeover — the crashed attempt's own
+            // PRESERVED value, reassigned from `RetryClaim::Acquired`
+            // above. Either way this is never a second, independently
+            // read clock value; see `StoredSession::created_at`'s docs for
+            // why a retry in particular must not re-mint.
+            created_at,
+            // Equal to `created_at` for a session that has produced
+            // nothing yet, which is what every create reply describes. The
+            // two only diverge once the ticker has watched this session's
+            // pane change.
+            last_activity_at: created_at,
+            creation_seq: Some(creation_seq),
+            cwd: cwd.to_string(),
+            // Keep the user-facing spelling above. This separate fact is
+            // the directory create actually accepted and persists with the
+            // row, so helm history never needs to resolve the path itself.
+            canonical_cwd: Some(canonical_cwd.clone()),
+            invocation: invocation.clone(),
+            resume_template: snapshot.resume_template.clone(),
+            launch,
+            // Create-time placeholder, deliberately NOT a live status:
+            // `SessionCreated`'s own docs say creation establishes that
+            // the session and terminal exist, not that the agent's later
+            // `exec` inside it succeeded — a fast-exiting command (a
+            // typo'd invocation, `true`, ...) can already be dead by the
+            // time this reply reaches the caller. `Unknown` is the
+            // honest "not yet computed" answer, exactly like
+            // `reload_sessions`'s own placeholder; `ListSessions` computes
+            // the real answer from tmux (`session_status`), and this
+            // value is never persisted (see `StoredSession`'s docs)
+            // either way.
+            status: SessionStatus::Unknown,
+            // No run has ended yet, so there is no stop annotation to
+            // carry (PLAN_M3.md item 4).
+            annotation: None,
+            // Computed honestly rather than defaulted, even though nothing
+            // can be captured at create time: a session created with an
+            // explicit placeholder-free template already has a real
+            // fallback to offer, and reporting `FreshOnly` for it would
+            // understate what restart could do from the very first reply.
+            restart_offer: snapshot.restart_offer(None),
+            // A brand-new session has no tabs; real tab creation lands in
+            // PLAN_M4.md step 4.
+            tabs: Vec::new(),
+            // The profile this create resolved, snapshotted once and never
+            // rewritten (PLAN_M6_75.md item 4). The existence beside it is
+            // a PLACEHOLDER here — like `status` above — because this value
+            // is what the published ENTRY carries, and an entry's existence
+            // is re-derived by every reply built from it. The reply this
+            // function returns derives its own below.
+            source_profile: source_profile.map(|profile| SourceProfile {
+                id: profile.id,
+                name: profile.name,
+                existence: ProfileExistence::Present,
+            }),
+        };
+
+        // The takeover must win before any artifact is removed. A late
+        // launch or delete can make `restart_pending_launch` refuse the
+        // takeover, and either winner still owns the previous attempt's
+        // files. Once acquired, cleanup is fail-closed before spawning on
+        // the generation-scoped paths the replacement row now records.
+        if let Some(intent_key) = retry_intent_key
+            && let Err(e) =
+                clear_launch_artifacts_fail_closed(&self.state_dir, &id, generation).await
+        {
+            self.publish_retained_launch(
+                &info,
+                None,
+                &snapshot,
+                &canonical_cwd,
+                generation,
+                launch_scope.clone(),
+            )
+            .await;
+            return Err(anyhow::anyhow!(
+                "not relaunching intent key {}: {e}; the intent stays pending, so a \
+                 retry can resolve it once the cause is cleared",
+                truncate_for_error(&intent_key)
+            ));
+        }
         // Deliberately BEFORE the cleanup-bearing paths below: a simulated
         // crash must leave the launching row (and its reservation) exactly
         // as a real one would, with nothing tidied up after it.
@@ -6583,7 +6721,7 @@ impl Supervisor {
             .spawn_agent(
                 &id,
                 &session_token,
-                0,
+                generation,
                 &tmux_name,
                 argv,
                 // The very snapshot the entry published below carries, so
@@ -6652,6 +6790,15 @@ impl Supervisor {
                         )
                         .await
                         {
+                            self.publish_retained_launch(
+                                &info,
+                                None,
+                                &snapshot,
+                                &canonical_cwd,
+                                generation,
+                                launch_scope.clone(),
+                            )
+                            .await;
                             return Err(error.context(format!(
                                 "and the failed launch's process tree could not be swept \
                                  ({sweep:#}), so session {id} is kept as a launching record \
@@ -6687,6 +6834,15 @@ impl Supervisor {
                              session {id} is kept as a launching record rather than deleted; \
                              stop or delete it to reap whatever is running there"
                         ));
+                        self.publish_retained_launch(
+                            &info,
+                            None,
+                            &snapshot,
+                            &canonical_cwd,
+                            generation,
+                            launch_scope.clone(),
+                        )
+                        .await;
                     }
                     Err(probe) => {
                         error = error.context(format!(
@@ -6694,6 +6850,15 @@ impl Supervisor {
                              ({probe:#}), so session {id} is kept as a launching record rather \
                              than deleted"
                         ));
+                        self.publish_retained_launch(
+                            &info,
+                            None,
+                            &snapshot,
+                            &canonical_cwd,
+                            generation,
+                            launch_scope.clone(),
+                        )
+                        .await;
                     }
                 }
                 return Err(error);
@@ -6709,69 +6874,6 @@ impl Supervisor {
         // reconcile.
         self.simulate_crash(CreateStage::DuringLaunch)?;
 
-        let info = SessionInfo {
-            parent,
-            archived: false,
-            id: id.clone(),
-            title,
-            // The same value just persisted: a fresh mint for a first-time
-            // insert, or — on a retry takeover — the crashed attempt's own
-            // PRESERVED value, reassigned from `RetryClaim::Acquired`
-            // above. Either way this is never a second, independently
-            // read clock value; see `StoredSession::created_at`'s docs for
-            // why a retry in particular must not re-mint.
-            created_at,
-            // Equal to `created_at` for a session that has produced
-            // nothing yet, which is what every create reply describes. The
-            // two only diverge once the ticker has watched this session's
-            // pane change.
-            last_activity_at: created_at,
-            creation_seq: Some(creation_seq),
-            cwd: cwd.to_string(),
-            // Keep the user-facing spelling above. This separate fact is
-            // the directory create actually accepted and persists with the
-            // row, so helm history never needs to resolve the path itself.
-            canonical_cwd: Some(canonical_cwd.clone()),
-            invocation: invocation.clone(),
-            resume_template: snapshot.resume_template.clone(),
-            launch,
-            // Create-time placeholder, deliberately NOT a live status:
-            // `SessionCreated`'s own docs say creation establishes that
-            // the session and terminal exist, not that the agent's later
-            // `exec` inside it succeeded — a fast-exiting command (a
-            // typo'd invocation, `true`, ...) can already be dead by the
-            // time this reply reaches the caller. `Unknown` is the
-            // honest "not yet computed" answer, exactly like
-            // `reload_sessions`'s own placeholder; `ListSessions` computes
-            // the real answer from tmux (`session_status`), and this
-            // value is never persisted (see `StoredSession`'s docs)
-            // either way.
-            status: SessionStatus::Unknown,
-            // No run has ended yet, so there is no stop annotation to
-            // carry (PLAN_M3.md item 4).
-            annotation: None,
-            // Computed honestly rather than defaulted, even though nothing
-            // can be captured at create time: a session created with an
-            // explicit placeholder-free template already has a real
-            // fallback to offer, and reporting `FreshOnly` for it would
-            // understate what restart could do from the very first reply.
-            restart_offer: snapshot.restart_offer(None),
-            // A brand-new session has no tabs; real tab creation lands in
-            // PLAN_M4.md step 4.
-            tabs: Vec::new(),
-            // The profile this create resolved, snapshotted once and never
-            // rewritten (PLAN_M6_75.md item 4). The existence beside it is
-            // a PLACEHOLDER here — like `status` above — because this value
-            // is what the published ENTRY carries, and an entry's existence
-            // is re-derived by every reply built from it. The reply this
-            // function returns derives its own below.
-            source_profile: source_profile.map(|profile| SourceProfile {
-                id: profile.id,
-                name: profile.name,
-                existence: ProfileExistence::Present,
-            }),
-        };
-
         // Launch confirmed: the pane exists, so the durable record moves
         // from launching to running and gains the pane id it could not
         // know before (PLAN_M3.md item 2's "confirmed running once the
@@ -6779,11 +6881,16 @@ impl Supervisor {
         // row would otherwise stay launching while a real agent runs under
         // it, and the caller would be told a create succeeded whose
         // terminal handle was never recorded — so the tmux session just
-        // created is torn back down (best effort) rather than left running
-        // and unlisted with no way for the caller to learn its id.
+        // created is torn back down (best effort). If teardown cannot prove
+        // it is gone, the launching row and entry remain as the caller's
+        // handle for stopping or deleting it.
         let confirmed = self
             .store
-            .transition(&id, 0, Transition::ConfirmRunning { pane: pane.clone() })
+            .transition(
+                &id,
+                generation,
+                Transition::ConfirmRunning { pane: pane.clone() },
+            )
             .await;
         if let Ok(None) = confirmed {
             // The row is GONE: a `DeleteSession` for this id resolved its
@@ -6892,7 +6999,7 @@ impl Supervisor {
                 warn!(
                     session = %id, error = %kill_err,
                     "could not kill tmux session after its DB insert failed; \
-                     it may now be running unlisted"
+                     the agent may still be running, so its launching record is retained"
                 );
                 result = result.context(format!(
                     "additionally, could not kill tmux session {tmux_name} for session {id} \
@@ -6920,6 +7027,19 @@ impl Supervisor {
             // rollback below also skips.
             if killed.is_ok() {
                 result = self.abandon_launching_record(reserved, result).await;
+            } else {
+                self.publish_retained_launch(
+                    &info,
+                    Some(Terminal {
+                        tmux_name: tmux_name.clone(),
+                        pane: pane.clone(),
+                    }),
+                    &snapshot,
+                    &canonical_cwd,
+                    generation,
+                    launch_scope.clone(),
+                )
+                .await;
             }
             return Err(result);
         }
@@ -6944,7 +7064,7 @@ impl Supervisor {
                 // What `spawn_agent` actually did to this launch's argv,
                 // recorded on the entry that describes that launch. A
                 // create publishes exactly once, so this is the only
-                // moment the flag can be set for generation 0.
+                // moment the flag can be set for its launch generation.
                 hooked: hook_flag(hooked),
                 hook_warned: hook_flag(false),
                 // The agent has printed nothing this supervisor has looked
@@ -6955,10 +7075,10 @@ impl Supervisor {
                 // just committed: all three say creation, because nothing
                 // has been seen happening here yet.
                 last_activity_at: activity_stamp(info.last_activity_at),
-                // A create is a session's FIRST launch by definition
-                // (`store::StoredSession::generation`); only a restart ever
-                // moves this off zero.
-                generation: 0,
+                // Normally zero because create is the first launch. A keyed
+                // retry defensively preserves any generation already stored
+                // rather than moving the durable fence backwards.
+                generation,
                 // Derived from the same selection the launching row
                 // committed above, not from a fresh probe: the entry must
                 // describe the launch that happened.
@@ -14788,7 +14908,9 @@ pub(crate) mod tests {
     /// removing the tmux binary from this supervisor's reach, which makes
     /// both the create AND the has-session probe that follows it fail;
     /// with the probe unable to confirm absence, the row must survive and
-    /// the error must say so.
+    /// the error must say so. The surviving row must also remain published:
+    /// lifecycle operations resolve through the in-memory map, so durability
+    /// alone would leave a possibly-running agent unlisted and unstoppable.
     #[farhelm_testtrace::test]
     async fn an_ambiguous_tmux_failure_keeps_the_launching_record() {
         let state = StateDir::new();
@@ -14842,6 +14964,10 @@ pub(crate) mod tests {
              agent; error was: {error:#}"
         );
         assert_eq!(rows[0].outcome, LastOutcome::Launching);
+        assert!(
+            sup.sessions.lock().await.contains_key(&rows[0].id),
+            "a retained launching row must stay listed so its possible agent can be stopped or deleted"
+        );
         let rendered = format!("{error:#}");
         assert!(
             rendered.contains("kept as a launching record"),
@@ -14970,7 +15096,9 @@ pub(crate) mod tests {
     /// process could not remove would leave the shim reading a file from a
     /// dead attempt — and a surviving sentinel would be read as evidence
     /// about a launch that has not happened yet. Failing closed leaves the
-    /// reservation pending, which is recoverable; launching anyway is not.
+    /// reservation pending, which is recoverable; the takeover must also
+    /// republish its entry after removing the old one, or Delete cannot use
+    /// that retained row to finish recovery. Launching anyway is not.
     #[farhelm_testtrace::test]
     async fn a_relaunch_refuses_to_start_over_artifacts_it_cannot_remove() {
         let state = StateDir::new();
@@ -15065,6 +15193,10 @@ pub(crate) mod tests {
                 .outcome,
             ReservationOutcome::Pending,
             "the intent stays reconcilable: nothing about it was resolved"
+        );
+        assert!(
+            sup.sessions.lock().await.contains_key("stranded"),
+            "a takeover that retains its row must restore the entry it removed"
         );
         assert!(
             sup.tmux
@@ -15475,9 +15607,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// A retry adopts the title its TAKEOVER preserved, not the one its
-    /// snapshot was resolved with — in the reply, in SQLite, and in the
-    /// entry the very next list is served from.
+    /// A retry adopts the title and generation its TAKEOVER preserved, not
+    /// the values its snapshot supplied — in the reply, in SQLite, and in
+    /// the entry the very next list is served from.
     ///
     /// A rename is the one field a user can change after creation, and a
     /// retry's takeover is a delete-and-reinsert. The store keeps the
@@ -15497,6 +15629,11 @@ pub(crate) mod tests {
     /// deterministic; the serialization that keeps a rename from landing
     /// LATER (between the takeover and the map removal) is the lifecycle
     /// claim `launch_reserved` holds across both.
+    ///
+    /// Generation is the durable fence for one launch. Although an ordinary
+    /// interrupted create uses zero, preserving a nonzero stored value here
+    /// prevents defensive recovery from moving that fence backwards and
+    /// makes the test distinguish preservation from another hard-coded zero.
     #[farhelm_testtrace::test]
     async fn a_retry_publishes_the_title_its_takeover_preserved() {
         let state = StateDir::new();
@@ -15526,7 +15663,7 @@ pub(crate) mod tests {
             captured_record: None,
             capture_ambiguous: false,
             first_input_at: None,
-            generation: 0,
+            generation: 7,
             launch_scoped: false,
             source_profile: None,
         };
@@ -15606,6 +15743,26 @@ pub(crate) mod tests {
             "as renamed",
             "and the entry the next list is served from must agree with the row, or the rename \
              looks reverted until the supervisor restarts"
+        );
+        let row = sup
+            .store
+            .session("stranded")
+            .await
+            .expect("read")
+            .expect("the takeover leaves a row");
+        assert_eq!(
+            row.generation, 7,
+            "the takeover must not move the durable generation fence backwards"
+        );
+        assert_eq!(
+            sup.sessions
+                .lock()
+                .await
+                .get("stranded")
+                .expect("the retry publishes an entry")
+                .generation,
+            7,
+            "the published entry must describe the generation the row and launch use"
         );
     }
 
