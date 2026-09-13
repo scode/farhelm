@@ -73,12 +73,16 @@ pub enum Script {
     /// idle until driven, which keeps the fixture deterministic instead of
     /// recursively creating descendants on launch.
     Spawn,
-    /// Like `Spawner`, but the child ignores SIGTERM — the acceptance
-    /// subject for the SIGKILL half of `kill_process_tree`'s sequence.
-    /// Its child writes `stubborn-ready` in the session's working
-    /// directory once the trap is actually installed, since a test
-    /// cannot otherwise observe when that has happened (the child's own
-    /// stdio is not connected to the terminal).
+    /// Like `Spawner`, but the child ignores SIGTERM (and the SIGHUP
+    /// cascade tmux sends the pane's process group once the pane process
+    /// dies, which would otherwise end it moments after the sweep's
+    /// SIGTERM anyway) — the acceptance subject for the SIGKILL half of
+    /// `kill_process_tree`'s sequence, and the fixture that holds a stop
+    /// inside its grace for the whole bound. Its child writes
+    /// `stubborn-ready` in the session's working directory once the trap
+    /// is actually installed, since a test cannot otherwise observe when
+    /// that has happened (the child's own stdio is not connected to the
+    /// terminal).
     SpawnerStubborn,
     /// The PANE PROCESS ITSELF — not a spawned child, and it spawns none
     /// — ignores SIGTERM and carries four extra sleeping threads. This is
@@ -306,7 +310,12 @@ pub fn run(
         Script::Spawner => spawn_and_echo("sleep 3600", "spawner"),
         Script::Spawn => spawn_session(),
         Script::SpawnerStubborn => spawn_and_echo(
-            "trap '' TERM; touch stubborn-ready; sleep 3600",
+            // HUP as well as TERM: the pane process itself dies to the
+            // sweep's SIGTERM, and tmux then SIGHUPs the pane's whole
+            // process group. A child that ignored only TERM died to that
+            // cascade a few milliseconds into the grace, which made it a
+            // fixture that survived SIGTERM in name only.
+            "trap '' TERM HUP; touch stubborn-ready; sleep 3600",
             "spawner-stubborn",
         ),
         Script::StubbornThreads => stubborn_threads(),

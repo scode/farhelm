@@ -26,10 +26,20 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
-/// Grace period between `SIGTERM` and the SIGSTOP-quiesce step in
-/// [`kill_process_tree`]. Long enough for a well-behaved agent (or an
-/// MCP/dev-server child) to run its own shutdown hooks; short enough that
-/// `stop`/`delete` still feel immediate to a human waiting on them.
+/// Upper bound on the wait between `SIGTERM` and the SIGSTOP-quiesce step
+/// in [`kill_process_tree`], and between `SIGTERM` and `SIGKILL` in
+/// [`kill_scope`]. An upper bound, not a duration: both waits poll their
+/// oracle (every signalled pid confirmed gone; the scope unit retired) and
+/// end the moment it answers, so a well-behaved agent that exits on
+/// SIGTERM costs a stop only as long as its own shutdown takes, and only
+/// an agent that ignores SIGTERM pays the whole window. That is what makes
+/// the window affordable at all: it is the time an MCP or dev-server child
+/// gets to run its shutdown hooks, and it is paid only by processes that
+/// use it. On the process-tree side the wait ends only when EVERY
+/// signalled pid is gone, never when the root alone is: the grace is owed
+/// to each process that received the SIGTERM, and a child still in its
+/// shutdown hooks when its parent exits would otherwise be frozen and
+/// killed mid-exit by the quiesce step that follows.
 const KILL_GRACE: Duration = Duration::from_millis(500);
 
 /// Bounds how many SIGSTOP-and-re-enumerate rounds
@@ -824,6 +834,38 @@ fn prioritize_quiesce_failure(errors: &mut Vec<String>, quiesce_growth: &[String
 /// the unexamined remainder as gone by default (the bug a bare
 /// `.unwrap_or_default()` on the task join would otherwise hide).
 async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<String> {
+    let (remaining, mut errors) = poll_until_gone(found, timeout).await;
+    errors.extend(
+        remaining
+            .keys()
+            .map(|&pid| format!("pid {pid} still alive {timeout:?} after SIGKILL")),
+    );
+    errors
+}
+
+/// The polling core of [`confirm_gone`], also used as the bounded SIGTERM
+/// grace in [`kill_process_tree`]: watch every identity in `found` until
+/// ALL of them are confirmed gone or `timeout` elapses, returning whoever
+/// is still there plus any read errors met along the way.
+///
+/// Survivors are returned, not reported: what a survivor MEANS depends on
+/// the phase. After SIGKILL it is a failure ([`confirm_gone`] says so);
+/// during the grace it is merely a process that has not finished with
+/// SIGTERM yet, and the caller goes on to the quiesce step. The all-or-
+/// nothing condition is the same in both phases and is load-bearing for
+/// the grace: the grace is owed to EVERY process that was signalled, so
+/// ending it because the root died while a child that received the same
+/// SIGTERM is still running its shutdown hooks would SIGSTOP and SIGKILL
+/// that child mid-exit, exactly what the grace exists to avoid. (A child
+/// forked after the enumeration is a different matter and is what the
+/// SIGSTOP-quiesce fixpoint after the grace handles, whatever this
+/// condition does.) A pid that cannot be read is kept in the set as well
+/// as reported, for the reason [`confirm_gone`]'s docs give: unknown is
+/// not gone.
+async fn poll_until_gone(
+    found: &HashMap<u32, u64>,
+    timeout: Duration,
+) -> (HashMap<u32, u64>, Vec<String>) {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut remaining = found.clone();
     let mut errors = Vec::new();
@@ -845,8 +887,13 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
                     // pid, or a zombie: all three are confirmed absence.
                     Ok(_) => {}
                     // A real read/parse problem: not confirmed either
-                    // way, and must not be silently counted as gone.
-                    Err(e) => poll_errors.push(format!("confirming pid {pid} is gone: {e}")),
+                    // way, so it stays in the polled set (an unreadable
+                    // pid must never end a wait early as if it were gone)
+                    // and is reported as an error besides.
+                    Err(e) => {
+                        poll_errors.push(format!("confirming pid {pid} is gone: {e}"));
+                        alive.insert(pid, starttime);
+                    }
                 }
             }
             (alive, poll_errors)
@@ -863,7 +910,7 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
                 errors.extend(remaining.keys().map(|&pid| {
                     format!("pid {pid} could not be confirmed gone: polling task panicked")
                 }));
-                return errors;
+                return (remaining, errors);
             }
         };
         errors.extend(poll_errors);
@@ -873,12 +920,7 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
         }
         tokio::time::sleep(KILL_CONFIRM_STEP).await;
     }
-    errors.extend(
-        remaining
-            .keys()
-            .map(|&pid| format!("pid {pid} still alive {timeout:?} after SIGKILL")),
-    );
-    errors
+    (remaining, errors)
 }
 
 /// Kill one terminal's entire process tree (SPEC.md: stop/delete reap the
@@ -889,7 +931,10 @@ async fn confirm_gone(found: &HashMap<u32, u64>, timeout: Duration) -> Vec<Strin
 ///
 /// 1. Enumerate (PPID closure from `root_pid` if any, unioned with the
 ///    environment-marker scan for `session_id`) and SIGTERM the result.
-/// 2. After a grace period, re-enumerate (seeded with everything round 1
+/// 2. After a grace period — bounded by [`KILL_GRACE`], ended early only
+///    once EVERY pid round 1 signalled is confirmed gone (see
+///    [`poll_until_gone`] for why the root alone dying is not enough) —
+///    re-enumerate (seeded with everything round 1
 ///    found, so a reparented survivor is not lost) and SIGSTOP it —
 ///    freezing every survivor before the fixpoint below closes the
 ///    fork-during-teardown race: a `SIGTERM` handler that forks a child
@@ -954,6 +999,22 @@ async fn kill_process_tree(
     session_id: &str,
     target: &SweepTarget,
 ) -> anyhow::Result<()> {
+    kill_process_tree_with_grace(root, session_id, target, KILL_GRACE).await
+}
+
+/// [`kill_process_tree`] with the SIGTERM grace bound as a parameter.
+///
+/// Production always passes [`KILL_GRACE`]; the parameter exists so a test
+/// can hand in a bound long enough that "the wait ended early" is a
+/// margin of seconds rather than a race against scheduler noise, and one
+/// short enough that "the wait ran its full length" does not slow the
+/// suite. Nothing else about the escalation varies with it.
+async fn kill_process_tree_with_grace(
+    root: Option<(u32, u64)>,
+    session_id: &str,
+    target: &SweepTarget,
+    grace: Duration,
+) -> anyhow::Result<()> {
     let mut errors: Vec<String> = Vec::new();
 
     // The root enters as a SEED — an identity, not a bare number — so it is
@@ -970,7 +1031,13 @@ async fn kill_process_tree(
     let mut found = enumerate_or_reuse(None, session_id, &seed, target, &mut errors).await;
     errors.extend(signal_all(&found.identities, libc::SIGTERM));
 
-    tokio::time::sleep(KILL_GRACE).await;
+    // The grace is a bounded wait on everything just signalled, not a
+    // fixed sleep: it ends as soon as every one of those pids is confirmed
+    // gone, and runs out the bound otherwise. Read errors met here are
+    // dropped on purpose — nothing is decided during the grace, and the
+    // post-SIGKILL confirmation re-reads every survivor and reports what it
+    // still cannot read then. An empty `found` ends the wait at once.
+    let _ = poll_until_gone(&found.identities, grace).await;
 
     found = enumerate_or_reuse(None, session_id, &found, target, &mut errors).await;
     errors.extend(signal_all(&found.identities, libc::SIGSTOP));
@@ -1132,7 +1199,7 @@ pub(crate) async fn reap_process_tree(
 ) -> anyhow::Result<()> {
     // Captured BEFORE anything is killed, and this ordering is the whole
     // point of doing it here rather than inside the sweep: `kill_scope`
-    // below sends SIGTERM and then sleeps out a grace period, during which
+    // below sends SIGTERM and then waits out a grace period, during which
     // the pane's process can die and the kernel can hand its number to
     // something unrelated. A bare pid read before that window and trusted
     // after it is exactly how a sweep signals a stranger.
@@ -1244,9 +1311,10 @@ const SCOPE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 /// Poll interval within [`SCOPE_CONFIRM_TIMEOUT`].
 const SCOPE_CONFIRM_POLL: Duration = Duration::from_millis(50);
 
-/// SIGTERM the whole scope, wait out the same grace the sweep gives,
-/// SIGKILL it, and confirm the unit actually went away — the existing
-/// escalation, mapped onto cgroup operations.
+/// SIGTERM the whole scope, wait up to the same grace the sweep gives for
+/// the unit to retire on its own, SIGKILL it if it has not, and confirm
+/// the unit actually went away — the existing escalation, mapped onto
+/// cgroup operations.
 ///
 /// The mapping is deliberately partial, and honestly so. `kill_process_tree`
 /// has five phases (TERM, grace, SIGSTOP-quiesce to a fixpoint, KILL,
@@ -1255,10 +1323,11 @@ const SCOPE_CONFIRM_POLL: Duration = Duration::from_millis(50);
 /// enumeration would miss, and a cgroup needs no enumeration — a child
 /// forked during teardown lands in the same cgroup its parent is in and
 /// dies to the same `systemctl kill`. Every other phase carries its
-/// meaning across: a well-behaved agent still gets [`KILL_GRACE`] to exit
-/// on SIGTERM before anything unkillable happens to it, and the unit's
-/// disappearance is confirmed rather than assumed, because `systemctl
-/// kill` returning only proves delivery.
+/// meaning across: a well-behaved agent still gets up to [`KILL_GRACE`]
+/// to exit on SIGTERM before anything unkillable happens to it (and the
+/// wait ends the moment the unit retires, so a quick exit costs a quick
+/// stop), and the unit's disappearance is confirmed rather than assumed,
+/// because `systemctl kill` returning only proves delivery.
 ///
 /// # Errors accumulate; nothing short-circuits
 ///
@@ -1310,6 +1379,18 @@ async fn kill_scope(
     unit: &str,
     session_id: &str,
 ) -> anyhow::Result<()> {
+    kill_scope_with_grace(scopes, unit, session_id, KILL_GRACE).await
+}
+
+/// [`kill_scope`] with the SIGTERM grace bound as a parameter, for the
+/// same reason [`kill_process_tree_with_grace`] has one: a test can make
+/// "ended early" and "ran the full bound" each unambiguous.
+async fn kill_scope_with_grace(
+    scopes: &crate::scope::ScopeManager,
+    unit: &str,
+    session_id: &str,
+    grace: Duration,
+) -> anyhow::Result<()> {
     // Two buckets on purpose. `advisory` holds what `systemctl` REPORTED
     // (a failed existence check, a non-zero kill exit); the confirmation
     // below decides whether those reports were about anything real.
@@ -1339,16 +1420,17 @@ async fn kill_scope(
     if let Err(e) = scopes.kill(unit, "SIGTERM").await {
         advisory.push(format!("{e:#}"));
     }
-    tokio::time::sleep(KILL_GRACE).await;
-    // Re-checked rather than killed unconditionally, unlike the sweep's own
-    // SIGKILL (which signals pids, where an already-dead one is a harmless
-    // ESRCH). Here the polite case is the COMMON case: an agent that exits
-    // on SIGTERM empties its cgroup, `--collect` retires the unit
-    // immediately, and a SIGKILL aimed at a retired unit is a hard
-    // `systemctl` error — which would make every clean stop report a scope
-    // failure. A check that itself fails falls through to the kill, since
-    // the honest response to "cannot tell" is to try.
-    if scopes.exists(unit).await.unwrap_or(true)
+    // The grace is a bounded wait for the unit to retire on its own, not a
+    // fixed sleep, and its final answer doubles as the re-check before
+    // SIGKILL. Re-checked rather than killed unconditionally, unlike the
+    // sweep's own SIGKILL (which signals pids, where an already-dead one is
+    // a harmless ESRCH): here the polite case is the COMMON case — an agent
+    // that exits on SIGTERM empties its cgroup, `--collect` retires the
+    // unit immediately, and a SIGKILL aimed at a retired unit is a hard
+    // `systemctl` error, which would make every clean stop report a scope
+    // failure. A check that itself fails counts as "still there", since the
+    // honest response to "cannot tell" is to try.
+    if !wait_for_scope_to_retire(scopes, unit, grace).await
         && let Err(e) = scopes.kill(unit, "SIGKILL").await
     {
         advisory.push(format!("{e:#}"));
@@ -1385,6 +1467,33 @@ async fn kill_scope(
                 summarize_errors(&errors)
             )
         }
+    }
+}
+
+/// Poll `unit`'s existence at the [`SCOPE_CONFIRM_POLL`] cadence until it
+/// is gone (`true`) or `timeout` elapses (`false`) — the SIGTERM grace of
+/// [`kill_scope`].
+///
+/// Unlike [`confirm_scope_gone`], a manager that cannot be asked is not an
+/// error here: nothing is decided during the grace except whether the
+/// SIGKILL is still needed, and "cannot tell" resolves to "send it", the
+/// direction that never leaves a live cgroup behind. The first check is
+/// immediate, so an agent that died to SIGTERM before this is even asked
+/// costs no wait at all.
+async fn wait_for_scope_to_retire(
+    scopes: &crate::scope::ScopeManager,
+    unit: &str,
+    timeout: Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if let Ok(false) = scopes.exists(unit).await {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(SCOPE_CONFIRM_POLL).await;
     }
 }
 
@@ -2189,10 +2298,10 @@ mod tests {
                 observed.lock().unwrap().push((op.clone(), alive));
             }) as crate::scope::ScopeOpSink
         };
-        // The unit survives the first two existence checks (the pre-TERM one
-        // and the pre-KILL one) and is gone by the third, which is the
-        // confirmation — the shape a real teardown produces.
-        let scopes = crate::scope::ScopeManager::fake_vanishing(2, sink);
+        // The unit outlives SIGTERM (so the grace runs its bound and the
+        // SIGKILL is sent) and retires once the SIGKILL has gone out — the
+        // shape a real teardown of a SIGTERM-ignoring agent produces.
+        let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGKILL", sink);
 
         let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
         reap_process_tree(
@@ -2207,30 +2316,8 @@ mod tests {
         .expect("the sweep must confirm the marked process is gone");
 
         let observed = observed.lock().expect("op sink mutex poisoned");
-        assert_eq!(
-            observed
-                .iter()
-                .map(|(op, _)| op.clone())
-                .collect::<Vec<_>>(),
-            vec![
-                // The availability probe comes first: reap consults it to
-                // decide whether the recorded names can have units behind
-                // them at all before asking the manager anything.
-                crate::scope::ScopeOp::Probe,
-                crate::scope::ScopeOp::Exists(unit.clone()),
-                crate::scope::ScopeOp::Kill {
-                    unit: unit.clone(),
-                    signal: "SIGTERM".to_string(),
-                },
-                crate::scope::ScopeOp::Exists(unit.clone()),
-                crate::scope::ScopeOp::Kill {
-                    unit: unit.clone(),
-                    signal: "SIGKILL".to_string(),
-                },
-                crate::scope::ScopeOp::Exists(unit.clone()),
-            ],
-            "the scope escalation must check existence, TERM, re-check, KILL, then confirm"
-        );
+        let ops: Vec<crate::scope::ScopeOp> = observed.iter().map(|(op, _)| op.clone()).collect();
+        assert_escalation_shape(&ops, &unit, true);
         assert!(
             observed.iter().all(|(_, alive)| *alive),
             "the sweep must not have run yet at any point during the scope kill: {observed:?}"
@@ -2423,30 +2510,244 @@ mod tests {
             });
 
             let observed = observed.lock().expect("op sink mutex poisoned");
-            assert_eq!(
-                *observed,
-                vec![
-                    crate::scope::ScopeOp::Probe,
-                    crate::scope::ScopeOp::Exists(unit.clone()),
-                    crate::scope::ScopeOp::Kill {
-                        unit: unit.clone(),
-                        signal: "SIGTERM".to_string(),
-                    },
-                    crate::scope::ScopeOp::Exists(unit.clone()),
-                    crate::scope::ScopeOp::Kill {
-                        unit: unit.clone(),
-                        signal: "SIGKILL".to_string(),
-                    },
-                    crate::scope::ScopeOp::Exists(unit.clone()),
-                ],
-                "failing kill reports must not short-circuit the escalation under {policy:?}"
-            );
+            assert_escalation_shape(&observed, &unit, true);
             assert!(
                 marked_process_gone(decoy),
                 "the backstop sweep must still have reaped the marked process under {policy:?}"
             );
             let _ = child.wait();
         }
+    }
+
+    /// Assert the ORDER of a scope escalation without pinning how many times
+    /// it asked whether the unit still exists: probe first, then an
+    /// existence check, SIGTERM, at least one check during the grace, then
+    /// (when `expect_sigkill`) SIGKILL followed by at least one confirming
+    /// check — or, when the unit retired on SIGTERM, no SIGKILL at all.
+    ///
+    /// The count is deliberately not asserted: the grace polls until the
+    /// unit retires or the bound elapses, so the number of checks between
+    /// TERM and KILL is a function of timing, and a test that pinned it
+    /// would flake on a loaded host without testing anything the order
+    /// does not already test.
+    fn assert_escalation_shape(ops: &[crate::scope::ScopeOp], unit: &str, expect_sigkill: bool) {
+        use crate::scope::ScopeOp;
+        let kill_of = |signal: &str| ScopeOp::Kill {
+            unit: unit.to_string(),
+            signal: signal.to_string(),
+        };
+        assert_eq!(
+            ops.first(),
+            Some(&ScopeOp::Probe),
+            "the availability probe must come before any manager operation: {ops:?}"
+        );
+        let term = ops
+            .iter()
+            .position(|op| *op == kill_of("SIGTERM"))
+            .unwrap_or_else(|| panic!("SIGTERM must be sent: {ops:?}"));
+        assert!(
+            ops[1..term].contains(&ScopeOp::Exists(unit.to_string())),
+            "existence must be checked before SIGTERM: {ops:?}"
+        );
+        let kill = ops.iter().position(|op| *op == kill_of("SIGKILL"));
+        match (expect_sigkill, kill) {
+            (true, Some(kill)) => {
+                assert!(kill > term, "SIGKILL must follow SIGTERM: {ops:?}");
+                assert!(
+                    ops[term + 1..kill].contains(&ScopeOp::Exists(unit.to_string())),
+                    "the grace must re-check existence before SIGKILL: {ops:?}"
+                );
+                assert!(
+                    ops[kill + 1..].contains(&ScopeOp::Exists(unit.to_string())),
+                    "the unit's disappearance must be confirmed after SIGKILL: {ops:?}"
+                );
+            }
+            (true, None) => panic!("SIGKILL must be sent when the unit outlives SIGTERM: {ops:?}"),
+            (false, Some(_)) => {
+                panic!("a unit that retired on SIGTERM must not be SIGKILLed: {ops:?}")
+            }
+            (false, None) => assert!(
+                ops[term + 1..].contains(&ScopeOp::Exists(unit.to_string())),
+                "the unit's disappearance must be observed after SIGTERM: {ops:?}"
+            ),
+        }
+        let sent = |signal: &str| ops.iter().filter(|op| **op == kill_of(signal)).count();
+        assert_eq!(sent("SIGTERM"), 1, "exactly one SIGTERM: {ops:?}");
+        assert!(sent("SIGKILL") <= 1, "at most one SIGKILL: {ops:?}");
+    }
+
+    /// An agent that exits on SIGTERM ends the scope grace the moment its
+    /// unit retires: no SIGKILL is sent, and the stop returns long before
+    /// the grace bound — the whole reason the grace is a bounded wait
+    /// rather than a fixed sleep.
+    ///
+    /// Specified with a bound of several seconds so the assertion "returned
+    /// well inside it" is a margin of seconds, not a race against the
+    /// scheduler; the production bound is [`KILL_GRACE`] and is not what
+    /// this test is about.
+    #[farhelm_testtrace::test]
+    async fn a_scope_that_retires_on_sigterm_ends_the_grace_early_without_a_sigkill() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let observed: Arc<std::sync::Mutex<Vec<crate::scope::ScopeOp>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", sink);
+        // The probe is what `reap_process_tree` would run first; it is run
+        // here so the recorded shape matches the other escalation tests.
+        assert!(scopes.available().await, "the fake must probe available");
+        let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+
+        let grace = Duration::from_secs(5);
+        let started = tokio::time::Instant::now();
+        kill_scope_with_grace(&scopes, &unit, &session_id, grace)
+            .await
+            .expect("a unit that retired on SIGTERM is a clean teardown");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < grace / 2,
+            "the grace must end as soon as the unit retires, but the teardown took {elapsed:?} \
+             against a {grace:?} bound"
+        );
+        let observed = observed.lock().expect("op sink mutex poisoned");
+        assert_escalation_shape(&observed, &unit, false);
+    }
+
+    /// A unit that outlives SIGTERM makes the scope grace run its whole
+    /// bound before the SIGKILL: the early exit is for a retired unit
+    /// only, never for impatience.
+    #[farhelm_testtrace::test]
+    async fn a_scope_that_outlives_sigterm_waits_the_whole_grace_before_the_sigkill() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let observed: Arc<std::sync::Mutex<Vec<crate::scope::ScopeOp>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let observed = Arc::clone(&observed);
+            Arc::new(move |op: &crate::scope::ScopeOp| {
+                observed.lock().unwrap().push(op.clone());
+            }) as crate::scope::ScopeOpSink
+        };
+        let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal("SIGKILL", sink);
+        assert!(scopes.available().await, "the fake must probe available");
+        let unit = crate::scope::unit_name(&session_id, 0).expect("a UUID id must name a unit");
+
+        let grace = Duration::from_millis(300);
+        let started = tokio::time::Instant::now();
+        kill_scope_with_grace(&scopes, &unit, &session_id, grace)
+            .await
+            .expect("a unit that retired on SIGKILL is a clean teardown");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= grace,
+            "the SIGKILL must not be sent before the grace bound elapses, but the teardown took \
+             only {elapsed:?} against a {grace:?} bound"
+        );
+        let observed = observed.lock().expect("op sink mutex poisoned");
+        assert_escalation_shape(&observed, &unit, true);
+    }
+
+    /// The process-tree grace ends early only when EVERY signalled pid is
+    /// gone — a set with one survivor waits the whole bound even though the
+    /// other member died at once — and a set that all died ends it at once.
+    ///
+    /// This pins [`poll_until_gone`]'s all-or-nothing condition directly,
+    /// because the grace is owed to every signalled process: ending it
+    /// because the root died while a child is still in its shutdown hooks
+    /// would hand that child to the SIGSTOP-quiesce step mid-exit. Nothing
+    /// is signalled in this test, so the survivor is simply a sleeper that
+    /// is still running; the "prompt" member is killed and reaped by the
+    /// test itself before the poll starts.
+    #[farhelm_testtrace::test]
+    async fn the_process_tree_grace_waits_for_the_whole_set_not_just_the_root() {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut survivor = spawn_marked_process(&session_id);
+        let mut prompt = spawn_marked_process(&session_id);
+        let identity = |pid: u32| -> (u32, u64) {
+            match procs::read_process(pid) {
+                Ok(Some((_, starttime, _))) => (pid, starttime),
+                other => panic!("test setup: reading pid {pid}: {other:?}"),
+            }
+        };
+        let survivor_id = identity(survivor.id());
+        let prompt_id = identity(prompt.id());
+        prompt
+            .kill()
+            .expect("test setup: SIGKILL the prompt member");
+        let _ = prompt.wait();
+        assert!(
+            marked_process_gone(prompt.id()),
+            "test setup: the prompt member must be gone before the poll starts"
+        );
+
+        let found: HashMap<u32, u64> = [survivor_id, prompt_id].into_iter().collect();
+        let grace = Duration::from_millis(300);
+        let started = tokio::time::Instant::now();
+        let (remaining, errors) = poll_until_gone(&found, grace).await;
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= grace,
+            "one survivor must hold the grace to its bound, but it ended after {elapsed:?}"
+        );
+        assert_eq!(
+            remaining.keys().copied().collect::<Vec<_>>(),
+            vec![survivor_id.0],
+            "only the live survivor may remain"
+        );
+        assert!(errors.is_empty(), "no read errors expected: {errors:?}");
+
+        survivor.kill().expect("cleanup: SIGKILL the survivor");
+        let _ = survivor.wait();
+        let found: HashMap<u32, u64> = [survivor_id, prompt_id].into_iter().collect();
+        let bound = Duration::from_secs(5);
+        let started = tokio::time::Instant::now();
+        let (remaining, _) = poll_until_gone(&found, bound).await;
+        assert!(
+            remaining.is_empty(),
+            "everything is gone now: {remaining:?}"
+        );
+        assert!(
+            started.elapsed() < bound / 2,
+            "an all-gone set must end the wait at once"
+        );
+    }
+
+    /// End to end through [`kill_process_tree_with_grace`]: a marked process
+    /// that dies to SIGTERM is reaped well inside a long grace bound, so a
+    /// well-behaved agent's stop costs its own exit time and no more.
+    ///
+    /// The exit signal is asserted too: a sweep that ended the grace early
+    /// for the wrong reason and SIGKILLed the process would also finish
+    /// fast, and only the child's own exit status tells the two apart.
+    #[farhelm_testtrace::test]
+    async fn a_tree_that_dies_to_sigterm_is_reaped_well_inside_the_grace_bound() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let mut child = spawn_marked_process(&session_id);
+        let grace = Duration::from_secs(5);
+        let started = tokio::time::Instant::now();
+        kill_process_tree_with_grace(None, &session_id, &SweepTarget::AgentOnly, grace)
+            .await
+            .expect("the sweep must confirm the marked process gone");
+        let elapsed = started.elapsed();
+        assert!(
+            marked_process_gone(child.id()),
+            "the marked process must have been reaped"
+        );
+        assert!(
+            elapsed < grace / 2,
+            "a process that exits on SIGTERM must not pay the grace bound, but the sweep took \
+             {elapsed:?} against a {grace:?} bound"
+        );
+        let status = child.wait().expect("reaping the marked process");
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGTERM),
+            "the process must have died to the SIGTERM, not to a premature SIGKILL: {status:?}"
+        );
     }
 
     /// A host with NO user manager must not be asked about derived scope
@@ -2590,7 +2891,7 @@ mod tests {
     /// A scope kill must never leave the sweep seeding itself from a pid the
     /// kill's own grace window let the kernel recycle.
     ///
-    /// The window is real: `kill_scope` sends SIGTERM and sleeps out
+    /// The window is real: `kill_scope` sends SIGTERM and waits up to
     /// [`KILL_GRACE`], and the pane's process is precisely the one most
     /// likely to die inside it. Passing a bare pid through that window and
     /// then walking the PPID closure from it would mean sweeping — and

@@ -4523,6 +4523,16 @@ async fn stop_kills_the_whole_process_tree() {
 /// forever under a SIGTERM-only kill, so its death here is what pins the
 /// escalation actually runs, not just that SIGTERM is sent.
 ///
+/// Which escalation depends on the host: under a systemd user manager
+/// (this project's development hosts and the release gate) the plain
+/// harness launches in a cgroup scope and it is `kill_scope`'s grace and
+/// `systemctl kill`'s SIGKILL that end the child; without a manager it is
+/// `kill_process_tree`'s. The observables are the same either way. The
+/// child ignores HUP as well as TERM on purpose: before it did, on a
+/// manager host it died to the pty hangup moments after the pane process,
+/// the scope retired inside the grace, and this test passed without any
+/// SIGKILL ever being sent.
+///
 /// Waits for `stubborn-ready` (written by the child itself, AFTER
 /// installing the trap) before stopping — without that wait, a stop
 /// racing the child's own startup could catch it before `trap ''` has
@@ -4553,6 +4563,12 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
+    // The child ignores HUP as well as TERM, and an ignored disposition
+    // survives exec into its `sleep`, so nothing but SIGKILL ends it: a
+    // failure before the stop below would otherwise leak the pair for an
+    // hour. The guard's start-time check keeps it harmless after a
+    // successful stop has already reaped and recycled the pid.
+    let _child_cleanup = PidKillGuard::arm(child_pid);
     wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
@@ -4565,10 +4581,20 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
 /// `DeleteSession` (`service.rs`'s `handle_control`, per those arms' own
 /// comments): a slow one in flight must not stall a cheap, unrelated
 /// request on the SAME connection behind it. `stop_session` against a
-/// `spawner` session is the slow one here — `kill_process_tree`'s grace
-/// period alone is half a second, before quiesce and kill-confirmation
-/// even start — and an unknown-session `attach` is about as cheap as a
-/// request gets: one lock-guarded map lookup, no tmux call at all.
+/// `spawner-stubborn` session is the slow one here: its child ignores
+/// SIGTERM (and SIGHUP), so the stop waits out its whole grace before the
+/// SIGKILL — `kill_scope`'s grace under a systemd user manager,
+/// `kill_process_tree`'s where there is none; either ends early only once
+/// EVERY signalled process is gone, and this child never is until the
+/// SIGKILL.
+/// An unknown-session `attach` is about as cheap as a request gets: one
+/// lock-guarded map lookup, no tmux call at all.
+///
+/// The observable that teardown has BEGUN is the pane process's own death:
+/// the fake agent itself dies to the SIGTERM within milliseconds, while
+/// the stubborn child keeps the stop in flight for the rest of the grace.
+/// A plain `spawner` child would not do: it dies to SIGTERM too, which
+/// ends the grace at once and leaves no window for the cheap request.
 ///
 /// Reverting the handlers to plain inline `await`s would fail this: the
 /// connection's single serial read loop would not even read the attach
@@ -4582,7 +4608,7 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         .client
         .create_session(
             &work.path().to_string_lossy(),
-            &agent_cmd("internal fake-agent --script spawner"),
+            &agent_cmd("internal fake-agent --script spawner-stubborn"),
             None,
             80,
             24,
@@ -4596,12 +4622,22 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         .expect("attach");
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    // Written by the child AFTER its trap is installed: a stop racing the
+    // child's own startup would otherwise kill it the ordinary way and end
+    // the grace at once, silently removing the window this test needs.
+    wait_for_file(&work.path().join("stubborn-ready"), 10).await;
 
+    let self_pid = extract_pid(&seen, "SELF-PID:");
     let child_pid = extract_pid(&seen, "CHILD-PID:");
+    let _child_cleanup = PidKillGuard::arm(child_pid);
 
     assert!(
+        observed_process_can_run(self_pid).await,
+        "test setup: the pane process must be alive before stop"
+    );
+    assert!(
         observed_process_can_run(child_pid).await,
-        "test setup: the published spawner child must be alive before stop"
+        "test setup: the published stubborn child must be alive before stop"
     );
 
     // Kick off the slow stop without awaiting it yet.
@@ -4617,12 +4653,17 @@ async fn cheap_request_completes_before_a_slow_spawned_handler_in_flight() {
         stop_done_writer.store(true, Ordering::SeqCst);
     });
 
-    // The fixture's long-lived child cannot exit normally during this
-    // test. Its death proves the server has started teardown, whereas
-    // spawning the client task proves nothing about server dispatch.
-    // Keep both completion assertions: death alone does not prove that
-    // stop remains in flight while the cheap request is handled.
-    wait_for_observed_process_exit(child_pid).await;
+    // The pane process cannot exit normally during this test, so its death
+    // proves the server has started teardown (spawning the client task
+    // proves nothing about server dispatch), while the stubborn child is
+    // what keeps that teardown in flight. Keep both completion assertions:
+    // the death alone does not prove that stop remains in flight while the
+    // cheap request is handled.
+    wait_for_observed_process_exit(self_pid).await;
+    assert!(
+        observed_process_can_run(child_pid).await,
+        "test setup: the stubborn child must still be alive, holding the stop in its grace"
+    );
     assert!(
         !stop_done.load(Ordering::SeqCst),
         "test setup: the slow stop must still be in flight at this point"

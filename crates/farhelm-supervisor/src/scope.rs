@@ -473,6 +473,17 @@ impl ScopeManager {
             .vanishing_after_signal("SIGKILL")
     }
 
+    /// A test double whose kills succeed and whose units retire once
+    /// `signal` (`"SIGTERM"` or `"SIGKILL"`) has been sent to them: an agent
+    /// that exits politely, or one that dies only to the unignorable signal.
+    /// Keyed on the event rather than a check count because the SIGTERM
+    /// grace polls existence a timing-dependent number of times.
+    #[cfg(test)]
+    pub fn fake_vanishing_after_signal(signal: &'static str, sink: ScopeOpSink) -> ScopeManager {
+        ScopeManager::fake_with(vec![true], false, None, Vec::new(), sink)
+            .vanishing_after_signal(signal)
+    }
+
     /// Make a fake's units retire once `signal` has been sent to them; see
     /// the `vanishes_after_signal` field.
     #[cfg(test)]
