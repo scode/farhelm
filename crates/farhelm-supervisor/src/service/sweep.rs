@@ -40,7 +40,14 @@ use tracing::{debug, info, warn};
 /// to each process that received the SIGTERM, and a child still in its
 /// shutdown hooks when its parent exits would otherwise be frozen and
 /// killed mid-exit by the quiesce step that follows.
-const KILL_GRACE: Duration = Duration::from_millis(500);
+///
+/// Five seconds, up from the half-second the fixed sleep could afford:
+/// claude does not finish its own SIGTERM handling within half a second,
+/// so with the shorter bound nearly every delete of a claude session
+/// reached the SIGKILL — and, on systemd 255, the exit-status quirk that
+/// rides on it (see [`kill_scope`]). A polite exit still ends the wait
+/// at once; only an agent that ignores SIGTERM pays the full five.
+const KILL_GRACE: Duration = Duration::from_secs(5);
 
 /// Bounds how many SIGSTOP-and-re-enumerate rounds
 /// [`kill_process_tree`]'s quiesce fixpoint runs before giving up on
@@ -1376,6 +1383,13 @@ const SCOPE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(2);
 /// Poll interval within [`SCOPE_CONFIRM_TIMEOUT`].
 const SCOPE_CONFIRM_POLL: Duration = Duration::from_millis(50);
 
+/// Poll interval of the SIGTERM grace in [`kill_scope`]. Coarser than
+/// [`SCOPE_CONFIRM_POLL`] because every poll is a `systemctl` process,
+/// and a grace that runs out (an agent that ignores SIGTERM) would at the
+/// confirmation cadence spawn a hundred of them per stop; a stop that ends
+/// up to 200 ms after the unit retired is not a latency anyone notices.
+const SCOPE_GRACE_POLL: Duration = Duration::from_millis(200);
+
 /// SIGTERM the whole scope, wait up to the same grace the sweep gives for
 /// the unit to retire on its own, SIGKILL it if it has not, and confirm
 /// the unit actually went away — the existing escalation, mapped onto
@@ -1545,7 +1559,7 @@ async fn kill_scope_with_grace(
     }
 }
 
-/// Poll `unit`'s existence at the [`SCOPE_CONFIRM_POLL`] cadence until it
+/// Poll `unit`'s existence at the [`SCOPE_GRACE_POLL`] cadence until it
 /// is gone (`true`) or `timeout` elapses (`false`) — the SIGTERM grace of
 /// [`kill_scope`].
 ///
@@ -1568,7 +1582,7 @@ async fn wait_for_scope_to_retire(
         if tokio::time::Instant::now() >= deadline {
             return false;
         }
-        tokio::time::sleep(SCOPE_CONFIRM_POLL).await;
+        tokio::time::sleep(SCOPE_GRACE_POLL).await;
     }
 }
 

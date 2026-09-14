@@ -329,10 +329,11 @@ pub fn run(
             // (an assertion panic, say) cannot leak processes that run
             // indefinitely; the e2e test's own drop guard is the primary
             // cleanup, this is the defense-in-depth backstop under it.
-            // 120s is still comfortably longer than kill_process_tree's
-            // own ~2s grace-plus-confirm window, so the fixture's
-            // discriminating power (see SpawnerForkStorm's docs) is
-            // unaffected.
+            // 120s is still comfortably longer than the sweep's own
+            // grace-plus-confirm window (about seven seconds: the
+            // five-second SIGTERM grace plus the two-second kill
+            // confirmation), so the fixture's discriminating power (see
+            // SpawnerForkStorm's docs) is unaffected.
             "trap '' TERM HUP; i=0; while [ $i -lt 2400 ]; do sh -c 'sleep 120' & sleep 0.05; \
              i=$((i + 1)); done",
             "spawner-fork-storm",

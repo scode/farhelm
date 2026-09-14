@@ -25,16 +25,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
   must not.
 
-- Make the SIGTERM grace a bounded wait, then raise it to about 5 seconds. Do this after the scope-verdict fix above.
-  `KILL_GRACE` (sweep.rs) is an unconditional sleep in both `kill_scope` and `kill_process_tree`, and the two run
-  sequentially on a scoped stop, so every stop pays about a second even when the agent exits in 20 ms; raising the
-  constant as-is would slow every stop by the same amount. Poll instead: `kill_scope` on `exists` at the
-  `SCOPE_CONFIRM_POLL` cadence until the unit retires, `kill_process_tree` on its signalled pid set with the start-time
-  validation `confirm_gone` already does. Then a well-behaved agent ends the wait immediately and only one that ignores
-  SIGTERM pays the full window, which makes the SIGKILL path (and the systemd quirk above) the exception rather than the
-  norm for claude. NOTE: the process-tree side may end the grace early only when the ENTIRE enumerated set is gone, not
-  just the root; ending on a partial exit reopens the fork race the SIGSTOP quiesce fixpoint exists to close.
-
 - Fix the vertical misalignment inside the launch button. In the new-session dialog the bold "launch" verb sits visibly
   lower than the lighter "host · folder" context beside it, so the two halves of one button read as two baselines. The
   verb is the button's own text node and the context is the inline-block `.launch-composer-launch-context` span
