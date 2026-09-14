@@ -309,6 +309,19 @@ struct IntentBinding {
     /// beside it.
     agent: LaunchIntent,
     title: String,
+    /// `Some(source id)` when this binding is a "replace with", carried
+    /// straight from the mounted [`CreatePrefill::replace_source`] — `None`
+    /// for every ordinary create or clone. Part of the binding, not a
+    /// side channel next to it, for the same idempotency reason every other
+    /// field here is: a retried replace-with must reuse its own key
+    /// (matching this same source id), and a plain create must never be
+    /// able to collide with one — which `PartialEq`/`Eq` on the whole
+    /// struct give for free the moment this field exists, with no bespoke
+    /// comparison to keep in sync. The submit handler reads it after
+    /// minting to decide whether to call `api::replace_session_with`
+    /// instead of `api::create_session` (see that call site's own
+    /// comment).
+    replace_source: Option<String>,
 }
 
 impl IntentBinding {
@@ -320,6 +333,7 @@ impl IntentBinding {
         cwd: String,
         agent: LaunchIntent,
         title: String,
+        replace_source: Option<String>,
     ) -> Option<IntentBinding> {
         let host = hosts.iter().find(|host| Some(host.id) == selected)?;
         Some(IntentBinding {
@@ -328,6 +342,7 @@ impl IntentBinding {
             cwd,
             agent,
             title,
+            replace_source,
         })
     }
 }
@@ -771,6 +786,22 @@ pub(super) struct CreatePrefill {
     /// rather than reverse-engineering a harness from an arbitrary command.
     pub(super) launch: Option<LaunchSelection>,
     pub(super) agent: PrefillAgent,
+    /// `Some(source id)` for a "replace with" prefill, `None` for a plain
+    /// clone — the one field that distinguishes the two, everything else
+    /// about how a prefill seeds the form being identical between them
+    /// (SPEC.md's "clone, replace with, and New are one launcher"). Every
+    /// existing prefill rule above applies exactly the same way whether or
+    /// not this is set: profile-vs-invocation trust, host identity, the
+    /// remembered-permissions seed losing to a prefill, `prefill_applied`
+    /// generations. What DOES change downstream, all of it in
+    /// `CreateSessionForm`'s submit path rather than in reseeding: the
+    /// composer's launch button reads "replace" instead of "launch", a
+    /// selected host that drifts from [`host`](Self::host) is refused
+    /// before sending, and a successful submit calls
+    /// `api::replace_session_with` instead of `api::create_session` (see
+    /// [`IntentBinding::replace_source`], which carries this value from
+    /// submit through to that branch).
+    pub(super) replace_source: Option<String>,
 }
 
 /// Build the prefill a clone click seeds the create form with, from the
@@ -780,6 +811,12 @@ pub(super) struct CreatePrefill {
 /// mints `generation` (`list::view::ListView`, once per clone click) — so
 /// the Present/Renamed/Deleted/Unrecognized/None decision (see
 /// [`PrefillAgent`]) is checkable without mounting a component.
+///
+/// Always leaves [`CreatePrefill::replace_source`] `None`: this function
+/// builds a CLONE's prefill specifically, and `list::view::ListView`'s own
+/// "replace with" handler is what sets that field afterward on the value
+/// this returns, since only the caller knows which row is being
+/// replaced-with rather than merely cloned.
 pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill {
     let agent = match &session.source_profile {
         Some(source) if source.existence == ProfileExistence::Present => PrefillAgent::Profile {
@@ -796,6 +833,7 @@ pub(super) fn prefill_from(session: &Session, generation: u64) -> CreatePrefill 
         invocation: session.invocation.clone(),
         launch: session.launch.clone(),
         agent,
+        replace_source: None,
     }
 }
 
@@ -1155,8 +1193,14 @@ fn reseed_cloned_field(
 ///
 /// A "clone" click (`ListView`'s `on_clone`) opens this same form with
 /// `prefill` set instead of building a second, immediate-create path — see
-/// `CreatePrefill`'s own doc for what it carries and why. The one wrinkle it
-/// adds to the agent picker: a prefilled profile choice must WIN over the
+/// `CreatePrefill`'s own doc for what it carries and why. A "replace with"
+/// click (`ListView`'s `on_replace_with`) takes the identical path with the
+/// identical prefill shape, marked only by `CreatePrefill::replace_source`;
+/// nothing in this section, or in the reseed effect below, branches on that
+/// field — the two verbs differ only past submit (see `IntentBinding::
+/// replace_source`), which is the whole point of routing both through one
+/// prefill mechanism instead of a second one. The one wrinkle it adds to
+/// the agent picker: a prefilled profile choice must WIN over the
 /// helm's remembered default on the render right after the clone,
 /// which is the opposite of the ordinary "nothing chosen yet, seed from the
 /// remembered default" rule two paragraphs up. The reseed effect (below)
@@ -1381,12 +1425,25 @@ pub(super) fn CreateSessionForm(
                 "the session you cloned predates host tracking, so its host could not be \
                  confirmed and the ordinary host default is used — check the host below",
             ),
+            // Worded for the SOURCE session rather than "the session you
+            // cloned": a replace-with prefill takes this same path, and its
+            // user did not clone anything.
             CloneHostState::Unconfirmable => Some(
-                "the session you cloned reports a different installation now, so its host was \
+                "the source session reports a different installation now, so its host was \
                  not carried over here — check the host below",
             ),
             CloneHostState::Waiting | CloneHostState::Bound | CloneHostState::UserTookOver => None,
         });
+    // Taken before the reseed effect below moves the prop into its own
+    // `move` closure: the submit handler needs `replace_source` and `host`
+    // long after that effect has run (one owned copy, consumed by its
+    // closure), and the launch button's verb only needs to know whether
+    // this is a replace-with at all — a `bool`, derived here rather than
+    // a second clone of the whole prefill.
+    let prefill_for_submit = prefill.clone();
+    let is_replace_with = prefill
+        .as_ref()
+        .is_some_and(|prefill| prefill.replace_source.is_some());
     let selected = effective_create_host(&hosts, chosen_host(), open_host.as_ref());
     let destination_now = history_target(&hosts, selected);
     // Store the latest render's registry claim synchronously. Parent-derived
@@ -1920,6 +1977,13 @@ pub(super) fn CreateSessionForm(
     } else {
         None
     };
+    // The submit button's verb: "replace" for a replace-with prefill,
+    // "launch" for everything else (an ordinary create OR a plain clone),
+    // so the destructive half of what a click does is visible on the
+    // button itself rather than only in a menu item clicked a moment
+    // earlier. `launch-composer-launch-context` beside it is unchanged
+    // either way — the host/folder summary is equally true of both verbs.
+    let submit_verb = if is_replace_with { "replace" } else { "launch" };
     let summary_folder = display_peer(&cwd());
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
@@ -2418,6 +2482,51 @@ pub(super) fn CreateSessionForm(
                     ops.release();
                     return;
                 }
+                // "Replace with" keeps the source's own host (SPEC.md's
+                // replace-with bullet; clone is the way to a different
+                // host). A `prefill` with no recorded host (a helm old
+                // enough to omit `Session::host`) has nothing to compare
+                // against and is let through — the helm's own same-host
+                // refusal (`ReplaceReq::with`'s doc) is the backstop for
+                // that rare case, exactly the way this whole check mirrors
+                // that refusal for the ordinary case, so the user sees the
+                // words here instead of waiting on a round trip to see
+                // them.
+                let replace_source = prefill_for_submit
+                    .as_ref()
+                    .and_then(|prefill| prefill.replace_source.clone());
+                if replace_source.is_some()
+                    && prefill_for_submit.as_ref().is_some_and(|prefill| {
+                        prefill.host.is_some() && prefill.host != selected_now
+                    })
+                {
+                    // Two ways to get here that deserve different words: the
+                    // user picked another host in the selector (say so, and
+                    // point at clone), or the reseed effect never bound the
+                    // source's host because its install identity no longer
+                    // matched (`CloneHostState::Unconfirmable`) and the
+                    // selector fell back to the default host — blaming the
+                    // user for a host change they never made would be wrong.
+                    let unconfirmable = matches!(
+                        *clone_host_state.peek(),
+                        CloneHostState::Unconfirmable
+                    );
+                    error.set(Some(
+                        if unconfirmable {
+                            "replace with keeps the source session's own host, but that host \
+                             could not be confirmed (the source reports a different installation \
+                             now), so this create was not sent — replace with cannot proceed \
+                             until the source's host is back; clone is the way to start a session \
+                             elsewhere"
+                        } else {
+                            "replace with keeps the source session's own host, so this create was \
+                             not sent — clone is the way to start a session on a different host"
+                        }
+                        .to_string(),
+                    ));
+                    ops.release();
+                    return;
+                }
                 // No host, no create. The helm would default a hostless body
                 // to its local row — usually the right answer, and not one
                 // this form may reach by omission while its own selector is
@@ -2429,6 +2538,7 @@ pub(super) fn CreateSessionForm(
                     submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
                     launch,
                     submitted_field(&title(), title_edited(), title_raw_seed.peek().as_deref()),
+                    replace_source,
                 ) else {
                     error.set(Some(
                         if hosts_loaded {
@@ -2602,17 +2712,44 @@ pub(super) fn CreateSessionForm(
                         LaunchIntent::Profile(id) => CreateAgent::Profile(id),
                         LaunchIntent::Structured(selection) => CreateAgent::Structured(selection),
                     };
-                    match create_session(
-                        &base,
-                        &bound.cwd,
-                        agent,
-                        &bound.title,
-                        &key,
-                        Some(bound.host),
-                        expected_incarnation,
-                    )
-                    .await
-                    {
+                    // The one branch point between the two verbs this form
+                    // shares: an ordinary create and a "replace with" send
+                    // the SAME body fields (cwd, agent, title, intent key,
+                    // host, expected incarnation — see `create_body`, the
+                    // single builder both calls share), differing only in
+                    // which endpoint receives them and in the source id a
+                    // replace-with also names. Everything above this point
+                    // — resolution, guards, key minting — has already run
+                    // identically for both; only the network call itself
+                    // forks.
+                    let create_result = match &bound.replace_source {
+                        Some(source) => {
+                            api::replace_session_with(
+                                &base,
+                                source,
+                                &bound.cwd,
+                                agent,
+                                &bound.title,
+                                &key,
+                                Some(bound.host),
+                                expected_incarnation,
+                            )
+                            .await
+                        }
+                        None => {
+                            create_session(
+                                &base,
+                                &bound.cwd,
+                                agent,
+                                &bound.title,
+                                &key,
+                                Some(bound.host),
+                                expected_incarnation,
+                            )
+                            .await
+                        }
+                    };
+                    match create_result {
                         Ok(session) => {
                             // A profile-backed create changes the helm's
                             // remembered default. Drop the old paired answer
@@ -2700,7 +2837,7 @@ pub(super) fn CreateSessionForm(
                             && (structured_harness.read().is_none()
                                 || structured_choice_error.is_some()))
                         || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
-                    "launch"
+                    "{submit_verb}"
                     " "
                     span { class: "launch-composer-launch-context",
                         if let Some(harness) = &launch_harness {
@@ -4232,6 +4369,7 @@ mod tests {
             "/tmp".to_string(),
             command(),
             "title".to_string(),
+            None,
         )
         .expect("the selected host is in the list");
 
@@ -4246,6 +4384,7 @@ mod tests {
             "/tmp".to_string(),
             command(),
             "title".to_string(),
+            None,
         )
         .expect("still selectable");
         assert_ne!(
@@ -4284,6 +4423,14 @@ mod tests {
                 title: "other title".to_string(),
                 ..base.clone()
             },
+            // A "replace with" is a different intent from the identical
+            // plain create: reusing a plain create's key for a
+            // replace-with (or the reverse) must mint a fresh one rather
+            // than replay across the two verbs — see this field's own doc.
+            IntentBinding {
+                replace_source: Some("source-1".to_string()),
+                ..base.clone()
+            },
         ] {
             assert_ne!(base, edited);
         }
@@ -4297,7 +4444,8 @@ mod tests {
                 &hosts,
                 "/tmp".to_string(),
                 command(),
-                "title".to_string()
+                "title".to_string(),
+                None,
             )
             .expect("still selectable")
         );
@@ -4480,9 +4628,20 @@ mod tests {
     fn no_selected_host_yields_no_binding() {
         let hosts = vec![option(1, "this machine", true)];
         let nothing = || LaunchIntent::Command(String::new());
-        assert!(IntentBinding::of(None, &hosts, String::new(), nothing(), String::new()).is_none());
         assert!(
-            IntentBinding::of(Some(99), &hosts, String::new(), nothing(), String::new()).is_none(),
+            IntentBinding::of(None, &hosts, String::new(), nothing(), String::new(), None)
+                .is_none()
+        );
+        assert!(
+            IntentBinding::of(
+                Some(99),
+                &hosts,
+                String::new(),
+                nothing(),
+                String::new(),
+                None
+            )
+            .is_none(),
             "a selection the option list no longer contains is not a target either"
         );
     }
@@ -4652,7 +4811,11 @@ mod tests {
     /// suffix on the title, no rewriting of the directory, the row's own
     /// host and install identity together — and the generation is exactly
     /// what the caller passed in (`ListView` is the one that decides what
-    /// counts as a new clone).
+    /// counts as a new clone). `replace_source` is the one field
+    /// `prefill_from` never sets: it builds a CLONE's prefill, and only
+    /// `list::view::ListView`'s "replace with" handler turns that same
+    /// value into a replace-with prefill afterward (see `prefill_from`'s
+    /// own doc).
     #[farhelm_testtrace::test]
     fn prefill_from_carries_title_cwd_host_and_identity_verbatim() {
         let session = Session {
@@ -4668,6 +4831,7 @@ mod tests {
         assert_eq!(prefill.host_identity, Some(Some("install-7".to_string())));
         assert_eq!(prefill.cwd, "/work/api");
         assert_eq!(prefill.title, "my session");
+        assert_eq!(prefill.replace_source, None);
     }
 
     // -------------------------------------------------------------

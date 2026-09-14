@@ -1814,6 +1814,42 @@ pub(crate) fn ListView(
         show_create.set(true);
     };
 
+    // The "replace with" menu item's click — `on_clone`'s body verbatim
+    // (same guard, same shared `clone_prefill` signal, same
+    // generation-minting scheme, same reasons for both) except that the
+    // prefill it builds is marked with THIS row as its replace-with source
+    // (`CreatePrefill::replace_source`). That one field is the whole
+    // difference between clone and replace-with from here on: it is what
+    // makes `create_form.rs`'s shared submit path call
+    // `api::replace_session_with` instead of `api::create_session`, and
+    // what makes this closing form's `on_created` request an explicit
+    // listing refresh so the source row leaves the list promptly (see that
+    // handler's own doc). See `on_clone`'s doc above for why the guard runs
+    // before any signal is touched and why the generation is minted here
+    // rather than by the form.
+    let on_replace_with = move |session: Session| {
+        if clone_is_refused(
+            ops.busy_now(),
+            &session.id,
+            &pending.read(),
+            &confirming.read(),
+            &confirming_archive.read(),
+            &confirming_replace.read(),
+            renaming.read().as_deref(),
+        ) {
+            return;
+        }
+        menu_open.set(None);
+        let generation = clone_prefill
+            .peek()
+            .as_ref()
+            .map_or(0, |prefill| prefill.generation + 1);
+        let mut prefill = prefill_from(&session, generation);
+        prefill.replace_source = Some(session.id);
+        clone_prefill.set(Some(prefill));
+        show_create.set(true);
+    };
+
     // The rename button's click: opens this row's field, seeds the draft
     // from the title the row is showing right now, and never calls the API
     // — exactly as `on_delete` opens the confirm prompt. Refuses a row
@@ -2173,6 +2209,11 @@ pub(crate) fn ListView(
     // The create form's own copy of the API base, for recording a created
     // session as the selection (see `remember_selection`).
     let created_base = base.clone();
+    // The create form's own copy of the listing requester, for the explicit
+    // refresh a successful replace-with issues (see `on_created` below) —
+    // the same "do not wait for the feed" nudge `do_replace` gives an
+    // ordinary replace's own success path.
+    let created_listing = request_listing.clone();
 
     rsx! {
         AppBar {
@@ -2305,6 +2346,23 @@ pub(crate) fn ListView(
                         focus_new_session_button();
                     },
                     on_created: move |session: Session| {
+                        // Read BEFORE any of the clearing below: a
+                        // successful replace-with's closing prefill is the
+                        // only place this handler can still tell the
+                        // create it just finished apart from an ordinary
+                        // one, and every other write in this handler is
+                        // about to erase it. That the prefill still
+                        // describes THIS create rests on the shared ops
+                        // lock: `clone_is_refused` (via `ops.busy_now()`)
+                        // refuses every clone and replace-with click while
+                        // a create is in flight, so nothing can swap the
+                        // prefill between submit and this handler. Relax
+                        // that guard and this read silently describes the
+                        // wrong create.
+                        let was_replace_with = clone_prefill
+                            .peek()
+                            .as_ref()
+                            .is_some_and(|prefill| prefill.replace_source.is_some());
                         // Creation is a user-initiated selection too.
                         remember_selection(&created_base, preferences, &session.id);
                         // Mirror THIS client's own successful structured
@@ -2341,6 +2399,17 @@ pub(crate) fn ListView(
                         ordinary_new_cwd.set(None);
                         on_open.call(session);
                         focus_new_session_button();
+                        // A plain create has nothing else to announce — the
+                        // fleet just gained a row, and the ordinary feed or
+                        // fallback poll will say so soon enough. A
+                        // replace-with's create ALSO removed the source row,
+                        // and nobody else has been told: request the same
+                        // explicit re-read `do_replace` requests on its own
+                        // success path, so the source leaves the list
+                        // without waiting on the feed.
+                        if was_replace_with {
+                            created_listing(Trigger::Explicit);
+                        }
                     },
                 }
             }
@@ -2490,6 +2559,7 @@ pub(crate) fn ListView(
                                 rename_draft,
                                 on_open: guarded_open,
                                 on_clone,
+                                on_replace_with,
                                 on_mark_seen,
                                 on_replace,
                                 on_confirm_replace: confirm_replace,

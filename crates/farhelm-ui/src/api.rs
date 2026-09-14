@@ -1481,7 +1481,62 @@ pub(crate) async fn create_session(
     resp.json::<Session>().await.map_err(|e| e.to_string())
 }
 
-/// One create's request body.
+/// POST `/api/sessions/{source}/replace` with an override body — SPEC.md's
+/// "replace with": the create-form's shared submit path calls this instead
+/// of [`create_session`] whenever its bound intent carries a replace-with
+/// source (`list::create_form`'s `IntentBinding::replace_source`), passing
+/// the identical arguments either call would take plus `source`.
+///
+/// Reuses [`create_body`] verbatim to build the override object, rather than
+/// hand-assembling a second, parallel body: a replace-with request and an
+/// ordinary create request describe the same intended launch in every field
+/// that matters to one, and building both from one function is what keeps
+/// them from drifting apart as fields are added. The wire body is
+/// `{"intent_key": <key>, "with": <create_body's object>}` — `key` appears
+/// TWICE, once at the top level (the replace endpoint's own idempotency key)
+/// and once inside `with` (`create_body` always writes it), which is
+/// intentional: the helm's `ReplaceReq::with.intent_key` must be absent or
+/// equal to the top-level key, and sending the identical value in both
+/// places is what makes that always true from this client rather than a
+/// rule this function has to additionally enforce.
+///
+/// Error surfacing matches [`replace_session`]'s own doc: the helm's body
+/// verbatim, including the two delete-after-create shapes that name both
+/// ids — this is the SAME endpoint, so a failure reads exactly the same
+/// regardless of which form of the request produced it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors create_session's own argument list plus the replace-with source id; splitting \
+              them into a struct would only move the coupling this comment already explains"
+)]
+pub(crate) async fn replace_session_with(
+    base: &str,
+    source: &str,
+    cwd: &str,
+    agent: CreateAgent<'_>,
+    title: &str,
+    intent_key: &str,
+    host: Option<HostId>,
+    expected_incarnation: Option<u64>,
+) -> Result<Session, String> {
+    let url = format!(
+        "{base}/api/sessions/{}/replace",
+        encode_path_segment(source)
+    );
+    let body = serde_json::json!({
+        "intent_key": intent_key,
+        "with": create_body(cwd, agent, title, intent_key, host, expected_incarnation),
+    });
+    let resp = send(client().post(&url).json(&body)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    resp.json::<Session>().await.map_err(|e| e.to_string())
+}
+
+/// One create's request body — the single builder both [`create_session`]
+/// and [`replace_session_with`] use, so a replace-with's override body can
+/// never drift from an ordinary create's own field list.
 ///
 /// Split from the request purely so the two rules it has to keep can be
 /// exercised without a helm: the title's absent-versus-empty distinction, and
