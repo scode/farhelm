@@ -889,6 +889,10 @@ export interface Preferences {
   list_sort?: string;
   last_selected?: string;
   compact?: boolean;
+  /** The permissions mode ("yolo") of the last successful STRUCTURED launch,
+   * helm-wide — written only by the helm itself, never by a client PUT (see
+   * `patchPreferences`'s own doc for why the type still accepts one). */
+  remembered_permissions?: string;
 }
 
 /** Read the helm's shared preference row (SPEC.md, Session list). */
@@ -901,6 +905,12 @@ export async function readPreferences(request: APIRequestContext): Promise<Prefe
 /**
  * Write a sparse patch to the helm's shared preference: an absent field is
  * untouched, an explicit `null` clears it, a value replaces it.
+ *
+ * `remembered_permissions` is accepted here for test-fixture convenience
+ * (planting or clearing a known memory directly, without driving a real
+ * structured launch through the UI) even though no shipped client ever
+ * sends it: the route validates and merges it exactly like every other
+ * field, so a direct PUT is a legitimate, if unusual, caller.
  */
 export async function patchPreferences(
   request: APIRequestContext,
@@ -908,6 +918,7 @@ export async function patchPreferences(
     list_sort?: string | null;
     last_selected?: string | null;
     compact?: boolean | null;
+    remembered_permissions?: string | null;
   },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });
@@ -924,7 +935,12 @@ export async function patchPreferences(
  * the row in `beforeEach` rather than inherit the last test's answer.
  */
 export async function resetPreferences(request: APIRequestContext): Promise<void> {
-  await patchPreferences(request, { list_sort: null, last_selected: null, compact: null });
+  await patchPreferences(request, {
+    list_sort: null,
+    last_selected: null,
+    compact: null,
+    remembered_permissions: null,
+  });
 }
 
 /**

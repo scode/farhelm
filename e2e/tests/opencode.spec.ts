@@ -53,6 +53,11 @@ test("OpenCode keeps composer controls while requiring a suggested or custom Zen
   // The submit click below blurs the field; if Enter had not applied the
   // draft, blur would discard it and the POST would carry the previous id.
   await expect(model).toHaveValue("custom'42;$literal");
+  // The body's `permissions: null` below is this test's own choice, not an
+  // assumption about an untouched segment: a fresh dialog preselects the
+  // helm-wide remembered mode, and an earlier spec in the same invocation
+  // may have launched with yolo.
+  await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
   await page.route("**/api/sessions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     await route.fulfill({ status: 400, headers: { "x-farhelm-build": build }, body: "fixture captured launch" });
