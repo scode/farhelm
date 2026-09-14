@@ -1377,7 +1377,7 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
   try {
     // This test is about the ARIA relationship, not the seen-state feature
     // (which has its own tests) — hiding the field keeps the item list at
-    // its fixed six regardless of whether the real supervisor's
+    // its fixed seven regardless of whether the real supervisor's
     // classifier has settled this fixture into a live status by the time
     // the menu opens (see `hideSeenState`'s own doc for why that race is
     // otherwise real, not hypothetical).
@@ -1399,16 +1399,20 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     // list they have opened.
     const menu = target.getByRole("menu", { name: `session actions for ${title}` });
     await expect(menu).toBeVisible();
+    // "replace with" sits between clone and replace (row.rs's
+    // `MENU_ACTIONS`), the row menu's other "make a new session from this
+    // one" verb.
     await expect(menu.getByRole("menuitem")).toHaveText([
       "rename",
       "clone",
+      "replace with",
       "replace",
       "stop",
       "archive",
       "delete",
     ]);
     // The boundary before the destructive item exists in the tree, not
-    // only in the paint — six consecutive commands with nothing marking
+    // only in the paint — seven consecutive commands with nothing marking
     // the last as different in kind is what this replaces.
     await expect(menu.getByRole("separator")).toHaveCount(1);
     // The profile footer and any refusal line are the panel's, not the
@@ -1438,14 +1442,15 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
  * jump — through the real nodes, not through index arithmetic.
  *
  * `next_menu_focus` in menu_panel.rs already pins the arithmetic,
- * and it cannot prove any of what this proves: that all six items
+ * and it cannot prove any of what this proves: that all seven items
  * mounted, that each registered a handle under its own action, and that
  * the positions the key handler derives from `MenuOrder` line up with the
  * order the panel actually renders. A previous version of this test
  * walked two of the four items THEN offered, which left archive and delete
  * — the two with separately duplicated wiring, and the two whose misfire
- * is destructive — covered by nothing at all; clone and then replace
- * joined the walk when they joined the menu, for the same reason.
+ * is destructive — covered by nothing at all; clone, then replace with,
+ * then replace joined the walk when each joined the menu, for the same
+ * reason.
  *
  * The separator sitting between archive and delete is part of what is
  * being checked: it is not focusable and not counted, so ArrowDown must
@@ -1458,7 +1463,7 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     invocation: "sleep 300",
   });
   try {
-    // Fixed six-item navigation, not the seen-state feature — see
+    // Fixed seven-item navigation, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
     await page.goto("/");
@@ -1473,6 +1478,7 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
     const clone = target.locator(".session-row-clone");
+    const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
     const stop = target.locator(".session-row-stop");
     const archive = target.locator(".session-row-archive");
@@ -1488,6 +1494,8 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     await expect(rename).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(replaceWith).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(replace).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -1524,14 +1532,15 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
  * An archived row's SHORTER menu navigates on its own length.
  *
  * Archiving withdraws stop and archive, which moves delete from position
- * 5 to position 3 (clone and replace, both offered unconditionally, keep
- * positions 1 and 2 in both retention states). Nothing durable may
- * remember the old number — this is the bug that motivated keying mounted
- * handles by ACTION rather than by index — and wrapping has to happen on
- * four, not on an assumed six. Only a real browser can show that the
- * surviving nodes registered themselves under the shorter list.
+ * 6 to position 4 (clone, replace with, and replace, all offered
+ * unconditionally, keep positions 1 through 3 in both retention states).
+ * Nothing durable may remember the old number — this is the bug that
+ * motivated keying mounted handles by ACTION rather than by index — and
+ * wrapping has to happen on five, not on an assumed seven. Only a real
+ * browser can show that the surviving nodes registered themselves under
+ * the shorter list.
  */
-test("an archived row's four-item menu navigates on its own length", async ({ page, request }) => {
+test("an archived row's five-item menu navigates on its own length", async ({ page, request }) => {
   const session = await createSession(request, {
     title: `menu-archived-${Date.now()}`,
     cwd: "/tmp",
@@ -1555,11 +1564,18 @@ test("an archived row's four-item menu navigates on its own length", async ({ pa
 
     await openRowMenu(target);
     const menu = target.getByRole("menu");
-    await expect(menu.getByRole("menuitem")).toHaveText(["rename", "clone", "replace", "delete"]);
+    await expect(menu.getByRole("menuitem")).toHaveText([
+      "rename",
+      "clone",
+      "replace with",
+      "replace",
+      "delete",
+    ]);
 
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
     const clone = target.locator(".session-row-clone");
+    const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
     const remove = target.locator(".session-row-delete");
     await toggle.focus();
@@ -1568,10 +1584,12 @@ test("an archived row's four-item menu navigates on its own length", async ({ pa
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    await expect(replaceWith).toBeFocused();
+    await page.keyboard.press("ArrowDown");
     await expect(replace).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(remove).toBeFocused();
-    // Wraps on FOUR. A list that still believed it had six would leave
+    // Wraps on FIVE. A list that still believed it had seven would leave
     // focus where it was, or reach for a handle nothing mounted.
     await page.keyboard.press("ArrowDown");
     await expect(rename).toBeFocused();
@@ -1644,7 +1662,7 @@ test("archiving under an open menu renumbers it and navigation follows", async (
   await expect(target).toBeVisible({ timeout: 20_000 });
   await waitForHostsListSettled(page);
   await openRowMenu(target);
-  await expect(target.getByRole("menuitem")).toHaveCount(6);
+  await expect(target.getByRole("menuitem")).toHaveCount(7);
 
   // The change lands through an ordinary refresh, with the row keeping
   // its place in the list — so nothing closes the menu, which is the
@@ -1657,18 +1675,26 @@ test("archiving under an open menu renumbers it and navigation follows", async (
   await responded;
   await expect(target).toHaveAttribute("data-session-archived", "true");
   await expect(target.locator(".session-row-menu-panel")).toBeVisible();
-  await expect(target.getByRole("menuitem")).toHaveText(["rename", "clone", "replace", "delete"]);
+  await expect(target.getByRole("menuitem")).toHaveText([
+    "rename",
+    "clone",
+    "replace with",
+    "replace",
+    "delete",
+  ]);
 
-  // Delete is at position 3 now, not 5, and the node that survived the
-  // change answers to it — clone and replace, both offered
-  // unconditionally, keep positions 1 and 2 in both retention states and
-  // do not need to be re-found here.
+  // Delete is at position 4 now, not 6, and the node that survived the
+  // change answers to it — clone, replace with, and replace, all offered
+  // unconditionally, keep positions 1 through 3 in both retention states
+  // and do not need to be re-found here.
   const toggle = target.locator(".session-row-menu");
   await toggle.focus();
   await page.keyboard.press("ArrowDown");
   await expect(target.locator(".session-row-rename")).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(target.locator(".session-row-clone")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(target.locator(".session-row-replace-with")).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(target.locator(".session-row-replace")).toBeFocused();
   await page.keyboard.press("ArrowDown");
@@ -1764,7 +1790,7 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await openRowMenu(target);
     await expect(rename).toBeFocused();
 
-    // One tab stop, not six: the focused item carries it, everything
+    // One tab stop, not seven: the focused item carries it, everything
     // else is skipped by Tab.
     await expect(rename).toHaveAttribute("tabindex", "0");
     await expect(clone).toHaveAttribute("tabindex", "-1");
@@ -1819,6 +1845,8 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await expect(rename).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(target.locator(".session-row-replace-with")).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(target.locator(".session-row-replace")).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -1999,6 +2027,7 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
     const toggle = target.locator(".session-row-menu");
     const rename = target.locator(".session-row-rename");
     const clone = target.locator(".session-row-clone");
+    const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
     const stop = target.locator(".session-row-stop");
     const archive = target.locator(".session-row-archive");
@@ -2009,6 +2038,8 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
     await expect(rename).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(replaceWith).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(replace).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -2022,6 +2053,8 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
     await expect(rename).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(replaceWith).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(replace).toBeFocused();
     await page.keyboard.press("ArrowDown");
@@ -2249,7 +2282,7 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
     invocation: "sleep 300",
   });
   try {
-    // Fixed six-item geometry, not the seen-state feature — see
+    // Fixed seven-item geometry, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
     await page.goto("/");
@@ -2286,7 +2319,7 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
         };
       });
     });
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
     for (const item of items) {
       // `.btn` reserves a 1px border so an opaque edge costs no layout
       // shift; on a menu item it must stay fully transparent.
@@ -3774,20 +3807,22 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // "bottom edge inside the viewport" assertion below is measured
     // against.
     await page.setViewportSize({ width: 900, height: 500 });
-    // The geometry under test is the panel's height at its FIXED six-item
-    // count against `MENU_PANEL_MIN_RESERVE_PX` in menu_panel.rs, the
-    // room the placement keeps below the panel's clamped top. A menu
-    // taller than that reserve is clamped to the viewport edge and scrolls
-    // inside its own panel (see the `max-height` note above
-    // `.session-row-menu-panel` in app.css), which leaves the bottom-most
-    // item's box past the edge this test measures — that is how the
-    // reserve sized for five items was caught when replace made it six,
-    // and the failure is the same at any viewport height, since the clamp
-    // measures from the bottom. The reserve now holds the seventh row
-    // too, but the count is still pinned: an extra "mark unread" row
-    // (this fleet's fixture sessions do reach a live status under enough
-    // real wall-clock time — 18 of them, outliving every other test in
-    // the file) would make the measured height depend on the classifier's
+    // The geometry under test is the panel's height at its FIXED seven-item
+    // count (rename, clone, replace with, replace, stop, archive, delete)
+    // against `MENU_PANEL_MIN_RESERVE_PX` in menu_panel.rs, the room the
+    // placement keeps below the panel's clamped top. A menu taller than
+    // that reserve is clamped to the viewport edge and scrolls inside its
+    // own panel (see the `max-height` note above `.session-row-menu-panel`
+    // in app.css), which leaves the bottom-most item's box past the edge
+    // this test measures — that is how the reserve sized for five items
+    // was caught when replace made it six, and the failure is the same at
+    // any viewport height, since the clamp measures from the bottom. The
+    // reserve now holds the eighth row too ("replace with" added a
+    // seventh on top of mark seen's own eighth), but the count here is
+    // still pinned at seven: an extra "mark unread" row (this fleet's
+    // fixture sessions do reach a live status under enough real
+    // wall-clock time — 18 of them, outliving every other test in the
+    // file) would make the measured height depend on the classifier's
     // timing rather than on the geometry under test. See `hideSeenState`'s
     // own doc.
     await hideSeenState(page);

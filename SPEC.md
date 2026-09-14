@@ -246,7 +246,7 @@ session itself — **error** when the agent process could not be started at all 
 
 ### Lifecycle operations
 
-The client supports: create, open, rename, restart, clone, replace, stop, archive, delete.
+The client supports: create, open, rename, restart, clone, replace, replace with, stop, archive, delete.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
   Terminal tabs keep running, and the session remains with its terminal still viewable.
@@ -281,6 +281,14 @@ The client supports: create, open, rename, restart, clone, replace, stop, archiv
   reply names both sessions; whether the source is still there depends on how the removal failed, and the user checks or
   removes it by hand. Replace is offered wherever clone is offered, archived sessions included — an archived source has
   no agent to kill, only a record to delete.
+- **Replace with** opens the same editable create form clone opens, pre-filled the same way clone pre-fills it, so every
+  field can be edited before launching — the key use is starting an equivalent session on a different harness or effort.
+  Launching creates the new session and then deletes the source, with exactly Replace's create-then-delete contract and
+  failure reporting (the same asymmetry: an untouched source on a failed create, both ids named on a failed removal).
+  Unlike clone, it keeps the source's own host — clone is the way to start a session on a different host. Offered
+  wherever clone and replace are offered, archived sessions included. Clone, replace with, and New are one launcher —
+  same layout, same controls, same search, same validation — differing only in what is pre-filled when they open and in
+  what launching does (create; create then delete the source).
 - **Archive** hides the session from the default list and shuts down everything in it — agent and terminal tabs — with
   confirmation when anything is still running. Archived sessions keep their metadata; their terminal contents are gone
   (see Terminal experience). Restart on an archived session unarchives it and recovers the conversation where the agent

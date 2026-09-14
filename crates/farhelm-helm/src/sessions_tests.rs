@@ -2428,6 +2428,637 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
     peer.await.unwrap();
 }
 
+// ----- "replace with": `ReplaceReq::with` overriding the create half -----
+//
+// Everything above this point pins UNQUALIFIED replace (`with` absent),
+// which the tests below leave completely alone. These pin the override
+// body: the create half launches `with`'s fields instead of the source's
+// own, while every failure shape, the same-host rule, and the delete half
+// stay exactly as `do_replace_session`'s doc describes for either form.
+
+/// The plainest "replace with": a raw override of cwd, invocation, and
+/// title. SPEC.md's replace-with bullet promises every field can be edited
+/// before launching, and this pins that the OVERRIDE — not the source's own
+/// cwd/title/invocation — is what reaches the supervisor, while the source
+/// is still removed exactly as an unqualified replace removes it.
+#[farhelm_testtrace::test]
+async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_removes_the_source() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        // The create half must carry the OVERRIDE's cwd, invocation, and
+        // title — never the source's own — with no profile and no
+        // idempotency key (the request body below sends none).
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            parent: None,
+            profile_name: None,
+            cwd,
+            invocation,
+            source_profile,
+            title,
+            intent_key,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(cwd, "/replaced-with");
+        assert_eq!(invocation, Some("new-agent --flag".to_string()));
+        assert_eq!(source_profile, None);
+        assert_eq!(title, Some("replaced-with-title".to_string()));
+        assert_eq!(intent_key, None);
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "replaced-with-title".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/replaced-with".into(),
+            canonical_cwd: None,
+            invocation: "new-agent --flag".into(),
+            resume_template: None,
+            launch: None,
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "with": {
+                "cwd": "/replaced-with",
+                "invocation": "new-agent --flag",
+                "title": "replaced-with-title",
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.id, "sess-2");
+    assert_eq!(session.cwd, "/replaced-with");
+    assert_eq!(session.invocation, "new-agent --flag");
+    assert_eq!(session.title, "replaced-with-title");
+
+    harness.refresh_to_completion(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-2"],
+        "the source must be gone once the override's create and the delete both succeed"
+    );
+
+    peer.await.unwrap();
+}
+
+/// A "replace with" override on an ARCHIVED source still creates the
+/// override and removes the archived record — SPEC.md's replace-with
+/// bullet says it is offered on archived sessions too, an archived source
+/// having no agent to kill, only a record to delete, and that stays true
+/// whether or not the create half carries an override.
+#[farhelm_testtrace::test]
+async fn a_replace_with_override_of_an_archived_source_creates_it_and_removes_the_source() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let source = farhelm_proto::SessionInfo {
+        archived: true,
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    };
+    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            cwd,
+            invocation,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(cwd, "/replaced-with-archived");
+        assert_eq!(invocation, Some("archived-override".to_string()));
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/replaced-with-archived".into(),
+            canonical_cwd: None,
+            invocation: "archived-override".into(),
+            resume_template: None,
+            launch: None,
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
+        writer
+            .write_control(&ControlMsg::SessionDeleted { req_id })
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "with": { "cwd": "/replaced-with-archived", "invocation": "archived-override" }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
+    assert_eq!(session.id, "sess-2");
+    assert!(!session.archived, "a replacement is never born archived");
+    assert_eq!(session.cwd, "/replaced-with-archived");
+    assert_eq!(session.invocation, "archived-override");
+
+    peer.await.unwrap();
+}
+
+/// "Replace with" keeps the source's own host: SPEC.md draws that line
+/// explicitly (clone is the way to a different host), and this pins the
+/// helm-side refusal that enforces it — a 409 before either the create or
+/// the delete runs, with both hosts' listings left exactly as they were.
+#[farhelm_testtrace::test]
+async fn a_replace_with_body_naming_another_host_is_refused_before_anything_is_created() {
+    let (builder, other) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            sessions: vec![rest_harness::session("sess-1", 100)],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@other",
+            rest_harness::HostScript {
+                identity: Some("identity-other".to_string()),
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    harness.await_refreshed(other).await;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "with": { "cwd": "/sess-1", "invocation": "agent", "host": other }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains("clone"),
+        "must point at clone as the way to start a session elsewhere: {body}"
+    );
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-1"],
+        "nothing may be created or removed while replace with names another host"
+    );
+}
+
+/// A "replace with" override whose CREATE fails leaves the source
+/// untouched, exactly like an unqualified replace's own create-refusal
+/// case (`a_create_refusal_leaves_the_source_listed`) — the override
+/// changes what would have been launched, never the promise that a failed
+/// create loses nothing.
+#[farhelm_testtrace::test]
+async fn a_replace_with_override_whose_create_fails_leaves_the_source_untouched() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(cwd, "/does-not-exist");
+        writer
+            .write_frame(&Frame::control(&ControlMsg::Error {
+                req_id,
+                message: "working directory does not exist: /does-not-exist".into(),
+                kind: ErrorKind::InvalidRequest,
+            }))
+            .await
+            .unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({ "with": { "cwd": "/does-not-exist", "invocation": "agent" } }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("does not exist"), "{body}");
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(row_ids(&value), vec!["sess-1"]);
+
+    peer.await.unwrap();
+}
+
+/// A "replace with" override whose DELETE fails after a successful create
+/// still answers with the message naming both ids — the same asymmetric
+/// failure rule an unqualified replace's own delete-failure gets
+/// (`a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_both_rows`),
+/// unaffected by which fields the create half actually launched.
+#[farhelm_testtrace::test]
+async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_reports_both_ids() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let fleet = harness.fleet.clone();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            cwd,
+            invocation,
+            ..
+        } = request
+        else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        assert_eq!(cwd, "/override-delete-fails");
+        assert_eq!(invocation, Some("override-agent".to_string()));
+        let created = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "sess-2".into(),
+            title: "sess-1".into(),
+            created_at: 1_700_000_500,
+            last_activity_at: 1_700_000_500,
+            creation_seq: None,
+            cwd: "/override-delete-fails".into(),
+            canonical_cwd: None,
+            invocation: "override-agent".into(),
+            resume_template: None,
+            launch: None,
+            status: farhelm_proto::SessionStatus::Unknown,
+            annotation: None,
+            restart_offer: farhelm_proto::RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+        };
+        // See `spliced_replace_harness`'s doc: fixture updated before the
+        // reply, matching every other successful create in this file.
+        fleet.edit(local, |script| script.sessions.push(created.clone()));
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: created,
+            }))
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, session_id } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        assert_eq!(session_id, "sess-1");
+        // No fixture change: the supervisor REFUSES this delete, so
+        // "sess-1" genuinely still exists on the far end too.
+        writer
+            .write_frame(&Frame::control(&ControlMsg::Error {
+                req_id,
+                message: "supervisor lost the process table entry".into(),
+                kind: ErrorKind::Internal,
+            }))
+            .await
+            .unwrap();
+    });
+
+    harness.await_refreshed(local).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "with": { "cwd": "/override-delete-fails", "invocation": "override-agent" }
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "{body}"
+    );
+    assert!(body.contains("sess-1"), "must name the source: {body}");
+    assert!(body.contains("sess-2"), "must name the replacement: {body}");
+    assert!(
+        body.contains("both sessions still exist"),
+        "an explicit supervisor refusal is a DEFINITE answer, not an unknown outcome: {body}"
+    );
+
+    harness.refresh_to_completion(local).await;
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    let mut ids = row_ids(&value);
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec!["sess-1".to_string(), "sess-2".to_string()],
+        "both sessions must stay listed until the user removes the old one by hand"
+    );
+
+    peer.await.unwrap();
+}
+
+/// A "replace with" body whose OWN `intent_key` disagrees with the
+/// top-level one is refused as a bad request — see `ReplaceReq::with`'s own
+/// doc for why the wire must not silently pick a winner between two
+/// candidate keys for what is supposed to be one intended create. Checked
+/// before any routing happens, so it 400s even for a session id this fleet
+/// has never heard of and a host it never had to contact.
+#[farhelm_testtrace::test]
+async fn a_replace_with_mismatched_intent_key_is_refused_as_a_bad_request() {
+    let harness = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/does-not-exist/replace",
+        serde_json::json!({
+            "intent_key": "top-level-key",
+            "with": { "cwd": "/x", "invocation": "agent", "intent_key": "a-different-key" }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("key"), "{body}");
+}
+
+/// A "replace with" body with a create-shape problem — here naming BOTH
+/// `invocation` and `profile_id` — is a 400 with the SAME precedence an
+/// ordinary create gives it: before routing, before any supervisor round
+/// trip, and therefore even for a session id this fleet has never heard
+/// of. `ReplaceReq::with`'s doc promises the override is resolved "exactly
+/// as an ordinary create's body is", and this pins that the promise covers
+/// WHEN the refusal happens, not only what it says — a version that
+/// resolved the mode after the live source read answered such a body with
+/// a 404 for the missing session instead.
+#[farhelm_testtrace::test]
+async fn a_replace_with_body_shape_problem_is_refused_before_routing() {
+    let harness = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/does-not-exist/replace",
+        serde_json::json!({
+            "with": { "cwd": "/x", "invocation": "agent", "profile_id": "some-profile" }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{body}");
+}
+
+/// A "replace with" body whose `expected_incarnation` names a connection
+/// the source's host is no longer on is a 409 carrying
+/// [`crate::precondition::INCARNATION_MARKER`] before the live read, the
+/// create, or the delete — the same precondition an ordinary create's
+/// `expected_incarnation` gets, applied to the override's own claim. The
+/// listing is untouched afterwards.
+#[farhelm_testtrace::test]
+async fn a_replace_with_stale_incarnation_is_refused_before_anything_is_created() {
+    let harness = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            sessions: vec![rest_harness::session("sess-1", 100)],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    let current = harness
+        .manager
+        .status(local)
+        .expect("the local host has an actor")
+        .incarnation;
+
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "with": { "cwd": "/sess-1", "invocation": "agent", "expected_incarnation": current - 1 }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains(crate::precondition::INCARNATION_MARKER),
+        "a client must be able to tell this from a host that is merely busy: {body}"
+    );
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-1"],
+        "nothing may be created or removed on a stale incarnation claim"
+    );
+}
+
+/// The idempotency-replay veto holds under `with` too. A "replace with"
+/// whose override reproduces the source's own fingerprint, sent with the
+/// source's own creation key, hits the same reservation REPLAY a plain
+/// replace can (see `a_create_reply_that_replays_the_source_id_is_refused_before_any_delete`):
+/// the target answers with the SOURCE row, and accepting it would delete
+/// the very session just "created". The veto is shared code, and this pins
+/// that a future "skip the veto when the caller supplied its own fields"
+/// shortcut would fail rather than pass silently.
+#[farhelm_testtrace::test]
+async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_before_any_delete() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession { req_id, .. } = request else {
+            panic!("expected CreateSession, got {request:?}");
+        };
+        writer
+            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
+                req_id,
+                session: SessionInfo {
+                    parent: None,
+                    archived: false,
+                    id: "sess-1".into(),
+                    title: "sess-1".into(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    creation_seq: None,
+                    cwd: "/sess-1".into(),
+                    canonical_cwd: None,
+                    invocation: "agent".into(),
+                    resume_template: None,
+                    launch: None,
+                    status: farhelm_proto::SessionStatus::Running,
+                    annotation: None,
+                    restart_offer: farhelm_proto::RestartOffer::default(),
+                    tabs: Vec::new(),
+                    source_profile: None,
+                },
+            }))
+            .await
+            .unwrap();
+        // No `DeleteSession` follows: the veto refuses before any
+        // bookkeeping, so this peer reads nothing more.
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (status, body) = post_text(
+        &harness,
+        "/api/sessions/sess-1/replace",
+        serde_json::json!({
+            "intent_key": "reused-key",
+            "with": { "cwd": "/sess-1", "invocation": "agent", "title": "sess-1" }
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert!(
+        body.contains("no replacement was made"),
+        "the refusal must say the replay made nothing: {body}"
+    );
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["sess-1"],
+        "a rejected replay must leave the source exactly as it was — no delete was ever sent"
+    );
+
+    peer.await.unwrap();
+}
+
 /// `GET /api/sessions`'s JSON shape, which the UI decodes and which
 /// PLAN_M6.md item 5 extended without breaking.
 ///

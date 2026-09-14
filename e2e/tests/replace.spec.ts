@@ -12,10 +12,23 @@
 // (SPEC.md's "a fresh session with the same settings takes its place" is
 // this file's one property confirm_consequence-shaped unit tests cannot
 // see).
+//
+// This file also covers "replace with" (row.rs's `.session-row-replace-with`,
+// SPEC.md's bullet of that name): clone's exact editable create form, seeded
+// from the clicked row, whose launch button sends the same edited fields to
+// `POST /api/sessions/{id}/replace`'s "with" override instead of to
+// `POST /api/sessions` — replace's create-then-delete contract reached
+// through clone's form rather than through an inline confirmation. The
+// helm-level "with" override (its own field-by-field composition and its
+// same-host refusal) is `sessions_tests.rs`'s job; this file's replace-with
+// tests are about the one thing only a real browser proves: that editing the
+// pre-filled form through the launch composer's own search box, then
+// launching, reaches the override endpoint with exactly what was typed.
 
 import { expect, test } from "./helpers/evidence";
 import { Page } from "@playwright/test";
-import { cleanupSession, createSession, FAKE_AGENT, openRowMenu, type SessionRow } from "./helpers/fleet";
+import { cleanupSession, createSession, FAKE_AGENT, localHostId, openRowMenu, type SessionRow } from "./helpers/fleet";
+import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText } from "./helpers/term";
 
 /** Find one session by its opaque server id, independent of title changes —
@@ -183,6 +196,177 @@ test("cancelling a replace confirmation leaves the session untouched", async ({ 
     await expect(target).toBeVisible();
     await expect(target.locator(".session-title")).toHaveText(title);
     await expect(target.locator(".confirm-consequence")).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/** The narrowed shape these replace-with tests read back off `GET
+ * /api/sessions` — mirrors `composer-word-search.spec.ts`'s own local
+ * `ListedSession`, kept local rather than added to `fleet.ts`'s shared
+ * `SessionRow` for the same reason that file's own doc gives: most specs
+ * never look at `launch`, and folding it into the shared narrowing would
+ * make every other spec's use of that type claim to cover a field it does
+ * not check. */
+type ListedSessionWithLaunch = {
+  id: string;
+  title: string;
+  cwd: string;
+  launch?: { harness: string; model: string | null; effort: string | null } | null;
+};
+
+async function listedSessionsWithLaunch(
+  request: import("@playwright/test").APIRequestContext,
+): Promise<ListedSessionWithLaunch[]> {
+  const response = await request.get("/api/sessions");
+  expect(response.ok(), "the session listing must be readable").toBe(true);
+  return (await response.json() as { sessions: ListedSessionWithLaunch[] }).sessions;
+}
+
+test("replace with pre-fills clone's form from the source, and editing the harness and effort through search then launching creates the edited session in the source's place", async ({
+  page,
+  request,
+}) => {
+  const local = await localHostId(request);
+  const cwd = stackScratchDir("replace-with-");
+  const title = `replace-with-live-${Date.now()}`;
+  // A structured source, exactly like `clone.spec.ts`'s own structured GUI
+  // clone test — the launch composer's search box only renders on the
+  // Structured surface, and this is the direct route there: the row menu's
+  // "replace with" click must seed the composer on whatever surface the
+  // source itself used, and a structured source is what puts the search box
+  // on screen without an extra "back to harnesses" click this test has no
+  // reason to make.
+  const initial = { harness: "codex", model: "gpt-6-astra", effort: "high" };
+  let sourceId: string | undefined;
+  let replacedId: string | undefined;
+  try {
+    const created = await request.post("/api/sessions", {
+      data: { cwd, title, host: local, launch: initial },
+    });
+    expect(created.ok(), `creating structured source: ${await created.text()}`).toBe(true);
+    const source: SessionRow = await created.json();
+    sourceId = source.id;
+
+    await page.goto("/");
+    const sourceRow = row(page, sourceId);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-replace-with").click();
+
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toBeVisible();
+    // Clone's exact prefill: this row's own title and directory, filled
+    // without any edit yet, and the launch button already naming the
+    // destructive half of what pressing it will do.
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwd);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await expect(form.locator(".create-session-submit")).toContainText("replace");
+
+    const search = form.locator('.launch-composer-search input[role="combobox"]');
+    await expect(search).toBeFocused();
+
+    // Change the harness through the search box: accepting a result clears
+    // the box and keeps focus there (the word-search feature this test
+    // exercises alongside replace-with).
+    await search.fill("claude");
+    await search.press("Enter");
+    await expect(
+      form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+
+    // Change the effort the same way — overriding the source's own "high"
+    // (still a valid Claude effort, so this is a deliberate edit, not a
+    // value the harness switch cleared on its own).
+    await search.fill("medium");
+    await search.press("Enter");
+    await expect(
+      form.locator(".launch-composer-effort-choice").getByRole("button", { name: "medium", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+
+    const launchButton = form.locator(".create-session-submit");
+    await expect(launchButton).toBeEnabled();
+    // Enter on the now-empty search box launches a complete, valid
+    // selection through the ordinary Launch path (SPEC.md's launch-composer
+    // bullet) — which for a replace-with prefill is `POST
+    // /api/sessions/{id}/replace` rather than `POST /api/sessions`.
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.request().method() === "POST" && r.url().endsWith(`/api/sessions/${sourceId}/replace`),
+      ),
+      search.press("Enter"),
+    ]);
+    const replaced = await response.json();
+    replacedId = replaced.id;
+    expect(replacedId).not.toBe(sourceId);
+    expect(replaced.title).toBe(title);
+    expect(replaced.cwd).toBe(cwd);
+    expect(replaced.launch).toMatchObject({ harness: "claude", effort: "medium" });
+
+    // The source id is gone; the edited replacement exists — both read back
+    // through the API listing, independent of the create reply and of
+    // whatever the row-level feed has painted by the time this runs.
+    const listing = await listedSessionsWithLaunch(request);
+    const replacement = listing.find((session) => session.id === replacedId);
+    expect(replacement, "the edited replacement must be listed").toBeTruthy();
+    expect(replacement?.title).toBe(title);
+    expect(replacement?.cwd).toBe(cwd);
+    expect(replacement?.launch).toMatchObject({ harness: "claude", effort: "medium" });
+    expect(
+      listing.some((session) => session.id === sourceId),
+      "the source id must no longer be listed",
+    ).toBe(false);
+  } finally {
+    if (replacedId) await cleanupSession(request, replacedId);
+    if (sourceId) await cleanupSession(request, sourceId);
+  }
+});
+
+test("cancelling a replace-with composer leaves the source untouched and creates nothing", async ({
+  page,
+  request,
+}) => {
+  const title = `replace-with-cancel-${Date.now()}`;
+  const cwd = "/tmp";
+  const session = await createSession(request, { title, cwd });
+  // Recorded from before the click, exactly like the plain-replace
+  // cancellation test above: proving NOTHING reached either endpoint is the
+  // whole point, and a `page.on` listener lets every other request the page
+  // makes keep flowing normally.
+  const posts: string[] = [];
+  page.on("request", (req) => {
+    if (req.method() !== "POST") return;
+    const url = new URL(req.url());
+    if (url.pathname === "/api/sessions" || url.pathname === `/api/sessions/${session.id}/replace`) {
+      posts.push(url.pathname);
+    }
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+
+    await openRowMenu(target);
+    await target.locator(".session-row-replace-with").click();
+
+    const form = page.locator('.create-session-form[role="dialog"]');
+    await expect(form).toBeVisible();
+    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
+
+    expect(posts).toEqual([]);
+
+    // The same row, same id, still just as it was — no create, no delete,
+    // nothing to clean up beyond the fixture itself.
+    await expect(target).toBeVisible();
+    await expect(target.locator(".session-title")).toHaveText(title);
   } finally {
     await cleanupSession(request, session.id);
   }
