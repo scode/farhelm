@@ -269,6 +269,17 @@ is a clean gate.
   the popup's render path — this spec already holds several focus and popup races, and this one is not yet attributed to
   any of them.
 
+- Deflake `an_authenticated_agent_clone_starts_a_structured_successor` in
+  `crates/farhelm/tests/e2e/agent_listing_real_stack.rs` (structured clone argv observation). The deflake sweep's
+  workspace nextest battery failed it once: the parent-generation argv assertion ("the structured parent must reach the
+  owned fake executable") saw an empty observed argv. Classification reruns passed twice and failed once, the failure at
+  the clone-generation argv assertion ("clone argv lost model") with an empty argv as well. Sweep failure run
+  `bab77953-df15-4df6-88fc-83f4ac2ee18e`; reruns `f09afa88-3506-482a-b17a-afd08570917d`,
+  `69a2a2b2-c1c8-4f22-9e3e-131d88ac618c`, `23f578e3-bba7-4932-bc13-13809d162fe2`. Hypothesis: the generation-argv
+  observation returned empty before the fake's marker line arrived, at two different generations, rather than either
+  launch losing the model. On recurrence retain the observer stream around the marker before changing the wait or the
+  launch path.
+
 ### Systematic deflake
 
 Deferred work, with its original triggers:
