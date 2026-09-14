@@ -84,21 +84,6 @@ enum CreationSurface {
     Structured,
 }
 
-/// The stable HTML value for one effort choice.
-///
-/// The enum crosses HTTP as snake case, so the controls use the same literal
-/// spelling instead of deriving a second display protocol from `Debug`.
-fn effort_value(effort: LaunchEffort) -> &'static str {
-    match effort {
-        LaunchEffort::Low => "low",
-        LaunchEffort::Medium => "medium",
-        LaunchEffort::High => "high",
-        LaunchEffort::Xhigh => "xhigh",
-        LaunchEffort::Max => "max",
-        LaunchEffort::Ultra => "ultra",
-    }
-}
-
 /// Decode the helm's remembered `remembered_permissions` word into the
 /// composer's typed choice, for a dialog mount that has nothing else to
 /// seed it from (SPEC.md's launch-composer carve-out: the last SUCCESSFUL
@@ -243,6 +228,15 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             custom_model_harness.set(owner);
+        }
+        crate::launch_composer::ComposerSearchResult::Effort(effort) => {
+            // Only the effort moves. Harness and model stay, so no
+            // reconciliation runs and `composer_reset_reason` is deliberately
+            // left as it was — the same as clicking the effort segment, which
+            // is what this result is a keyboard spelling of. The shared
+            // `intent_key.set(None)` below still applies: a changed effort is
+            // a changed create.
+            structured_effort.set(Some(effort));
         }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
             composer_reset_reason.set(None);
@@ -1930,7 +1924,9 @@ pub(super) fn CreateSessionForm(
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
         .unwrap_or_else(|| "default".to_string());
-    let summary_effort = structured_effort().map(effort_value).unwrap_or("default");
+    let summary_effort = structured_effort()
+        .map(crate::launch_composer::effort_value)
+        .unwrap_or("default");
     let catalog_for_submit = catalog_models.clone();
     let catalog_for_harness = catalog_models.clone();
     let catalog_for_search = catalog_models.clone();
@@ -2088,11 +2084,24 @@ pub(super) fn CreateSessionForm(
             &recent_history,
             &catalog_models,
             &composer_search(),
+            structured_harness(),
+            structured_model().as_deref(),
         ));
+    let catalog_models_for_search_input = catalog_models.clone();
     let search_results_for_keys = search_result_groups
         .iter()
         .flat_map(|(_, results)| results.iter().cloned())
         .collect::<Vec<_>>();
+    // The keyboard index is set by `oninput` against the results of THAT
+    // keystroke, but the list it indexes is rebuilt on every render from
+    // live state: a harness chosen from its segment while the list is open
+    // rescopes the models and adds or removes the effort rows, and a
+    // promoted history snapshot can change the custom-model rows. Clamping
+    // at every read keeps `aria-activedescendant`, the highlighted row, and
+    // Enter pointing at a row that exists, instead of naming an option id
+    // that is not in the DOM and swallowing Enter.
+    let composer_active_index =
+        composer_search_index().min(search_results_for_keys.len().saturating_sub(1));
     let browse_base = base.clone();
     // This snapshot is used only to construct the outbound request. The
     // reply is checked against `browse_target`, which stays live while the
@@ -2786,12 +2795,12 @@ pub(super) fn CreateSessionForm(
                     input {
                         r#type: "search",
                         role: "combobox",
-                        aria_label: "search folders, harnesses, and models",
+                        aria_label: "search folders, harnesses, models, and efforts",
                         aria_expanded: composer_search_open(),
                         aria_controls: "launch-composer-search-results",
                         aria_activedescendant: (composer_search_open() && !search_results_for_keys.is_empty())
-                            .then(|| format!("launch-composer-search-option-{}", composer_search_index())),
-                        placeholder: "search folders, harnesses, models…",
+                            .then(|| format!("launch-composer-search-option-{}", composer_active_index)),
+                        placeholder: "search folders, harnesses, models, efforts…",
                         autocomplete: "off",
                         // Search includes literal host paths and model IDs;
                         // browser text correction would change the query's meaning.
@@ -2823,7 +2832,43 @@ pub(super) fn CreateSessionForm(
                             );
                             composer_search.set(evt.value());
                             composer_search_open.set(true);
-                            composer_search_index.set(0);
+                            // Preselect the exact-word match for THIS keystroke's
+                            // results. Built from the history the promotion above
+                            // just installed (read live from `offered_history`, not
+                            // from a render-time clone that predates the promotion),
+                            // so the index agrees with the list the next render
+                            // draws from the same signal; the clamp at
+                            // `composer_active_index` covers whatever still moves
+                            // between this keystroke and a later render.
+                            let promoted_history = offered_history
+                                .peek()
+                                .as_ref()
+                                .and_then(|(target, history)| {
+                                    // The SAME two-part predicate the render body's
+                                    // `recent_history` applies: the offered target must
+                                    // match both the parent-derived `create_target` and
+                                    // the synchronously derived destination
+                                    // (`live_destination`), because during the
+                                    // one-render lag after a host change the former
+                                    // still names the old host while the render will
+                                    // already show nothing for it.
+                                    (Some(target) == create_target().as_ref()
+                                        && Some(target) == live_destination.peek().as_ref())
+                                    .then(|| history.clone())
+                                })
+                                .unwrap_or_default();
+                            let groups = crate::launch_composer::grouped_search_results(
+                                crate::launch_composer::search_results(
+                                    &promoted_history,
+                                    &catalog_models_for_search_input,
+                                    &evt.value(),
+                                    structured_harness(),
+                                    structured_model().as_deref(),
+                                ),
+                            );
+                            composer_search_index.set(
+                                crate::launch_composer::default_search_index(&groups, &evt.value()),
+                            );
                         },
                         onkeydown: {
                             let catalog = catalog_for_search.clone();
@@ -2845,31 +2890,63 @@ pub(super) fn CreateSessionForm(
                                 }
                                 Key::ArrowDown if composer_search_open() && !search_results_for_keys.is_empty() => {
                                     evt.prevent_default();
-                                    composer_search_index.set(
-                                        (composer_search_index() + 1)
-                                            % search_results_for_keys.len(),
-                                    );
-                                    scroll_composer_search_result(composer_search_index());
+                                    // Step from the CLAMPED index (the row the DOM is
+                                    // highlighting), not the raw signal: after the list
+                                    // shrank, the raw value can exceed the length and the
+                                    // modulo would land on an arbitrary row instead of
+                                    // wrapping from the last row to the first.
+                                    let next = (composer_active_index + 1) % search_results_for_keys.len();
+                                    composer_search_index.set(next);
+                                    scroll_composer_search_result(next);
                                 }
                                 Key::ArrowUp if composer_search_open() && !search_results_for_keys.is_empty() => {
                                     evt.prevent_default();
-                                    composer_search_index.set(
-                                        (composer_search_index() + search_results_for_keys.len() - 1)
-                                            % search_results_for_keys.len(),
-                                    );
-                                    scroll_composer_search_result(composer_search_index());
+                                    let previous = (composer_active_index + search_results_for_keys.len() - 1)
+                                        % search_results_for_keys.len();
+                                    composer_search_index.set(previous);
+                                    scroll_composer_search_result(previous);
                                 }
-                                // While the combobox owns focus, Enter belongs to search even
-                                // when the query has no matches. Otherwise a no-result query
-                                // bubbles to the form and launches whatever stale selection the
-                                // composer happened to hold.
+                                // While the combobox holds a query, Enter belongs to search
+                                // even when the query has no matches. Otherwise a no-result
+                                // query would bubble to the form and launch whatever stale
+                                // selection the composer happened to hold.
+                                //
+                                // An EMPTY box is the one case Enter is allowed through: the
+                                // browser's own implicit submission then clicks the form's
+                                // default button — the launch button, the first submit button
+                                // in the dialog — unless that button is disabled, in which case
+                                // nothing happens. That is exactly the "launch only a complete,
+                                // valid selection through the ordinary Launch path" rule
+                                // (SPEC.md's launch composer), and it is why the empty case
+                                // returns BEFORE `prevent_default` rather than re-creating the
+                                // click by hand: the platform already owns that rule, including
+                                // the disabled check, and a hand-rolled selector click would be
+                                // a second copy of it that could drift from the markup. Literal
+                                // emptiness, not trimmed: a box holding only spaces still shows
+                                // a query, and SPEC.md's rule is about an empty box.
                                 Key::Enter if !evt.is_composing() => {
+                                    // A HELD Enter must not launch. Accepting a result
+                                    // empties the box synchronously, so the key's OS
+                                    // auto-repeat (tens of milliseconds later) would
+                                    // otherwise arrive at an empty box and fall through
+                                    // to implicit submission — turning "type the last
+                                    // word, press Enter a beat too long" into a launch
+                                    // nobody asked for. Inside the arm, not as a match
+                                    // guard: a failed guard would fall to `_ => {}` with
+                                    // the default un-prevented, which is the submit.
+                                    if evt.is_auto_repeating() {
+                                        evt.prevent_default();
+                                        return;
+                                    }
+                                    if composer_search().is_empty() {
+                                        return;
+                                    }
                                     evt.prevent_default();
                                     if !draft_transition_allowed(ops) {
                                         return;
                                     }
                                     if composer_search_open() && let Some(result) =
-                                        search_results_for_keys.get(composer_search_index()).cloned()
+                                        search_results_for_keys.get(composer_active_index).cloned()
                                     {
                                         // Every selection invalidates an old directory listing
                                         // before it changes the draft. BrowsePath installs its
@@ -2950,10 +3027,10 @@ pub(super) fn CreateSessionForm(
                                                     r#type: "button",
                                                     role: "option",
                                                     dir: "ltr",
-                                                    aria_selected: composer_search_index() == index,
+                                                    aria_selected: composer_active_index == index,
                                                     class: if matches!(result, crate::launch_composer::ComposerSearchResult::Recent(_)) {
-                                                        if composer_search_index() == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
-                                                    } else if composer_search_index() == index { "selected" } else { "" },
+                                                        if composer_active_index == index { "launch-composer-search-recent selected" } else { "launch-composer-search-recent" }
+                                                    } else if composer_active_index == index { "selected" } else { "" },
                                                     title: match &result {
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
                                                             "{} · {} · {}",
@@ -3025,6 +3102,7 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {harness:?}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
+                                                        crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
                                                             span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&entry.cwd)} · {selected_host_label}" }
                                                             // Keep the dangerous permission as a semantic span
@@ -3601,7 +3679,7 @@ pub(super) fn CreateSessionForm(
                                 }
                                 for effort in structured_efforts {
                                     button {
-                                        key: "{effort_value(effort)}", r#type: "button",
+                                        key: "{crate::launch_composer::effort_value(effort)}", r#type: "button",
                                         class: if *structured_effort.read() == Some(effort) { "selected" } else { "" },
                                         aria_pressed: *structured_effort.read() == Some(effort), disabled: busy,
                                         onclick: move |_| {
@@ -3611,7 +3689,7 @@ pub(super) fn CreateSessionForm(
                                             );
                                             structured_effort.set(Some(effort)); intent_key.set(None);
                                         },
-                                        "{effort_value(effort)}"
+                                        "{crate::launch_composer::effort_value(effort)}"
                                     }
                                 }
                             }
