@@ -963,10 +963,11 @@ mod tests {
         (state, sup, entry)
     }
 
-    /// The successful retry manager makes its recorded unit disappear after
-    /// the normal confirmation checks, matching a real collected scope.
+    /// The successful retry manager retires its recorded unit once SIGTERM
+    /// has been sent, the way a collected scope of an agent that exits
+    /// politely does.
     fn working_scopes() -> crate::scope::ScopeManager {
-        crate::scope::ScopeManager::fake_vanishing(2, Arc::new(|_| {}))
+        crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}))
     }
 
     /// A failed scope kill must block delete without discarding the only row
