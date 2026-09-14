@@ -352,18 +352,28 @@
   overflow: hidden;
 }
 
-.macos-root .auth-page {
+/* The auth page is its own scroller on EVERY build, not only the macOS
+   one. The document no longer scrolls (see the `html` rule below),
+   so a card taller than a short window has to scroll inside the page or
+   it is simply cut off; before that rule the web build got away with
+   letting the document scroll instead. */
+.window-root .auth-page {
   height: 100%;
   min-height: 0;
   overflow: auto;
 }
 
-.macos-root:has(.build-skew) {
+/* Same story for the build-skew notice: it is an in-flow block above a
+   100%-tall shell, and with the document refusing to scroll the only way
+   the bottom of both panes stays reachable while the notice is up is for
+   the shell to give up the notice's height. Every build shows the notice;
+   only the padding above and the fixed app bar below are macOS's. */
+.window-root:has(.build-skew) {
   display: flex;
   flex-direction: column;
 }
 
-.macos-root:has(.build-skew) .app-shell {
+.window-root:has(.build-skew) .app-shell {
   flex: 1;
   min-height: 0;
   height: auto;
@@ -386,6 +396,34 @@ body,
   background: var(--bg-0);
   color: var(--fg-0);
   font-family: var(--font-ui);
+}
+
+/* The document itself never scrolls. Every surface that legitimately
+   scrolls — the sidebar, the terminal viewport, a dialog's own overflow —
+   is a scroller INSIDE the 100%-tall shell, and the shell is the whole
+   page, so any document scroll is a layout leak (the `.app-sidebar`
+   containing-block rule below closed one) rendering the ground behind the
+   app. `overflow: hidden` refuses wheel, trackpad, keyboard, and
+   scrollbar scrolling of the document — NOT programmatic scrolling: a
+   focus() on a control below the fold, scrollIntoView, and find-in-page
+   still move an `overflow: hidden` viewport, so a future leak of the
+   same shape is still a bug (Tab could scroll the app away with no wheel
+   to bring it back); this rule only keeps such a leak from being
+   reachable by a wheel, and the containing-block rules are the real
+   fix. `overscroll-behavior: none` refuses the scroll CHAINING that would
+   otherwise hand an inner scroller's leftover wheel delta (the sidebar
+   list at its end, the terminal at the bottom of its scrollback) to the
+   root, and with it the macOS trackpad rubber-band the root would show
+   for that delta. Two states used to rely on the document scrolling and
+   now scroll or flex on their own instead: the auth page and the
+   build-skew notice, both handled by the `.window-root` rules above.
+   On `html` only, deliberately: with the root's overflow set, a `body`
+   value would no longer propagate to the viewport but make `body` a
+   second clip box and scroll container of its own — one more place a
+   programmatic scroll could park an offset, for no gain. */
+html {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* Every browser ships its OWN default `monospace` mapping for `code`,
@@ -431,6 +469,22 @@ samp {
    * rows stack and ellipsize per line; their fixed menus escape this
    * clipping context. */
   overflow: hidden auto;
+  /* This scroller must also be the CONTAINING BLOCK for every absolutely
+   * positioned box it scrolls: the `.visually-hidden` labels the host rows
+   * (`.hosts-panel`, in flow above the list) carry for screen readers
+   * directly, and the session rows' through `.session-list`'s own rule
+   * below. An overflow scroller only clips descendants whose containing
+   * block sits inside it; with no positioned ancestor those 1px spans
+   * resolved against the initial containing block instead, so the rows
+   * scrolled away below the fold still parked a span at their document
+   * position, the DOCUMENT grew to reach the last of them, and a wheel
+   * that no scroller consumed (over the header, over the sidebar edge)
+   * scrolled the whole app off its ground. Many sessions in a short
+   * window is all it took. `position: fixed` panels
+   * (`.session-row-menu-panel` and friends) are unaffected: their
+   * containing block is the viewport regardless of this rule, so the
+   * "menus escape the clip" contract above still holds. */
+  position: relative;
   /* The sidebar scrolls without a scrollbar. On macOS the overlay scrollbar
    * painted itself over the column's right edge and covered the row menu
    * toggles and controls that live there (seen on 0.5.0-rc.1), and a
@@ -1040,6 +1094,14 @@ samp {
    * layout change ever gave it a bounded height it would grow the same
    * edge-covering scrollbar. See the comment at `.app-sidebar`. */
   scrollbar-width: none;
+  /* And the same containing-block rule as `.app-sidebar`, for the same
+   * reason (see that comment): the rows' absolutely positioned
+   * screen-reader spans must resolve against the scroller that clips
+   * them. Today this list never has a bounded height, so it never
+   * actually scrolls and the sidebar's rule alone would do; the day a
+   * layout change bounds it, this is what keeps those spans from
+   * escaping one level up into the sidebar's scrollable overflow. */
+  position: relative;
 }
 
 .app-sidebar::-webkit-scrollbar,
