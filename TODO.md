@@ -20,14 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Add "replace with" to the session row, beside clone and replace. It is clone's editable form with replace's action:
-  the row's session is the seed, everything typed over it wins, and launching creates the new session and then deletes
-  the source exactly as replace does. The key use is "a new session just like this one but on harness foo": click →
-  replace with → "foo ENTER medium ENTER" → launch. Bake in that clone, replace with, and the plain New dialog are ONE
-  launcher — same layout, same controls, same search, same validation — differing only in what is pre-filled when they
-  open and in what happens on launch (create; create then delete the source). Any divergence between them is a bug in
-  this feature, not a design choice.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
