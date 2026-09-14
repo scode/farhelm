@@ -21,6 +21,34 @@ const EFFORT_ORDER: &[LaunchEffort] = &[
     LaunchEffort::Ultra,
 ];
 
+/// Return the stable lowercase word used for an effort in the composer.
+///
+/// The wire enum and the visible control labels use the same six words. Keeping
+/// that spelling here lets renderer-free search and the component controls share
+/// one protocol vocabulary instead of drifting through separate `Debug` or
+/// display conversions.
+pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
+    match effort {
+        LaunchEffort::Low => "low",
+        LaunchEffort::Medium => "medium",
+        LaunchEffort::High => "high",
+        LaunchEffort::Xhigh => "xhigh",
+        LaunchEffort::Max => "max",
+        LaunchEffort::Ultra => "ultra",
+    }
+}
+
+/// Return the lowercase word search matches a harness by.
+///
+/// One spelling for the two places that compare a query against a harness —
+/// the substring match that offers the row and the exact-word match that
+/// preselects it — so they can never disagree about what "claude" names.
+/// Derived from the `Debug` name rather than a second literal table because
+/// that name is also what the row displays (`Harness: {harness:?}`).
+pub(crate) fn harness_word(harness: LaunchHarness) -> String {
+    format!("{harness:?}").to_ascii_lowercase()
+}
+
 /// A partial structured choice used to narrow suggestions without inventing
 /// missing defaults.
 ///
@@ -47,6 +75,8 @@ pub(crate) enum ComposerSearchResult {
         id: String,
         harness: LaunchHarness,
     },
+    /// Apply one effort offered by the currently selected harness and model.
+    Effort(LaunchEffort),
     /// Apply the path the person typed without changing their agent choices.
     UsePath(String),
     /// Open the explicit directory browser at the path the person typed.
@@ -182,6 +212,8 @@ pub(crate) fn model_options(
 pub(crate) enum ComposerSearchGroup {
     Harnesses,
     Models,
+    /// Reasoning-effort words valid for the selected harness and model.
+    Efforts,
     Folders,
     RecentSetups,
 }
@@ -192,6 +224,7 @@ impl ComposerSearchGroup {
         match self {
             Self::Harnesses => "Harnesses",
             Self::Models => "Models",
+            Self::Efforts => "Efforts",
             Self::Folders => "Folders",
             Self::RecentSetups => "Recent setups",
         }
@@ -208,12 +241,14 @@ pub(crate) fn grouped_search_results(
 ) -> Vec<(ComposerSearchGroup, Vec<ComposerSearchResult>)> {
     let mut harnesses = Vec::new();
     let mut models = Vec::new();
+    let mut efforts = Vec::new();
     let mut folders = Vec::new();
     let mut recents = Vec::new();
     for result in results {
         match result {
             ComposerSearchResult::Harness(_) => harnesses.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
+            ComposerSearchResult::Effort(_) => efforts.push(result),
             ComposerSearchResult::UsePath(_)
             | ComposerSearchResult::BrowsePath(_)
             | ComposerSearchResult::Folder(_) => folders.push(result),
@@ -223,6 +258,7 @@ pub(crate) fn grouped_search_results(
     [
         (ComposerSearchGroup::Harnesses, harnesses),
         (ComposerSearchGroup::Models, models),
+        (ComposerSearchGroup::Efforts, efforts),
         (ComposerSearchGroup::Folders, folders),
         (ComposerSearchGroup::RecentSetups, recents),
     ]
@@ -286,11 +322,15 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
 /// The server owns history ordering, so the result preserves it. This does
 /// not walk a filesystem; folder search is only a lookup through prior
 /// successful destinations for the selected host. A path-shaped query also
-/// exposes explicit use and browse actions, but does not invoke either.
+/// exposes explicit use and browse actions, but does not invoke either. A
+/// selected harness narrows catalog and custom-history models; absent a
+/// harness, model ownership remains discoverable and effort words are absent.
 pub(crate) fn search_results(
     history: &LaunchHistory,
     catalog: &[LaunchCatalogModel],
     query: &str,
+    harness: Option<LaunchHarness>,
+    model: Option<&str>,
 ) -> Vec<ComposerSearchResult> {
     let query = query.trim();
     if query.is_empty() {
@@ -304,18 +344,18 @@ pub(crate) fn search_results(
         LaunchHarness::Muse,
         LaunchHarness::OpenCode,
     ] {
-        if format!("{harness:?}")
-            .to_ascii_lowercase()
-            .contains(&folded_query)
-        {
+        if harness_word(harness).contains(&folded_query) {
             results.push(ComposerSearchResult::Harness(harness));
         }
     }
-    for model in catalog {
-        if model.id.to_ascii_lowercase().contains(&folded_query) {
+    for candidate in catalog {
+        if harness.is_some_and(|selected| selected != candidate.harness) {
+            continue;
+        }
+        if candidate.id.to_ascii_lowercase().contains(&folded_query) {
             results.push(ComposerSearchResult::Model {
-                id: model.id.clone(),
-                harness: model.harness,
+                id: candidate.id.clone(),
+                harness: candidate.harness,
             });
         }
     }
@@ -329,6 +369,9 @@ pub(crate) fn search_results(
         let Some(id) = launch.selection.model.as_ref() else {
             continue;
         };
+        if harness.is_some_and(|selected| selected != launch.selection.harness) {
+            continue;
+        }
         if !id.to_ascii_lowercase().contains(&folded_query)
             || catalog.iter().any(|model| model.id == *id)
             || results.iter().any(|result| {
@@ -347,6 +390,17 @@ pub(crate) fn search_results(
             id: id.clone(),
             harness: launch.selection.harness,
         });
+    }
+    // Models can be searched without a selected harness because a known model
+    // carries its owner. Efforts are different: without a harness, there is no
+    // safe vocabulary to offer, and with one selected they must follow the
+    // selected model's compatibility list rather than the raw enum.
+    if let Some(harness) = harness {
+        for effort in compatible_efforts(harness, model, catalog) {
+            if effort_value(effort).contains(&folded_query) {
+                results.push(ComposerSearchResult::Effort(effort));
+            }
+        }
     }
     // Paths are an explicit opt-in boundary. Plain language queries should
     // search the known choices only; a path-shaped query offers deliberate
@@ -380,6 +434,67 @@ pub(crate) fn search_results(
         }
     }
     results
+}
+
+/// Return the first flat result index whose visible word exactly matches the query.
+///
+/// Exact words win over broader substring matches without changing the fixed
+/// group order. Efforts outrank exact model ids, which outrank exact harness
+/// names; this keeps `medium` from landing on a model such as
+/// `medium-context`, and keeps a model id from losing to a harness substring.
+/// Paths and recent setup descriptions deliberately do not participate.
+pub(crate) fn default_search_index(
+    grouped_results: &[(ComposerSearchGroup, Vec<ComposerSearchResult>)],
+    query: &str,
+) -> usize {
+    let folded_query = query.trim().to_ascii_lowercase();
+    if folded_query.is_empty() {
+        return 0;
+    }
+    let flat_results = grouped_results
+        .iter()
+        .flat_map(|(_, results)| results)
+        .collect::<Vec<_>>();
+    for kind in [
+        ComposerSearchGroup::Efforts,
+        ComposerSearchGroup::Models,
+        ComposerSearchGroup::Harnesses,
+    ] {
+        if let Some(index) = flat_results
+            .iter()
+            .position(|result| exact_word_group(result, &folded_query) == Some(kind))
+        {
+            return index;
+        }
+    }
+    0
+}
+
+/// Return the group of a result whose visible word IS the (lowercase,
+/// trimmed) query, or `None` when the result is not an exact word match.
+///
+/// Only harness, model, and effort rows have a single word a person types
+/// deliberately; paths, folders, and recent setups are descriptions, and an
+/// exact match on those would be a coincidence rather than an intent. Each
+/// kind compares by the same spelling the search offered it under —
+/// [`harness_word`], the model id, [`effort_value`] — so a row that matched
+/// as a substring can always also match exactly.
+fn exact_word_group(
+    result: &ComposerSearchResult,
+    folded_query: &str,
+) -> Option<ComposerSearchGroup> {
+    match result {
+        ComposerSearchResult::Harness(harness) if harness_word(*harness) == folded_query => {
+            Some(ComposerSearchGroup::Harnesses)
+        }
+        ComposerSearchResult::Model { id, .. } if id.eq_ignore_ascii_case(folded_query) => {
+            Some(ComposerSearchGroup::Models)
+        }
+        ComposerSearchResult::Effort(effort) if effort_value(*effort) == folded_query => {
+            Some(ComposerSearchGroup::Efforts)
+        }
+        _ => None,
+    }
 }
 
 /// Return whether a search term is an explicit filesystem path expression.
@@ -1138,6 +1253,219 @@ mod tests {
         );
     }
 
+    /// Effort search must expose only vocabulary that the selected choice can
+    /// launch, while refusing to guess a vocabulary before a harness exists.
+    #[test]
+    fn search_offers_efforts_only_for_a_selected_compatible_harness() {
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "claude-fable".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![LaunchEffort::Medium],
+            },
+            LaunchCatalogModel {
+                id: "codex-basic".into(),
+                harness: LaunchHarness::Codex,
+                efforts: vec![LaunchEffort::Low],
+            },
+            LaunchCatalogModel {
+                id: "opencode-basic".into(),
+                harness: LaunchHarness::OpenCode,
+                efforts: vec![],
+            },
+        ];
+        let history = LaunchHistory::default();
+
+        assert!(
+            search_results(
+                &history,
+                &catalog,
+                "MED",
+                Some(LaunchHarness::Claude),
+                Some("claude-fable"),
+            )
+            .contains(&ComposerSearchResult::Effort(LaunchEffort::Medium))
+        );
+        assert!(
+            !search_results(
+                &history,
+                &catalog,
+                "low",
+                Some(LaunchHarness::Claude),
+                Some("claude-fable"),
+            )
+            .iter()
+            .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
+        );
+        assert!(
+            !search_results(&history, &catalog, "medium", None, None)
+                .iter()
+                .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
+        );
+        assert!(
+            !search_results(
+                &history,
+                &catalog,
+                "low",
+                Some(LaunchHarness::OpenCode),
+                Some("opencode-basic"),
+            )
+            .iter()
+            .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
+        );
+        // A model the catalog does not know (custom history, or typed) gets
+        // the harness's released vocabulary — the union of that harness's
+        // catalog efforts, the same rule the effort segment renders — never an
+        // empty list. OpenCode's union is empty, so it still offers nothing.
+        assert!(
+            search_results(
+                &history,
+                &catalog,
+                "med",
+                Some(LaunchHarness::Claude),
+                Some("claude-custom"),
+            )
+            .contains(&ComposerSearchResult::Effort(LaunchEffort::Medium))
+        );
+        assert!(
+            !search_results(
+                &history,
+                &catalog,
+                "low",
+                Some(LaunchHarness::OpenCode),
+                Some("opencode-custom"),
+            )
+            .iter()
+            .any(|result| matches!(result, ComposerSearchResult::Effort(_)))
+        );
+    }
+
+    /// Selecting a harness narrows both released and custom-history model
+    /// results, while a fresh composer still searches every harness.
+    #[test]
+    fn search_models_follow_the_selected_harness() {
+        let history = LaunchHistory {
+            launches: vec![
+                LaunchHistoryEntry {
+                    host: HostId::default(),
+                    canonical_cwd: None,
+                    cwd: "/work".into(),
+                    selection: selection(LaunchHarness::Claude, Some("claude-private"), None),
+                    created_at: 2,
+                    creation_seq: Some(2),
+                },
+                LaunchHistoryEntry {
+                    host: HostId::default(),
+                    canonical_cwd: None,
+                    cwd: "/work".into(),
+                    selection: selection(LaunchHarness::Codex, Some("codex-private"), None),
+                    created_at: 1,
+                    creation_seq: Some(1),
+                },
+            ],
+            folders: Vec::new(),
+        };
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "claude-catalog".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![],
+            },
+            LaunchCatalogModel {
+                id: "codex-catalog".into(),
+                harness: LaunchHarness::Codex,
+                efforts: vec![],
+            },
+        ];
+
+        let claude_results = search_results(
+            &history,
+            &catalog,
+            "catalog",
+            Some(LaunchHarness::Claude),
+            None,
+        );
+        assert_eq!(
+            claude_results,
+            vec![ComposerSearchResult::Model {
+                id: "claude-catalog".into(),
+                harness: LaunchHarness::Claude,
+            }]
+        );
+        let selected_private = search_results(
+            &history,
+            &catalog,
+            "private",
+            Some(LaunchHarness::Claude),
+            None,
+        );
+        assert!(selected_private.contains(&ComposerSearchResult::Model {
+            id: "claude-private".into(),
+            harness: LaunchHarness::Claude,
+        }));
+        assert!(!selected_private.contains(&ComposerSearchResult::Model {
+            id: "codex-private".into(),
+            harness: LaunchHarness::Codex,
+        }));
+        let all_results = search_results(&history, &catalog, "private", None, None);
+        assert!(all_results.contains(&ComposerSearchResult::Model {
+            id: "claude-private".into(),
+            harness: LaunchHarness::Claude,
+        }));
+        assert!(all_results.contains(&ComposerSearchResult::Model {
+            id: "codex-private".into(),
+            harness: LaunchHarness::Codex,
+        }));
+    }
+
+    /// Exact effort and model words must win over broader matches, while a
+    /// query with no exact structured word keeps the first keyboard result.
+    #[test]
+    fn default_search_index_prefers_exact_specific_words() {
+        let results = vec![
+            ComposerSearchResult::Harness(LaunchHarness::Claude),
+            ComposerSearchResult::Model {
+                id: "claude".into(),
+                harness: LaunchHarness::Claude,
+            },
+            ComposerSearchResult::Model {
+                id: "medium-context".into(),
+                harness: LaunchHarness::Claude,
+            },
+            ComposerSearchResult::Effort(LaunchEffort::Medium),
+        ];
+        let groups = grouped_search_results(results);
+
+        assert_eq!(default_search_index(&groups, "medium"), 3);
+        assert_eq!(default_search_index(&groups, "claude"), 1);
+        assert_eq!(default_search_index(&groups, "partial"), 0);
+    }
+
+    /// The fixed group order places effort actions after model actions and
+    /// before folder actions, so keyboard indexes stay stable as groups grow.
+    #[test]
+    fn grouped_search_results_places_efforts_between_models_and_folders() {
+        let groups = grouped_search_results(vec![
+            ComposerSearchResult::Folder("/work".into()),
+            ComposerSearchResult::Effort(LaunchEffort::High),
+            ComposerSearchResult::Model {
+                id: "model".into(),
+                harness: LaunchHarness::Claude,
+            },
+            ComposerSearchResult::Harness(LaunchHarness::Claude),
+        ]);
+
+        assert_eq!(
+            groups.iter().map(|(group, _)| *group).collect::<Vec<_>>(),
+            vec![
+                ComposerSearchGroup::Harnesses,
+                ComposerSearchGroup::Models,
+                ComposerSearchGroup::Efforts,
+                ComposerSearchGroup::Folders,
+            ]
+        );
+    }
+
     /// Folder search must reuse only successful folder history, while a
     /// harness query distinguishes a partial harness choice from a saved
     /// complete setup that happens to mention it.
@@ -1168,7 +1496,7 @@ mod tests {
         }];
 
         assert_eq!(
-            search_results(&history, &catalog, "clau"),
+            search_results(&history, &catalog, "clau", None, None),
             vec![
                 ComposerSearchResult::Harness(LaunchHarness::Claude),
                 ComposerSearchResult::Model {
@@ -1179,7 +1507,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            search_results(&history, &catalog, "helm"),
+            search_results(&history, &catalog, "helm", None, None),
             vec![
                 ComposerSearchResult::Folder("~/work/helm".into()),
                 ComposerSearchResult::Recent(history.launches[0].clone()),
@@ -1238,7 +1566,7 @@ mod tests {
             1
         );
         assert_eq!(
-            search_results(&history, &[], "project")
+            search_results(&history, &[], "project", None, None)
                 .into_iter()
                 .filter(|result| matches!(result, ComposerSearchResult::Recent(_)))
                 .count(),
@@ -1317,7 +1645,7 @@ mod tests {
             .into_iter()
             .map(|entry| (entry.cwd.clone(), entry.selection.clone()))
             .collect::<Vec<_>>();
-        let searched = search_results(&history, &[], "work")
+        let searched = search_results(&history, &[], "work", None, None)
             .into_iter()
             .filter_map(|result| match result {
                 ComposerSearchResult::Recent(entry) => Some((entry.cwd, entry.selection)),
@@ -1362,7 +1690,8 @@ mod tests {
             }],
         };
 
-        let groups = grouped_search_results(search_results(&history, &[], "~/work/helm"));
+        let groups =
+            grouped_search_results(search_results(&history, &[], "~/work/helm", None, None));
         assert_eq!(
             groups,
             vec![
@@ -1399,11 +1728,13 @@ mod tests {
                 creation_seq: Some(1),
             }],
         };
-        assert!(search_results(&history, &[], "candidate").contains(
-            &ComposerSearchResult::Model {
-                id: "release/candidate.42".into(),
-                harness: LaunchHarness::Codex,
-            }
-        ));
+        assert!(
+            search_results(&history, &[], "candidate", None, None).contains(
+                &ComposerSearchResult::Model {
+                    id: "release/candidate.42".into(),
+                    harness: LaunchHarness::Codex,
+                }
+            )
+        );
     }
 }

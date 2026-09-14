@@ -20,13 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Make model names and reasoning efforts searchable in the launch composer. The search box today matches folders,
-  harnesses, and recent setups, so the keyboard path stops at the harness: what is wanted is "claude ENTER fable ENTER
-  medium ENTER" driving the whole structured selection from the one field, each accepted result applying its choice and
-  leaving the box ready for the next word. Model results should be scoped by the harness already chosen (or resolve the
-  harness themselves, as picking a known model does now), and effort words should apply only where the harness offers
-  that vocabulary.
-
 - Add "replace with" to the session row, beside clone and replace. It is clone's editable form with replace's action:
   the row's session is the seed, everything typed over it wins, and launching creates the new session and then deletes
   the source exactly as replace does. The key use is "a new session just like this one but on harness foo": click →
