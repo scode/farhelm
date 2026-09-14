@@ -117,8 +117,17 @@ work="$state/work"
 # Structured composer tests compile a harness NAME, unlike the raw startup
 # fixture below, which invokes the fake-agent binary by absolute path. The
 # supervisor deliberately launches through a login shell, so a private login
-# home is the only reliable way to put an owned fake `codex` ahead of any
-# operator installation without changing this script's own PATH.
+# home is the only reliable way to put an owned fake harness binary ahead of
+# any operator installation without changing this script's own PATH. Two
+# harnesses are faked, `codex` and `claude`, because replace-with's own
+# browser coverage (`replace.spec.ts`) exercises a harness SWITCH through the
+# real composer search box — an e2e run must never let that switch fall
+# through to a REAL vendor CLI the login shell happens to find on this
+# machine, so every structured harness a spec can select through the search
+# box needs its own owned fake ahead of PATH, not just the one the original
+# structured-clone tests used. All four harness NAMES the helm compiles
+# (codex, claude, muse, opencode — `crates/farhelm-helm/src/launches.rs`)
+# get one, so a future spec selecting any of them lands on a fake too.
 structured_bin="$state/structured-bin"
 structured_home="$state/structured-home"
 # Assigned BEFORE the trap below, not where it is first used. The cleanup
@@ -154,10 +163,22 @@ mkdir -p "$work" "$remote_state" "$provisioning_backend" "$structured_bin" "$str
 printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$provisioning_backend/ENABLED" || exit 1
 printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 : >"$provisioning_backend/events.jsonl" || exit 1
-cat >"$structured_bin/codex" <<EOF || exit 1
+# One fake per structured harness a spec's composer search can select —
+# see the comment above `structured_bin`'s own assignment for why both are
+# needed rather than just the `codex` the original structured-clone tests
+# used. Both share the identical body (the per-session generation counter
+# and argv echo every structured test asserts against, then the SAME
+# `claude-record` fake-agent script for either binary — the record SHAPE
+# is unrelated to which harness name invoked it, and picking one shape for
+# both keeps this loop from needing a second branch), differing only in
+# which binary name they are installed under and in their own counter
+# file's name, so two structured sessions on different harnesses do not
+# share one generation sequence.
+for structured_name in codex claude muse opencode; do
+  cat >"$structured_bin/$structured_name" <<EOF || exit 1
 #!/bin/sh
 session="\${FARHELM_SESSION_ID:?missing session id}"
-counter="$state/codex-generation-\$session"
+counter="$state/$structured_name-generation-\$session"
 generation=0
 if [ -f "\$counter" ]; then
   IFS= read -r generation <"\$counter"
@@ -170,7 +191,8 @@ printf ' %s' "\$@"
 printf '\n'
 exec "$bin" internal fake-agent --script claude-record --record-home "$structured_home" "\$@"
 EOF
-chmod 700 "$structured_bin/codex" || exit 1
+  chmod 700 "$structured_bin/$structured_name" || exit 1
+done
 printf '%s\n' "export PATH=$structured_bin:\$PATH" >"$structured_home/.bash_profile" || exit 1
 bash_shell=$(command -v bash) || exit 1
 [ -n "$bash_shell" ] && [ -x "$bash_shell" ] || exit 1

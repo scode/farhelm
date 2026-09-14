@@ -1542,6 +1542,20 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   instead says the replacement exists and that the source's fate is unknown and must be checked before deleting it again
   or retrying. Neither shape ever rolls the create back (killing an agent the caller just asked for) or claims success
   (hiding a session, or an uncertainty, the caller needs to see).
+- "Replace with" (SPEC.md's bullet of that name) reuses the same endpoint through `ReplaceReq`'s optional `with` field —
+  a whole `CreateReq`, the same type an ordinary create's body decodes into — rather than a second route or a second
+  override type: present, its cwd/title/dimensions/mode selector are resolved exactly as an ordinary create's own body
+  is (including that body's own mutual-exclusivity refusals), and used in place of the source's live row; absent,
+  behavior is byte-for-byte unqualified replace. Replace never changes machine, with or without an override, so a
+  `with.host` naming anything but the source's own host (compared against the `claim` `route_session` resolved for the
+  source, not a fresh registry read) is refused with `Conflict` before either the create or the delete runs — the same
+  refusal shape `precondition::incarnation_holds` already gives an ordinary create, applied here to `with`'s own
+  `expected_incarnation` too. The client's idempotency binding folds the replace-with source id in alongside the
+  ordinary create fields (`create_form.rs`'s `IntentBinding::replace_source`), so retrying a replace-with reuses its own
+  key and an ordinary create can never collide with one — and the wire body's own two `intent_key` fields (the
+  endpoint's own, and the one `with` carries because it is built from the identical create-body function) must agree, a
+  caller sending two different keys for what claims to be one intended create being refused as a 400 rather than
+  silently resolved by picking one.
 - Host management commits durably first and converges the live actors after, so each verb states how it fails closed:
   add rolls its row back if no actor could be started (a registered host with no actor is invisible and un-dialed, while
   its destination is taken); retarget converges instead of rolling back, because the durable write is what the user

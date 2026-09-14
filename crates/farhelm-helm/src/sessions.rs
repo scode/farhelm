@@ -2189,9 +2189,10 @@ pub(crate) async fn mark_seen(
     }
 }
 
-/// The body of `POST /api/sessions/{id}/replace`: only an optional
-/// idempotency key, forwarded to the CREATE half of the operation (see
-/// [`do_replace_session`]).
+/// The body of `POST /api/sessions/{id}/replace`: an optional idempotency
+/// key, forwarded to the CREATE half of the operation (see
+/// [`do_replace_session`]), and an optional override of what that create
+/// launches — SPEC.md's "replace with".
 ///
 /// The delete half deliberately gets no key of its own: a browser fires one
 /// request per confirmation and never retries a replace on its own, so the
@@ -2200,6 +2201,42 @@ pub(crate) async fn mark_seen(
 #[derive(Deserialize)]
 pub(crate) struct ReplaceReq {
     intent_key: Option<String>,
+    /// "Replace with"'s editable form, reusing [`CreateReq`] verbatim rather
+    /// than inventing a parallel override type: a replace-with body IS an
+    /// ordinary create body in every field that matters to a create, and a
+    /// second type would only be one more place for the two to drift apart.
+    /// `None` means today's plain replace — the source's own cwd, title, and
+    /// agent, read live and carried forward unchanged (see
+    /// [`do_replace_session`]'s doc for that path).
+    ///
+    /// Present, this field's `cwd`/`title`/`cols`/`rows`/`agent_kind`/
+    /// `resume_template`/mode selector (`invocation`/`profile_id`/`launch`)
+    /// are resolved exactly as an ordinary `POST /api/sessions` body's are —
+    /// including its own mutual-exclusivity and compatibility refusals
+    /// (`create_mode`) — and used in place of the source's live row. Two
+    /// fields on it mean something DIFFERENT here than on an ordinary
+    /// create, because replace-with is deliberately not an ordinary create:
+    ///
+    /// - `host`: replace never changes machine (SPEC.md's contrast with
+    ///   clone, which is the one way to start a session elsewhere). A
+    ///   `with.host` naming anything other than the SOURCE's own host (the
+    ///   `claim` [`route_session`] resolved for `id`, not a live re-read of
+    ///   any registry state) is refused with `Conflict` before anything is
+    ///   created; `None` means "the source's host", which is what makes an
+    ///   ordinary REST caller's replace-with body able to omit it entirely,
+    ///   exactly as a plain create can.
+    /// - `intent_key`: this create's real idempotency key is always the
+    ///   TOP-LEVEL `intent_key` on this struct, never this field — the wire
+    ///   body would otherwise carry two candidate keys for one create, and
+    ///   callers that build `with` from the same body-building
+    ///   code path an ordinary create uses (see the browser client's
+    ///   `create_body`) naturally send the same value in both places. A
+    ///   `with.intent_key` that is `Some` and DIFFERS from the top-level key
+    ///   is refused with `InvalidRequest` (400): a caller sending two
+    ///   different keys for what is supposed to be one intended create is
+    ///   describing an ambiguity this route will not silently resolve by
+    ///   picking one.
+    with: Option<CreateReq>,
 }
 
 /// One replace: a fresh session with the source's cwd, title, and agent
@@ -2247,16 +2284,86 @@ pub(crate) struct ReplaceReq {
 /// through the ordinary `route_session` refusal that precedes everything
 /// else here; this route makes no attempt to look idempotent past that
 /// point, and none is needed.
+///
+/// ## "Replace with", and what stays true either way
+///
+/// `with` (see [`ReplaceReq::with`]) overrides WHAT the create half
+/// launches — cwd, title, agent, dimensions — never WHERE: the source's own
+/// host and connection (`claim` below) are used for both the create and the
+/// delete regardless of `with`, and a `with.host` naming a different host is
+/// refused before either mutation runs. Everything from the create call
+/// onward in this function's doc above — the idempotency-replay veto, the
+/// delete, its two failure shapes, `forget_session` — is unchanged by
+/// `with`'s presence; only the `CreateSpec` fields feeding that create
+/// differ.
 pub(crate) async fn do_replace_session(
     state: &AppState,
     id: &str,
     intent_key: Option<String>,
+    with: Option<CreateReq>,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    // Body-shape refusals, checked before anything touches the network —
+    // the same precedence an ordinary create's own mutual-exclusivity
+    // refusals (`create_mode`) get ahead of routing in `create_session`.
+    // Resolving the override's MODE here, and not down where the source's
+    // live row is read, is what makes that true for `with`: a body naming
+    // both or neither of invocation/profile/launch is a 400 whether or not
+    // the source's host is reachable or the source id even exists, exactly
+    // as an ordinary create answers, and it never pays for a supervisor
+    // round trip first. Two keys naming one intended create is the other
+    // shape refused here: an ambiguity this route resolves by refusing
+    // rather than silently picking one; see `ReplaceReq::with`'s own doc
+    // for why the wire even has two fields that could disagree.
+    let mut with = with;
+    let with_mode = match with.as_mut() {
+        Some(with) => Some(create_mode(with)?),
+        None => None,
+    };
+    if let Some(with) = &with
+        && let Some(with_key) = &with.intent_key
+        && Some(with_key) != intent_key.as_ref()
+    {
+        return Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "the replace's own idempotency key and its \"with\" body's key disagree; \
+                      send the same key in both places, or omit it from \"with\" entirely"
+                .to_string(),
+        }));
+    }
     let (claim, client) = route_session(state, id).await?;
+    // "Replace with" keeps the source's own host — SPEC.md draws this line
+    // explicitly, since clone already exists for "start this elsewhere".
+    // Checked against the CLAIM (the connection this whole operation is
+    // pinned to), not any live-read row, and BEFORE the live read below:
+    // this refusal needs nothing from the source's own fields, so there is
+    // no reason to pay for that read before a refusal that does not depend
+    // on it.
+    if let Some(with) = &with
+        && let Some(wanted_host) = with.host
+        && wanted_host != claim.host
+    {
+        return Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: format!(
+                "replace with keeps the source session's own host ({}); it cannot move a \
+                 session to another host ({wanted_host}) — clone is the way to start one \
+                 elsewhere",
+                claim.host
+            ),
+        }));
+    }
+    crate::precondition::incarnation_holds(
+        &claim,
+        with.as_ref().and_then(|with| with.expected_incarnation),
+    )?;
     // Read LIVE from the owning host, exactly as `clone_for_agent` does and
     // for the same reason: the helm's cache is for the stale list, not a
     // serving layer, and a replace built from a cached row could copy a
-    // title or working directory the session no longer has.
+    // title or working directory the session no longer has. This read (and
+    // its existence check) runs unconditionally — `with` or not — so a
+    // source that has vanished from its own host's list is refused the same
+    // way regardless of which form of replace was asked for; only the
+    // FIELDS the create half launches with, resolved right below, differ.
     let source = manager::drain_sessions(&client)
         .await?
         .sessions
@@ -2270,29 +2377,64 @@ pub(crate) async fn do_replace_session(
                     .to_string(),
             })
         })?;
-    let mode = mode_from_source(state, &source, DanglingProfilePolicy::FallBackToRaw).await?;
+    // The create half's fields: from the override body when "replace with"
+    // supplied one (its mode already resolved at the top of this function,
+    // ahead of routing), otherwise derived from the source's own live row
+    // exactly as plain replace has always done. Building `with`'s mode
+    // through the SAME `create_mode` an ordinary create uses is what gives
+    // "replace with" every one of a create's own body-shape refusals (naming both or
+    // neither of invocation/profile/launch, a profile body also naming
+    // agent_kind/resume_template) for free, rather than a second copy of
+    // them to keep in sync.
+    let (mode, cwd, title, cols, rows, agent_kind, resume_template) = match (with, with_mode) {
+        (Some(with), Some(mode)) => (
+            mode,
+            with.cwd,
+            with.title,
+            with.cols,
+            with.rows,
+            with.agent_kind,
+            with.resume_template,
+        ),
+        // The two halves travel together: `with_mode` is `Some` exactly
+        // when `with` is, since both come from the same `Option` above.
+        (_, _) => {
+            let mode =
+                mode_from_source(state, &source, DanglingProfilePolicy::FallBackToRaw).await?;
+            (
+                mode,
+                source.cwd,
+                // Copied verbatim, empty string included — the same rule
+                // `clone_for_agent` follows and for the same reason: deriving
+                // a title from the directory instead would silently rename
+                // the replacement, the one difference between the two rows a
+                // user reading them side by side would notice first.
+                Some(source.title),
+                default_cols(),
+                default_rows(),
+                // Raw/profile compatibility overrides still have no durable
+                // projection on `SessionInfo`. A structured source is
+                // different: `mode_from_source` carries its recorded
+                // template inside the structured mode, where
+                // `do_create_session` forwards it.
+                None,
+                None,
+            )
+        }
+    };
     let created = do_create_session(
         state,
         &claim,
         &client,
         CreateSpec {
-            cwd: source.cwd,
+            cwd,
             mode,
-            // Copied verbatim, empty string included — the same rule
-            // `clone_for_agent` follows and for the same reason: deriving a
-            // title from the directory instead would silently rename the
-            // replacement, the one difference between the two rows a user
-            // reading them side by side would notice first.
-            title: Some(source.title),
-            cols: default_cols(),
-            rows: default_rows(),
+            title,
+            cols,
+            rows,
             intent_key,
-            // Raw/profile compatibility overrides still have no durable
-            // projection on `SessionInfo`. A structured source is different:
-            // `mode_from_source` carries its recorded template inside the
-            // structured mode, where `do_create_session` forwards it.
-            agent_kind: None,
-            resume_template: None,
+            agent_kind,
+            resume_template,
             origin: CreateOrigin::User,
             // Unlike an ordinary REST create, replace DOES have a session an
             // idempotency replay can collide with: the SOURCE itself. A
@@ -2376,15 +2518,16 @@ pub(crate) async fn do_replace_session(
 }
 
 /// `POST /api/sessions/{id}/replace` — recreate `id` under a brand-new id on
-/// the same host, in the same directory, with the same title and agent, then
-/// remove `id` (SPEC.md's "replace"; see [`do_replace_session`] for the
-/// operation and its failure rule).
+/// the same host, then remove `id` (SPEC.md's "replace"). Absent `with`,
+/// the replacement carries the same directory, title, and agent as `id`; a
+/// present `with` overrides any of those instead (SPEC.md's "replace with").
+/// See [`do_replace_session`] for the operation and its failure rule.
 pub(crate) async fn replace_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<ReplaceReq>,
 ) -> impl IntoResponse {
-    match do_replace_session(&state, &id, req.intent_key).await {
+    match do_replace_session(&state, &id, req.intent_key, req.with).await {
         Ok(session) => match browser_session_ready(&session) {
             Ok(()) => axum::Json(session).into_response(),
             Err(error) => http_error(error),
