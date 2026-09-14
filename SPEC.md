@@ -195,6 +195,11 @@ Session creation is one action, not a wizard. Only the working directory is fund
   invalid combination cannot launch. The one exception to "New preselects nothing": the permissions mode remembers the
   last SUCCESSFUL structured launch, helm-wide across every client; "reset choices" returns the segment to that
   remembered value rather than to the harness default, and a recent-setup row's own saved choice overrides it when used.
+  The launch-composer search matches harnesses, models scoped by the chosen harness, effort words offered by that
+  harness and model, folders, and recent setups. Accepting a result applies it and clears the box while keeping focus
+  there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch path; Enter on a
+  non-empty query with no result never launches, and Escape closes the result list without clearing the query, so Enter
+  after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: an explicit secondary creation surface. Existing callers, profiles, and
   their helm-wide last-used profile behavior remain compatible, but New does not silently choose a remembered profile.
   Values from this surface cannot affect a structured request, or its idempotency key. The helm owns the remembered

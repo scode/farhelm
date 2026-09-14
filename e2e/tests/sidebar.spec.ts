@@ -5321,7 +5321,8 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
   // a long folder: reach the row by keyboard (the hint is shown for
   // `:focus-visible`, which Chromium withholds from programmatic focus) and
   // require the hint inside the row's box.
-  const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
+  // The search label names efforts too now that effort words are searchable (composer word search).
+  const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
   await search.focus();
   await expect(search).toBeFocused();
   await page.keyboard.press("Tab");
@@ -5381,7 +5382,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo");
     expect(posts, "clicking a recent only fills the draft").toHaveLength(0);
-    const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
+    const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
     await search.focus();
     await page.keyboard.press("Tab");
     await expect(recent, "Tab from the search box must establish the keyboard-visible row focus before Enter").toBeFocused();
@@ -5913,7 +5914,7 @@ test("composer menu-closed Tab order follows the displayed launch groups", async
   await page.goto("/");
   await page.locator(".new-session-button").click();
   const form = page.locator(".create-session-form");
-  const search = form.getByRole("combobox", { name: "search folders, harnesses, and models", exact: true });
+  const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
   await form.getByLabel("folder", { exact: true }).fill(folder);
   // Name the controls rather than indexing a generic list so this traversal
   // continues to document the destination's user-visible order.

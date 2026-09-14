@@ -1725,7 +1725,8 @@ test("create form inputs opt out of autocomplete, autocorrect, autocapitalize, a
   await expect(form.getByLabel("folder", { exact: true })).toHaveCount(1);
   await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveCount(1);
   await expect(form.getByLabel("name (optional)", { exact: true })).toHaveCount(1);
-  await expect(form.getByRole("combobox", { name: "search folders, harnesses, and models" })).toHaveCount(1);
+  // The search label names efforts too now that effort words are searchable (composer word search).
+  await expect(form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts" })).toHaveCount(1);
   const inputs = form.locator('input[type="text"], input[type="search"]');
   const inputCount = await inputs.count();
   expect(inputCount).toBeGreaterThanOrEqual(4);
