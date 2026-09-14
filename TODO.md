@@ -20,11 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Stop the whole app scrolling. After the recent UI changes, a wheel or trackpad scroll that lands over the top of the
-  window, or over the thin bar between the terminal and the sidebar, scrolls the entire app contents and exposes the
-  black background underneath. Only the terminal viewport and the sidebar list should ever scroll; the app shell itself
-  must not.
-
 - Make model names and reasoning efforts searchable in the launch composer. The search box today matches folders,
   harnesses, and recent setups, so the keyboard path stops at the harness: what is wanted is "claude ENTER fable ENTER
   medium ENTER" driving the whole structured selection from the one field, each accepted result applying its choice and
