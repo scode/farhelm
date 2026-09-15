@@ -422,23 +422,23 @@ fn decode_generation_argv(observed: &[u8], session: &str, generation: u32) -> Ge
     // original byte stream. A narrow pane can fold this deliberately
     // unambiguous hex witness across physical lines; join only
     // wholly hexadecimal continuation rows, stopping before the
-    // fake process's ordinary human-readable output. The join also
-    // crosses blank rows: a replay taken while the pipeline still
-    // fills the pane holds the prefix row followed by not-yet-rendered
-    // rows, with the live payload arriving after them textually.
-    // Rows below the render point are always blank here — these panes
-    // run no cursor-addressing programs, and the launch output never
-    // fills the pane — so skipping blanks cannot skip real content,
-    // and the first hex run past them is this launch's payload.
+    // fake process's ordinary human-readable output. Blank rows are
+    // filtered throughout the run, not just ahead of it: a replay
+    // taken while the pipeline still fills the pane holds the prefix
+    // row — and any already-rendered payload rows — followed by
+    // not-yet-rendered rows, with the live remainder arriving after
+    // them textually. Rows below the render point are always blank
+    // here — these panes run no cursor-addressing programs, and the
+    // launch output never fills the pane — so skipping blanks cannot
+    // skip real content, and the hex run past them is this launch's
+    // payload. Stopping at the first blank instead would decode a
+    // snapshot cut mid-payload as the whole argv.
     let encoded = std::iter::once(first_line.trim())
         .chain(
             lines
                 .by_ref()
-                .skip_while(|line| line.trim().is_empty())
-                .take_while(|line| {
-                    let line = line.trim();
-                    !line.is_empty() && line.bytes().all(|byte| byte.is_ascii_hexdigit())
-                })
+                .filter(|line| !line.trim().is_empty())
+                .take_while(|line| line.trim().bytes().all(|byte| byte.is_ascii_hexdigit()))
                 .map(str::trim),
         )
         .collect::<String>();
@@ -459,6 +459,14 @@ fn decode_generation_argv(observed: &[u8], session: &str, generation: u32) -> Ge
         Ok(bytes) => bytes,
         Err(_) => return GenerationArgv::Error("wrapper argv hex is invalid".to_string()),
     };
+    // The wrapper NUL-terminates every argument (`printf '%s\0'`), so a
+    // complete witness always ends in NUL. A join cut short of the
+    // terminator is a truncated snapshot cut, not the generation's argv:
+    // staying pending distinguishes the two where the even/odd length
+    // check cannot.
+    if bytes.last() != Some(&0) {
+        return GenerationArgv::Pending;
+    }
     let words = bytes
         .split(|byte| *byte == 0)
         .filter(|word| !word.is_empty())
@@ -850,17 +858,18 @@ async fn explicit_overrides_clear_a_structured_parents_metadata_before_launch() 
 mod decoder_tests {
     use super::*;
 
-    /// Encode argv words the way the fixture wrapper's `od` pipeline does.
+    /// Encode argv words the way the fixture wrapper's `od` pipeline does,
+    /// including its trailing NUL: the wrapper prints `printf '%s\0' "$@"`,
+    /// so every argument — including the last — is NUL-terminated, and the
+    /// decoder requires that terminator as its completeness witness.
     ///
     /// Building the witness from words instead of pasting hex keeps the
     /// regression transcripts readable and proves the expectation against the
     /// same NUL-joined grammar the decoder parses.
     fn hex_of(words: &[&str]) -> String {
-        words
-            .join("\0")
-            .bytes()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
+        let mut joined = words.join("\0");
+        joined.push('\0');
+        joined.bytes().map(|byte| format!("{byte:02x}")).collect()
     }
 
     /// A stale payload-less prefix row must not satisfy the generation wait.
@@ -948,6 +957,86 @@ mod decoder_tests {
             GenerationArgv::Ready(argv) => assert_eq!(argv, shell_words::join(words)),
             other => panic!("escaped witness row must decode: {other:?}"),
         }
+    }
+
+    /// A snapshot cut mid-payload joins through blank rows to the live rest.
+    ///
+    /// The blank filter must apply throughout the hex run, not just ahead
+    /// of it: a replay taken halfway through the payload holds rendered
+    /// payload rows, then blank not-yet-rendered rows, then the live
+    /// remainder. Stopping the join at the first blank decodes the
+    /// retained cut as the whole argv — `Ready("in")` for an `internal`
+    /// launch — or errors on an odd cut. The full argv, terminator
+    /// included, is the only acceptable decode.
+    #[test]
+    fn a_snapshot_cut_mid_payload_joins_through_blank_rows() {
+        let words = ["codex", "internal", "fake-agent"];
+        let full = hex_of(&words);
+        let (cut, rest) = full.split_at(6);
+        let (first, second) = cut.split_at(4);
+        let transcript = format!(
+            "STRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:{first}\n{second}\n\n\n{rest}\nfake-agent starting\nFAKE-AGENT ARGV:/bin/fake internal\nFAKE-AGENT READY\n"
+        );
+        match decode_generation_argv(transcript.as_bytes(), "session", 1) {
+            GenerationArgv::Ready(argv) => assert_eq!(argv, shell_words::join(words)),
+            other => panic!("cut payload must join to the full argv: {other:?}"),
+        }
+    }
+
+    /// A witness without its NUL terminator is still in flight.
+    ///
+    /// The wrapper NUL-terminates every argument, so a decoded payload
+    /// that does not end in NUL is a truncated snapshot cut even when
+    /// its length is even. Accepting it would return a silently
+    /// shortened argv; staying pending waits for the remainder (or
+    /// fails loudly at the wait's deadline with the transcript).
+    #[test]
+    fn a_witness_missing_its_terminator_stays_pending() {
+        let transcript = b"STRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:666f6f\nFAKE-AGENT ARGV:/bin/fake\nFAKE-AGENT READY\n";
+        assert!(matches!(
+            decode_generation_argv(transcript, "session", 1),
+            GenerationArgv::Pending
+        ));
+    }
+
+    /// A corrupted witness stays an error, not a guess.
+    ///
+    /// Pins the defensive arm: an odd-length hex run cannot split into
+    /// bytes, so the decoder must say so rather than pending forever or
+    /// decoding a prefix of it.
+    #[test]
+    fn an_odd_length_witness_is_an_error() {
+        let transcript = b"STRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:2d6\nFAKE-AGENT ARGV:/bin/fake\nFAKE-AGENT READY\n";
+        assert!(matches!(
+            decode_generation_argv(transcript, "session", 1),
+            GenerationArgv::Error(_)
+        ));
+    }
+
+    /// Each fake-side marker gate is necessary on its own.
+    ///
+    /// The generation wait requires both the fake's argv line and its
+    /// ready line; pin that neither gate alone suffices, so losing
+    /// either requirement in the disjunction fails loudly here instead
+    /// of silently weakening the boundary.
+    #[test]
+    fn each_fake_marker_gate_is_necessary() {
+        let words = ["codex", "internal"];
+        let hex = hex_of(&words);
+        let without_ready = format!(
+            "STRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:{hex}\nFAKE-AGENT ARGV:/bin/fake\n"
+        );
+        assert!(matches!(
+            decode_generation_argv(without_ready.as_bytes(), "session", 1),
+            GenerationArgv::Pending
+        ));
+        let without_argv = format!(
+            "STRUCTURED-LAUNCH-GENERATION:1\nSTRUCTURED-LAUNCH-ARGV-HEX:{hex}\nFAKE-AGENT READY\n"
+        );
+        assert!(matches!(
+            decode_generation_argv(without_argv.as_bytes(), "session", 1),
+            GenerationArgv::Pending
+        ));
     }
 
     /// A hex witness folded across terminal rows still decodes as one argv.
