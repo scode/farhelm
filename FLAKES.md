@@ -891,3 +891,23 @@ trace was not opened for this record. Disposition: open (TODO.md).
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-14 — `agent_listing_real_stack::an_authenticated_agent_clone_starts_a_structured_successor` (crates/farhelm/tests/e2e/agent_listing_real_stack.rs)
+
+The deflake sweep's workspace nextest battery failed this structured-clone test once: the parent-generation argv
+assertion ("the structured parent must reach the owned fake executable") saw an empty observed argv, even though the
+retained trace shows the fake's `STRUCTURED-LAUNCH-GENERATION:1` marker and `FAKE-AGENT READY`. Classification reruns of
+the exact test passed twice and failed once, the failure at the clone-generation argv assertion ("clone argv lost
+model") with an empty argv as well. Sweep failure retained run `bab77953-df15-4df6-88fc-83f4ac2ee18e`; reruns
+`f09afa88-3506-482a-b17a-afd08570917d`, `69a2a2b2-c1c8-4f22-9e3e-131d88ac618c`, `23f578e3-bba7-4932-bc13-13809d162fe2`.
+Tested commit `f4c3840de3aff5fefb5c4c2ae10483314886fa4f` with a clean tree. Selection `workspace Rust targets`
+(`cargo nextest run --workspace --exclude farhelm-desktop`, minus the recorded exclusions); concurrency
+`4 nextest slots; retries 0` with `--test-threads 4`, on a Linux x86_64 worker. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only
+`FARHELM_TEST_TRACE_DIR` present in the test process). Suspected observation race: the generation-argv wait returned
+empty before the marker arrived, at two different generations, rather than either launch losing the model; not
+established. Disposition: open (TODO.md).
+
+Class: readiness
+
+Cause: hypothesis
