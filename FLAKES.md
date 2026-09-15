@@ -911,3 +911,31 @@ established. Disposition: open (TODO.md).
 Class: readiness
 
 Cause: hypothesis
+
+## 2026-09-14 — `agent_listing_real_stack::an_authenticated_agent_clone_starts_a_structured_successor` fixed (crates/farhelm/tests/e2e/structured_launches.rs)
+
+The open entry above guessed an observation race; the mechanism turned out to be two defects in the generation-argv
+decoder, both in how it reads the attach replay. The replay carries terminal rows, not the wrapper's byte stream: rows
+arrive with cursor-positioning escapes and padding, and a snapshot taken mid-render holds a payload-less argv prefix
+row. First, the decoder accepted the first (stale) prefix row, returning an empty argv for a healthy launch — the
+sweep's empty-argv failures. Second, the hex join stopped at any non-hex line, so a payload row wearing a positioning
+escape (`\x1b[2;28H` ahead of the hex, as retained) was invisible and the wait sat pending until its deadline even
+though the failure transcript carries the full boundary. That second shape reproduced 1/20 and 5/20 in isolation hunts
+(batches `562ec3f5-21ef-45cd-a0d4-244a82685e46`, `785d243b-457a-4245-a8ca-9fdafb39c864`) with the generation-2 timeout
+signature, always at the clone observation. The decoder now normalizes rows through the harness's own
+`normalize_pane_text` before parsing, resolves to the most recent witness (matching the generation marker's own
+last-occurrence rule), joins the payload across the replay's not-yet-rendered rows, and treats an empty decode as a
+payload still in flight. Adversarial review then found the join still stopped at the first blank, truncating a snapshot
+cut mid-payload, so blanks filter throughout the run and the wrapper's trailing NUL terminator witnesses completeness.
+One investigation note for the next reader: the retained failure logs strip raw ANSI escapes, so every timeout
+transcript looked clean; only a Debug-escaped buffer dump showed the `\x1b[2;28H` prefix. Tested commit `08182855` with
+the uncommitted fix. Selection `structured clone argv observation` (decoder unit tests 10/10; exact flake test 20/20 in
+batch `3d4163fa-3168-47d8-b5d9-a2607f7d3de2`; `structured_launches` plus `agent_listing_real_stack` modules 17/17);
+concurrency `4 nextest slots; retries 0`, on a Linux x86_64 worker. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only
+`FARHELM_TEST_TRACE_DIR` present in the test process). Disposition: fixed in this PR; the TODO.md entry and the
+`deflake/known-flakes.txt` line are removed.
+
+Class: readiness
+
+Cause: established
