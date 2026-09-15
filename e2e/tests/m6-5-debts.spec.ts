@@ -376,6 +376,26 @@ test.describe("the M6.5 test debts", () => {
     feed.notify(2);
     await reads.waitForCaptures(1);
 
+    // The restart takes the session off the supervisor's map between the
+    // generation claim and the republication (`Supervisor::relaunch`), so a
+    // read that lands in that gap is honestly answered 404 — a reply this
+    // test cannot re-sign. Release gap answers and read again; every attempt
+    // still starts inside the restart, so each carries the same epoch, and
+    // the first JSON reply in hand is the mid-restart one.
+    let held = 1;
+    const gapDeadline = Date.now() + 30_000;
+    while (reads.reply(held).status !== 200) {
+      if (Date.now() > gapDeadline) {
+        throw new Error(
+          `the mid-restart read kept landing in the restart gap (last status ${reads.reply(held).status})`,
+        );
+      }
+      reads.release(held);
+      held += 1;
+      feed.notify(held + 1);
+      await reads.waitForCaptures(held);
+    }
+
     // The restart finishes. The button coming back is the second bump having
     // happened — it is re-enabled immediately after it (`restarting`) — and
     // waiting for it is what keeps this test from releasing the stale reply
@@ -385,14 +405,14 @@ test.describe("the M6.5 test debts", () => {
 
     // The mid-restart reply, wearing a title that exists nowhere else.
     const signature = `${original}-from-the-run-that-ended`;
-    const midRestart = JSON.parse(reads.reply(1).body);
-    reads.release(1, { body: JSON.stringify({ ...midRestart, title: signature }) });
+    const midRestart = JSON.parse(reads.reply(held).body);
+    reads.release(held, { body: JSON.stringify({ ...midRestart, title: signature }) });
 
     // The refresh the restart owes is dispatched the moment that reply is
-    // dealt with, and the hold captures it — so reaching two captures is
-    // proof both that the stale reply landed and that nothing has repaired
-    // the screen since.
-    await reads.waitForCaptures(2);
+    // dealt with, and the hold captures it — so reaching one capture past the
+    // re-signed reply is proof both that the stale reply landed and that
+    // nothing has repaired the screen since.
+    await reads.waitForCaptures(held + 1);
     await expect(
       page.locator(".titlebar .title"),
       "a read launched during a restart describes the run that ended, and the second bump is " +
