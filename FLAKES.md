@@ -939,3 +939,47 @@ concurrency `4 nextest slots; retries 0`, on a Linux x86_64 worker. Pinned tmux 
 Class: readiness
 
 Cause: established
+
+## 2026-09-15 — `a detail read that starts during a restart cannot describe the previous run` (e2e/tests/m6-5-debts.spec.ts)
+
+The deflake sweep's browser battery failed this restart-seam test once on Chromium: the test holds a detail read issued
+during a restart, parses the recorded reply, and re-signs it — but the recorded body was the plaintext
+`no such session: ...` error, so `JSON.parse` threw
+`SyntaxError: Unexpected token 'o', "no such ses"... is not valid JSON`. The page snapshot shows the client itself
+detached with the same `no such session` error. All three classification reruns passed. Sweep failure retained run
+`963d54d5-217a-4798-be58-331e80ae571b` (failure screenshot, trace.zip, and error-context.md retained under
+`playwright-artifacts`); reruns `77e34f5b-79f4-4d7d-b695-a4fb251881d8`, `7d01057a-6205-46d7-bf8c-0984d9758e3d`,
+`e3b617a7-c99b-4091-b040-43a89d274e4b`. Tested commit `204b5cb964315ccf15aa97fa719d9a558c30c33b` with a clean tree.
+Selection `browser suite, both engines` (Playwright with the recorded exclusions, `--workers=1 --retries=0`);
+concurrency `one browser worker; retries 0`, on a Linux x86_64 worker. Pinned tmux 3.7c executable SHA256
+`c4d00d1d947c5e64fd7c4eada92b80a2a0230df32f725f8ae26ee6ac9d3a81c2`, `LANG=C.UTF-8`, only
+`FARHELM_PLAYWRIGHT_POLICY_FILE` and `FARHELM_TEST_TRACE_DIR` present in the test process. Hypothesis: the read was
+served after the restart discarded the old session, so the server answered the teardown error rather than the held
+detail JSON; not established. Disposition: open (TODO.md).
+
+Class: peer-lifecycle
+
+Cause: hypothesis
+
+## 2026-09-15 — `a detail read that starts during a restart cannot describe the previous run` fixed (e2e/tests/m6-5-debts.spec.ts)
+
+The open entry above guessed the read was served after the restart discarded the session; the mechanism is narrower and
+documented: `Supervisor::relaunch` takes the session off the map between the generation claim and the republication, so
+a read landing in that gap is honestly answered 404 (`get_session`'s missing-from-drain arm). The test re-signed the
+held reply by parsing it as JSON, and the plaintext `no such session` body crashed the parse. The product behavior is
+intended — an admitted 404 only raises the `.refresh-stale` notice and a later good reply clears it — so the fix stays
+on the test side: gap-answered captures are released and re-read (every attempt still starts inside the restart, so each
+carries the same first-bump epoch) until a 200 JSON reply is in hand, under a 30 s deadline. A temporary probe forcing
+one retry iteration passed once on Chromium (run `1983e6aa-3aba-40e5-a38f-13bc82449f94`); the committed shape passed the
+exact test 20/20 on Chromium (run `da6e41ed-7f8e-413b-a096-875a70673406`) and 3/3 on WebKit (run
+`5228471f-4021-443b-b43e-d6b52a7cb518`). Tested commit `204b5cb964315ccf15aa97fa719d9a558c30c33b` with the uncommitted
+fix. Selection `exact mid-restart read on one engine` (Playwright `--project=chromium-m6-5-debts` /
+`--project=webkit-m6-5-debts` with `-g` on the test title); concurrency `one browser worker; retries 0`, on a Linux
+x86_64 worker. Pinned tmux 3.7c executable SHA256 `62c79831e9ffb46570aaee6381c36e045d8c131eff03a34f2bdd7ddc35b01ce4`
+(this checkout's own `.ci-tmux` build), `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR`
+present in the test process). Disposition: fixed in this PR; the TODO.md entry and the `deflake/known-flakes.txt` line
+are removed.
+
+Class: peer-lifecycle
+
+Cause: established
