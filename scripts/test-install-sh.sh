@@ -465,6 +465,87 @@ find_snapshot() {
   find "$1" -mindepth 0 -exec sh -c 'printf "%s %s\n" "$(stat -c %F "$1" 2>/dev/null || echo "?")" "$1"' _ {} \; | sort
 }
 
+# assert_standalone_record INSTALL_DIR DESKTOP_EXPECTED
+# Compares the complete NUL-delimited record with an independent Python
+# oracle. Python receives the pathname as an argument, so it can retain
+# trailing newlines and use realpath and byte hashing without copying the
+# installer's shell canonicalization.
+assert_standalone_record() {
+  python3 - "$1" "$2" <<'PY'
+import hashlib
+import os
+import sys
+
+install_dir = sys.argv[1]
+has_desktop = sys.argv[2] == "yes"
+canonical = os.fsencode(os.path.realpath(install_dir))
+
+def digest(path):
+    with open(path, "rb") as source:
+        return hashlib.sha256(source.read()).hexdigest().encode()
+
+expected = b"\0".join([
+    b"farhelm-standalone",
+    canonical,
+    digest(os.path.join(install_dir, "farhelm")),
+    digest(os.path.join(install_dir, "farhelm-desktop")) if has_desktop else b"",
+]) + b"\0"
+with open(os.path.join(install_dir, ".farhelm-installation"), "rb") as record:
+    raise SystemExit(0 if record.read() == expected else 1)
+PY
+}
+
+# A conventional directory must not acquire pwd's output terminator in its
+# recorded identity. The separate awkward-path case allows real newlines.
+assert_stable_path_field() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+install_dir = sys.argv[1]
+with open(os.path.join(install_dir, ".farhelm-installation"), "rb") as record:
+    fields = record.read().split(b"\0")
+expected = os.fsencode(os.path.realpath(install_dir))
+raise SystemExit(0 if fields[1] == expected and not fields[1].endswith(b"\n") else 1)
+PY
+}
+
+# The repair must replace stale metadata, not merely return success while
+# leaving the old release's ownership assertion in place.
+assert_records_differ() {
+  ! cmp -s "$1" "$2"
+}
+
+# assert_bundle_record APP_PATH INSTALL_DIR
+# Checks the app-local ownership record against an independent Python oracle
+# over the staged bundle files. This proves the record describes content,
+# rather than only proving that a file with the expected name exists.
+assert_bundle_record() {
+  python3 - "$1" "$2" <<'PY'
+import hashlib
+import os
+import sys
+
+app_path, install_dir = sys.argv[1:3]
+canonical = os.fsencode(os.path.realpath(install_dir))
+
+def digest(path):
+    with open(path, "rb") as source:
+        return hashlib.sha256(source.read()).hexdigest().encode()
+
+expected = b"\0".join([
+    b"farhelm-app",
+    canonical,
+    digest(os.path.join(app_path, "Contents", "MacOS", "farhelm")),
+    digest(os.path.join(app_path, "Contents", "MacOS", "farhelm-desktop")),
+    digest(os.path.join(app_path, "Contents", "Info.plist")),
+    digest(os.path.join(app_path, "Contents", "Resources", "Farhelm.icns")),
+]) + b"\0"
+with open(os.path.join(app_path, "Contents", ".farhelm-installation"), "rb") as record:
+    raise SystemExit(0 if record.read() == expected else 1)
+PY
+}
+
 echo "== Fixture setup =="
 WWW="$WORKDIR/www"
 mkdir -p "$WWW"
@@ -511,7 +592,39 @@ check "fresh install writes farhelm" [ -x "$INSTALL1/farhelm" ]
 check "fresh install reports its own version" contains "$("$INSTALL1/farhelm" --version)" "farhelm 1.2.3"
 check "fresh install installs mode 0755" [ "$(stat -c %a "$INSTALL1/farhelm")" = "755" ]
 check "fresh install reports Installed" contains "$OUT" "Installed farhelm 1.2.3 to $INSTALL1."
-check "fresh install has no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*')" ]
+check "fresh install writes owner-only standalone metadata" [ "$(stat -c %a "$INSTALL1/.farhelm-installation")" = "600" ]
+check "fresh install writes the exact standalone metadata fields" assert_standalone_record "$INSTALL1" no
+check "fresh install has no appended canonical-path newline" assert_stable_path_field "$INSTALL1"
+check "fresh install has no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
+
+# Relative destinations use the caller's working directory. An inherited
+# CDPATH must neither redirect their recorded identity nor add cd's stdout
+# to the path field. The decoy exists before the installer resolves it.
+pushd "$WORKDIR" >/dev/null
+mkdir -p relative-owner/cd-search/bin relative-owner/home
+pushd relative-owner >/dev/null
+check "relative ownership fixture has a distinct CDPATH destination" [ -d cd-search/bin ]
+run_install "$TOOLCHAIN_FULL" "$PWD/home" bin "$BASE/good" 1.2.3 "CDPATH=$PWD/cd-search"
+check "relative install with CDPATH succeeds" [ "$RC" -eq 0 ]
+check "relative ownership identifies the actual installed directory" assert_standalone_record "$PWD/bin" no
+check "relative install leaves the CDPATH decoy empty" [ -z "$(find cd-search/bin -mindepth 1 -print)" ]
+popd >/dev/null
+popd >/dev/null
+
+# A Linux destination may already contain a separately installed desktop
+# executable. The standalone record must leave that foreign artifact
+# unclaimed while still recording the CLI this run installed.
+HOME_FOREIGN_DESKTOP="$WORKDIR/home-foreign-desktop"
+INSTALL_FOREIGN_DESKTOP="$HOME_FOREIGN_DESKTOP/.local/bin"
+mkdir -p "$INSTALL_FOREIGN_DESKTOP"
+printf 'foreign desktop\n' >"$INSTALL_FOREIGN_DESKTOP/farhelm-desktop"
+chmod 755 "$INSTALL_FOREIGN_DESKTOP/farhelm-desktop"
+run_install "$TOOLCHAIN_FULL" "$HOME_FOREIGN_DESKTOP" "$INSTALL_FOREIGN_DESKTOP" "$BASE/good" 1.2.3
+check "Linux foreign desktop install succeeds" [ "$RC" -eq 0 ]
+check "Linux foreign desktop remains byte-for-byte untouched" \
+  [ "$(cat "$INSTALL_FOREIGN_DESKTOP/farhelm-desktop")" = "foreign desktop" ]
+check "Linux foreign desktop is absent from ownership metadata" \
+  assert_standalone_record "$INSTALL_FOREIGN_DESKTOP" no
 
 # ===========================================================================
 # Scenario: update (re-run against the same release) -- the ".old" rollback
@@ -524,7 +637,7 @@ check "update exits 0" [ "$RC" -eq 0 ]
 check "update reports Updated" contains "$OUT" "Updated. Restart what is running:"
 check "update mentions systemctl restart line" contains "$OUT" "systemctl --user restart farhelm-supervisor farhelm-helm"
 check "update does not print a rollback message" not_contains "$OUT$ERR" "was restored"
-check "update leaves no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*')" ]
+check "update leaves no leftover staging/lock/backup dot-files" [ -z "$(find "$INSTALL1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
 
 # ===========================================================================
 # Scenario: redirect chain (F1) -- the SAME fresh-install assertions, but
@@ -607,6 +720,10 @@ check "bundle: executable carries the executable bit" [ -x "$MAC_APP/Contents/Ma
 check "bundle: CLI sibling carries the executable bit" [ -x "$MAC_APP/Contents/MacOS/farhelm" ]
 check "bundle: icon is the archive's Farhelm.icns byte-for-byte" \
   [ "$(cat "$MAC_APP/Contents/Resources/Farhelm.icns")" = "fake icns: farhelm-desktop 1.2.3" ]
+check "macOS standalone metadata has all installed hashes" assert_standalone_record "$INSTALL_MAC" yes
+check "macOS standalone metadata is owner-only" [ "$(stat -c %a "$INSTALL_MAC/.farhelm-installation")" = "600" ]
+check "bundle metadata has the exact content fields" assert_bundle_record "$MAC_APP" "$INSTALL_MAC"
+check "bundle metadata is owner-only" [ "$(stat -c %a "$MAC_APP/Contents/.farhelm-installation")" = "600" ]
 
 OLD_FARHELM_CONTENT=$(cat "$INSTALL_MAC/farhelm")
 OLD_DESKTOP_CONTENT=$(cat "$INSTALL_MAC/farhelm-desktop")
@@ -656,7 +773,7 @@ check "forced desktop-replace failure leaves the OLD (1.2.3) farhelm-desktop unt
 check "forced desktop-replace failure: farhelm still reports 1.2.3 (not 1.2.4)" \
   [ "$("$INSTALL_MAC/farhelm" --version)" = "farhelm 1.2.3" ]
 check "forced desktop-replace failure leaves no leftover staging/lock/backup dot-files" \
-  [ -z "$(find "$INSTALL_MAC" -maxdepth 1 -name '.farhelm*')" ]
+  [ -z "$(find "$INSTALL_MAC" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
 # The failure hit step 6 (the journaled replace), so step 7 never ran: the
 # bundle must still be the intact 1.2.3 one, matching the restored binaries.
 check "forced desktop-replace failure leaves the 1.2.3 bundle untouched" \
@@ -677,6 +794,31 @@ check "real update: bundle rebuilt at the new version" \
   contains "$(cat "$MAC_APP/Contents/Info.plist")" "<string>1.2.4</string>"
 check "real update: bundle executable tracks the new farhelm-desktop" \
   [ "$(cat "$MAC_APP/Contents/MacOS/farhelm-desktop")" = "$(cat "$INSTALL_MAC/farhelm-desktop")" ]
+check "real update: bundle metadata matches the new bundle" assert_bundle_record "$MAC_APP" "$INSTALL_MAC"
+
+# Opting out of bundle assembly on an update keeps the existing bundle and
+# its record independent while the flat executables and standalone record
+# advance to the new release.
+HOME_OLD_OPTOUT="$WORKDIR/home-old-optout"
+INSTALL_OLD_OPTOUT="$HOME_OLD_OPTOUT/.local/bin"
+mkdir -p "$HOME_OLD_OPTOUT"
+run_install "$MAC_TOOLS" "$HOME_OLD_OPTOUT" "$INSTALL_OLD_OPTOUT" "$BASE/good" 1.2.3
+OLD_OPTOUT_APP="$HOME_OLD_OPTOUT/Applications/Farhelm.app"
+cp -a "$OLD_OPTOUT_APP" "$WORKDIR/old-optout-app"
+cp "$OLD_OPTOUT_APP/Contents/.farhelm-installation" "$WORKDIR/old-optout-bundle-record"
+check "opt-out baseline bundle record verifies independently" \
+  assert_bundle_record "$OLD_OPTOUT_APP" "$INSTALL_OLD_OPTOUT"
+run_install "$MAC_TOOLS" "$HOME_OLD_OPTOUT" "$INSTALL_OLD_OPTOUT" "$BASE/good-v2" 1.2.4 \
+  FARHELM_NO_APP_BUNDLE=1
+check "bundle opt-out update succeeds" [ "$RC" -eq 0 ]
+check "bundle opt-out update advances flat ownership metadata" \
+  assert_standalone_record "$INSTALL_OLD_OPTOUT" yes
+check "bundle opt-out update leaves the old bundle unchanged" \
+  diff -r "$WORKDIR/old-optout-app" "$OLD_OPTOUT_APP"
+check "bundle opt-out update leaves the old bundle record unchanged" \
+  cmp -s "$WORKDIR/old-optout-bundle-record" "$OLD_OPTOUT_APP/Contents/.farhelm-installation"
+check "bundle opt-out update leaves the old bundle independently verifiable" \
+  assert_bundle_record "$OLD_OPTOUT_APP" "$INSTALL_OLD_OPTOUT"
 
 # ===========================================================================
 # Scenario: bundle edge shapes, all macOS-shaped. Each gets its own fresh
@@ -798,7 +940,7 @@ check "F3: forced first-replacement failure prints the exact required message" \
 check "F3: forced first-replacement failure restores the OLD farhelm byte-for-byte" \
   [ "$(cat "$INSTALLFIRSTFAIL/farhelm")" = "$OLD_FIRSTFAIL_CONTENT" ]
 check "F3: forced first-replacement failure leaves no leftover staging/lock/backup dot-files" \
-  [ -z "$(find "$INSTALLFIRSTFAIL" -maxdepth 1 -name '.farhelm*')" ]
+  [ -z "$(find "$INSTALLFIRSTFAIL" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation')" ]
 
 # ===========================================================================
 # Scenario: refuses before touching anything when a destination exists and
@@ -816,6 +958,79 @@ check "F4: directory-collision install exits 1" [ "$RC" -ne 0 ]
 check "F4: directory-collision install names the problem" contains "$ERR" "is not a regular file"
 check "F4: directory-collision install leaves the directory's contents untouched" \
   [ "$(cat "$INSTALLDIRDEST/farhelm/keepme")" = "sentinel" ]
+
+# ===========================================================================
+# Scenario: ownership metadata collisions and publication failure happen
+# after the binary commit, but never follow or destroy a foreign target.
+# ===========================================================================
+echo
+echo "== installer ownership metadata refusal and repair =="
+HOMEMETA="$WORKDIR/home-meta"
+INSTALLMETA="$HOMEMETA/.local/bin"
+mkdir -p "$HOMEMETA"
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good" 1.2.3
+check "metadata refusal setup succeeds" [ "$RC" -eq 0 ]
+META_OUTSIDE="$WORKDIR/metadata-outside"
+printf 'outside sentinel\n' >"$META_OUTSIDE"
+rm "$INSTALLMETA/.farhelm-installation"
+ln -s "$META_OUTSIDE" "$INSTALLMETA/.farhelm-installation"
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good-v2" 1.2.4
+check "metadata symlink refusal exits 1" [ "$RC" -ne 0 ]
+check "metadata symlink refusal names the metadata target" contains "$ERR" "ownership metadata"
+check "metadata symlink refusal leaves the link in place" [ -L "$INSTALLMETA/.farhelm-installation" ]
+check "metadata symlink refusal does not touch the link target" [ "$(cat "$META_OUTSIDE")" = "outside sentinel" ]
+check "metadata symlink refusal leaves committed binaries usable" [ "$("$INSTALLMETA/farhelm" --version)" = "farhelm 1.2.4" ]
+rm "$INSTALLMETA/.farhelm-installation"
+ln -s "$WORKDIR/missing-metadata-target" "$INSTALLMETA/.farhelm-installation"
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good-v2" 1.2.4
+check "dangling metadata symlink refusal exits 1" [ "$RC" -ne 0 ]
+check "dangling metadata symlink remains in place" [ -L "$INSTALLMETA/.farhelm-installation" ]
+rm "$INSTALLMETA/.farhelm-installation"
+
+mkdir "$INSTALLMETA/.farhelm-installation"
+run_install "$TOOLCHAIN_FULL" "$HOMEMETA" "$INSTALLMETA" "$BASE/good-v2" 1.2.4
+check "metadata directory refusal exits 1" [ "$RC" -ne 0 ]
+check "metadata directory refusal leaves the directory in place" [ -d "$INSTALLMETA/.farhelm-installation" ]
+rm -rf "$INSTALLMETA/.farhelm-installation"
+
+TOOLS_FAILMETA="$WORKDIR/toolchain-failmeta"
+HOMEFAILMETA="$WORKDIR/home-failmeta"
+INSTALLFAILMETA="$HOMEFAILMETA/.local/bin"
+mkdir -p "$HOMEFAILMETA"
+run_install "$TOOLCHAIN_FULL" "$HOMEFAILMETA" "$INSTALLFAILMETA" "$BASE/good" 1.2.3
+check "metadata publication failure setup succeeds" [ "$RC" -eq 0 ]
+cp "$INSTALLFAILMETA/.farhelm-installation" "$WORKDIR/old-metadata-record"
+mkdir -p "$TOOLS_FAILMETA"
+cp -a "$TOOLCHAIN_FULL"/. "$TOOLS_FAILMETA/"
+rm -f "$TOOLS_FAILMETA/mv"
+cat >"$TOOLS_FAILMETA/mv" <<'MVEOF'
+#!/bin/sh
+eval "last=\${$#}"
+case "$last" in
+  */.farhelm-installation)
+    echo "fake mv: forced metadata publication failure" >&2
+    exit 1
+    ;;
+esac
+exec /bin/mv "$@"
+MVEOF
+chmod 755 "$TOOLS_FAILMETA/mv"
+run_install "$TOOLS_FAILMETA" "$HOMEFAILMETA" "$INSTALLFAILMETA" "$BASE/good-v2" 1.2.4
+check "forced metadata publication failure exits 1" [ "$RC" -ne 0 ]
+check "forced metadata publication failure explains the committed binaries" \
+  contains "$ERR" "binaries in $INSTALLFAILMETA are installed and usable"
+check "forced metadata publication failure leaves the new binary installed" \
+  [ "$("$INSTALLFAILMETA/farhelm" --version)" = "farhelm 1.2.4" ]
+check "forced metadata publication failure leaves the prior record intact" \
+  cmp -s "$WORKDIR/old-metadata-record" "$INSTALLFAILMETA/.farhelm-installation"
+check "forced metadata publication failure leaves no rollback debris" \
+  [ -z "$(find "$INSTALLFAILMETA" -maxdepth 1 -name '.farhelm-install.*' -o -name '.farhelm-install.lock' -o -name '.farhelm.old')" ]
+run_install "$TOOLCHAIN_FULL" "$HOMEFAILMETA" "$INSTALLFAILMETA" "$BASE/good-v2" 1.2.4
+check "metadata publication repair succeeds" [ "$RC" -eq 0 ]
+check "metadata publication repair writes current ownership fields" \
+  assert_standalone_record "$INSTALLFAILMETA" no
+check "metadata publication repair changes the CLI digest" \
+  assert_records_differ "$WORKDIR/old-metadata-record" "$INSTALLFAILMETA/.farhelm-installation"
 
 # ===========================================================================
 # Scenario: a subsequent run detects and repairs an interrupted swap (F2,
@@ -1422,7 +1637,7 @@ set -e
 check "F26: default install dir exits 0" [ "$DEFAULT_RC" -eq 0 ]
 check "F26: farhelm lands at \$HOME/.local/bin/farhelm" [ -x "$HOMEDEFAULT/.local/bin/farhelm" ]
 check "F26: nothing else under \$HOME was created" \
-  [ "$(find "$HOMEDEFAULT" -type f 2>/dev/null | wc -l)" -eq 1 ]
+  [ "$(find "$HOMEDEFAULT" -type f 2>/dev/null | wc -l)" -eq 2 ]
 
 # ===========================================================================
 # Scenario: the real production download URL, with no FARHELM_RELEASE_
@@ -1672,7 +1887,7 @@ check "F23: installer A completes successfully once released" [ -x "$INSTALLF23/
 check "F23: installer A's farhelm actually runs" \
   contains "$("$INSTALLF23/farhelm" --version 2>/dev/null || true)" "farhelm 1.2.3"
 check "F23: no leftover staging/lock/journal after the race resolves" \
-  [ -z "$(find "$INSTALLF23" -maxdepth 1 -name '.farhelm*' 2>/dev/null || true)" ]
+  [ -z "$(find "$INSTALLF23" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation' 2>/dev/null || true)" ]
 
 # ===========================================================================
 # Scenario: the lock path is something other than our own lock (F6) -- a
@@ -1961,7 +2176,7 @@ check "R3 F1: farhelm is restored to the OLD (1.2.3) bytes" \
 check "R3 F1: farhelm-desktop still exists, at the OLD (1.2.3) bytes" \
   [ "$(cat "$INSTALL_R3F1/farhelm-desktop")" = "$R3_OLD_DESKTOP" ]
 check "R3 F1: no leftover lock, journal, or backup" \
-  [ -z "$(find "$INSTALL_R3F1" -maxdepth 1 -name '.farhelm*' 2>/dev/null || true)" ]
+  [ -z "$(find "$INSTALL_R3F1" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation' 2>/dev/null || true)" ]
 
 run_install "$MAC_TOOLS" "$HOME_R3F1" "$INSTALL_R3F1" "$BASE/good-v2" 1.2.4
 check "R3 F1: a following run installs 1.2.4 cleanly" [ "$RC" -eq 0 ]
@@ -2152,7 +2367,7 @@ check "R3 F2b: recovery clears the lock and journal" \
 echo
 echo "== R3 F3: an install directory containing '|' and a newline =="
 HOME_R3F3="$WORKDIR/home-r3f3"
-INSTALL_R3F3=$(printf '%s/.local/bin|pipe\nnewline' "$HOME_R3F3")
+printf -v INSTALL_R3F3 '%s/.local/bin|pipe\nnewline\n' "$HOME_R3F3"
 r3_seed_macos_pair "R3 F3" "$HOME_R3F3" "$INSTALL_R3F3"
 
 run_install "$MAC_TOOLS_FAILDESKTOP" "$HOME_R3F3" "$INSTALL_R3F3" "$BASE/good-v2" 1.2.4
@@ -2162,12 +2377,13 @@ check "R3 F3: farhelm is restored byte-for-byte" \
 check "R3 F3: farhelm-desktop is restored byte-for-byte" \
   [ "$(cat "$INSTALL_R3F3/farhelm-desktop")" = "$R3_OLD_DESKTOP" ]
 check "R3 F3: no leftover lock, journal, or backup" \
-  [ -z "$(find "$INSTALL_R3F3" -maxdepth 1 -name '.farhelm*' 2>/dev/null || true)" ]
+  [ -z "$(find "$INSTALL_R3F3" -maxdepth 1 -name '.farhelm*' ! -name '.farhelm-installation' 2>/dev/null || true)" ]
 
 run_install "$MAC_TOOLS" "$HOME_R3F3" "$INSTALL_R3F3" "$BASE/good-v2" 1.2.4
 check "R3 F3: a following run installs 1.2.4 cleanly" [ "$RC" -eq 0 ]
 check "R3 F3: the following run's farhelm reports 1.2.4" \
   [ "$("$INSTALL_R3F3/farhelm" --version)" = "farhelm 1.2.4" ]
+check "R3 F3: standalone metadata preserves the awkward canonical path" assert_standalone_record "$INSTALL_R3F3" yes
 # The closing report is only reached by a run that gets that far, hence the
 # assertion here rather than on the deliberately-failed run above.
 check "R3 F3: the newline-named directory gets the by-hand PATH guidance" \

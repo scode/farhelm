@@ -232,6 +232,60 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
     esac
   }
 
+  # Writes one ownership record for the flat installation. The record is
+  # staged beside the other verified artifacts and renamed only after the
+  # binary transaction has committed, so a reader sees either the previous
+  # complete record or the new complete record. A non-regular destination is
+  # never followed or replaced; an ordinary old record is deliberately
+  # replaceable because it may describe an interrupted earlier update.
+  publish_installation_record() {
+    pir_final=$1
+    pir_stage=$2
+    if [ -L "$pir_final" ] || { [ -e "$pir_final" ] && [ ! -f "$pir_final" ]; }; then
+      printf '%s exists and is not a regular file (or is a symlink); refusing to publish installer ownership metadata\n' "$pir_final" >&2
+      return 1
+    fi
+
+    # Keep the sentinel inside command substitution: POSIX shells strip
+    # trailing newlines from its output, while a legal installation path may
+    # itself end in one.
+    pir_canonical=$(
+      # CDPATH can redirect relative destinations and make cd print a path.
+      # Identity must describe the directory used by the file operations.
+      CDPATH='' cd -P "$INSTALL_DIR" || exit 1
+      pwd -P || exit 1
+      printf '%s' '__FARHELM_CANONICAL_PATH_END__'
+    ) || return 1
+    pir_canonical=${pir_canonical%__FARHELM_CANONICAL_PATH_END__}
+    pir_canonical=${pir_canonical%"$NEWLINE"}
+    pir_cli_sha=$(sha256_of "$INSTALL_DIR/farhelm") || return 1
+    pir_desktop_sha=
+    if [ "$HAS_DESKTOP" -eq 1 ]; then
+      pir_desktop_sha=$(sha256_of "$INSTALL_DIR/farhelm-desktop") || return 1
+    fi
+
+    (umask 077; printf '%s\000%s\000%s\000%s\000' \
+      farhelm-standalone "$pir_canonical" "$pir_cli_sha" "$pir_desktop_sha" >"$pir_stage") || return 1
+    chmod 0600 "$pir_stage" || return 1
+    mv "$pir_stage" "$pir_final" || return 1
+  }
+
+  # Adds the app-local ownership record after all bundle inputs are staged.
+  # The record identifies the flat install that supplied the copies and
+  # carries digests of the four files a later verifier needs to compare.
+  write_bundle_record() {
+    wbr_bundle=$1
+    wbr_canonical=$2
+    wbr_cli_sha=$3
+    wbr_desktop_sha=$4
+    wbr_plist_sha=$5
+    wbr_icns_sha=$6
+    (umask 077; printf '%s\000%s\000%s\000%s\000%s\000%s\000' \
+      farhelm-app "$wbr_canonical" "$wbr_cli_sha" "$wbr_desktop_sha" \
+      "$wbr_plist_sha" "$wbr_icns_sha" >"$wbr_bundle/Contents/.farhelm-installation") || return 1
+    chmod 0600 "$wbr_bundle/Contents/.farhelm-installation" || return 1
+  }
+
   # How many members of the archive at $1 have $2 as their BASENAME. The
   # basename match, not a full path comparison, is the deliberate contract
   # with dist's layout: dist nests each member under <package>-<target>/, and
@@ -1097,6 +1151,11 @@ EOF
     for name in $binaries; do
       rm -f "$INSTALL_DIR/.$name.old"
     done
+
+    if ! publish_installation_record "$INSTALL_DIR/.farhelm-installation" "$STAGING_DIR/.farhelm-installation"; then
+      printf 'could not publish installer ownership metadata. The binaries in %s are installed and usable; re-run the installer to repair uninstall metadata.\n' "$INSTALL_DIR" >&2
+      exit 1
+    fi
     remove_owned_lock
 
     # 7. macOS launcher identity: assemble ~/Applications/Farhelm.app around
@@ -1193,6 +1252,13 @@ EOF
 </dict>
 </plist>
 PLIST_EOF
+
+        bundle_cli_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm") || bundle_fail "hashing the staged CLI"
+        bundle_desktop_sha=$(sha256_of "$bundle_stage/Contents/MacOS/farhelm-desktop") || bundle_fail "hashing the staged desktop executable"
+        bundle_plist_sha=$(sha256_of "$bundle_stage/Contents/Info.plist") || bundle_fail "hashing Info.plist"
+        bundle_icns_sha=$(sha256_of "$bundle_stage/Contents/Resources/Farhelm.icns") || bundle_fail "hashing Farhelm.icns"
+        write_bundle_record "$bundle_stage" "$pir_canonical" "$bundle_cli_sha" "$bundle_desktop_sha" \
+          "$bundle_plist_sha" "$bundle_icns_sha" || bundle_fail "writing installer ownership metadata"
 
         (umask 022; mkdir -p "$app_parent") || bundle_fail "creating $app_parent"
         rm -rf "$app_path" || bundle_fail "removing the previous bundle (grant your terminal App Management in System Settings > Privacy & Security if this said 'Operation not permitted')"
