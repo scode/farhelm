@@ -1162,6 +1162,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
         // The last row is the rival: same kind, same canonical directory,
         // and a first input inside the real session's window.
         let rival = i == LIST_SESSIONS_CAP;
+        let created_at = now_unix();
         store
             .insert_session(
                 StoredSession {
@@ -1170,8 +1171,9 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     id: format!("extra-{i}"),
                     parent: None,
                     title: format!("extra-{i}"),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
+                    created_at,
+                    last_activity_at: created_at,
+                    last_work_started_at: created_at.saturating_mul(1_000),
                     creation_seq: 0,
                     cwd: work.path().to_string_lossy().into_owned(),
                     invocation: "agent".to_string(),

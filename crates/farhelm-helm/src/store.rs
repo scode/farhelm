@@ -5920,6 +5920,7 @@ mod tests {
             title: id.to_string(),
             created_at,
             last_activity_at: created_at,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: format!("/{id}"),
             canonical_cwd: None,
@@ -11653,9 +11654,8 @@ mod tests {
         assert!(!settled.changed);
     }
 
-    /// A mutation's reply may push a session's `last_activity_at` forward
-    /// and never back — including when the reply carries the old wire
-    /// value of 0.
+    /// A mutation reply may push activity and work-start keys forward and
+    /// never back, including when it carries old-wire zeroes.
     ///
     /// The durable half of `crate::manager::merge_cached_session`'s
     /// contract, pinned where it is actually reachable. The race is
@@ -11674,57 +11674,61 @@ mod tests {
     /// `created_at` fallback is applied at read time and never written
     /// down.
     #[farhelm_testtrace::test]
-    async fn a_mutation_reply_never_walks_the_activity_stamp_backwards() {
+    async fn a_mutation_reply_never_walks_recency_keys_backwards() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "user@host", "identity-1").await;
 
-        let stamped = |at: i64| SessionInfo {
-            last_activity_at: at,
+        let stamped = |activity: i64, work_start: i64| SessionInfo {
+            last_activity_at: activity,
+            last_work_started_at: work_start,
             ..session("s-1", 100)
         };
-        let cached_stamp = async |store: &HelmStore| {
+        let cached_stamps = async |store: &HelmStore| {
             let rows = store
                 .cached_rows(&[host])
                 .await
                 .expect("read the cache back");
-            rows[0].info.last_activity_at
+            (
+                rows[0].info.last_activity_at,
+                rows[0].info.last_work_started_at,
+            )
         };
 
         // A drain commits a fresh observation.
         store
-            .replace_host_sessions(host, "identity-1", vec![stamped(900)], false)
+            .replace_host_sessions(host, "identity-1", vec![stamped(900, 900_000)], false)
             .await
             .expect("drain");
-        assert_eq!(cached_stamp(&store).await, 900);
+        assert_eq!(cached_stamps(&store).await, (900, 900_000));
 
         // A mutation reply built before that drain landed.
         store
-            .remember_session(host, "identity-1", &stamped(500))
+            .remember_session(host, "identity-1", &stamped(500, 500_000))
             .await
             .expect("stale reply");
         assert_eq!(
-            cached_stamp(&store).await,
-            900,
+            cached_stamps(&store).await,
+            (900, 900_000),
             "a reply carrying an older observation must not undo a newer one"
         );
 
         // And one from a sender that does not know the field at all.
         store
-            .remember_session(host, "identity-1", &stamped(0))
+            .remember_session(host, "identity-1", &stamped(0, 0))
             .await
             .expect("reply from an old sender");
         assert_eq!(
-            cached_stamp(&store).await,
-            900,
+            cached_stamps(&store).await,
+            (900, 900_000),
             "0 means unknown, not 1970; it may never replace a real observation"
         );
 
         // Forward is still allowed — the merge is monotonic, not frozen.
         store
-            .remember_session(host, "identity-1", &stamped(1_500))
+            .remember_session(host, "identity-1", &stamped(1_500, 1_500_000))
             .await
             .expect("fresh reply");
-        assert_eq!(cached_stamp(&store).await, 1_500);
+        assert_eq!(cached_stamps(&store).await, (1_500, 1_500_000));
     }
 
     /// The single-row writes answer the same question, so a mutation that

@@ -274,6 +274,7 @@ fn child_session(cwd: String) -> SessionInfo {
         title: "child".to_string(),
         created_at: 1_700_000_000,
         last_activity_at: 1_700_000_000,
+        last_work_started_at: 0,
         creation_seq: None,
         cwd,
         canonical_cwd: None,

@@ -351,6 +351,7 @@ mod tests {
                     title: "remembered".to_string(),
                     created_at: 100,
                     last_activity_at: 100,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     cwd: "/tmp".to_string(),
                     canonical_cwd: None,

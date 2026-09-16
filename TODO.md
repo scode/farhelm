@@ -20,38 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Stable recent-activity ordering.** Concurrently active sessions repeatedly overtake one another in "recently active"
-  order. Promote a session when it starts a new work burst after being inactive; continued activity must not change its
-  sort key, and finishing the burst must leave that key unchanged. Both idle-to-working and waiting-to-working start a
-  new burst, including resumption after answering a question or approval. The maintainer chose this over state-priority
-  grouping: newer bursts can push older rows down, but completion does not itself move a row. This means most recently
-  started work, not active-first ordering; a newer session that has finished can remain above an older one still
-  working. Keep ordinary activity ages and read/unread tracking accurate while the ordering stays stable.
-
-  Preliminary assessment: `sort_rows` in `crates/farhelm-helm/src/aggregate.rs` orders by `effective_activity()`, then
-  deterministic creation/id/host tie-breakers. The supervisor's `service/ticker.rs::note_activity` advances
-  `last_activity_at` on observed screen changes at a 60-second quantum per session, so sustained output alone can
-  repeatedly change the ordering. That stamp also serves displayed ages and seen-state comparisons; use a separate
-  work-burst ordering key rather than freezing or redefining it. Design the key's authoritative ownership, persistence,
-  protocol/cache propagation, cross-host comparison, deterministic ties, and fallback for existing sessions so clients
-  agree and a reload does not scramble the list. Define what starts a new burst around waiting/resume, restart, initial
-  unsampled state, and reconnect; unknown observations or sampler resets must not manufacture fresh activity. Coordinate
-  with the false-running fix above: animated idle chrome or brief classification flicker must not repeatedly promote an
-  idle session. Update SPEC.md and SPEC_impl.md's ordering contracts. Verify multiple overlapping work bursts keep their
-  relative order during output and completion, while genuine new work promotes once, including across refreshes,
-  reconnects, and multiple clients. Cover activity ages/read-unread independently and preserve an open rename editor
-  through the legitimate reorder that remains.
-
-  Herdr comparison, inspected at commit `18061191fdc019498610aee81f0df93f6c2ebd31`: its
-  [priority comparator](https://github.com/herdrdev/herdr/blob/18061191fdc019498610aee81f0df93f6c2ebd31/src/client/shell/agent_sidebar.rs)
-  groups blocked, done, working, idle, unknown, then sorts newest state-change sequence first within a group.
-  [State-change sequencing](https://github.com/herdrdev/herdr/blob/18061191fdc019498610aee81f0df93f6c2ebd31/src/app/actions.rs)
-  advances when the effective state changes, not on repeated output in the same state. Its default sort is workspace
-  order; aggregate priority ordering also accounts for stale endpoints and uses client-observed state-change recency
-  across endpoints. This explains how its priority mode avoids continuous-output churn, but does not establish which
-  version or mode the maintainer previously used. Adopt the transition-based stability idea, not Herdr's priority groups
-  or client-local cross-endpoint ordering.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly

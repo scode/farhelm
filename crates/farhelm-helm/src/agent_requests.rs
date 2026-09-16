@@ -1636,6 +1636,7 @@ mod tests {
             title: "a title".to_string(),
             created_at: 1,
             last_activity_at: 1,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/w".to_string(),
             canonical_cwd: None,
