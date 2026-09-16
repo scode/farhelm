@@ -1032,7 +1032,13 @@ reports a failed listing rather than a silently shortened one.
   rather than seconds is load-bearing — the sampler works through live panes on a budgeted round robin, so a session's
   real sampling period grows with the fleet, and any wall-clock window would eventually report a continuously-working
   agent as idle because the HOST was busy. Waiting is never derived from activity at all (a blocked agent and a finished
-  one are equally quiet); it comes only from per-kind sharpening.
+  one are equally quiet); it comes only from per-kind sharpening. Codex is the one audited exception to raw comparison:
+  the sampler takes a temporary 64 KiB visible-grid tail, recognizes only its bottom composer (including its known
+  sparkle cells and safely bounded draft rows), then applies the normal UTF-8-safe 4096-byte cap to canonical comparison
+  text. It separately retains the raw 4096-byte tail for waiting recognition. Unknown composer, popup, and output shapes
+  remain unchanged. The pinned Codex `Working (elapsed • esc to interrupt)` widget adjoining that composer can prevent
+  quiet decay in both its animated and reduced-motion forms, including its bounded inline context and detail rows;
+  historical or quoted copies elsewhere in the pane do not. Waiting still wins.
 - Last-activity timestamp: the same ticker that samples for status also DATES the changes it sees, into a
   `last_activity_at` column on the session row and onto the wire. It is the ordering key a "most recently active"
   session list needs, seeded to the session's creation time so one that has never produced output sorts by age rather

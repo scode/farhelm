@@ -451,9 +451,12 @@ order agree. A session with neither stamp gets no age at all, never one counted 
 
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
 The bar: best-effort observation-based heuristics (output activity, terminal state), optionally sharpened per agent
-profile with agent-specific heuristics. Wrong status must be cosmetic only — status detection must never gate or delay
-interaction with the terminal. Integrations that require configuring the agent itself (e.g. Claude Code hooks) may be
-supported later but are not part of v1 and must never be required.
+profile with agent-specific heuristics. A profile may canonically remove only an audited, tightly located redraw region
+before output comparison, while retaining the raw bounded screen for approval detection; unfamiliar screens remain raw.
+It may also recognize a current vendor work indicator, but a waiting prompt wins and neither heuristic creates lifecycle
+state. Wrong status must be cosmetic only — status detection must never gate or delay interaction with the terminal.
+Integrations that require configuring the agent itself (e.g. Claude Code hooks) may be supported later but are not part
+of v1 and must never be required.
 
 Notifications (desktop or otherwise) are explicitly out of v1. The status column is the whole story.
 

@@ -36,11 +36,11 @@
 //!    the fallback for kinds and launches the hook cannot reach, and it
 //!    never overrides a report: a report is exact, a scan is an inference,
 //!    and the two are never allowed to disagree about which wins.
-//! 3. **Status sharpening** (PLAN_M6_75.md item 2). The generic classifier
-//!    in `service::status` can only see whether successive sampled screens
-//!    differed from each other; recognizing that an agent is BLOCKED ON A
-//!    QUESTION means recognizing that agent's own prompt and approval
-//!    shapes, which is per-kind knowledge and nothing else's business.
+//! 3. **Activity interpretation** (PLAN_M6_75.md item 2). The generic
+//!    classifier can compare successive screens, but it cannot know which
+//!    redraws are vendor-owned decoration or which still screen proves a
+//!    current question or work indicator. Those narrow interpretations
+//!    live here; unfamiliar screen shapes keep the generic behavior.
 //!
 //! ## Where the line between this file and `capture` is drawn
 //!
@@ -294,6 +294,19 @@ pub trait AgentIntegration: Send + Sync {
         baseline
     }
 
+    /// Derive activity evidence from one bounded visible-grid capture.
+    ///
+    /// The default preserves every byte. An integration may canonicalize a
+    /// vendor-owned redraw region and set `working` only for a positive,
+    /// current vendor indicator. The sampler retains a separate raw status
+    /// tail, so comparison cleanup cannot erase approval evidence.
+    fn activity_screen(&self, raw: &str) -> ActivityScreen {
+        ActivityScreen {
+            comparison: raw.to_string(),
+            working: false,
+        }
+    }
+
     /// Command-line elements that make THIS launch report its conversation
     /// identity through `farhelm internal hook`, appended verbatim after the
     /// user's argv by the caller (`Supervisor::with_hook_argv`). Empty
@@ -331,6 +344,17 @@ pub trait AgentIntegration: Send + Sync {
         let _ = (hook_exe, instructions);
         Vec::new()
     }
+}
+
+/// One integration's activity interpretation of a sampled visible grid.
+///
+/// Only `comparison` can reset the generic quiet counter or date activity.
+/// `working` is a narrow vendor hint: it keeps a proven active screen from
+/// decaying to idle, but it cannot manufacture a lifecycle state and a
+/// recognized waiting prompt still wins.
+pub struct ActivityScreen {
+    pub(crate) comparison: String,
+    pub(crate) working: bool,
 }
 
 /// The command string both integrations embed in their vendor's hook
@@ -579,6 +603,10 @@ impl AgentIntegration for CodexIntegration {
         promote_if_waiting(baseline, tail, CODEX_QUESTION_PHRASES)
     }
 
+    fn activity_screen(&self, raw: &str) -> ActivityScreen {
+        codex_activity_screen(raw)
+    }
+
     /// Five argv elements: the per-launch hook-trust bypass, then two `-c`
     /// overrides that both land in Codex's `SessionFlags` config layer
     /// (`codex-rs/config/src/config_layer_source.rs`, audited in plan §1)
@@ -733,6 +761,208 @@ pub(crate) fn toml_basic_string(s: &str) -> String {
 // property trivial to see: there is no byte-offset arithmetic anywhere in
 // here.
 // ---------------------------------------------------------------------
+
+/// The only Braille cells Codex's audited sparkle renderer draws.
+///
+/// These are deliberately individual characters rather than the Braille
+/// block. Terminal output, progress spinners, and user text may legitimately
+/// contain other Braille, and this cleanup is only valid inside a proven
+/// Codex composer.
+const CODEX_SPARKLE_DOTS: [char; 8] = [
+    '\u{2801}', '\u{2802}', '\u{2804}', '\u{2808}', '\u{2810}', '\u{2820}', '\u{2840}', '\u{2880}',
+];
+
+/// Canonical marker replacing the decorative Codex composer in comparison
+/// text. It names neither a draft nor a footer because both are user input
+/// or configuration rather than agent output.
+const CODEX_COMPOSER_MARKER: &str = "› <codex-composer>";
+
+/// Classify one Codex capture before the sampler applies its retained cap.
+///
+/// This recognizes one deliberately small grammar: an empty or drafted
+/// composer, bounded above and below by blank/sparkle rows, immediately
+/// followed by one nonblank footer row. Anything else stays byte-for-byte
+/// intact. That restriction is what keeps a popup, arbitrary prompt, or
+/// output that happens to contain Braille from disappearing from activity
+/// comparison.
+fn codex_activity_screen(raw: &str) -> ActivityScreen {
+    let mut lines: Vec<&str> = raw.lines().collect();
+    let Some((upper_padding, lower_padding)) = codex_composer_bounds(&lines) else {
+        return ActivityScreen {
+            comparison: raw.to_string(),
+            working: false,
+        };
+    };
+
+    let working = codex_status_region_start(&lines, upper_padding).is_some();
+    lines.splice(
+        upper_padding..=lower_padding,
+        std::iter::once(CODEX_COMPOSER_MARKER),
+    );
+    ActivityScreen {
+        comparison: lines.join("\n"),
+        working,
+    }
+}
+
+/// Locate a current Codex status widget directly above the composer.
+///
+/// The widget renders its header first, followed by an optional hook row
+/// and up to three detail rows. All continuation rows carry the audited
+/// four-column branch indent. Capping that region matters: an unbounded
+/// reverse search could turn a status line retained in output history into
+/// evidence about the current task.
+fn codex_status_region_start(lines: &[&str], upper_padding: usize) -> Option<usize> {
+    let mut header = upper_padding.checked_sub(1)?;
+    let mut continuations = 0;
+    while is_codex_status_continuation(lines[header]) {
+        continuations += 1;
+        if continuations > 4 {
+            return None;
+        }
+        header = header.checked_sub(1)?;
+    }
+    is_codex_running_status(lines[header]).then_some(header)
+}
+
+/// Match the indentation shared by wrapped details and hook overflow.
+fn is_codex_status_continuation(line: &str) -> bool {
+    line.strip_prefix("  └ ")
+        .is_some_and(|text| !text.is_empty())
+        || line
+            .strip_prefix("    ")
+            .is_some_and(|text| !text.is_empty())
+}
+
+/// Find the padding rows surrounding a bottom Codex composer.
+///
+/// The prompt identifies the first textarea row. Wrapped rows use Codex's
+/// two-column input indent, so they can be included only while that boundary
+/// is visible. Requiring the footer to be the final nonblank row anchors the
+/// recognition to the bottom pane; it intentionally declines modal and popup
+/// layouts whose ownership cannot be established from plain text.
+fn codex_composer_bounds(lines: &[&str]) -> Option<(usize, usize)> {
+    if lines.len() < 4 || is_codex_composer_padding(lines.last()?) {
+        return None;
+    }
+    let lower_padding = lines.len() - 2;
+    if !is_codex_composer_padding(lines[lower_padding]) {
+        return None;
+    }
+    for first_input in (1..lower_padding).rev() {
+        if !is_codex_prompt_row(lines[first_input])
+            || !is_codex_composer_padding(lines[first_input - 1])
+        {
+            continue;
+        }
+        if lines[first_input + 1..lower_padding]
+            .iter()
+            .all(|line| is_codex_wrapped_row(line))
+        {
+            return Some((first_input - 1, lower_padding));
+        }
+    }
+    None
+}
+
+/// Whether a row is either blank or contains only the known Codex particles.
+fn is_codex_composer_padding(line: &str) -> bool {
+    line.chars()
+        .all(|character| character.is_whitespace() || CODEX_SPARKLE_DOTS.contains(&character))
+}
+
+/// Whether a row has Codex's left-edge composer prompt.
+///
+/// No ASCII space is required after the prompt: a sparkle is allowed in its
+/// column-one blank cell, and requiring a space would reject the observed
+/// idle frame this normalization exists to handle. An empty first draft row
+/// captures as the bare prompt because tmux removes trailing blank cells.
+fn is_codex_prompt_row(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('›') else {
+        return false;
+    };
+    rest.chars().next().is_none_or(|character| {
+        character.is_whitespace() || CODEX_SPARKLE_DOTS.contains(&character)
+    })
+}
+
+/// Whether a wrapped textarea row has only blank/sparkle cells in its indent.
+///
+/// Tmux trims trailing blanks: a blank draft row can therefore contain zero
+/// characters, or just one sparkle. Missing captured cells are blank here;
+/// a present non-padding character in either indent cell still rejects it.
+fn is_codex_wrapped_row(line: &str) -> bool {
+    line.chars()
+        .take(2)
+        .all(|character| character.is_whitespace() || CODEX_SPARKLE_DOTS.contains(&character))
+}
+
+/// Match the pinned Codex status header, including its reduced-motion form.
+///
+/// The audited source defaults to `Working` and permits either no activity
+/// indicator or `•`/`◦` before it. Unknown labels and symbols deliberately
+/// do not count as work: without that bound arbitrary prose would be
+/// indistinguishable from the widget.
+fn is_codex_running_status(line: &str) -> bool {
+    let Some(header) = line
+        .strip_prefix("Working ")
+        .or_else(|| strip_codex_spinner(line))
+    else {
+        return false;
+    };
+    let Some(rest) = header.strip_prefix('(') else {
+        return false;
+    };
+    let Some((elapsed, suffix)) = rest.split_once(')') else {
+        return false;
+    };
+    let Some(elapsed) = elapsed.strip_suffix(" • esc to interrupt") else {
+        return false;
+    };
+    is_codex_elapsed(elapsed)
+        && (suffix.is_empty()
+            || suffix
+                .strip_prefix(" · ")
+                .is_some_and(|context| !context.is_empty()))
+}
+
+/// Remove one animated activity cell before the fixed status header.
+fn strip_codex_spinner(line: &str) -> Option<&str> {
+    line.strip_prefix("• ")
+        .or_else(|| line.strip_prefix("◦ "))?
+        .strip_prefix("Working ")
+}
+
+/// Validate the exact compact elapsed forms emitted by `fmt_elapsed_compact`.
+fn is_codex_elapsed(elapsed: &str) -> bool {
+    fn unpadded(value: &str) -> Option<u64> {
+        let parsed = value.parse::<u64>().ok()?;
+        (parsed.to_string() == value).then_some(parsed)
+    }
+
+    fn two_digits_below_sixty(value: &str) -> bool {
+        value.len() == 2
+            && value.bytes().all(|byte| byte.is_ascii_digit())
+            && value.parse::<u8>().is_ok_and(|parsed| parsed < 60)
+    }
+
+    let Some(without_seconds_unit) = elapsed.strip_suffix('s') else {
+        return false;
+    };
+    if let Some((hours, rest)) = without_seconds_unit.split_once("h ") {
+        let Some((minutes, seconds)) = rest.split_once("m ") else {
+            return false;
+        };
+        return unpadded(hours).is_some_and(|hours| hours > 0)
+            && two_digits_below_sixty(minutes)
+            && two_digits_below_sixty(seconds);
+    }
+    if let Some((minutes, seconds)) = without_seconds_unit.split_once("m ") {
+        return unpadded(minutes).is_some_and(|minutes| (1..60).contains(&minutes))
+            && two_digits_below_sixty(seconds);
+    }
+    unpadded(without_seconds_unit).is_some_and(|seconds| seconds < 60)
+}
 
 /// Question wording that, together with a menu of numbered answers, means
 /// Claude Code is blocked on a human.
@@ -1965,6 +2195,166 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sanitized Codex bottom pane. Its footer text is deliberately
+    /// arbitrary: users configure it, while the composer geometry is the
+    /// vendor shape this module can safely identify.
+    fn codex_composer(input: &str, upper: &str, lower: &str) -> String {
+        format!("agent output\n{upper}\n› {input}\n{lower}\ncustom footer")
+    }
+
+    /// Codex's eight sparkle particles redraw while an otherwise idle
+    /// composer remains on screen. All of them must disappear only from the
+    /// recognized composer, or the activity sampler dates animation frames.
+    #[farhelm_testtrace::test]
+    fn codex_composer_particles_and_drafts_do_not_change_activity_evidence() {
+        let plain =
+            CodexIntegration.activity_screen(&codex_composer("Ask Codex to do anything", "", ""));
+        for dot in CODEX_SPARKLE_DOTS {
+            let decorated = CodexIntegration.activity_screen(&codex_composer(
+                &format!("{dot}Ask Codex to do anything"),
+                &dot.to_string(),
+                &dot.to_string(),
+            ));
+            assert_eq!(decorated.comparison, plain.comparison, "dot {dot:?}");
+        }
+
+        let first = CodexIntegration.activity_screen(&codex_composer("draft", "", ""));
+        let edited = CodexIntegration.activity_screen(&codex_composer(
+            "different draft\n⠁⠂wrapped draft row",
+            "",
+            "",
+        ));
+        assert_eq!(first.comparison, edited.comparison);
+    }
+
+    /// Blank lines inside pasted or edited drafts lose their trailing
+    /// indent cells in tmux captures. They must remain part of the proven
+    /// composer, including a blank first line whose prompt captures as `›`.
+    #[farhelm_testtrace::test]
+    fn codex_blank_draft_rows_remain_composer_after_tmux_trims_cells() {
+        let expected = CodexIntegration.activity_screen(&codex_composer("draft", "", ""));
+        for frame in [
+            "agent output\n\n›\n\n  draft\n\ncustom footer",
+            "agent output\n⠁\n›⠂\n⠄\n  draft\n⠈\ncustom footer",
+            "agent output\n\n› draft\n\n  continued\n\ncustom footer",
+        ] {
+            assert_eq!(
+                CodexIntegration.activity_screen(frame).comparison,
+                expected.comparison
+            );
+        }
+        for frame in [
+            "agent output\n\n› draft\nx\n\ncustom footer",
+            "agent output\n\n›not a composer\n\ncustom footer",
+        ] {
+            assert_eq!(CodexIntegration.activity_screen(frame).comparison, frame);
+        }
+    }
+
+    /// Cleanup must not become a global Braille filter or hide a popup that
+    /// only resembles the bottom pane. Either mistake loses actual output.
+    #[farhelm_testtrace::test]
+    fn codex_activity_cleanup_preserves_outside_content_and_unknown_shapes() {
+        let outside = format!(
+            "output {} spinner\n{}",
+            CODEX_SPARKLE_DOTS[0],
+            codex_composer("draft", "", "")
+        );
+        let screen = CodexIntegration.activity_screen(&outside);
+        assert!(
+            screen
+                .comparison
+                .contains(&format!("output {} spinner", CODEX_SPARKLE_DOTS[0]))
+        );
+
+        let popup = "output\n\n› draft\n\ncustom footer\npopup choice";
+        let screen = CodexIntegration.activity_screen(popup);
+        assert_eq!(screen.comparison, popup);
+    }
+
+    /// The positive interrupt hint prevents a still long-running Codex task
+    /// from decaying to idle. These fixtures mirror the pinned widget's
+    /// reduced-motion, animated, inline-context, and detail-row layouts.
+    #[farhelm_testtrace::test]
+    fn codex_working_hint_accepts_the_current_adjoining_status_widget() {
+        for status in [
+            "Working (3s • esc to interrupt)",
+            "• Working (1m 02s • esc to interrupt)",
+            "◦ Working (59m 59s • esc to interrupt)",
+            "Working (2h 03m 09s • esc to interrupt) · compacting",
+            "Working (4s • esc to interrupt)\n  └ Running a hook\n  └ Reading files\n    and checking output",
+        ] {
+            let busy = format!("agent output\n{status}\n\n› draft\n\ncustom footer");
+            assert!(
+                CodexIntegration.activity_screen(&busy).working,
+                "current status was not recognized: {status:?}"
+            );
+        }
+    }
+
+    /// Status words in output history, quoted prose, synthetic labels, and
+    /// malformed elapsed values must not pin a completed task at running.
+    #[farhelm_testtrace::test]
+    fn codex_working_hint_rejects_historical_and_unproved_status_shapes() {
+        for screen in [
+            "Working (3s • esc to interrupt)\ncompleted output\n\n› draft\n\ncustom footer",
+            "agent output\nEarlier: Working (3s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nThinking (3s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\n✻ Working (3s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nWorking (3 minutes • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nWorking (60s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nWorking (+1m 02s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nWorking (1m +2s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nWorking (1h +2m 03s • esc to interrupt)\n\n› draft\n\ncustom footer",
+            "agent output\nWorking (3s • esc to interrupt)\n  arbitrary transcript\n\n› draft\n\ncustom footer",
+            "Working (3s • esc to interrupt)\n› draft",
+        ] {
+            assert!(
+                !CodexIntegration.activity_screen(screen).working,
+                "unproved status claimed current work: {screen:?}"
+            );
+        }
+    }
+
+    /// Normalization must happen before the final retained cap. Variable
+    /// three-byte particles beside that boundary otherwise shift real output
+    /// into the comparison suffix and manufacture activity.
+    #[farhelm_testtrace::test]
+    fn codex_cleanup_precedes_the_final_utf8_safe_tail_cap() {
+        let prefix = "x".repeat(4090);
+        let left = format!("{prefix}\n{}", codex_composer("draft", "", ""));
+        let right = format!("{prefix}\n{}", codex_composer("draft", "⠁⠂⠄⠈", "⠐⠠⡀⢀"));
+        let left = crate::tmux::retain_pane_tail(
+            &CodexIntegration.activity_screen(&left).comparison,
+            4096,
+        );
+        let right = crate::tmux::retain_pane_tail(
+            &CodexIntegration.activity_screen(&right).comparison,
+            4096,
+        );
+        assert_eq!(left, right);
+
+        let normalized_suffix = format!("\n{}", codex_composer("draft", "", ""));
+        let normalized_suffix = CodexIntegration
+            .activity_screen(&normalized_suffix)
+            .comparison;
+        let fill = "x".repeat(4097 - "é".len() - normalized_suffix.len());
+        let raw = format!("é{fill}\n{}", codex_composer("draft", "", ""));
+        let normalized = CodexIntegration.activity_screen(&raw).comparison;
+        assert_eq!(
+            normalized.len(),
+            4097,
+            "premise: the 4096-byte cut must land inside the leading two-byte scalar"
+        );
+        let capped = crate::tmux::retain_pane_tail(&normalized, 4096);
+        assert_eq!(
+            capped,
+            normalized["é".len()..],
+            "the real cap must skip the split scalar and retain the exact complete suffix"
+        );
+        assert_eq!(capped.len(), 4095);
+    }
 
     /// Derivation is the DEFAULT every session gets when a caller sends no
     /// override, so its exact reach is a product decision, not an
