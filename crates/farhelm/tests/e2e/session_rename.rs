@@ -59,6 +59,7 @@ async fn rename(sup: &Arc<Supervisor>, session_id: &str, title: &str) -> Control
         .write_control(&ControlMsg::RenameSession {
             req_id: 1,
             session_id: session_id.to_string(),
+            expected_title: None,
             title: title.to_string(),
         })
         .await
@@ -873,6 +874,7 @@ async fn a_rename_whose_client_vanishes_still_lands() {
             .write_control(&ControlMsg::RenameSession {
                 req_id: 1,
                 session_id: session.id.clone(),
+                expected_title: None,
                 title: "renamed-by-a-client-that-left".to_string(),
             })
             .await

@@ -447,11 +447,8 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// documented there as intentionally host-wide — it is what catches a
 /// descendant that broke its PPID chain). A `farhelm agent` process
 /// necessarily carries that marker FOR THE SESSION IT AUTHENTICATES AS, so
-/// a bare CLI invocation that both asks-as and acts-on the SAME session
-/// races its own triggered sweep — confirmed empirically while writing
-/// this test, where a stand-alone `farhelm agent archive` (no `--session`)
-/// was reliably SIGTERM'd by the sweep its own request caused, before it
-/// could print a confirmation. That is a property of an unattended CLI
+/// a command explicitly targeting that same session races its own triggered
+/// sweep and may be SIGTERM'd before it can print a confirmation. That is a property of an unattended CLI
 /// process racing a kill sweep it started against itself, not a defect in
 /// the relay or in `HelmAgentRequests`: nothing is supposed to survive a
 /// self-archive, the disposable CLI invocation least of all, since ending
@@ -461,9 +458,9 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// `stop`/`archive` at a
 /// SEPARATE target session sidesteps the race entirely — the controller's
 /// marker never matches the target's sweep — which is what makes this
-/// fixture deterministic. `rename` triggers no sweep at all, so it is
-/// exercised the other way, WITHOUT `--session`, to cover the
-/// "defaults to the asker" half on a verb that carries no such hazard.
+/// fixture deterministic. `rename` triggers no sweep at all, so it safely
+/// covers a deliberate self-action with the controller's exact ID and
+/// observed title.
 ///
 /// `GET /api/sessions/{id}` is the read used to observe each effect rather
 /// than the listing table, because it is documented to answer LIVE for a
@@ -523,11 +520,18 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
     // one is issued.
     hosts_until_attached(&controller_id, &token, &socket).await;
 
-    // `rename`, with NO `--session`: defaults to the asker (the controller
-    // itself), and triggers no sweep, so it is the safe verb to exercise
-    // that half of the contract on.
+    // Deliberate self-targeting uses the id and old title from discovery;
+    // rename itself triggers no sweep, so it is safe to run from the
+    // controller's agent process.
     let renamed = agent_command_args(
-        &["rename", "renamed-controller"],
+        &[
+            "rename",
+            "renamed-controller",
+            "--session",
+            &controller_id,
+            "--expected-title",
+            "controller",
+        ],
         &controller_id,
         &token,
         &socket,
@@ -768,9 +772,21 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
         "the profile NAME must have resolved through the helm catalog: {created}"
     );
 
-    // `clone`, naming nothing: the asking session's own host, directory and
-    // title.
-    let output = spawn_agent_command_args(&["clone"], &asker_id, &token, &socket).await;
+    // Clone names its source and destination explicitly; the directory,
+    // title, and launch definition inherit from that source.
+    let output = spawn_agent_command_args(
+        &[
+            "clone",
+            "--source-session",
+            &asker_id,
+            "--host",
+            "this machine",
+        ],
+        &asker_id,
+        &token,
+        &socket,
+    )
+    .await;
     assert!(
         output.status.success(),
         "`farhelm agent clone` failed: {}",
@@ -797,7 +813,15 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     // words rather than a paraphrase assembled on the way back.
     let absent = work.path().join("no-such-directory");
     let output = spawn_agent_command_args(
-        &["clone", "--cwd", &absent.to_string_lossy()],
+        &[
+            "clone",
+            "--source-session",
+            &asker_id,
+            "--host",
+            "this machine",
+            "--cwd",
+            &absent.to_string_lossy(),
+        ],
         &asker_id,
         &token,
         &socket,
@@ -830,6 +854,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
             &created_cwd,
             "--profile",
             "No Such Profile",
+            "--host",
+            "this machine",
         ],
         &asker_id,
         &token,
@@ -839,8 +865,8 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
     assert!(!output.status.success());
     let refusal = String::from_utf8_lossy(&output.stderr);
     assert!(
-        refusal.contains("No Such Profile") && refusal.contains("this machine"),
-        "the refusal must name the profile AND the host it was looked for on: {refusal}"
+        refusal.contains("No Such Profile") && refusal.contains("Relay Fixture"),
+        "the helm-wide catalog refusal must name the requested profile and an available choice: {refusal}"
     );
 
     // `helm`, `supervisor` and `work` deliberately outlive this test's last
@@ -905,7 +931,19 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     let token = session_token(supervisor.state.path(), &parent.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
     hosts_until_attached(&parent.id, &token, &socket).await;
-    let output = spawn_agent_command_args(&["clone"], &parent.id, &token, &socket).await;
+    let output = spawn_agent_command_args(
+        &[
+            "clone",
+            "--source-session",
+            &parent.id,
+            "--host",
+            "this machine",
+        ],
+        &parent.id,
+        &token,
+        &socket,
+    )
+    .await;
     assert!(
         output.status.success(),
         "structured agent clone failed: {}",

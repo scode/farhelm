@@ -14,7 +14,8 @@
 
 use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 use farhelm_proto::{
-    AgentHost, AgentOutcome, AgentReply, AgentSession, AgentVerb, ControlMsg, ErrorKind, Frame,
+    AgentHost, AgentOutcome, AgentProfile, AgentReply, AgentSession, AgentVerb, ControlMsg,
+    ErrorKind, Frame,
 };
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -358,20 +359,24 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Hosts {
+                    caller_host_id: "host-local".to_string(),
                     hosts: vec![
                         AgentHost {
+                            id: "host-local".to_string(),
                             name: "this machine".to_string(),
                             kind: "local".to_string(),
                             state: "connected".to_string(),
                             current: true,
                         },
                         AgentHost {
+                            id: "host-builder".to_string(),
                             name: "builder".to_string(),
                             kind: "ssh".to_string(),
                             state: "unreachable-reprobing".to_string(),
                             current: false,
                         },
                     ],
+                    complete: true,
                 },
             },
         })
@@ -388,13 +393,127 @@ fn hosts_asks_as_its_own_session_and_prints_the_marked_table() {
         // multi-line string literal's backslash continuation eats exactly
         // that leading whitespace.
         [
-            "  NAME         KIND  STATE",
-            "* this machine local connected",
-            "  builder      ssh   unreachable-reprobing",
+            "  ID           NAME         KIND  STATE",
+            "* host-local   this machine local connected",
+            "  host-builder builder      ssh   unreachable-reprobing",
             "",
         ]
         .join("\n")
     );
+}
+
+/// JSON discovery is a versioned envelope with explicit caller identity and
+/// the reply's completeness signal.
+///
+/// Parsing and comparing the whole value pins the public schema while
+/// avoiding a meaningless dependency on object-key serialization order.
+#[farhelm_testtrace::test]
+fn hosts_json_has_the_exact_discovery_envelope() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(request, AgentVerb::Hosts {});
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Hosts {
+                    caller_host_id: "host-local".to_string(),
+                    hosts: vec![AgentHost {
+                        id: "host-local".to_string(),
+                        name: "this machine".to_string(),
+                        kind: "local".to_string(),
+                        state: "connected".to_string(),
+                        current: true,
+                    }],
+                    complete: false,
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["hosts", "--json"]));
+    finish_server(done, thread);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON envelope");
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "schema_version": 1,
+            "caller": {"session_id": "session-1", "host_id": "host-local"},
+            "reply": {
+                "reply": "hosts",
+                "caller_host_id": "host-local",
+                "hosts": [{
+                    "id": "host-local",
+                    "name": "this machine",
+                    "kind": "local",
+                    "state": "connected",
+                    "current": true
+                }],
+                "complete": false
+            }
+        })
+    );
+}
+
+/// Profile discovery exposes only the stable selector metadata in its human
+/// table; launch commands and provider settings do not exist in this shape.
+#[farhelm_testtrace::test]
+fn profiles_prints_the_id_name_and_builtin_table() {
+    let temp = farhelm_teststate::tempdir().unwrap();
+    let socket = temp.path().join("supervisor.sock");
+    let (done, thread) = mock_supervisor(&socket, |request| {
+        let ControlMsg::AgentRequest {
+            req_id, request, ..
+        } = request
+        else {
+            panic!("farhelm agent must send an AgentRequest, got {request:?}");
+        };
+        assert_eq!(request, AgentVerb::Profiles {});
+        Some(ControlMsg::AgentResponse {
+            req_id,
+            outcome: AgentOutcome::Ok {
+                reply: AgentReply::Profiles {
+                    caller_host_id: "host-local".to_string(),
+                    profiles: vec![
+                        AgentProfile {
+                            id: "builtin-codex".to_string(),
+                            name: "codex".to_string(),
+                            builtin: true,
+                        },
+                        AgentProfile {
+                            id: "profile-2".to_string(),
+                            name: "duplicate".to_string(),
+                            builtin: false,
+                        },
+                    ],
+                    complete: true,
+                },
+            },
+        })
+    });
+
+    let output = output_with_timeout(agent_command_with_args(&socket, &["profiles"]));
+    finish_server(done, thread);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("UTF-8 table"),
+        [
+            "ID            NAME      BUILTIN",
+            "builtin-codex codex     true",
+            "profile-2     duplicate false",
+            "",
+        ]
+        .join("\n")
+    );
+    assert!(output.stderr.is_empty());
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
@@ -427,9 +546,11 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Sessions {
+                    caller_host_id: "host-local".to_string(),
                     sessions: vec![
                         AgentSession {
                             id: "session-1".to_string(),
+                            host_id: "1".to_string(),
                             host: Some("this machine".to_string()),
                             title: "auth".to_string(),
                             cwd: "/w/auth".to_string(),
@@ -441,6 +562,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                         },
                         AgentSession {
                             id: "session-2".to_string(),
+                            host_id: "1".to_string(),
                             host: Some("builder".to_string()),
                             title: "docs".to_string(),
                             cwd: "/w".to_string(),
@@ -452,6 +574,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                         },
                         AgentSession {
                             id: "session-3".to_string(),
+                            host_id: "1".to_string(),
                             host: Some("builder".to_string()),
                             title: "old".to_string(),
                             cwd: "/w".to_string(),
@@ -509,8 +632,10 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Sessions {
+                    caller_host_id: "host-local".to_string(),
                     sessions: vec![AgentSession {
                         id: "session-1".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "auth".to_string(),
                         cwd: "/w".to_string(),
@@ -765,7 +890,14 @@ fn agent_run_against_frame(
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, thread) = mock_supervisor_frames(&socket, reply);
-    let output = output_with_timeout(agent_command_with_args(&socket, &[verb]));
+    // These transport tests require an admitted request. Stop names its
+    // fixture target explicitly; omission refusal has separate parser tests.
+    let args = if verb == "stop" {
+        vec![verb, "--session", "target-session"]
+    } else {
+        vec![verb]
+    };
+    let output = output_with_timeout(agent_command_with_args(&socket, &args));
     finish_server(done, thread);
     output
 }
@@ -811,7 +943,11 @@ fn an_untrustworthy_reply_fails_with_nothing_on_stdout() {
         Some(ControlMsg::AgentResponse {
             req_id: asked_req_id(&request) + 99,
             outcome: AgentOutcome::Ok {
-                reply: AgentReply::Hosts { hosts: Vec::new() },
+                reply: AgentReply::Hosts {
+                    caller_host_id: "host-local".to_string(),
+                    hosts: Vec::new(),
+                    complete: true,
+                },
             },
         })
     });
@@ -933,6 +1069,7 @@ fn a_reply_for_the_other_verb_is_refused() {
             req_id: asked_req_id(&request),
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Sessions {
+                    caller_host_id: "host-local".to_string(),
                     sessions: Vec::new(),
                     truncated: false,
                 },
@@ -943,7 +1080,11 @@ fn a_reply_for_the_other_verb_is_refused() {
         Some(ControlMsg::AgentResponse {
             req_id: asked_req_id(&request),
             outcome: AgentOutcome::Ok {
-                reply: AgentReply::Hosts { hosts: Vec::new() },
+                reply: AgentReply::Hosts {
+                    caller_host_id: "host-local".to_string(),
+                    hosts: Vec::new(),
+                    complete: true,
+                },
             },
         })
     });
@@ -1025,7 +1166,11 @@ fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
                     Some(ControlMsg::AgentResponse {
                         req_id: asked_req_id(&request),
                         outcome: AgentOutcome::Ok {
-                            reply: AgentReply::Hosts { hosts: Vec::new() },
+                            reply: AgentReply::Hosts {
+                                caller_host_id: "host-local".to_string(),
+                                hosts: Vec::new(),
+                                complete: true,
+                            },
                         },
                     })
                 }),
@@ -1066,16 +1211,16 @@ fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
 // sends, and the one confirmation line each prints on success.
 //
 // "Prints on success" holds unconditionally against a MOCK and not against
-// the real stack: a bare `stop`/`archive` targets the asking session, and
-// the marker-keyed sweep that ends it reaches this CLI process too, so a
-// real self-stop can be SIGTERMed before its own `println!` runs (see
+// the real stack: an explicit self-stop or self-archive targets the asking
+// session's process tree, whose marker-keyed sweep reaches this CLI process
+// too, so it can be SIGTERMed before its own `println!` runs (see
 // `main`'s Rename/Stop/Archive comment, and the e2e lifecycle test that
 // routes around it). Every case below sends its verb to a mock that stops
 // nothing, which is what makes the confirmation observable at all.
 // ---------------------------------------------------------------
 
-/// Spec: `farhelm agent rename <title> --session <id>` sends exactly one
-/// `Rename` verb naming the given title and target, and prints the
+/// Spec: `farhelm agent rename --session <id> --expected-title=<old> --
+/// <new>` sends exactly one conditional `Rename` verb and prints the
 /// updated row's id and title as one plain confirmation line.
 ///
 /// The confirmation reads from the REPLY's own fields (`AgentSession::id`/
@@ -1105,6 +1250,7 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
             request,
             AgentVerb::Rename {
                 session_id: Some("other-session".to_string()),
+                expected_title: Some("old title".to_string()),
                 title: "new title".to_string(),
             }
         );
@@ -1114,6 +1260,7 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "resolved-session".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "the helm's own title".to_string(),
                         cwd: "/w".to_string(),
@@ -1130,7 +1277,14 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
 
     let output = output_with_timeout(agent_command_with_args(
         &socket,
-        &["rename", "new title", "--session", "other-session"],
+        &[
+            "rename",
+            "new title",
+            "--session",
+            "other-session",
+            "--expected-title",
+            "old title",
+        ],
     ));
     finish_server(done, thread);
 
@@ -1143,40 +1297,25 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
     assert!(output.stderr.is_empty());
 }
 
-/// Spec: `farhelm agent stop`, with no `--session`, sends `Stop` naming no
-/// target — the substitution the helm resolves to the asking session — and
-/// the confirmation names the ASKING session, since `Stopped` itself
-/// carries no id to read one back from.
+/// Spec: `farhelm agent stop` refuses an omitted `--session` before opening
+/// the supervisor socket.
+///
+/// This keeps the command-line boundary from spelling the old implicit-self
+/// request at all. The wire and authority tests separately prove that an old
+/// client cannot bypass this check by sending an omitted-target request.
 #[farhelm_testtrace::test]
-fn stop_with_no_session_flag_sends_none_and_names_the_asking_session() {
+fn stop_without_a_session_is_refused_before_anything_is_sent() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        assert_eq!(request, AgentVerb::Stop { session_id: None });
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Stopped {},
-            },
-        })
-    });
-
     let output = output_with_timeout(agent_command_with_args(&socket, &["stop"]));
-    finish_server(done, thread);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "stopped session-1\n",
-        "with no --session, the confirmation names the injected asking session"
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--session"),
+        "the refusal must name it: {stderr}"
     );
-    assert!(output.stderr.is_empty());
 }
 
 /// Spec: `farhelm agent archive --session <id>` sends `Archive` naming that
@@ -1215,6 +1354,7 @@ fn archive_sends_the_named_target_and_prints_its_id() {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "other-session".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "auth".to_string(),
                         cwd: "/w".to_string(),
@@ -1282,6 +1422,7 @@ fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "sess\n1".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "line one\nsays \"hi\" \\ bye".to_string(),
                         cwd: "/w".to_string(),
@@ -1298,7 +1439,14 @@ fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
 
     let output = output_with_timeout(agent_command_with_args(
         &socket,
-        &["rename", "line one\nline two"],
+        &[
+            "rename",
+            "line one\nline two",
+            "--session",
+            "session-1",
+            "--expected-title",
+            "old title",
+        ],
     ));
     finish_server(done, thread);
 
@@ -1394,6 +1542,7 @@ fn an_archive_confirmation_escapes_control_characters_in_the_id() {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "line one\nline two".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "t".to_string(),
                         cwd: "/w".to_string(),
@@ -1408,7 +1557,10 @@ fn an_archive_confirmation_escapes_control_characters_in_the_id() {
         })
     });
 
-    let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &["archive", "--session", "session-1"],
+    ));
     finish_server(done, thread);
 
     assert_eq!(output.status.code(), Some(0));
@@ -1420,113 +1572,46 @@ fn an_archive_confirmation_escapes_control_characters_in_the_id() {
     assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
 }
 
-/// Spec: bare `farhelm agent rename <title>` (no `--session`) sends
-/// `Rename` with `session_id: None` — the asking-session substitution
-/// every other lifecycle verb already pins at this wire-encoding layer
-/// (see `stop_with_no_session_flag_sends_none_and_names_the_asking_session`
-/// for `Stop`'s own version of this contract), and here for `Rename`,
-/// which previously had no such coverage below the handler-test and e2e
-/// layers.
+/// Spec: rename requires both the target id and the title observed during
+/// discovery before it opens the supervisor socket.
+///
+/// Requiring both values makes the command conditional by construction: an
+/// agent cannot accidentally recover the old implicit-self or unconditional
+/// rename behavior by omitting one flag.
 #[farhelm_testtrace::test]
-fn bare_rename_sends_no_target_and_lets_the_helm_substitute_the_asker() {
+fn rename_without_consequential_selectors_is_refused_before_sending() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        assert_eq!(
-            request,
-            AgentVerb::Rename {
-                session_id: None,
-                title: "new title".to_string(),
-            },
-            "omitting --session must send no target at all"
-        );
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Session {
-                    session: AgentSession {
-                        id: "session-1".to_string(),
-                        host: Some("this machine".to_string()),
-                        title: "new title".to_string(),
-                        cwd: "/w".to_string(),
-                        agent: "claude".to_string(),
-                        status: "running".to_string(),
-                        current: true,
-                        archived: false,
-                        stale: false,
-                    },
-                },
-            },
-        })
-    });
-
     let output = output_with_timeout(agent_command_with_args(&socket, &["rename", "new title"]));
-    finish_server(done, thread);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "renamed session-1 to \"new title\"\n"
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--session"),
+        "the refusal must name the target selector: {stderr}"
     );
-    assert!(output.stderr.is_empty());
+    assert!(
+        stderr.contains("--expected-title"),
+        "the refusal must name the condition: {stderr}"
+    );
 }
 
-/// Spec: bare `farhelm agent archive` (no `--session`) sends `Archive` with
-/// `session_id: None` — the asking-session substitution `Rename` and `Stop`
-/// already pin at this wire-encoding layer, and here for `Archive`, which
-/// previously had no such coverage below the handler-test and e2e layers
-/// (every existing `archive` test here named an explicit `--session`).
+/// Spec: archive refuses an omitted target before opening the supervisor
+/// socket, matching stop's explicit-target contract.
 #[farhelm_testtrace::test]
-fn bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker() {
+fn archive_without_a_session_is_refused_before_anything_is_sent() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        assert_eq!(
-            request,
-            AgentVerb::Archive { session_id: None },
-            "omitting --session must send no target at all"
-        );
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Session {
-                    session: AgentSession {
-                        id: "session-1".to_string(),
-                        host: Some("this machine".to_string()),
-                        title: "t".to_string(),
-                        cwd: "/w".to_string(),
-                        agent: "claude".to_string(),
-                        status: "exited".to_string(),
-                        current: true,
-                        archived: true,
-                        stale: false,
-                    },
-                },
-            },
-        })
-    });
-
     let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
-    finish_server(done, thread);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "archived session-1\n"
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--session"),
+        "the refusal must name it: {stderr}"
     );
-    assert!(output.stderr.is_empty());
 }
 
 /// Spec: a rename title starting with a hyphen is sent verbatim as the
@@ -1554,7 +1639,8 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
         assert_eq!(
             request,
             AgentVerb::Rename {
-                session_id: None,
+                session_id: Some("session-1".to_string()),
+                expected_title: Some("-old-title".to_string()),
                 title: "-not-a-flag".to_string(),
             },
             "a leading hyphen must reach the wire as ordinary title text"
@@ -1565,6 +1651,7 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "session-1".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "-not-a-flag".to_string(),
                         cwd: "/w".to_string(),
@@ -1579,7 +1666,16 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
         })
     });
 
-    let output = output_with_timeout(agent_command_with_args(&socket, &["rename", "-not-a-flag"]));
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "rename",
+            "-not-a-flag",
+            "--session",
+            "session-1",
+            "--expected-title=-old-title",
+        ],
+    ));
     finish_server(done, thread);
 
     assert_eq!(
@@ -1650,6 +1746,7 @@ fn instructions_print_every_verb_without_a_session() {
     for verb in [
         "hosts",
         "sessions",
+        "profiles",
         "rename",
         "stop",
         "archive",
@@ -1666,9 +1763,9 @@ fn instructions_print_every_verb_without_a_session() {
     // The three conventions an agent cannot infer: the trigger, the marker
     // column, and the failure that has a remedy rather than a cause.
     assert!(text.contains("$farhelm"), "{text}");
-    assert!(text.contains("\"*\""), "{text}");
+    assert!(text.contains("* marks this"), "{text}");
     assert!(
-        text.contains("no helm is attached to this session"),
+        text.contains("attached, ask the user to open this session"),
         "{text}"
     );
 
@@ -1749,6 +1846,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
                 profile_name: Some("Claude Code".to_string()),
+                profile_id: None,
                 invocation: None,
                 title: Some("over there".to_string()),
                 intent_key: Some("key-1".to_string()),
@@ -1760,6 +1858,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
                 reply: AgentReply::Created {
                     session: AgentSession {
                         id: "new-session".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("builder".to_string()),
                         title: "over there".to_string(),
                         cwd: "/srv/work".to_string(),
@@ -1804,64 +1903,28 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
     );
 }
 
-/// Spec: `farhelm agent clone` with no flags sends every field absent,
-/// which is how "another one of these, right here" is spelled on the wire.
+/// Spec: clone refuses omitted source and destination selectors before it
+/// opens the supervisor socket.
 ///
-/// Every one of those `None`s is a DEFAULT the helm resolves, not an
-/// omission: no host means the asking session's own, no cwd and no title
-/// mean the source's. A CLI that filled any of them in locally — the
-/// asking session's own directory, say, which this process could read —
-/// would be answering a question only the helm has the information to
-/// answer, since the source session may not even be this process's own
-/// working directory.
+/// The optional directory and title still inherit from the explicit source,
+/// but neither the source nor its destination may be inferred from the
+/// calling session.
 #[farhelm_testtrace::test]
-fn bare_clone_sends_every_field_absent() {
+fn clone_without_source_or_host_is_refused_before_sending() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        assert_eq!(
-            request,
-            AgentVerb::Clone {
-                host: None,
-                cwd: None,
-                title: None,
-                intent_key: None,
-            }
-        );
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Created {
-                    session: AgentSession {
-                        id: "the-copy".to_string(),
-                        host: Some("this machine".to_string()),
-                        title: "the original".to_string(),
-                        cwd: "/srv/project".to_string(),
-                        agent: "Claude".to_string(),
-                        status: String::new(),
-                        current: false,
-                        archived: false,
-                        stale: false,
-                    },
-                },
-            },
-        })
-    });
-
     let output = output_with_timeout(agent_command_with_args(&socket, &["clone"]));
-    finish_server(done, thread);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(String::from_utf8(output.stdout).unwrap(), "the-copy\n");
-    assert_eq!(
-        String::from_utf8(output.stderr).unwrap(),
-        "created the-copy \"the original\" on this machine in /srv/project\n"
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--source-session"),
+        "the refusal must name the source: {stderr}"
+    );
+    assert!(
+        stderr.contains("--host"),
+        "the refusal must name the destination: {stderr}"
     );
 }
 
@@ -1900,6 +1963,7 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
         assert_eq!(
             request,
             AgentVerb::Clone {
+                source_session_id: Some("source-session".to_string()),
                 host: Some("builder".to_string()),
                 cwd: Some("/srv/elsewhere".to_string()),
                 title: Some("the copy".to_string()),
@@ -1912,6 +1976,7 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
                 reply: AgentReply::Created {
                     session: AgentSession {
                         id: "the-copy".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("buil\x1b[2Jder".to_string()),
                         title: "forged\nrow".to_string(),
                         cwd: "/srv/\tproject".to_string(),
@@ -1930,6 +1995,8 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
         &socket,
         &[
             "clone",
+            "--source-session",
+            "source-session",
             "--host",
             "builder",
             "--cwd",
@@ -2057,6 +2124,7 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
             title,
             intent_key,
             profile_name,
+            profile_id,
         } = request
         else {
             panic!("expected a Create verb, got {request:?}");
@@ -2070,12 +2138,17 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
             profile_name, None,
             "the invocation selector was chosen, so no profile travels"
         );
+        assert_eq!(
+            profile_id, None,
+            "the invocation selector excludes a profile id"
+        );
         Some(ControlMsg::AgentResponse {
             req_id,
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Created {
                     session: AgentSession {
                         id: "new-session".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "t".to_string(),
                         cwd: "/w".to_string(),
@@ -2145,6 +2218,7 @@ fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
                 reply: AgentReply::Created {
                     session: AgentSession {
                         id: "new-session".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "t".to_string(),
                         cwd: "/w".to_string(),
@@ -2161,7 +2235,15 @@ fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
 
     let output = output_with_timeout(agent_command_with_args(
         &socket,
-        &["create", "--cwd", "/w", "--profile", "-dash-profile"],
+        &[
+            "create",
+            "--host",
+            "this machine",
+            "--cwd",
+            "/w",
+            "--profile",
+            "-dash-profile",
+        ],
     ));
     finish_server(done, thread);
 
@@ -2202,6 +2284,7 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "an-existing-session".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "t".to_string(),
                         cwd: "/w".to_string(),
@@ -2216,7 +2299,16 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
         })
     });
 
-    let output = output_with_timeout(agent_command_with_args(&socket, &["clone"]));
+    let output = output_with_timeout(agent_command_with_args(
+        &socket,
+        &[
+            "clone",
+            "--source-session",
+            "source-session",
+            "--host",
+            "this machine",
+        ],
+    ));
     finish_server(done, thread);
 
     assert_ne!(output.status.code(), Some(0));

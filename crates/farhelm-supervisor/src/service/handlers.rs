@@ -219,29 +219,54 @@ use crate::store::RESUME_TEMPLATE_ELEMENT_CAP;
 /// create, and [`CreateMode`] is where that stops being a convention.
 enum CreateSelector {
     Bundle(CreateMode),
-    ProfileName(String),
+    Profile {
+        name: Option<String>,
+        id: Option<String>,
+    },
     Derived,
+}
+
+/// The wire fields that jointly select one create mode.
+///
+/// Keeping them together prevents callers from accidentally applying
+/// different exclusivity rules as the selector vocabulary grows.
+struct CreateSelectorFields {
+    invocation: Option<String>,
+    profile_name: Option<String>,
+    profile_id: Option<String>,
+    inherit_agent: bool,
+    agent_kind: Option<AgentKind>,
+    resume_template: Option<Vec<String>>,
+    source_profile: Option<WireProfileSnapshot>,
+    launch: Option<LaunchSelection>,
 }
 
 /// Validate the create selector's wire shape before any profile resolution
 /// or reservation work begins.
 ///
-/// `profile_name` and the selectorless form are retained only for the spawn
-/// protocol. All ordinary helm creates arrive as an invocation bundle, with
-/// profile provenance present only when the helm resolved one.
-fn create_mode(
-    invocation: Option<String>,
-    profile_name: Option<String>,
-    agent_kind: Option<AgentKind>,
-    resume_template: Option<Vec<String>>,
-    source_profile: Option<WireProfileSnapshot>,
-    launch: Option<LaunchSelection>,
-) -> Result<CreateSelector, String> {
+/// Profile selectors and explicit inheritance are retained only for the
+/// spawn protocol. All ordinary helm creates arrive as an invocation bundle,
+/// with profile provenance present only when the helm resolved one.
+fn create_mode(fields: CreateSelectorFields) -> Result<CreateSelector, String> {
+    let CreateSelectorFields {
+        invocation,
+        profile_name,
+        profile_id,
+        inherit_agent,
+        agent_kind,
+        resume_template,
+        source_profile,
+        launch,
+    } = fields;
     if let Some(selection) = launch {
         let Some(invocation) = invocation else {
             return Err("a structured launch must carry its resolved invocation".to_string());
         };
-        if profile_name.is_some() || source_profile.is_some() {
+        if profile_name.is_some()
+            || profile_id.is_some()
+            || inherit_agent
+            || source_profile.is_some()
+        {
             return Err("a structured launch cannot also carry profile fields".to_string());
         }
         let expected_kind = match selection.harness {
@@ -265,8 +290,8 @@ fn create_mode(
             selection,
         }));
     }
-    match (invocation, profile_name) {
-        (Some(invocation), None) => Ok(CreateSelector::Bundle(CreateMode::Raw {
+    match (invocation, profile_name, profile_id, inherit_agent) {
+        (Some(invocation), None, None, false) => Ok(CreateSelector::Bundle(CreateMode::Raw {
             invocation,
             agent_kind,
             resume_template,
@@ -276,26 +301,38 @@ fn create_mode(
             }),
             launch: None,
         })),
-        (None, Some(profile_name)) => {
+        (None, Some(profile_name), None, false) => {
             if agent_kind.is_some() || resume_template.is_some() || source_profile.is_some() {
                 return Err(
                     "a spawn profile name cannot also carry invocation bundle fields".to_string(),
                 );
             }
-            Ok(CreateSelector::ProfileName(profile_name))
+            Ok(CreateSelector::Profile { name: Some(profile_name), id: None })
         }
-        (None, None)
+        (None, None, Some(profile_id), false) => {
+            if agent_kind.is_some() || resume_template.is_some() || source_profile.is_some() {
+                return Err(
+                    "a spawn profile id cannot also carry invocation bundle fields".to_string(),
+                );
+            }
+            Ok(CreateSelector::Profile { name: None, id: Some(profile_id) })
+        }
+        (None, None, None, true)
             if agent_kind.is_none() && resume_template.is_none() && source_profile.is_none() =>
         {
             Ok(CreateSelector::Derived)
         }
-        (None, None) => Err(
+        (None, None, None, false) => Err(
+            "a restricted create requires an explicit profile name, profile id, or inheritance selector"
+                .to_string(),
+        ),
+        (None, None, None, true) => Err(
             "a create without an invocation cannot carry agent_kind, resume_template, or \
              source_profile"
                 .to_string(),
         ),
-        (Some(_), Some(_)) => Err(
-            "a create names exactly one of invocation or profile name; this request named both"
+        _ => Err(
+            "a create names exactly one invocation bundle, profile selector, or explicit inheritance choice"
                 .to_string(),
         ),
     }
@@ -318,14 +355,14 @@ async fn resolve_create_selector(
 ) -> Result<CreateMode, (ErrorKind, String)> {
     match selector {
         CreateSelector::Bundle(mode) => Ok(mode),
-        CreateSelector::ProfileName(name) => {
+        CreateSelector::Profile { name, id } => {
             let CreateAdmission::Spawn { asking_session } = admission else {
                 return Err((
                     ErrorKind::InvalidRequest,
                     "profile_name is available only to a session-authenticated spawn".to_string(),
                 ));
             };
-            resolve_restricted_profile(sup, asking_session, name).await
+            resolve_restricted_profile(sup, asking_session, name, id).await
         }
         CreateSelector::Derived => {
             let CreateAdmission::Spawn { asking_session } = admission else {
@@ -386,12 +423,13 @@ async fn resolve_create_selector(
 async fn resolve_restricted_profile(
     sup: &Arc<Supervisor>,
     asking_session: &str,
-    name: String,
+    name: Option<String>,
+    id: Option<String>,
 ) -> Result<CreateMode, (ErrorKind, String)> {
     match sup
         .relay_agent_request(
             asking_session.to_string(),
-            AgentVerb::ResolveProfile { name },
+            AgentVerb::ResolveProfile { name, id },
             None,
         )
         .await
@@ -440,6 +478,8 @@ async fn handle_create_session(
     cwd: String,
     invocation: Option<String>,
     profile_name: Option<String>,
+    profile_id: Option<String>,
+    inherit_agent: bool,
     title: Option<String>,
     cols: u16,
     rows: u16,
@@ -456,14 +496,16 @@ async fn handle_create_session(
     launch: Option<LaunchSelection>,
     resolved_mode: Option<CreateMode>,
 ) {
-    let selector = match create_mode(
+    let selector = match create_mode(CreateSelectorFields {
         invocation,
         profile_name,
+        profile_id,
+        inherit_agent,
         agent_kind,
         resume_template,
         source_profile,
         launch,
-    ) {
+    }) {
         Ok(selector) => selector,
         Err(message) => {
             send_reply(
@@ -478,10 +520,11 @@ async fn handle_create_session(
             return;
         }
     };
-    if let CreateSelector::ProfileName(name) = &selector {
+    if let CreateSelector::Profile { name, id } = &selector {
         let field_len = parent.as_deref().map_or(0, str::len)
             + cwd.len()
-            + name.len()
+            + name.as_deref().map_or(0, str::len)
+            + id.as_deref().map_or(0, str::len)
             + title.as_deref().map_or(0, str::len);
         if field_len > CREATE_FIELD_CAP {
             send_reply(
@@ -2253,6 +2296,7 @@ async fn handle_rename_session(
     req_id: u64,
     session_id: String,
     title: String,
+    expected_title: Option<String>,
 ) {
     let refusal = if title.len() > CREATE_FIELD_CAP {
         Some(format!(
@@ -2294,7 +2338,9 @@ async fn handle_rename_session(
         // bounded writer queue on the other. Dropping it at either reply's
         // send is what keeps a peer that never reads from reclaiming
         // capacity per request (see `Supervisor::rename_session`).
-        let (outcome, _permit) = sup.rename_session(&session_id, title, permit).await;
+        let (outcome, _permit) = sup
+            .rename_session(&session_id, title, expected_title, permit)
+            .await;
         let renamed = match outcome {
             Ok(renamed) => renamed,
             Err(e) => {
@@ -2678,6 +2724,8 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             cwd,
             invocation,
             profile_name,
+            profile_id,
+            inherit_agent,
             title,
             cols,
             rows,
@@ -2695,6 +2743,8 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 cwd,
                 invocation,
                 profile_name,
+                profile_id,
+                inherit_agent,
                 title,
                 cols,
                 rows,
@@ -2806,7 +2856,19 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             req_id,
             session_id,
             title,
-        } => handle_rename_session(sup, ctx.tx, ctx.tasks, req_id, session_id, title).await,
+            expected_title,
+        } => {
+            handle_rename_session(
+                sup,
+                ctx.tx,
+                ctx.tasks,
+                req_id,
+                session_id,
+                title,
+                expected_title,
+            )
+            .await
+        }
         ControlMsg::OpenTab { req_id, session_id } => {
             handle_open_tab(sup, ctx.tx, ctx.tasks, req_id, session_id).await
         }
@@ -2903,6 +2965,8 @@ pub(crate) async fn handle_restricted_control(
             cwd,
             invocation,
             profile_name,
+            profile_id,
+            inherit_agent,
             title,
             cols,
             rows,
@@ -2974,8 +3038,23 @@ pub(crate) async fn handle_restricted_control(
             // delay stop, delete, or another lifecycle operation on the
             // parent. The claim below still covers the credential check and
             // create, which is the serialization boundary with deletion.
-            let resolved_mode = if invocation.is_none()
-                && profile_name.is_some()
+            let selector_count = usize::from(profile_name.is_some())
+                + usize::from(profile_id.is_some())
+                + usize::from(inherit_agent);
+            if invocation.is_some() || selector_count != 1 {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "a session-authenticated create requires exactly one profile name, profile id, or explicit inheritance selector"
+                            .to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
+            let resolved_mode = if !inherit_agent
                 && agent_kind.is_none()
                 && resume_template.is_none()
                 && source_profile.is_none()
@@ -2984,7 +3063,8 @@ pub(crate) async fn handle_restricted_control(
                 match resolve_restricted_profile(
                     sup,
                     &auth.session_id,
-                    profile_name.clone().expect("profile name checked above"),
+                    profile_name.clone(),
+                    profile_id.clone(),
                 )
                 .await
                 {
@@ -3091,6 +3171,8 @@ pub(crate) async fn handle_restricted_control(
                 cwd,
                 invocation,
                 profile_name,
+                profile_id,
+                inherit_agent,
                 title,
                 cols,
                 rows,
@@ -3397,12 +3479,14 @@ pub(crate) async fn handle_restricted_control(
 fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
     fn validate_target(target: &Option<String>) -> Result<(), String> {
         let Some(target) = target else {
-            return Ok(());
+            return Err(
+                "--session is required; name the asking session explicitly to act on it"
+                    .to_string(),
+            );
         };
         if target.is_empty() {
             return Err(
-                "an explicit --session target must not be empty; omit --session to act on the \
-                 asking session instead"
+                "--session must not be empty; name the asking session explicitly to act on it"
                     .to_string(),
             );
         }
@@ -3421,8 +3505,12 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
         Ok(())
     }
     match verb {
-        AgentVerb::Hosts {} | AgentVerb::Sessions {} => Ok(()),
-        AgentVerb::Rename { session_id, title } => {
+        AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Profiles {} => Ok(()),
+        AgentVerb::Rename {
+            session_id,
+            expected_title,
+            title,
+        } => {
             validate_target(session_id)?;
             if title.len() > CREATE_FIELD_CAP {
                 return Err(format!(
@@ -3439,6 +3527,20 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             if title.chars().any(char::is_control) {
                 return Err("title must not contain control characters".to_string());
             }
+            let Some(expected_title) = expected_title else {
+                return Err(
+                    "--expected-title is required; an explicitly empty title is legal".to_string(),
+                );
+            };
+            if expected_title.len() > CREATE_FIELD_CAP {
+                return Err(format!(
+                    "expected title is {} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit",
+                    expected_title.len()
+                ));
+            }
+            if expected_title.chars().any(char::is_control) {
+                return Err("expected title must not contain control characters".to_string());
+            }
             Ok(())
         }
         AgentVerb::Stop { session_id } | AgentVerb::Archive { session_id } => {
@@ -3448,28 +3550,51 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             host,
             cwd,
             profile_name,
+            profile_id,
             invocation,
             title,
             intent_key,
-        } => validate_create_fields(
-            host.as_deref(),
-            cwd,
-            [profile_name.as_deref(), invocation.as_deref()],
-            title.as_deref(),
-            intent_key.as_deref(),
-        ),
+        } => {
+            if cwd.is_empty() {
+                return Err("--cwd must not be empty".to_string());
+            }
+            let selectors = [
+                profile_name.as_deref(),
+                profile_id.as_deref(),
+                invocation.as_deref(),
+            ];
+            if selectors.iter().flatten().count() != 1
+                || selectors.iter().flatten().any(|value| value.is_empty())
+            {
+                return Err(
+                    "create requires exactly one non-empty profile name, profile id, or invocation"
+                        .to_string(),
+                );
+            }
+            validate_create_fields(
+                host.as_deref(),
+                cwd,
+                &selectors,
+                title.as_deref(),
+                intent_key.as_deref(),
+            )
+        }
         AgentVerb::Clone {
+            source_session_id,
             host,
             cwd,
             title,
             intent_key,
-        } => validate_create_fields(
-            host.as_deref(),
-            cwd.as_deref().unwrap_or_default(),
-            [None, None],
-            title.as_deref(),
-            intent_key.as_deref(),
-        ),
+        } => {
+            validate_target(source_session_id)?;
+            validate_create_fields(
+                host.as_deref(),
+                cwd.as_deref().unwrap_or_default(),
+                &[],
+                title.as_deref(),
+                intent_key.as_deref(),
+            )
+        }
         AgentVerb::ResolveProfile { .. } => {
             Err("profile resolution is not available to sessions".to_string())
         }
@@ -3516,17 +3641,16 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
 fn validate_create_fields(
     host: Option<&str>,
     cwd: &str,
-    selectors: [Option<&str>; 2],
+    selectors: &[Option<&str>],
     title: Option<&str>,
     intent_key: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(host) = host {
+    let Some(host) = host else {
+        return Err("--host is required; name the destination explicitly".to_string());
+    };
+    {
         if host.is_empty() {
-            return Err(
-                "an explicit --host must not be empty; omit --host to act on this session's own \
-                 host instead"
-                    .to_string(),
-            );
+            return Err("--host must not be empty; list hosts and pass one exact name".to_string());
         }
         if host.chars().any(char::is_control) {
             return Err("an explicit --host must not contain control characters".to_string());
@@ -3539,7 +3663,12 @@ fn validate_create_fields(
         }
     }
     let field_len = cwd.len()
-        + selectors.into_iter().flatten().map(str::len).sum::<usize>()
+        + selectors
+            .iter()
+            .copied()
+            .flatten()
+            .map(str::len)
+            .sum::<usize>()
         + title.map_or(0, str::len);
     if field_len > CREATE_FIELD_CAP {
         return Err(format!(
@@ -3763,7 +3892,7 @@ mod tests {
     }
 
     /// Structured bundles are a fourth wire concern beside raw invocation,
-    /// profile-name resolution, and selectorless inheritance. This keeps
+    /// profile-name resolution, and explicit inheritance. This keeps
     /// their shape rules at the admission boundary, before any reservation
     /// can make a malformed request permanently uncorrectable.
     #[test]
@@ -3811,14 +3940,16 @@ mod tests {
                 "profile",
             ),
         ] {
-            let error = match create_mode(
+            let error = match create_mode(CreateSelectorFields {
                 invocation,
                 profile_name,
+                profile_id: None,
+                inherit_agent: false,
                 agent_kind,
                 resume_template,
                 source_profile,
-                Some(selection.clone()),
-            ) {
+                launch: Some(selection.clone()),
+            }) {
                 Ok(_) => panic!("an ambiguous structured bundle must be refused"),
                 Err(error) => error,
             };
@@ -3828,17 +3959,37 @@ mod tests {
             );
         }
 
+        // A valid structured bundle cannot silently override a second,
+        // explicit spawn selector. Admission precedes durable reservations.
+        for (profile_id, inherit_agent) in [(Some("profile".to_string()), false), (None, true)] {
+            assert!(
+                create_mode(CreateSelectorFields {
+                    invocation: Some("codex".to_string()),
+                    profile_name: None,
+                    profile_id,
+                    inherit_agent,
+                    agent_kind: Some(AgentKind::Codex),
+                    resume_template: None,
+                    source_profile: None,
+                    launch: Some(selection.clone()),
+                })
+                .is_err()
+            );
+        }
+
         let template = vec!["codex".to_string(), "resume".to_string()];
         let CreateSelector::Bundle(CreateMode::Structured {
             resume_template, ..
-        }) = create_mode(
-            Some("codex".to_string()),
-            None,
-            Some(AgentKind::Codex),
-            Some(template.clone()),
-            None,
-            Some(selection),
-        )
+        }) = create_mode(CreateSelectorFields {
+            invocation: Some("codex".to_string()),
+            profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
+            agent_kind: Some(AgentKind::Codex),
+            resume_template: Some(template.clone()),
+            source_profile: None,
+            launch: Some(selection),
+        })
         .expect("the trusted structured path may preserve a frozen resume template")
         else {
             panic!("expected a structured bundle");
@@ -3869,6 +4020,8 @@ mod tests {
                 cwd: state.path().to_string_lossy().into_owned(),
                 invocation: Some("/opt/bin/claude --verbose".to_string()),
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 title: Some("resolved".to_string()),
                 cols: 80,
                 rows: 24,
@@ -3914,13 +4067,13 @@ mod tests {
         assert_eq!(stored.source_profile.unwrap().id, "profile-1");
     }
 
-    /// A selectorless spawn copies the authenticated parent's complete
-    /// stored agent bundle without any helm attachment.
+    /// An explicitly inherited spawn copies the authenticated parent's
+    /// complete stored agent bundle without any helm attachment.
     ///
     /// This is the offline scripting contract: the parent, not ambient host
     /// history, determines invocation, integration, resume, and provenance.
     #[farhelm_testtrace::test]
-    async fn selectorless_spawn_copies_the_asking_sessions_bundle_offline() {
+    async fn inherited_spawn_copies_the_asking_sessions_bundle_offline() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -3935,6 +4088,8 @@ mod tests {
                 cwd: state.path().to_string_lossy().into_owned(),
                 invocation: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: true,
                 title: Some("child".to_string()),
                 cols: 80,
                 rows: 24,
@@ -3951,7 +4106,7 @@ mod tests {
         let reply: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
         let ControlMsg::SessionCreated { session, .. } = reply else {
-            panic!("selectorless spawn must succeed: {reply:?}");
+            panic!("explicit inherited spawn must succeed: {reply:?}");
         };
         let stored = sup
             .store
@@ -3976,7 +4131,7 @@ mod tests {
     /// A structured parent may spawn without a helm because its resolved
     /// invocation and requested choices are already in supervisor storage.
     #[farhelm_testtrace::test]
-    async fn selectorless_spawn_keeps_a_structured_parents_launch_snapshot() {
+    async fn inherited_spawn_keeps_a_structured_parents_launch_snapshot() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -3991,6 +4146,8 @@ mod tests {
                 cwd: state.path().to_string_lossy().into_owned(),
                 invocation: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: true,
                 title: Some("child".to_string()),
                 cols: 80,
                 rows: 24,
@@ -4007,7 +4164,7 @@ mod tests {
         let reply: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("spawn reply").body).expect("decode");
         let ControlMsg::SessionCreated { session, .. } = reply else {
-            panic!("selectorless structured spawn must succeed: {reply:?}");
+            panic!("explicit inherited structured spawn must succeed: {reply:?}");
         };
         let expected = LaunchSelection {
             harness: LaunchHarness::Codex,
@@ -4054,6 +4211,8 @@ mod tests {
                 cwd: state.path().to_string_lossy().into_owned(),
                 invocation: None,
                 profile_name: Some("Claude".to_string()),
+                profile_id: None,
+                inherit_agent: false,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -4115,6 +4274,8 @@ mod tests {
                         cwd: state.path().to_string_lossy().into_owned(),
                         invocation: None,
                         profile_name: Some("Delayed profile".to_string()),
+                        profile_id: None,
+                        inherit_agent: false,
                         title: Some("child".to_string()),
                         cols: 80,
                         rows: 24,
@@ -4182,13 +4343,13 @@ mod tests {
     /// correlated `InvalidRequest` and that NOTHING was created on the way.
     ///
     /// The table covers every full-authority shape refusal: naming no
-    /// selector, naming multiple selectors, and pairing the unresolved
-    /// profile-name selector with any resolved-bundle field. The override
+    /// selector, naming multiple selectors, and pairing a profile selector
+    /// or explicit inheritance with resolved-bundle fields. The override
     /// rows are the subtle ones — a client that "helpfully" forwards a
-    /// default `agent_kind` alongside a profile selection has written a
-    /// request whose meaning nobody can defend, and the refusal stops an
-    /// invented precedence rule at launch time.
-    /// It also covers profile-name combinations, whose exact resolution is
+    /// default `agent_kind` or resume template alongside a selector has
+    /// written a request whose meaning nobody can defend, and the refusal
+    /// stops an invented precedence rule at launch time. Both profile-name
+    /// and profile-id forms are present because their exact resolution is
     /// meaningful only after this shape boundary has admitted them.
     ///
     /// Every row carries an INTENT KEY, and the keys are asserted unclaimed
@@ -4212,16 +4373,30 @@ mod tests {
             req_id,
             invocation,
             profile_name,
+            profile_id,
+            inherit_agent,
             agent_kind,
             resume_template,
             source_profile,
             expected,
         ) in [
-            (1u64, None, None, None, None, None, "invocation bundle"),
+            (
+                1u64,
+                None,
+                None,
+                None,
+                false,
+                None,
+                None,
+                None,
+                "requires an explicit profile",
+            ),
             (
                 2,
                 Some("agent".to_string()),
                 Some("Claude Code".to_string()),
+                None,
+                false,
                 None,
                 None,
                 None,
@@ -4231,6 +4406,8 @@ mod tests {
                 3,
                 None,
                 Some("Claude Code".to_string()),
+                None,
+                false,
                 Some(AgentKind::Claude),
                 None,
                 None,
@@ -4241,6 +4418,8 @@ mod tests {
                 None,
                 Some("Claude Code".to_string()),
                 None,
+                false,
+                None,
                 Some(vec!["claude".to_string(), "{conversation}".to_string()]),
                 None,
                 "bundle fields",
@@ -4250,6 +4429,8 @@ mod tests {
                 None,
                 Some("Claude Code".to_string()),
                 None,
+                false,
+                None,
                 None,
                 None,
                 "session-authenticated spawn",
@@ -4258,6 +4439,8 @@ mod tests {
                 6,
                 None,
                 Some("Claude Code".to_string()),
+                None,
+                false,
                 None,
                 None,
                 Some(WireProfileSnapshot {
@@ -4271,11 +4454,57 @@ mod tests {
                 None,
                 None,
                 None,
+                false,
+                None,
                 None,
                 Some(WireProfileSnapshot {
                     id: "profile-1".to_string(),
                     name: "Claude Code".to_string(),
                 }),
+                "requires an explicit profile",
+            ),
+            (
+                8,
+                None,
+                None,
+                Some("profile-1".to_string()),
+                false,
+                Some(AgentKind::Claude),
+                None,
+                None,
+                "bundle fields",
+            ),
+            (
+                9,
+                None,
+                None,
+                Some("profile-1".to_string()),
+                false,
+                None,
+                Some(vec!["claude".to_string(), "{conversation}".to_string()]),
+                None,
+                "bundle fields",
+            ),
+            (
+                10,
+                None,
+                None,
+                None,
+                true,
+                Some(AgentKind::Claude),
+                None,
+                None,
+                "without an invocation",
+            ),
+            (
+                11,
+                None,
+                None,
+                None,
+                true,
+                None,
+                Some(vec!["claude".to_string(), "{conversation}".to_string()]),
+                None,
                 "without an invocation",
             ),
         ] {
@@ -4285,6 +4514,8 @@ mod tests {
                     req_id,
                     parent: None,
                     profile_name,
+                    profile_id,
+                    inherit_agent,
                     // A real, usable directory, so nothing about the
                     // refusal can be attributed to the cwd check further
                     // in — the mode is what is under test.
@@ -5141,7 +5372,8 @@ mod tests {
                         req_id: 2,
                         session_id: "asker".to_string(),
                         request: AgentVerb::Rename {
-                            session_id: None,
+                            session_id: Some("asker".to_string()),
+                            expected_title: Some("old title".to_string()),
                             title: "new title".to_string(),
                         },
                     },
@@ -5244,7 +5476,9 @@ mod tests {
                     ControlMsg::AgentRequest {
                         req_id: 1,
                         session_id: "asker".to_string(),
-                        request: AgentVerb::Stop { session_id: None },
+                        request: AgentVerb::Stop {
+                            session_id: Some("asker".to_string()),
+                        },
                     },
                     &tx,
                     &auth,
@@ -5346,6 +5580,7 @@ mod tests {
                 session_id: "asker".to_string(),
                 request: AgentVerb::Rename {
                     session_id: Some("evil\nid".to_string()),
+                    expected_title: Some("old".to_string()),
                     title: "fine".to_string(),
                 },
             },
@@ -5371,9 +5606,8 @@ mod tests {
 
     /// Spec: the `agent_request_locks` fence and a session's own
     /// `lifecycle_locks` claim are independent locks even for the identical
-    /// id — the property that keeps a self-targeting lifecycle verb (no
-    /// `--session`: the asking session acting on itself) from deadlocking
-    /// against its own fence.
+    /// id — the property that keeps a lifecycle verb explicitly targeting
+    /// the asking session from deadlocking against its own fence.
     ///
     /// See `Supervisor::agent_request_locks`'s docs for the two-thread
     /// argument this pins: if the fence reused `lifecycle_locks` for the
@@ -5425,8 +5659,10 @@ mod tests {
         assert!(validate_agent_verb(&AgentVerb::Hosts {}).is_ok());
         assert!(validate_agent_verb(&AgentVerb::Sessions {}).is_ok());
         assert!(
-            validate_agent_verb(&AgentVerb::Stop { session_id: None }).is_ok(),
-            "omitting --session (asking-session substitution) is always valid"
+            validate_agent_verb(&AgentVerb::Stop { session_id: None })
+                .unwrap_err()
+                .contains("required"),
+            "the old implicit-self shape must be refused"
         );
         assert!(
             validate_agent_verb(&AgentVerb::Stop {
@@ -5451,12 +5687,14 @@ mod tests {
 
         let control_char = validate_agent_verb(&AgentVerb::Rename {
             session_id: Some("evil\nid".to_string()),
+            expected_title: Some("old".to_string()),
             title: "fine".to_string(),
         });
         assert!(control_char.unwrap_err().contains("control character"));
 
         let oversized_title = validate_agent_verb(&AgentVerb::Rename {
-            session_id: None,
+            session_id: Some("session".to_string()),
+            expected_title: Some("old".to_string()),
             title: "x".repeat(CREATE_FIELD_CAP + 1),
         });
         assert!(
@@ -5466,7 +5704,8 @@ mod tests {
         );
 
         let control_title = validate_agent_verb(&AgentVerb::Rename {
-            session_id: None,
+            session_id: Some("session".to_string()),
+            expected_title: Some("old".to_string()),
             title: "one\ntwo".to_string(),
         });
         assert!(
@@ -5484,7 +5723,8 @@ mod tests {
         );
         assert!(
             validate_agent_verb(&AgentVerb::Rename {
-                session_id: None,
+                session_id: Some("session".to_string()),
+                expected_title: Some("old".to_string()),
                 title: "x".repeat(CREATE_FIELD_CAP),
             })
             .is_ok(),
@@ -5492,7 +5732,8 @@ mod tests {
         );
         assert!(
             validate_agent_verb(&AgentVerb::Rename {
-                session_id: None,
+                session_id: Some("session".to_string()),
+                expected_title: Some("old".to_string()),
                 title: String::new(),
             })
             .is_ok(),
@@ -5553,6 +5794,7 @@ mod tests {
             host: host.map(str::to_string),
             cwd: cwd.to_string(),
             profile_name: profile_name.map(str::to_string),
+            profile_id: None,
             invocation: invocation.map(str::to_string),
             title: title.map(str::to_string),
             intent_key: intent_key.map(str::to_string),
@@ -5561,25 +5803,24 @@ mod tests {
             |host: Option<&str>, cwd: &str, invocation: Option<&str>, intent_key: Option<&str>| {
                 full(host, cwd, None, invocation, None, intent_key)
             };
-        assert!(
-            validate_agent_verb(&create(None, "/w", None, None)).is_ok(),
-            "a create naming only a directory is the ordinary shape"
-        );
+        assert!(validate_agent_verb(&create(None, "/w", Some("agent"), None)).is_err());
         assert!(
             validate_agent_verb(&AgentVerb::Clone {
+                source_session_id: None,
                 host: None,
                 cwd: None,
                 title: None,
                 intent_key: None,
             })
-            .is_ok(),
-            "a clone naming nothing at all means \"another one of these, here\""
+            .is_err(),
+            "the old implicit source and destination shape must be refused"
         );
 
-        let empty_host = validate_agent_verb(&create(Some(""), "/w", None, None));
+        let empty_host = validate_agent_verb(&create(Some(""), "/w", Some("agent"), None));
         assert!(empty_host.unwrap_err().contains("empty"));
 
         let control_host = validate_agent_verb(&AgentVerb::Clone {
+            source_session_id: Some("source".to_string()),
             host: Some("evil\nhost".to_string()),
             cwd: None,
             title: None,
@@ -5596,7 +5837,7 @@ mod tests {
         let long_host = validate_agent_verb(&create(
             Some(&"h".repeat(AGENT_HOST_NAME_CAP + 1)),
             "/w",
-            None,
+            Some("agent"),
             None,
         ));
         assert!(
@@ -5608,9 +5849,9 @@ mod tests {
         assert!(
             validate_agent_verb(&full(
                 Some(&"h".repeat(AGENT_HOST_NAME_CAP)),
-                &"x".repeat(CREATE_FIELD_CAP),
+                &"x".repeat(CREATE_FIELD_CAP - 1),
                 None,
-                None,
+                Some("i"),
                 None,
                 None,
             ))
@@ -5626,12 +5867,19 @@ mod tests {
         for (label, at_cap, over_cap) in [
             (
                 "cwd alone",
-                full(None, &"x".repeat(CREATE_FIELD_CAP), None, None, None, None),
                 full(
+                    Some("h"),
+                    &"x".repeat(CREATE_FIELD_CAP - 1),
                     None,
-                    &"x".repeat(CREATE_FIELD_CAP + 1),
+                    Some("i"),
                     None,
                     None,
+                ),
+                full(
+                    Some("h"),
+                    &"x".repeat(CREATE_FIELD_CAP),
+                    None,
+                    Some("i"),
                     None,
                     None,
                 ),
@@ -5639,7 +5887,7 @@ mod tests {
             (
                 "profile name",
                 full(
-                    None,
+                    Some("h"),
                     "/w",
                     Some(&"p".repeat(CREATE_FIELD_CAP - 2)),
                     None,
@@ -5647,7 +5895,7 @@ mod tests {
                     None,
                 ),
                 full(
-                    None,
+                    Some("h"),
                     "/w",
                     Some(&"p".repeat(CREATE_FIELD_CAP - 1)),
                     None,
@@ -5658,7 +5906,7 @@ mod tests {
             (
                 "invocation",
                 full(
-                    None,
+                    Some("h"),
                     "/w",
                     None,
                     Some(&"i".repeat(CREATE_FIELD_CAP - 2)),
@@ -5666,7 +5914,7 @@ mod tests {
                     None,
                 ),
                 full(
-                    None,
+                    Some("h"),
                     "/w",
                     None,
                     Some(&"i".repeat(CREATE_FIELD_CAP - 1)),
@@ -5677,19 +5925,19 @@ mod tests {
             (
                 "title",
                 full(
-                    None,
+                    Some("h"),
                     "/w",
                     None,
-                    None,
-                    Some(&"t".repeat(CREATE_FIELD_CAP - 2)),
+                    Some("i"),
+                    Some(&"t".repeat(CREATE_FIELD_CAP - 3)),
                     None,
                 ),
                 full(
-                    None,
+                    Some("h"),
                     "/w",
                     None,
-                    None,
-                    Some(&"t".repeat(CREATE_FIELD_CAP - 1)),
+                    Some("i"),
+                    Some(&"t".repeat(CREATE_FIELD_CAP - 2)),
                     None,
                 ),
             ),
@@ -5709,8 +5957,14 @@ mod tests {
         // Neither third exceeds the cap alone; together they do. A
         // per-field check would accept this.
         let third = "x".repeat(CREATE_FIELD_CAP / 3 + 1);
-        let summed =
-            validate_agent_verb(&full(None, &third, Some(&third), None, Some(&third), None));
+        let summed = validate_agent_verb(&full(
+            Some("h"),
+            &third,
+            Some(&third),
+            None,
+            Some(&third),
+            None,
+        ));
         assert!(
             summed.unwrap_err().contains(&CREATE_FIELD_CAP.to_string()),
             "cwd, selector and title share one total"
@@ -5718,7 +5972,8 @@ mod tests {
 
         let half = "x".repeat(CREATE_FIELD_CAP / 2 + 1);
         let summed_clone = validate_agent_verb(&AgentVerb::Clone {
-            host: None,
+            source_session_id: Some("source".to_string()),
+            host: Some("h".to_string()),
             cwd: Some(half.clone()),
             title: Some(half),
             intent_key: None,
@@ -5730,11 +5985,12 @@ mod tests {
             "a clone is bounded by the same total a create is"
         );
 
-        let empty_key = validate_agent_verb(&create(None, "/w", None, Some("")));
+        let empty_key = validate_agent_verb(&create(Some("h"), "/w", Some("agent"), Some("")));
         assert!(empty_key.unwrap_err().contains("empty"));
 
         let oversized_key = validate_agent_verb(&AgentVerb::Clone {
-            host: None,
+            source_session_id: Some("source".to_string()),
+            host: Some("h".to_string()),
             cwd: None,
             title: None,
             intent_key: Some("k".repeat(INTENT_KEY_CAP + 1)),
@@ -5927,6 +6183,8 @@ mod tests {
                 invocation: None,
                 source_profile: None,
                 profile_name: Some("Claude Code".to_string()),
+                profile_id: None,
+                inherit_agent: false,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -5983,6 +6241,8 @@ mod tests {
                 invocation: None,
                 source_profile: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: true,
                 title: None,
                 cols: 80,
                 rows: 24,
@@ -6818,6 +7078,8 @@ mod tests {
             invocation: None,
             source_profile: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: true,
             title: Some("spawned child".to_string()),
             cols: 80,
             rows: 24,
@@ -6977,6 +7239,8 @@ mod tests {
                 req_id,
                 parent: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 cwd: "x".repeat(CREATE_FIELD_CAP),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
@@ -7063,6 +7327,8 @@ mod tests {
                     req_id,
                     parent: None,
                     profile_name: None,
+                    profile_id: None,
+                    inherit_agent: false,
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     source_profile: None,
@@ -7116,6 +7382,8 @@ mod tests {
                 req_id: 4,
                 parent: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 cwd: "/nonexistent/definitely/not/here".to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
@@ -7181,6 +7449,8 @@ mod tests {
                     req_id,
                     parent: None,
                     profile_name: None,
+                    profile_id: None,
+                    inherit_agent: false,
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     source_profile: None,

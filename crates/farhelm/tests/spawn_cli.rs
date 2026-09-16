@@ -298,7 +298,7 @@ fn child_session(cwd: String) -> SessionInfo {
 #[farhelm_testtrace::test]
 fn a_missing_supervisor_socket_is_a_clean_precondition_failure() {
     let output = spawn_command()
-        .args(["--cwd", "."])
+        .args(["--cwd", ".", "--inherit-agent"])
         .env("FARHELM_SESSION_ID", "parent-123")
         .env("FARHELM_SESSION_TOKEN", "secret")
         .output()
@@ -318,7 +318,7 @@ fn a_preupgrade_session_is_told_to_restart_before_spawning() {
     let socket = temp.path().join("supervisor.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     let output = spawn_command()
-        .args(["--cwd", "."])
+        .args(["--cwd", ".", "--inherit-agent"])
         .env("FARHELM_SESSION_ID", "parent-123")
         .env("FARHELM_SUPERVISOR_SOCK", &socket)
         .output()
@@ -339,7 +339,7 @@ fn a_missing_session_id_is_a_clean_precondition_failure() {
     let socket = temp.path().join("supervisor.sock");
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     let output = spawn_command()
-        .args(["--cwd", "."])
+        .args(["--cwd", ".", "--inherit-agent"])
         .env("FARHELM_SESSION_TOKEN", "secret")
         .env("FARHELM_SUPERVISOR_SOCK", &socket)
         .output()
@@ -370,7 +370,7 @@ fn non_utf8_spawn_environment_values_are_refused_before_dialing() {
         let socket = temp.path().join("supervisor.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let output = spawn_command()
-            .args(["--cwd", "."])
+            .args(["--cwd", ".", "--inherit-agent"])
             .env("FARHELM_SESSION_ID", "parent-123")
             .env("FARHELM_SESSION_TOKEN", "secret")
             .env("FARHELM_SUPERVISOR_SOCK", &socket)
@@ -404,6 +404,32 @@ fn cwd_is_required_by_the_cli_surface() {
     assert!(String::from_utf8(output.stderr).unwrap().contains("--cwd"));
 }
 
+/// Spawn requires an explicit agent choice before it can contact the
+/// supervisor.
+///
+/// The inheritance flag is a consequential choice rather than the absence
+/// of one. Keeping this refusal at clap also prevents a current CLI from
+/// emitting the omitted-selector wire shape that older builds treated as an
+/// implicit parent snapshot.
+#[farhelm_testtrace::test]
+fn an_agent_selector_is_required_by_the_cli_surface() {
+    let output = spawn_command()
+        .args(["--cwd", "/tmp"])
+        .output()
+        .expect("run spawn");
+    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--agent"),
+        "the refusal names a selector: {stderr}"
+    );
+    assert!(
+        stderr.contains("--inherit-agent"),
+        "the refusal names explicit inheritance: {stderr}"
+    );
+}
+
 /// A successful command emits exactly one id line and maps every scripting
 /// flag onto the authenticated CreateSession request.
 #[farhelm_testtrace::test]
@@ -425,6 +451,8 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
             cwd,
             invocation,
             profile_name,
+            profile_id,
+            inherit_agent,
             title,
             intent_key,
             agent_kind,
@@ -439,6 +467,8 @@ fn success_is_one_stdout_line_and_the_wire_request_preserves_every_flag() {
         assert_eq!(cwd, expected_cwd);
         assert_eq!(invocation, None);
         assert_eq!(profile_name.as_deref(), Some("Agent One"));
+        assert_eq!(profile_id, None);
+        assert!(!inherit_agent);
         assert_eq!(agent_kind, None);
         assert_eq!(resume_template, None);
         assert_eq!(source_profile, None);
@@ -509,7 +539,7 @@ fn a_created_child_id_succeeds_even_when_its_status_is_already_terminal() {
         });
         let mut command = spawn_command();
         command
-            .args(["--cwd", "/tmp"])
+            .args(["--cwd", "/tmp", "--inherit-agent"])
             .env("FARHELM_SESSION_ID", "parent-123")
             .env("FARHELM_SESSION_TOKEN", "secret")
             .env("FARHELM_SUPERVISOR_SOCK", &socket);
@@ -546,7 +576,7 @@ fn supervisor_error_replies_exit_nonzero_with_empty_stdout() {
         });
         let mut command = spawn_command();
         command
-            .args(["--cwd", "/tmp"])
+            .args(["--cwd", "/tmp", "--inherit-agent"])
             .env("FARHELM_SESSION_ID", "parent-123")
             .env("FARHELM_SESSION_TOKEN", "secret")
             .env("FARHELM_SUPERVISOR_SOCK", &socket);
@@ -570,7 +600,7 @@ fn an_unexpected_reply_fails_instead_of_hanging() {
     });
     let mut command = spawn_command();
     command
-        .args(["--cwd", "/tmp"])
+        .args(["--cwd", "/tmp", "--inherit-agent"])
         .env("FARHELM_SESSION_ID", "parent-123")
         .env("FARHELM_SESSION_TOKEN", "secret")
         .env("FARHELM_SUPERVISOR_SOCK", &socket);
@@ -624,7 +654,7 @@ fn tilde_cwds_cross_the_wire_verbatim() {
         });
         let output = spawn_command()
             .current_dir(temp.path())
-            .args(["--cwd", sent])
+            .args(["--cwd", sent, "--inherit-agent"])
             .env("FARHELM_SESSION_ID", "parent-123")
             .env("FARHELM_SESSION_TOKEN", "secret")
             .env("FARHELM_SUPERVISOR_SOCK", &socket)

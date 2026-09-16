@@ -1241,31 +1241,6 @@ pub(crate) async fn do_create_session(
                 .await?;
             (session, Some(profile_names))
         }
-        CreateMode::ProfileName(profile_name) => {
-            let profiles = state.store.profiles().await?;
-            let profile_names = profile_name_index(&profiles);
-            let profile = crate::profiles::resolve_profile_name(&profiles, profile_name)?;
-            let session = client
-                .create_session_with_extras(
-                    &cwd,
-                    &profile.invocation,
-                    title,
-                    cols,
-                    rows,
-                    CreateExtras {
-                        intent_key,
-                        agent_kind: Some(profile.agent_kind),
-                        resume_template: profile.resume_template,
-                        source_profile: Some(ProfileSnapshot {
-                            id: profile.id,
-                            name: profile.name,
-                        }),
-                        launch: None,
-                    },
-                )
-                .await?;
-            (session, Some(profile_names))
-        }
         CreateMode::ResolvedProfile {
             profile,
             profile_names,
@@ -1342,10 +1317,6 @@ pub(crate) async fn do_create_session(
     let remembered = match &mode {
         CreateMode::Raw(_) => None,
         CreateMode::Profile(profile_id) => Some(profile_id.clone()),
-        CreateMode::ProfileName(_) => session
-            .source_profile
-            .as_ref()
-            .map(|profile| profile.id.clone()),
         CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
         // Structured launches are independent of the legacy profile selector,
         // so a successful create must not change that selector's remembered
@@ -1434,12 +1405,10 @@ pub(crate) type CreatedSessionCheck =
 /// moved into the call. Taken out of the body rather than cloned — nothing
 /// else reads them afterwards.
 ///
-/// `Profile` holds a helm-wide ID and [`CreateMode::ProfileName`] holds the
-/// exact human-facing name supplied by the agent CLI. Both resolve against
-/// the helm catalog before any supervisor call, producing the same invocation,
-/// integration fields, and source snapshot on the wire. The resolved bundle,
-/// rather than the selector, is what the supervisor fingerprints, so a profile
-/// edit between keyed retries is correctly treated as a changed request.
+/// Profile names and ids resolve against the helm catalog before any
+/// supervisor call. The resolved bundle, rather than the selector, is what
+/// the supervisor fingerprints, so a profile edit between keyed retries is
+/// correctly treated as a changed request.
 pub(crate) enum CreateMode {
     Raw(String),
     /// A release-catalog-validated launch composer selection. This stays
@@ -1447,7 +1416,6 @@ pub(crate) enum CreateMode {
     /// both crossed the supervisor boundary.
     Structured(crate::launches::CompiledLaunch),
     Profile(String),
-    ProfileName(String),
     /// A profile and identity index produced by one caller-owned catalog
     /// read before target routing.
     ///
@@ -1970,11 +1938,12 @@ pub(crate) async fn do_rename_session(
     state: &AppState,
     id: &str,
     title: &str,
+    expected_title: Option<&str>,
 ) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
     let (claim, client) = route_session(state, id).await?;
     // Catalog failure is still safe here: the title has not changed yet.
     let profile_names = load_profile_name_index(&state.store).await?;
-    let mut session = client.rename_session(id, title).await?;
+    let mut session = client.rename_session(id, title, expected_title).await?;
     resolve_session_profiles(&profile_names, std::iter::once(&mut session));
     record_session(state, &claim, &session).await;
     Ok((claim, session))
@@ -1998,7 +1967,7 @@ pub(crate) async fn rename_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RenameReq>,
 ) -> impl IntoResponse {
-    match do_rename_session(&state, &id, &req.title).await {
+    match do_rename_session(&state, &id, &req.title, None).await {
         Ok((_claim, session)) => match browser_session_ready(&session) {
             Ok(()) => axum::Json(session).into_response(),
             Err(error) => http_error(error),

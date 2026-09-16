@@ -2497,6 +2497,8 @@ impl SupervisorClient {
                     req_id,
                     parent: None,
                     profile_name: None,
+                    profile_id: None,
+                    inherit_agent: false,
                     cwd: cwd.to_string(),
                     invocation: Some(invocation.to_string()),
                     title,
@@ -2669,7 +2671,12 @@ impl SupervisorClient {
     /// client. A correlated reply of the wrong VARIANT does not: it is
     /// [`SupervisorTransportError::SentWrongReply`], which keeps the fact
     /// that the rename was sent (see [`wrong_reply`]).
-    pub async fn rename_session(&self, id: &str, title: &str) -> anyhow::Result<SessionInfo> {
+    pub async fn rename_session(
+        &self,
+        id: &str,
+        title: &str,
+        expected_title: Option<&str>,
+    ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
             .request(
@@ -2678,6 +2685,7 @@ impl SupervisorClient {
                     req_id,
                     session_id: id.to_string(),
                     title: title.to_string(),
+                    expected_title: expected_title.map(str::to_string),
                 },
             )
             .await?
@@ -5042,12 +5050,14 @@ mod tests {
             let ControlMsg::RenameSession {
                 req_id,
                 session_id,
+                expected_title,
                 title,
             } = request
             else {
                 panic!("expected RenameSession, got {request:?}");
             };
             assert_eq!(session_id, "sess-1");
+            assert_eq!(expected_title, None);
             assert_eq!(
                 title, TITLE,
                 "the title must reach the supervisor byte-for-byte unchanged"
@@ -5063,7 +5073,7 @@ mod tests {
         let (r, w) = tokio::io::split(client_side);
         let client = SupervisorClient::start(r, w).await.unwrap();
 
-        let session = client.rename_session("sess-1", TITLE).await.unwrap();
+        let session = client.rename_session("sess-1", TITLE, None).await.unwrap();
         assert_eq!(session.id, "sess-1");
         peer.await.unwrap();
     }
@@ -6623,7 +6633,11 @@ mod tests {
                 Arc::new(GatedHandler {
                     entered,
                     gate: Arc::clone(&gate),
-                    reply: farhelm_proto::AgentReply::Hosts { hosts: Vec::new() },
+                    reply: farhelm_proto::AgentReply::Hosts {
+                        caller_host_id: "host-local".to_string(),
+                        hosts: Vec::new(),
+                        complete: true,
+                    },
                 }),
                 calls,
                 gate,
@@ -6816,12 +6830,15 @@ mod tests {
 
         // The SAME slot, on the SAME connection: no reconnect happens here.
         slot.set(GatedHandler::answering(farhelm_proto::AgentReply::Hosts {
+            caller_host_id: "host-local".to_string(),
             hosts: vec![farhelm_proto::AgentHost {
+                id: "host-local".to_string(),
                 name: "this machine".to_string(),
                 kind: "local".to_string(),
                 state: "connected".to_string(),
                 current: true,
             }],
+            complete: true,
         }))
         .ok()
         .expect("a fresh slot is empty");
@@ -6829,7 +6846,7 @@ mod tests {
         peer.ask(2, farhelm_proto::AgentVerb::Hosts {}).await;
         match peer.outcome(2).await {
             farhelm_proto::AgentOutcome::Ok {
-                reply: farhelm_proto::AgentReply::Hosts { hosts },
+                reply: farhelm_proto::AgentReply::Hosts { hosts, .. },
             } => assert_eq!(hosts.len(), 1),
             other => panic!("a filled slot must answer, got {other:?}"),
         }
@@ -6974,7 +6991,11 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_stale_origin_downgrades_a_completed_listing_to_unavailable() {
         let handler = Arc::new(StaleExitHandler {
-            reply: farhelm_proto::AgentReply::Hosts { hosts: Vec::new() },
+            reply: farhelm_proto::AgentReply::Hosts {
+                caller_host_id: "host-local".to_string(),
+                hosts: Vec::new(),
+                complete: true,
+            },
         });
         let slot: crate::agent_requests::AgentRequestSlot = Arc::new(std::sync::OnceLock::from(
             handler as Arc<dyn crate::agent_requests::AgentRequestHandler>,
@@ -7026,6 +7047,7 @@ mod tests {
     async fn a_stale_origin_does_not_downgrade_a_completed_mutation() {
         let renamed = |id: &str| farhelm_proto::AgentSession {
             id: id.to_string(),
+            host_id: "1".to_string(),
             host: Some("this machine".to_string()),
             title: "t".to_string(),
             cwd: "/w".to_string(),
@@ -7042,7 +7064,8 @@ mod tests {
             ),
             (
                 farhelm_proto::AgentVerb::Rename {
-                    session_id: None,
+                    session_id: Some("s1".to_string()),
+                    expected_title: Some("old".to_string()),
                     title: "t".to_string(),
                 },
                 farhelm_proto::AgentReply::Session {
@@ -7057,9 +7080,10 @@ mod tests {
             ),
             (
                 farhelm_proto::AgentVerb::Create {
-                    host: None,
+                    host: Some("this machine".to_string()),
                     cwd: "/w".to_string(),
                     profile_name: None,
+                    profile_id: None,
                     invocation: Some("sh".to_string()),
                     title: None,
                     intent_key: None,
@@ -7070,7 +7094,8 @@ mod tests {
             ),
             (
                 farhelm_proto::AgentVerb::Clone {
-                    host: None,
+                    source_session_id: Some("s1".to_string()),
+                    host: Some("this machine".to_string()),
                     cwd: None,
                     title: None,
                     intent_key: None,
@@ -7286,8 +7311,10 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn an_oversized_agent_reply_fails_its_request_and_spares_the_connection() {
         let huge = farhelm_proto::AgentReply::Sessions {
+            caller_host_id: "host-local".to_string(),
             sessions: vec![farhelm_proto::AgentSession {
                 id: "s1".to_string(),
+                host_id: "1".to_string(),
                 host: Some("this machine".to_string()),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize + 1),
                 cwd: "/w".to_string(),
@@ -7486,14 +7513,17 @@ mod tests {
         // partway through the first answer it writes and every later one
         // stays in the queue where this test can see it.
         let reply = farhelm_proto::AgentReply::Hosts {
+            caller_host_id: "host-local".to_string(),
             hosts: (0..128)
                 .map(|n| farhelm_proto::AgentHost {
+                    id: format!("host-id-{n}"),
                     name: format!("host-{n}"),
                     kind: "ssh".to_string(),
                     state: "connected".to_string(),
                     current: false,
                 })
                 .collect(),
+            complete: true,
         };
         let slot: crate::agent_requests::AgentRequestSlot =
             Arc::new(std::sync::OnceLock::from(GatedHandler::answering(reply)
