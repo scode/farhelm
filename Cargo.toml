@@ -63,9 +63,9 @@ default-members = [
 [workspace.package]
 version = "0.9.0-rc.1"
 edition = "2024"
-# cargo-dist reads `repository` to know where to cut releases, and warns
-# without a `homepage` because the (deferred) Homebrew formula renders one.
-# The project has no site of its own, so both point at the repository.
+# cargo-dist reads `repository` to know where to cut releases and expects a
+# homepage in the package metadata. The project has no separate site, so both
+# point at the repository.
 homepage = "https://github.com/scode/farhelm"
 license = "Apache-2.0"
 repository = "https://github.com/scode/farhelm"

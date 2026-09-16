@@ -1951,9 +1951,10 @@ A release also carries cargo-dist's own metadata, none of which is signed and no
 what dist built. That last one is worth naming explicitly because it looks like the file that matters and is not it:
 `SHA256SUMS` — uppercase, six entries, the one `SHA256SUMS.minisig` authenticates — is what the helm and `install.sh`
 verify against. The metadata is nonetheless part of the release contract rather than incidental: the signing job
-REQUIRES the manifest and the four per-archive checksums to be present (a future Homebrew formula, deferred but meant to
-be a config flip, consumes the manifest) and treats `sha256.sum` as optional. Anything else appearing on a release fails
-it, so no published asset can sit outside both the signed set and that list.
+REQUIRES the manifest and the four per-archive checksums to be present as stable, machine-readable metadata for
+downstream tooling, and treats `sha256.sum` as optional. Homebrew distribution remains deferred, with no publishing
+model selected. Anything else appearing on a release fails it, so no published asset can sit outside both the signed set
+and that list.
 
 ## Cross-compilation and targets
 

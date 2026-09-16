@@ -74,9 +74,9 @@ env:
     tmux-x86_64-unknown-linux-musl
   # END SUMS MEMBERS
   # cargo-dist metadata the release contract PROMISES. Unsigned — Farhelm reads
-  # none of it — but required, because a future Homebrew formula is meant to be
-  # a config flip away and it consumes the manifest. The per-archive `.sha256`
-  # names are derived from SUMS_MEMBERS at use, so only the fixed name is here.
+  # none of it — but required as stable, machine-readable release metadata for
+  # downstream tooling. The per-archive `.sha256` names are derived from
+  # SUMS_MEMBERS at use, so only the fixed name is here.
   REQUIRED_METADATA: |
     dist-manifest.json
   # Metadata that may or may not appear, depending on what dist emits. Allowed,
@@ -147,7 +147,8 @@ jobs:
       #
       # - is every promised asset there? The six payloads plus the cargo-dist
       #   metadata the release contract names. A silently missing manifest
-      #   would break the deferred Homebrew path long after the release.
+      #   would leave a nominally complete release without its promised
+      #   machine-readable inventory.
       # - is anything published that this job would not sign? A new dist
       #   output, or a stray upload, would otherwise sit on the release
       #   outside the signed set, indistinguishable to a user from the assets
