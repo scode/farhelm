@@ -100,16 +100,43 @@ enum CreationSurface {
 /// worth testing, and what this function isolates, is the word-to-enum
 /// decode — including tolerating a word this build does not recognize,
 /// mirroring `list::view::decoded_sort`'s tolerance for an unrecognized
-/// `list_sort`. The helm's own store already refuses to store anything but
-/// `"yolo"` (`is_known_remembered_permissions_word` on the helm side), so
-/// this fallback is defense in depth against a stale cached reply or an
-/// older UI build talking to a newer helm, not a path this build's own
-/// writes can trigger.
+/// `list_sort`. The helm's own store refuses words outside the released
+/// modes (`is_known_remembered_permissions_word` on the helm side), so this
+/// fallback is defense in depth against a stale cached reply or an older UI
+/// build talking to a newer helm, not a path this build's own writes can
+/// trigger.
 fn initial_structured_permissions(preferences: &api::Preferences) -> Option<LaunchPermission> {
     match preferences.remembered_permissions.as_deref() {
         Some("yolo") => Some(LaunchPermission::Yolo),
+        Some("approve") => Some(LaunchPermission::Approve),
+        Some("smart_approve") => Some(LaunchPermission::SmartApprove),
+        Some("chat") => Some(LaunchPermission::Chat),
         _ => None,
     }
+}
+
+/// Name the explicit-model requirement in terms of the selected harness.
+fn missing_model_error(harness: LaunchHarness) -> Option<&'static str> {
+    match harness {
+        LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
+        LaunchHarness::Goose => Some("choose a Goose model before launching"),
+        LaunchHarness::Pi => Some("choose a Pi model before launching"),
+        LaunchHarness::Codex | LaunchHarness::Claude | LaunchHarness::Muse => None,
+    }
+}
+
+/// Describe reconciliation without promoting a passive remembered mode into
+/// an explicit user choice.
+fn draft_reconciliation_reason(
+    before: &LaunchSelection,
+    after: &LaunchSelection,
+    permissions_are_explicit: bool,
+) -> Option<String> {
+    let mut deliberate_before = before.clone();
+    if !permissions_are_explicit {
+        deliberate_before.permissions = None;
+    }
+    crate::launch_composer::reconciliation_reset_reason(&deliberate_before, after)
 }
 
 /// Apply a clicked or keyboard-selected search result without launching.
@@ -198,14 +225,17 @@ fn apply_composer_search_result(
                 harness,
                 catalog,
             );
-            composer_reset_reason.set(crate::launch_composer::reconciliation_reset_reason(
-                &before, &selection,
+            composer_reset_reason.set(draft_reconciliation_reason(
+                &before,
+                &selection,
+                structured_permissions_is_explicit(),
             ));
             structured_harness.set(Some(selection.harness));
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
+            structured_permissions.set(selection.permissions);
             custom_model_harness.set(owner);
         }
         crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
@@ -231,14 +261,17 @@ fn apply_composer_search_result(
                 harness,
                 catalog,
             );
-            composer_reset_reason.set(crate::launch_composer::reconciliation_reset_reason(
-                &before, &selection,
+            composer_reset_reason.set(draft_reconciliation_reason(
+                &before,
+                &selection,
+                structured_permissions_is_explicit(),
             ));
             structured_harness.set(Some(selection.harness));
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
+            structured_permissions.set(selection.permissions);
             custom_model_harness.set(owner);
         }
         crate::launch_composer::ComposerSearchResult::Effort(effort) => {
@@ -253,7 +286,11 @@ fn apply_composer_search_result(
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
             creation_surface.set(CreationSurface::Structured);
             composer_reset_reason.set(None);
-            let selection = crate::launch_composer::select_recent(&entry);
+            let mut selection = crate::launch_composer::select_recent(&entry);
+            selection.permissions = crate::launch_composer::normalized_permissions(
+                selection.harness,
+                selection.permissions,
+            );
             let owner = selection.model.as_ref().and_then(|model| {
                 (!catalog.iter().any(|candidate| candidate.id == *model))
                     .then_some(selection.harness)
@@ -1659,7 +1696,9 @@ pub(super) fn CreateSessionForm(
                 if let Some(launch) = &prefill.launch {
                     // A structured snapshot is the source's explicit
                     // request, whereas its invocation is only the compiler's
-                    // result. Preserve the former exactly for clone.
+                    // result. Preserve it for clone except for Pi's
+                    // compatibility normalization: an older omitted
+                    // permission is Pi's mandatory YOLO mode.
                     creation_surface.set(CreationSurface::Structured);
                     structured_harness.set(Some(launch.harness));
                     structured_model_raw_seed.set(launch.model.clone());
@@ -1671,7 +1710,10 @@ pub(super) fn CreateSessionForm(
                     // needs the source harness so it cannot leak across one.
                     custom_model_harness.set(launch.model.as_ref().map(|_| launch.harness));
                     structured_effort.set(launch.effort);
-                    structured_permissions.set(launch.permissions);
+                    structured_permissions.set(crate::launch_composer::normalized_permissions(
+                        launch.harness,
+                        launch.permissions,
+                    ));
                     // A restored structured snapshot is a real choice the
                     // source session made, not a passive default — it must
                     // filter recents exactly as it always has.
@@ -1927,7 +1969,13 @@ pub(super) fn CreateSessionForm(
                 .as_deref()
                 .map(display_peer)
                 .unwrap_or(model),
-            None if structured_harness() == Some(LaunchHarness::OpenCode) => String::new(),
+            None if matches!(
+                structured_harness(),
+                Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi)
+            ) =>
+            {
+                String::new()
+            }
             None => "harness default".to_string(),
         }
     };
@@ -1943,9 +1991,10 @@ pub(super) fn CreateSessionForm(
         })
         .unwrap_or_else(|| "choose a harness".to_string());
     // A stored structured snapshot is provenance, rather than a promise that
-    // a later release still supports every combination it named. Keep it
-    // visible for clone, but refuse to turn an incompatible known choice into
-    // a different launch by guessing a replacement.
+    // a later release still supports every combination it named. Keep its
+    // model and effort visible for clone, but refuse to turn an incompatible
+    // known choice into a different launch by guessing a replacement. Pi's
+    // omitted-permission compatibility rule was already applied while seeding.
     let structured_choice_error = structured_harness().and_then(|harness| {
         let selection = LaunchSelection {
             harness,
@@ -1953,8 +2002,10 @@ pub(super) fn CreateSessionForm(
             effort: structured_effort(),
             permissions: structured_permissions(),
         };
-        if harness == LaunchHarness::OpenCode && selection.model.is_none() {
-            Some("choose an OpenCode model before launching")
+        if selection.model.is_none()
+            && let Some(message) = missing_model_error(harness)
+        {
+            Some(message)
         } else {
             (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
                 "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
@@ -1989,6 +2040,14 @@ pub(super) fn CreateSessionForm(
     let summary_effort = structured_effort()
         .map(crate::launch_composer::effort_value)
         .unwrap_or("default");
+    let summary_permission = match structured_harness() {
+        Some(harness) => {
+            crate::launch_composer::normalized_permissions(harness, structured_permissions())
+        }
+        None => structured_permissions(),
+    }
+    .map(crate::launch_composer::permission_value)
+    .unwrap_or("default");
     let catalog_for_submit = catalog_models.clone();
     let catalog_for_harness = catalog_models.clone();
     let catalog_for_search = catalog_models.clone();
@@ -2013,7 +2072,11 @@ pub(super) fn CreateSessionForm(
                 return false;
             }
             promote_history_snapshot(offered_history, create_target(), history.clone());
-            let selection = crate::launch_composer::select_recent(&entry);
+            let mut selection = crate::launch_composer::select_recent(&entry);
+            selection.permissions = crate::launch_composer::normalized_permissions(
+                selection.harness,
+                selection.permissions,
+            );
             structured_harness.set(Some(selection.harness));
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
@@ -2089,7 +2152,7 @@ pub(super) fn CreateSessionForm(
                     if structured_harness() == Some(harness) {
                         let offered = catalog
                             .iter()
-                            .find(|model| model.id == id)
+                            .find(|model| model.id == id && model.harness == harness)
                             .map(|model| model.efforts.clone())
                             .unwrap_or_default();
                         let chosen_effort = *structured_effort.peek();
@@ -2125,16 +2188,17 @@ pub(super) fn CreateSessionForm(
                                 harness,
                                 &catalog,
                             );
-                        composer_reset_reason.set(
-                            crate::launch_composer::reconciliation_reset_reason(
-                                &before, &selection,
-                            ),
-                        );
+                        composer_reset_reason.set(draft_reconciliation_reason(
+                            &before,
+                            &selection,
+                            structured_permissions_is_explicit(),
+                        ));
                         structured_harness.set(Some(selection.harness));
                         structured_model_raw_seed.set(None);
                         structured_model_edited.set(true);
                         structured_model.set(selection.model);
                         structured_effort.set(selection.effort);
+                        structured_permissions.set(selection.permissions);
                         custom_model_harness.set(owner);
                     }
                     model_draft_error.set(None);
@@ -2411,14 +2475,20 @@ pub(super) fn CreateSessionForm(
                         ops.release();
                         return;
                     };
-                    let selection = LaunchSelection {
+                    let mut selection = LaunchSelection {
                         harness,
                         model: structured_model.peek().clone(),
                         effort: *structured_effort.peek(),
                         permissions: *structured_permissions.peek(),
                     };
-                    if harness == LaunchHarness::OpenCode && selection.model.is_none() {
-                        error.set(Some("choose an OpenCode model before launching".to_string()));
+                    selection.permissions = crate::launch_composer::normalized_permissions(
+                        harness,
+                        selection.permissions,
+                    );
+                    if selection.model.is_none()
+                        && let Some(message) = missing_model_error(harness)
+                    {
+                        error.set(Some(message.to_string()));
                         ops.release();
                         return;
                     }
@@ -2930,10 +3000,10 @@ pub(super) fn CreateSessionForm(
                     // out per variant so every permission reads in the same
                     // lowercase register as "default": a Debug fallback would
                     // capitalize a future variant next to these.
-                    if structured_permissions() == Some(LaunchPermission::Yolo) {
+                    if summary_permission == "yolo" {
                         span { class: "launch-composer-danger", "yolo" }
                     } else {
-                        "default"
+                        "{summary_permission}"
                     }
                 }
             }
@@ -3267,10 +3337,10 @@ pub(super) fn CreateSessionForm(
                                                             // the visible recent-setup rows.
                                                             span { class: "launch-composer-search-recent-selection",
                                                                 "{display_peer(&crate::launch_composer::selection_summary_before_permissions(&entry.selection))} · permissions: "
-                                                                if entry.selection.permissions == Some(LaunchPermission::Yolo) {
+                                                                if crate::launch_composer::selection_permission_value(&entry.selection) == "yolo" {
                                                                     span { class: "launch-composer-danger", "yolo" }
                                                                 } else {
-                                                                    "default"
+                                                                    "{crate::launch_composer::selection_permission_value(&entry.selection)}"
                                                                 }
                                                             }
                                                         },
@@ -3348,10 +3418,10 @@ pub(super) fn CreateSessionForm(
                                     // would. Matched on the signal's value.
                                     span { class: "launch-composer-recent-selection",
                                         "{display_peer(&before_permissions)} · permissions: "
-                                        if entry.selection.permissions == Some(LaunchPermission::Yolo) {
+                                        if crate::launch_composer::selection_permission_value(&entry.selection) == "yolo" {
                                             span { class: "launch-composer-danger", "yolo" }
                                         } else {
-                                            "default"
+                                            "{crate::launch_composer::selection_permission_value(&entry.selection)}"
                                         }
                                     }
                                     span { class: "launch-composer-recent-hint", "⏎ launch" }
@@ -3524,6 +3594,8 @@ pub(super) fn CreateSessionForm(
                                     (LaunchHarness::Codex, "Codex"),
                                     (LaunchHarness::Claude, "Claude"),
                                     (LaunchHarness::Muse, "Muse"),
+                                    (LaunchHarness::Goose, "Goose"),
+                                    (LaunchHarness::Pi, "Pi"),
                                     (LaunchHarness::OpenCode, "OpenCode"),
                                 ] {
                                     button {
@@ -3549,22 +3621,22 @@ pub(super) fn CreateSessionForm(
                                             let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
                                                 selection, *custom_model_harness.peek(), harness, &catalog,
                                             );
-                                            composer_reset_reason.set(
-                                                crate::launch_composer::reconciliation_reset_reason(
-                                                    &LaunchSelection {
-                                                        harness: structured_harness().unwrap_or(harness),
-                                                        model: structured_model(),
-                                                        effort: structured_effort(),
-                                                        permissions: structured_permissions(),
-                                                    },
-                                                    &selection,
-                                                ),
-                                            );
+                                            composer_reset_reason.set(draft_reconciliation_reason(
+                                                &LaunchSelection {
+                                                    harness: structured_harness().unwrap_or(harness),
+                                                    model: structured_model(),
+                                                    effort: structured_effort(),
+                                                    permissions: structured_permissions(),
+                                                },
+                                                &selection,
+                                                structured_permissions_is_explicit(),
+                                            ));
                                             structured_harness.set(Some(selection.harness));
                                             structured_model_raw_seed.set(selection.model.clone());
                                             structured_model_edited.set(false);
                                             structured_model.set(selection.model);
                                             structured_effort.set(selection.effort);
+                                            structured_permissions.set(selection.permissions);
                                             custom_model_harness.set(owner);
                                             creation_surface.set(CreationSurface::Structured);
                                             intent_key.set(None);
@@ -3619,7 +3691,7 @@ pub(super) fn CreateSessionForm(
                                     spellcheck: false,
                                     dir: "ltr",
                                     disabled: busy,
-                                    placeholder: (structured_harness() == Some(LaunchHarness::OpenCode)).then_some("model required"),
+                                    placeholder: matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi)).then_some("model required"),
                                     value: "{model_display}",
                                     onfocus: move |_| {
                                         if !draft_transition_allowed(ops) {
@@ -3855,33 +3927,78 @@ pub(super) fn CreateSessionForm(
                         div { class: "launch-composer-choice launch-composer-permissions-choice",
                             span { class: "launch-composer-section-label", "permissions" }
                             div { class: "launch-composer-segmented",
-                                button {
-                                    r#type: "button", class: if structured_permissions.read().is_none() { "selected" } else { "" },
-                                    aria_pressed: structured_permissions.read().is_none(), disabled: busy,
-                                    onclick: move |_| {
-                                        if !draft_transition_allowed(ops) { return; }
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        structured_permissions.set(None);
-                                        structured_permissions_is_explicit.set(true);
-                                        intent_key.set(None);
-                                    },
-                                    "default"
+                                if structured_harness() == Some(LaunchHarness::Pi) {
+                                    // Pi has no tool-approval gate. Its sole
+                                    // visible mode names that fact and cannot
+                                    // expose the unrelated `--approve` flag.
+                                    button {
+                                        r#type: "button",
+                                        class: "selected launch-composer-segment-danger",
+                                        aria_pressed: true,
+                                        disabled: busy,
+                                        onclick: move |_| {
+                                            if !draft_transition_allowed(ops) { return; }
+                                            promote_fetched_history_snapshot(
+                                                offered_history, create_target, fetched_history,
+                                            );
+                                            structured_permissions.set(Some(LaunchPermission::Yolo));
+                                            structured_permissions_is_explicit.set(true);
+                                            intent_key.set(None);
+                                        },
+                                        "yolo"
+                                    }
+                                } else {
+                                    button {
+                                        r#type: "button", class: if structured_permissions.read().is_none() { "selected" } else { "" },
+                                        aria_pressed: structured_permissions.read().is_none(), disabled: busy,
+                                        onclick: move |_| {
+                                            if !draft_transition_allowed(ops) { return; }
+                                            promote_fetched_history_snapshot(
+                                                offered_history, create_target, fetched_history,
+                                            );
+                                            structured_permissions.set(None);
+                                            structured_permissions_is_explicit.set(true);
+                                            intent_key.set(None);
+                                        },
+                                        "default"
+                                    }
+                                    button {
+                                        r#type: "button", class: if *structured_permissions.read() == Some(LaunchPermission::Yolo) { "selected launch-composer-segment-danger" } else { "launch-composer-segment-danger" },
+                                        aria_pressed: *structured_permissions.read() == Some(LaunchPermission::Yolo), disabled: busy,
+                                        onclick: move |_| {
+                                            if !draft_transition_allowed(ops) { return; }
+                                            promote_fetched_history_snapshot(
+                                                offered_history, create_target, fetched_history,
+                                            );
+                                            structured_permissions.set(Some(LaunchPermission::Yolo));
+                                            structured_permissions_is_explicit.set(true);
+                                            intent_key.set(None);
+                                        },
+                                        "yolo"
+                                    }
                                 }
-                                button {
-                                    r#type: "button", class: if *structured_permissions.read() == Some(LaunchPermission::Yolo) { "selected launch-composer-segment-danger" } else { "launch-composer-segment-danger" },
-                                    aria_pressed: *structured_permissions.read() == Some(LaunchPermission::Yolo), disabled: busy,
-                                    onclick: move |_| {
-                                        if !draft_transition_allowed(ops) { return; }
-                                        promote_fetched_history_snapshot(
-                                            offered_history, create_target, fetched_history,
-                                        );
-                                        structured_permissions.set(Some(LaunchPermission::Yolo));
-                                        structured_permissions_is_explicit.set(true);
-                                        intent_key.set(None);
-                                    },
-                                    "yolo"
+                                if structured_harness() == Some(LaunchHarness::Goose) {
+                                    for (permission, label) in [
+                                        (LaunchPermission::Approve, "approve"),
+                                        (LaunchPermission::SmartApprove, "smart approve"),
+                                        (LaunchPermission::Chat, "chat"),
+                                    ] {
+                                        button {
+                                            key: "{label}", r#type: "button",
+                                            class: if *structured_permissions.read() == Some(permission) { "selected" } else { "" },
+                                            aria_pressed: *structured_permissions.read() == Some(permission), disabled: busy,
+                                            onclick: move |_| {
+                                                if !draft_transition_allowed(ops) { return; }
+                                                promote_fetched_history_snapshot(
+                                                    offered_history, create_target, fetched_history,
+                                                );
+                                                structured_permissions.set(Some(permission));
+                                                structured_permissions_is_explicit.set(true);
+                                                intent_key.set(None);
+                                            },
+                                            "{label}"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -4197,6 +4314,18 @@ mod tests {
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),
             Some(super::LaunchPermission::Yolo)
+        );
+        assert_eq!(
+            super::initial_structured_permissions(&with(Some("approve"))),
+            Some(super::LaunchPermission::Approve)
+        );
+        assert_eq!(
+            super::initial_structured_permissions(&with(Some("smart_approve"))),
+            Some(super::LaunchPermission::SmartApprove)
+        );
+        assert_eq!(
+            super::initial_structured_permissions(&with(Some("chat"))),
+            Some(super::LaunchPermission::Chat)
         );
         assert_eq!(super::initial_structured_permissions(&with(None)), None);
         assert_eq!(

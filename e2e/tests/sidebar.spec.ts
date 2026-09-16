@@ -5598,7 +5598,7 @@ test("composer search recents keep complete 44px two-line rows", async ({ page, 
     await expect(recents.nth(index).locator(".launch-composer-search-recent-destination")).toHaveCSS("display", "block");
     await expect(recents.nth(index).locator(".launch-composer-search-recent-selection")).toHaveCSS("display", "block");
     const suffix = index ? "two" : "one";
-    const expected = `${cwd}${suffix} · this machine · Codex · model: model-${suffix} · effort: High · permissions: Yolo`;
+    const expected = `${cwd}${suffix} · this machine · Codex · model: model-${suffix} · effort: High · permissions: yolo`;
     await expect(recents.nth(index)).toHaveAttribute("title", expected);
     await expect(recents.nth(index)).toHaveAccessibleName(`Recent setup: ${expected}`);
   }
@@ -5669,7 +5669,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   const recentSlots = form.locator(".launch-composer-recent-slots > button");
   const allConflictRecent = recentSlots.filter({ hasText: "fixture-codex-all-conflict" });
   const savedHighEffortRecent = form.locator(".launch-composer-recent-slots").getByTitle(
-    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: High · permissions: Yolo",
+    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: High · permissions: yolo",
     { exact: true },
   );
   // With only the harness selected, remembered explicit values are candidates.
@@ -5700,7 +5700,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveCount(0);
   const ordinaryRecent = form.locator(".launch-composer-recent-slots").getByTitle(
-    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: Low · permissions: Yolo",
+    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: Low · permissions: yolo",
     { exact: true },
   );
   await expect(ordinaryRecent, "the Codex recent remains available while its notice is visible").toBeVisible();

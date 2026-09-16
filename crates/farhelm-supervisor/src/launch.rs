@@ -47,6 +47,14 @@ pub const SESSION_TOKEN_ENV_VAR: &str = "FARHELM_SESSION_TOKEN";
 /// directory would silently dial the wrong supervisor after `--state-dir`.
 pub const SUPERVISOR_SOCK_ENV_VAR: &str = "FARHELM_SUPERVISOR_SOCK";
 
+/// Current-launch controls consumed by Goose's persisted reporter.
+pub const GOOSE_REPORTER_ENABLED_ENV_VAR: &str = "FARHELM_GOOSE_REPORTER_ENABLED";
+pub const GOOSE_INSTRUCTIONS_ENV_VAR: &str = "FARHELM_GOOSE_INSTRUCTIONS";
+pub const GOOSE_REPORTER_EXE_ENV_VAR: &str = "FARHELM_GOOSE_REPORTER_EXE";
+
+/// Absolute reporter executable supplied only to Pi launches Farhelm injected.
+pub const PI_REPORTER_EXE_ENV_VAR: &str = "FARHELM_PI_REPORTER_EXE";
+
 /// The environment marker every TERMINAL TAB carries on top of
 /// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). Set by
 /// tmux itself (`new-window -e`) rather than by a shim, because a tab has
@@ -825,7 +833,11 @@ fn agent_command(spec: &LaunchSpec) -> std::process::Command {
         .env(SUPERVISOR_SOCK_ENV_VAR, &spec.supervisor_sock)
         .env(AGENT_ID_ENV_VAR, &spec.session_id)
         .env("COLORTERM", "truecolor")
-        .env_remove(TAB_ID_ENV_VAR);
+        .env_remove(TAB_ID_ENV_VAR)
+        .env_remove(GOOSE_REPORTER_ENABLED_ENV_VAR)
+        .env_remove(GOOSE_INSTRUCTIONS_ENV_VAR)
+        .env_remove(GOOSE_REPORTER_EXE_ENV_VAR)
+        .env_remove(PI_REPORTER_EXE_ENV_VAR);
     command
 }
 

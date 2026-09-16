@@ -597,7 +597,7 @@ pub async fn stamp_of(path: &Path) -> anyhow::Result<Option<RecordStamp>> {
 /// Lossy UTF-8 rather than strict because the prefix routinely ends
 /// mid-character, and a strict decode would fail the whole read over a
 /// truncation that never touches the correlators on the first line.
-async fn read_prefix(path: &Path) -> anyhow::Result<Option<String>> {
+pub(crate) async fn read_prefix(path: &Path) -> anyhow::Result<Option<String>> {
     use tokio::io::AsyncReadExt;
 
     let opened = tokio::fs::OpenOptions::new()
@@ -1079,7 +1079,9 @@ mod tests {
         .unwrap();
 
         for cwd in ["/tmp/a.b", "/tmp/a-b"] {
-            let root = ClaudeIntegration.record_root(home.path(), cwd);
+            let root = ClaudeIntegration
+                .record_root(home.path(), cwd)
+                .expect("Claude has a record root");
             let outcome = scan_records(&ClaudeIntegration, &root, 0).await;
             assert!(outcome.complete);
             assert_eq!(
@@ -1118,7 +1120,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn codex_descends_exactly_its_declared_depth_and_a_missing_root_is_complete() {
         let home = tempfile::tempdir().unwrap();
-        let root = CodexIntegration.record_root(home.path(), "/work");
+        let root = CodexIntegration
+            .record_root(home.path(), "/work")
+            .expect("Codex has a record root");
         let missing = scan_records(&CodexIntegration, &root, 0).await;
         assert!(missing.candidates.is_empty());
         assert!(

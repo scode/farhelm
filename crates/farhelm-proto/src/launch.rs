@@ -24,6 +24,10 @@ pub enum LaunchHarness {
     Codex,
     Claude,
     Muse,
+    /// Goose's OpenRouter-backed terminal session command.
+    Goose,
+    /// Pi's OpenRouter-backed terminal command.
+    Pi,
     /// OpenCode's terminal UI, intentionally kept on the generic runtime
     /// integration because Farhelm does not capture or resume its sessions.
     OpenCode,
@@ -37,6 +41,8 @@ pub enum LaunchHarness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchEffort {
+    Off,
+    Minimal,
     Low,
     Medium,
     High,
@@ -53,6 +59,8 @@ impl LaunchEffort {
     /// keeps command generation from depending on serde's representation.
     pub const fn as_cli_arg(self) -> &'static str {
         match self {
+            Self::Off => "off",
+            Self::Minimal => "minimal",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
@@ -72,6 +80,9 @@ impl LaunchEffort {
 #[serde(rename_all = "snake_case")]
 pub enum LaunchPermission {
     Yolo,
+    Approve,
+    SmartApprove,
+    Chat,
 }
 
 /// The full structured intent for one launch, before catalog compilation.
@@ -137,9 +148,15 @@ mod tests {
     fn effort_cli_spellings_are_stable() {
         assert_eq!(LaunchEffort::Xhigh.as_cli_arg(), "xhigh");
         assert_eq!(LaunchEffort::Ultra.as_cli_arg(), "ultra");
+        assert_eq!(LaunchEffort::Minimal.as_cli_arg(), "minimal");
         assert_eq!(
             serde_json::to_value(LaunchPermission::Yolo).expect("serialize permission"),
             "yolo"
+        );
+        assert_eq!(
+            serde_json::to_value(LaunchPermission::SmartApprove)
+                .expect("serialize Goose permission"),
+            "smart_approve"
         );
     }
 }

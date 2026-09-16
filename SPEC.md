@@ -153,6 +153,14 @@ provider prefix is refused. OpenCode has no offered effort choices. Its default 
 uses OpenCode's `--auto`, which auto-approves only permissions not explicitly denied. OpenCode uses generic activity
 status with no hooks, conversation capture/resume, or waiting-state recognition.
 
+Goose and Pi are structured OpenRouter harnesses, not built-in profiles. Both require an explicit model and suggest
+`z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, and `z-ai/glm-5.3`; a literal custom OpenRouter id remains
+available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers
+`approve`, `smart approve`, `chat`, and `yolo` modes. Pi requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
+`max` thinking and has only the visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not
+its project-resource `--approve` flag. Pi stores that mode as `yolo`; an older snapshot that omitted the formerly
+optional permission field reads and displays as YOLO too. Provider capabilities may clamp or reject a requested effort.
+
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
 Linux helm drives Mac agents. Reaching a remote helm's web UI takes a user-managed SSH port forward, and obtaining or
@@ -186,20 +194,22 @@ Session creation is one action, not a wizard. Only the working directory is fund
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, and OpenCode launches
-  carry a harness plus model, effort, and YOLO permission choices where that harness supports them; absent optional
-  choices mean the selected harness's defaults and omit their flags. OpenCode is the explicit exception: it requires a
-  model and offers no effort choice. The helm owns the released model catalog and validates every structured choice, so
-  the browser never turns a model identifier into an argv fragment. A known model identifies its owning harness; a
-  custom model needs an explicit harness. Replacing a harness clears only choices that are incompatible with it. An
-  invalid combination cannot launch. The one exception to "New preselects nothing": the permissions mode remembers the
-  last SUCCESSFUL structured launch, helm-wide across every client; "reset choices" returns the segment to that
-  remembered value rather than to the harness default, and a recent-setup row's own saved choice overrides it when used.
-  The launch-composer search matches harnesses, `other / command`, models scoped by the chosen harness, effort words
-  offered by that harness and model, folders, and recent setups. Accepting a result applies it and clears the box while
-  keeping focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch path;
-  Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing the
-  query, so Enter after Escape does nothing until the box is emptied.
+- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Goose, Pi, and OpenCode
+  launches carry a harness plus model, effort, and permission choices where that harness supports them; visible
+  permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`. Absent optional choices mean the
+  selected harness's defaults and omit their flags, except an omitted Pi permission means its mandatory YOLO mode.
+  OpenCode, Goose, and Pi require a model; OpenCode offers no effort choice. The helm owns the released model catalog
+  and validates every structured choice, so the browser never turns a model identifier into an argv fragment. A known
+  model identifies its owning harness; a custom model needs an explicit harness. A shared known model retains a selected
+  owning harness, while an unselected ambiguous id asks for one. Replacing a harness clears only choices that are
+  incompatible with it. An invalid combination cannot launch. The one exception to "New preselects nothing": the
+  permissions mode remembers the last SUCCESSFUL structured launch, helm-wide across every client; "reset choices"
+  returns the segment to that remembered value rather than to the harness default, and a recent-setup row's own saved
+  choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by the
+  chosen harness, effort words offered by that harness and model, folders, and recent setups. Accepting a result applies
+  it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid selection
+  through the ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape closes the
+  result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
   replaces only the model, effort, and permissions controls with the profile picker and raw invocation field. Existing
   callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not silently choose
@@ -626,9 +636,9 @@ reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
-`claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code and Codex
-integrations at this level are both required in v1. Identity is reported by the agent itself when its kind supports a
-per-launch hook, and scanned from the outside — the agent's terminal, its own on-disk session records — otherwise; a
+`claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
+and Pi integrations at this level are required in v1. Identity is reported by the agent itself when its kind supports a
+launch reporter, and scanned from the outside — the agent's terminal, its own on-disk session records — otherwise; a
 report wins over a scan, because it is the agent's own answer rather than a correlation over what the agent happened to
 leave on disk. What capture never does is write to the agent's own configuration or record directories. A hook passed on
 the command line for one launch is allowed because it writes nothing the vendor owns — no configuration file, no
@@ -637,15 +647,21 @@ absolute: the report it delivers lands in farhelm's own database, and every run 
 Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
 example — hooks written into the agent's configuration — still stands. Scanning stays the fallback whenever no report
 has been accepted, which covers more than unhooked launches: a hook that is skipped, fails, times out, or is refused
-leaves the scan in charge exactly as before. The hook is therefore never required. Both Claude Code and Codex offer such
-a hook and write discoverable session records, which is why requiring this in v1 is safe.
+leaves the scan in charge exactly as before. Goose and Pi are report-only integrations: Farhelm never scans or guesses
+from their vendor state. Goose persists a credential-free named MCP reporter with the conversation and reuses it on
+resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
+session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
+file without following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh
+and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that request.
 
 When an integrated session has no explicit resume invocation, its resume invocation is derived from the original launch
 argv retained for that session: Claude appends `--resume <conversation-id>`, and Codex appends
-`resume <conversation-id>`. The original argv is reused as-is, including permission and configuration arguments, and is
-preserved as argv elements rather than rejoined shell text. This immediate rule assumes every original argument is
-reusable and that the launch has no initial prompt or launch-only option; separating those concerns into common, launch,
-and resume arguments is deferred.
+`resume <conversation-id>`, Goose uses `session --resume --session-id <conversation-id>`, and Pi uses
+`--session <verified-absolute-file>`. For Pi, `{conversation}` in every resume template means that verified file path,
+not Farhelm's internal durable locator. The original argv is reused as-is, including permission and configuration
+arguments, and is preserved as argv elements rather than rejoined shell text. This immediate rule assumes every original
+argument is reusable and that the launch has no initial prompt or launch-only option; separating those concerns into
+common, launch, and resume arguments is deferred.
 
 Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
 no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job

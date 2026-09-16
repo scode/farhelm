@@ -463,6 +463,8 @@ fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str {
     match kind {
         farhelm_proto::AgentKind::Claude => "claude",
         farhelm_proto::AgentKind::Codex => "codex",
+        farhelm_proto::AgentKind::Goose => "goose",
+        farhelm_proto::AgentKind::Pi => "pi",
         farhelm_proto::AgentKind::Generic => "generic",
     }
 }
@@ -473,6 +475,8 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
     match text {
         "claude" => Ok(farhelm_proto::AgentKind::Claude),
         "codex" => Ok(farhelm_proto::AgentKind::Codex),
+        "goose" => Ok(farhelm_proto::AgentKind::Goose),
+        "pi" => Ok(farhelm_proto::AgentKind::Pi),
         "generic" => Ok(farhelm_proto::AgentKind::Generic),
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     }
@@ -726,13 +730,12 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
 
 /// The `remembered_permissions` wire vocabulary this build knows.
 ///
-/// One word today (`"yolo"`), but a function rather than an inline `==` at
-/// each of its two call sites — the route's write-time refusal
-/// ([`crate::preferences::put_preferences`]) and this module's read-time
-/// normalization ([`HelmStore::preferences`]) — because both must agree the
-/// moment a future harness needs a second remembered mode.
+/// These are the wire spellings emitted by structured launch history. A
+/// function rather than repeated inline matches keeps the route's write-time
+/// refusal ([`crate::preferences::put_preferences`]) and this module's
+/// read-time normalization ([`HelmStore::preferences`]) on one vocabulary.
 pub fn is_known_remembered_permissions_word(text: &str) -> bool {
-    text == "yolo"
+    matches!(text, "yolo" | "approve" | "smart_approve" | "chat")
 }
 
 /// The client preference this helm remembers for every client at once
@@ -4518,7 +4521,8 @@ impl HelmStore {
     ///
     /// `remember_permissions` gates a SECOND, independent side effect that
     /// piggybacks on this same admitted-create transaction: when `entry` is
-    /// a structured launch, its permissions choice (`"yolo"` or absent)
+    /// a structured launch, its permissions choice (one of the released
+    /// permission words, or absent)
     /// becomes the helm-wide `preferences.remembered_permissions` memory
     /// (SPEC.md's launch-composer carve-out). The caller passes `false` for
     /// an agent-relay-originated create (`sessions::CreateOrigin::Agent`):
@@ -4757,8 +4761,12 @@ impl HelmStore {
                 // write a few lines down needs, and it must come from the
                 // same admitted selection `launch_history` is about to
                 // record, not from a separately re-read one.
-                let permissions_word =
-                    selection.permissions.map(|farhelm_proto::LaunchPermission::Yolo| "yolo");
+                let permissions_word = selection.permissions.map(|permission| match permission {
+                    farhelm_proto::LaunchPermission::Yolo => "yolo",
+                    farhelm_proto::LaunchPermission::Approve => "approve",
+                    farhelm_proto::LaunchPermission::SmartApprove => "smart_approve",
+                    farhelm_proto::LaunchPermission::Chat => "chat",
+                });
                 let selection = serde_json::to_string(selection)
                     .context("serializing structured launch history")?;
                 let changed = tx
@@ -6101,6 +6109,50 @@ mod tests {
             Some("yolo"),
             "remember_permissions: true sets the memory"
         );
+
+        for (index, (permission, word)) in [
+            (farhelm_proto::LaunchPermission::Approve, "approve"),
+            (
+                farhelm_proto::LaunchPermission::SmartApprove,
+                "smart_approve",
+            ),
+            (farhelm_proto::LaunchPermission::Chat, "chat"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let entry = SessionInfo {
+                creation_seq: Some(index as u64 + 3),
+                launch: Some(LaunchSelection {
+                    harness: farhelm_proto::LaunchHarness::Goose,
+                    model: Some("z-ai/glm-5.3".into()),
+                    effort: None,
+                    permissions: Some(permission),
+                }),
+                ..session(&format!("goose-mode-{index}"), 101 + index as i64)
+            };
+            store
+                .record_create_history_with_paths(
+                    host,
+                    "identity-a",
+                    &entry,
+                    &entry.cwd,
+                    &entry.cwd,
+                    true,
+                )
+                .await
+                .expect("record a Goose permission mode");
+            assert_eq!(
+                store
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .remembered_permissions
+                    .as_deref(),
+                Some(word),
+                "every released permission mode must survive the durable preference round trip"
+            );
+        }
     }
 
     /// The accepted-create reply supplies canonical identity while the
