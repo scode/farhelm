@@ -45,6 +45,7 @@ mod agent_instructions;
 mod fake_agent;
 mod hook;
 mod setup;
+mod uninstall;
 
 #[derive(Parser)]
 #[command(
