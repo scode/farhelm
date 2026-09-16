@@ -8,12 +8,9 @@ that gets the flags, Codex prints one warning line about hook trust, and with th
 in that configuration home (`$CODEX_HOME` when it is set, `~/.codex` otherwise) that you have not trusted runs too. A
 few Claude and Codex invocation shapes turn the injection off and fall back to the older record-scanning method.
 
-Goose and Pi do not have a scanning fallback. Goose stores one credential-free named MCP reporter in conversation
-metadata; a Farhelm resume supplies its current launch controls without declaring it again. A manual Goose resume needs
-`farhelm` on `PATH` so that stored reporter can start, though it remains inert without Farhelm launch credentials. Pi
-loads a versioned extension from Farhelm's private state. Its resume target includes the exact session file, which
-Farhelm checks against the reported session ID immediately before restart; a missing, malformed, symlinked, or
-mismatched file withdraws the stale resume offer instead of letting Pi silently start fresh.
+Goose and Pi do not have a scanning fallback. See the harness notes for
+[Goose's saved reporter and manual-resume dependency](harnesses/goose.md) and
+[Pi's saved-file requirement and permission behavior](harnesses/pi.md).
 
 ## Why hooks at all
 
