@@ -238,7 +238,7 @@ pub(crate) fn session_status(
 /// Which of the three live statuses a session with a living pane gets
 /// (PLAN_M6_75.md item 2).
 ///
-/// Two stages, and the order matters:
+/// Three stages, and the order matters:
 ///
 /// 1. **The generic baseline** is observed output and nothing else. A
 ///    session whose last [`QUIET_SAMPLES_BEFORE_IDLE`] samples all showed
@@ -256,6 +256,9 @@ pub(crate) fn session_status(
 ///    the generic classifier sees one fact where there are two. That is
 ///    precisely why the second stage exists, and why it reads the tail's
 ///    CONTENT rather than anything about how the tail moved.
+/// 3. A positive current-work hint may keep an otherwise idle baseline at
+///    `Running`. This is weaker than waiting and cannot cross the live-pane
+///    boundary; capture failure clears it with the screen that proved it.
 ///
 /// ## The pre-first-sample state is `Running`, on purpose
 ///
@@ -302,7 +305,14 @@ fn live_status(entry: &SessionEntry) -> SessionStatus {
         return baseline;
     };
     let sharpened = integration.sharpen(baseline.clone(), tail);
-    waiting_or_baseline(baseline, sharpened)
+    let status = waiting_or_baseline(baseline.clone(), sharpened);
+    if status == SessionStatus::Waiting {
+        status
+    } else if activity.working {
+        SessionStatus::Running
+    } else {
+        baseline
+    }
 }
 
 /// The guard that reduces everything a sharpener can do to the one thing
@@ -706,6 +716,34 @@ mod tests {
             state
         };
         HashMap::from([("%0".to_string(), state)])
+    }
+
+    /// A current Codex interrupt hint is stronger evidence than three quiet
+    /// comparisons, but an approval question is stronger still: it tells the
+    /// user which interaction is presently required.
+    #[farhelm_testtrace::test]
+    fn codex_working_hint_prevents_idle_but_waiting_still_wins() {
+        let live = pane_map(false, None);
+        let entry = entry_sampled(
+            AgentKind::Codex,
+            8,
+            QUIET_SAMPLES_BEFORE_IDLE,
+            Some("still"),
+        );
+        entry.activity.lock().expect("activity mutex").working = true;
+        assert_eq!(session_status(&entry, &live).0, SessionStatus::Running);
+
+        entry.activity.lock().expect("activity mutex").tail =
+            Some("Do you want to run this command?\n❯ 1. Yes\n  2. No".to_string());
+        assert_eq!(session_status(&entry, &live).0, SessionStatus::Waiting);
+
+        entry.activity.lock().expect("activity mutex").tail =
+            Some("Working (4s • esc to interrupt)\n\n› draft\n\nfooter".to_string());
+        assert_eq!(
+            session_status(&entry, &live).0,
+            SessionStatus::Running,
+            "once the pending question is gone, the retained work hint resumes winning over idle"
+        );
     }
 
     /// The classification precedence PLAN_M3.md items 2 and 3 define, in
