@@ -20,44 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Stop false running indicators on idle agents.** Sessions frequently show a pulsing green running indicator when the
-  agent is not actively working. Reported mostly with Codex, but the maintainer mostly uses Codex, so harness
-  specificity is not established. At the time of the report both the current conversation and a companion Codex session
-  appeared affected. A read-only `farhelm agent sessions` query during preliminary assessment returned `running` for
-  both: this was a fleet status report, not merely a browser animation stuck independently of the reported status. The
-  current conversation was doing assessment work by then, so that observation does not prove its earlier idle
-  misclassification.
-
-  Live observation on 2026-09-15 established a concrete mechanism in the companion session, which the maintainer
-  confirmed was idle and untouched. Nine successful read-only pane captures two seconds apart showed a completed
-  response and the idle "Ask Codex to do anything" prompt, with animated Braille-dot particles around the composer. Only
-  those three composer-area lines changed; replacing Braille characters with spaces and trimming line-end spaces made
-  all nine complete screens identical. All nine tails reduced with the sampler's 4096-byte rule were different. Fleet
-  queries before and after still reported running. The running supervisor identified itself as Farhelm `0.8.0-rc.2`; the
-  pane process executable resolved to the Codex `0.154.0` package. Raw captures are retained privately. This directly
-  demonstrates decorative idle text changes sufficient to defeat the current classifier; the supervisor's internal
-  sample streak was not instrumented, and this does not establish the cause of every reported occurrence.
-
-  Preliminary assessment: the shared classifier in `crates/farhelm-supervisor/src/service/status.rs` reports running
-  until a session has sufficient samples and three consecutive unchanged-screen comparisons. `ActivitySample::observe`
-  in `service/ticker.rs` compares the captured terminal tail as text; changes reset the quiet streak without separating
-  agent work from prompt editing or changing terminal chrome. Capture failures discard the baseline and can also keep
-  the classifier running. Codex's integration sharpens waiting detection, not running versus idle. Prioritize the
-  observed idle animation; investigate capture failure, starvation, or stale propagation separately if false running
-  survives that correction. Include typing an unsubmitted prompt as a separate case from an untouched idle prompt;
-  ordinary redraws with identical captured text alone should not reset the streak. The same change detector also
-  advances last-activity timestamps, so check whether decorative animation incorrectly affects activity ordering. Keep
-  terminal contents and session identities out of public evidence.
-
-  Make the indicator reflect actual agent work as reliably as available evidence permits, rather than perpetually
-  treating idle UI activity as work. Assess vendor-supported turn-state signals or conservative screen recognition if
-  the current heuristic cannot distinguish them; surface changes to SPEC_impl.md's sample-count baseline and the
-  waiting-only sharpening contract before implementing them. Do not globally strip Braille: real output and working
-  spinners can use the same characters, so any normalization needs a justified scope and counterexamples. Do not mask
-  missing samples with an arbitrary idle timer or misclassify quiet long-running work as idle. Validate the diagnosed
-  mechanism with a focused reproduction, including idle/typing, active work, pending questions, capture recovery, and
-  another harness to establish scope. No live deployment changes are authorized by this investigation item.
-
 - **Stable recent-activity ordering.** Concurrently active sessions repeatedly overtake one another in "recently active"
   order. Promote a session when it starts a new work burst after being inactive; continued activity must not change its
   sort key, and finishing the burst must leave that key unchanged. Both idle-to-working and waiting-to-working start a

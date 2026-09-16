@@ -71,7 +71,7 @@
 //! The lifecycle, since this is the only writer of that column: the value
 //! is minted at create (equal to `created_at`), reloaded verbatim on
 //! restart, and moved forward only here — only when
-//! [`ActivitySample::observe`] reports the screen actually changed, and
+//! [`ActivitySample::observe_screen`] reports the screen actually changed, and
 //! only when the change is at least [`ACTIVITY_STAMP_QUANTUM`] newer than
 //! the value already held. Everything else — every reply, every listing —
 //! only ever reads it. A lost write costs precision in a "most recently
@@ -153,6 +153,8 @@ use super::launch_artifacts::cleanup_launch_artifacts;
 use super::status::observe_entry;
 use super::terminals::{Terminal, tabs_from_pane_states};
 use crate::store::LastOutcome;
+use crate::tmux::retain_pane_tail;
+use farhelm_proto::AgentKind;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -198,6 +200,12 @@ pub(crate) const TICKER_INTERVAL: Duration = Duration::from_secs(2);
 /// lives, and a pane rendering a 500-column wall of text should not be
 /// able to grow the supervisor's resident memory through it.
 const SAMPLE_TAIL_BYTES: usize = 4096;
+
+/// Codex's composer cleanup needs to see farther than the retained status
+/// tail: changing three-byte sparkle cells near the final 4096-byte boundary
+/// can otherwise move unrelated text into or out of comparison. This larger
+/// capture is temporary; each sample retains only two 4096-byte strings.
+const CODEX_ACTIVITY_CAPTURE_BYTES: usize = 64 * 1024;
 
 /// How many pane tails one tick may capture.
 ///
@@ -337,10 +345,17 @@ pub(crate) struct ActivitySample {
     /// [`SAMPLE_TAIL_BYTES`] and trimmed of the blank rows a pane is
     /// padded out with.
     ///
-    /// Serves both consumers: change detection compares it against the
-    /// next capture, and the per-kind sharpeners match a prompt or
-    /// approval shape in it.
+    /// Per-kind status recognition reads this raw value. Change detection
+    /// uses `comparison` below, which is identical for ordinary agents and
+    /// may remove a proven vendor redraw region for Codex.
     pub(crate) tail: Option<String>,
+    /// The canonical screen compared with the preceding sample. This differs
+    /// from `tail` only for a recognized Codex composer, whose animation and
+    /// unsubmitted draft are not output activity.
+    comparison: Option<String>,
+    /// A positive Codex work indicator from the most recent successful
+    /// capture. It is discarded with the raw tail after a capture failure.
+    pub(crate) working: bool,
 }
 
 impl ActivitySample {
@@ -396,11 +411,26 @@ impl ActivitySample {
     /// that were genuinely producing output, permanently. So an
     /// unverifiable change is treated as no change, and the next
     /// comparison against the re-established baseline reports the truth.
+    #[cfg(test)]
     pub(crate) fn observe(&mut self, tail: String) -> bool {
+        self.observe_screen(tail.clone(), tail, false)
+    }
+
+    /// Fold a screen whose raw status tail and activity comparison differ.
+    ///
+    /// Production always calls this after applying the selected agent
+    /// integration. `observe` is a test convenience for exercising
+    /// the raw, generic path without duplicating the two identical strings.
+    pub(crate) fn observe_screen(
+        &mut self,
+        comparison: String,
+        tail: String,
+        working: bool,
+    ) -> bool {
         let mut changed = false;
         if self.samples > 0 {
-            match self.tail.as_deref() {
-                Some(previous) if previous == tail.as_str() => self.unchanged_streak += 1,
+            match self.comparison.as_deref() {
+                Some(previous) if previous == comparison.as_str() => self.unchanged_streak += 1,
                 Some(_) => {
                     self.unchanged_streak = 0;
                     changed = true;
@@ -412,7 +442,9 @@ impl ActivitySample {
                 None => self.unchanged_streak = 0,
             }
         }
+        self.comparison = Some(comparison);
         self.tail = Some(tail);
+        self.working = working;
         self.samples += 1;
         changed
     }
@@ -448,7 +480,7 @@ impl ActivitySample {
     /// since the beginning.
     ///
     /// The activity STAMP takes the opposite branch of that same "we do
-    /// not know", and [`ActivitySample::observe`]'s docs argue why: a
+    /// not know": a
     /// re-baselining sample reports no change, so recovering from a
     /// capture failure never dates an observation nobody made. The two
     /// readings are not in tension — one is a cosmetic status that
@@ -456,6 +488,8 @@ impl ActivitySample {
     /// key that does not.
     pub(crate) fn forget_tail(&mut self) {
         self.tail = None;
+        self.comparison = None;
+        self.working = false;
     }
 }
 
@@ -1035,8 +1069,13 @@ async fn sample_pass(
         ) {
             Some(fault) => Err(fault),
             None => {
+                let capture_bytes = if entry.snapshot.kind == AgentKind::Codex {
+                    CODEX_ACTIVITY_CAPTURE_BYTES
+                } else {
+                    SAMPLE_TAIL_BYTES
+                };
                 sup.tmux
-                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
+                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, capture_bytes)
                     .await
             }
         };
@@ -1061,11 +1100,24 @@ async fn sample_pass(
                 continue;
             }
         };
+        // Codex needs its larger temporary capture before the final cap so
+        // sparkle-byte count cannot shift unrelated text across 4096. The
+        // raw status tail remains separate: waiting recognition must read
+        // exactly what tmux showed, not a composer-cleaned reconstruction.
+        let status_tail = retain_pane_tail(&tail, SAMPLE_TAIL_BYTES);
+        let screen = entry.snapshot.integration().map_or_else(
+            || crate::agent_kind::ActivityScreen {
+                comparison: tail.clone(),
+                working: false,
+            },
+            |integration| integration.activity_screen(&tail),
+        );
+        let comparison = retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES);
         let changed = entry
             .activity
             .lock()
             .expect("activity mutex poisoned")
-            .observe(tail);
+            .observe_screen(comparison, status_tail, screen.working);
         if changed {
             note_activity(sup, entry).await;
         }
@@ -1650,6 +1702,43 @@ mod tests {
         );
     }
 
+    /// Wait until an owned pane exposes the complete frame a fixture wrote.
+    ///
+    /// Exact equality after the production capture trimming proves both
+    /// that the shell consumed the phase file and that tmux published the
+    /// whole requested frame before a sampler pass uses it as evidence.
+    async fn wait_for_pane_frame(sup: &Arc<Supervisor>, id: &str, expected: &str) -> String {
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .expect("the session is in the map");
+        let terminal = entry.terminal.as_ref().expect("the session has a terminal");
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let captured = sup
+                .tmux
+                .capture_pane_tail(
+                    &terminal.tmux_name,
+                    &terminal.pane,
+                    CODEX_ACTIVITY_CAPTURE_BYTES,
+                )
+                .await
+                .expect("the owned pane remains readable");
+            if captured == expected {
+                return captured;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "owned pane never rendered the complete expected frame {expected:?}; last capture: {captured:?}"
+            );
+            // sleep-ok: poll the owned shell's phase-file render until tmux exposes the complete frame.
+            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        }
+    }
+
     /// Drive the existing sampler until one session receives a newer
     /// activity stamp, keeping the caller's sampling budget and stop signal.
     async fn sample_until_activity_stamp_advances(
@@ -1993,6 +2082,101 @@ mod tests {
             still_before,
             "a pane whose screen never changed has produced no activity to date"
         );
+    }
+
+    /// A real tmux pane runs the Codex-specific capture and canonicalization
+    /// path. Four different composer frames decay to idle without moving
+    /// the durable activity cell; output above the composer then moves it.
+    ///
+    /// The phase file is the stimulus, and exact equality with the requested
+    /// trimmed frame is the readiness oracle. The test therefore waits for
+    /// tmux to publish every row before sampling rather than treating one
+    /// phase-specific marker as proof that the rest of the frame arrived.
+    #[farhelm_testtrace::test]
+    async fn codex_composer_redraws_do_not_date_a_real_pane_but_output_does() {
+        let state = StateDir::new();
+        let phase_file = state.path().join("codex-activity-phase");
+        std::fs::write(&phase_file, "a").expect("seed the owned phase file");
+        let phase_path = shell_words::quote(
+            phase_file
+                .to_str()
+                .expect("the test state path is valid UTF-8"),
+        );
+        let command = format!(
+            "last=''; while :; do phase=$(cat {phase_path}); if [ \"$phase\" != \"$last\" ]; \
+             then case \"$phase\" in \
+             a) printf '\\033[2J\\033[Hagent output\\n\\n› Ask Codex to do anything\\n\\ncustom footer' ;; \
+             b) printf '\\033[2J\\033[Hagent output\\n⠁\\n› ⠂Ask Codex to do anything\\n⠄\\ncustom footer' ;; \
+             c) printf '\\033[2J\\033[Hagent output\\n⠈\\n›\\n\\n  edited draft\\n⠐\\ncustom footer' ;; \
+             d) printf '\\033[2J\\033[Hagent output\\n⠠\\n› another draft\\n⠁\\n⡀\\ncustom footer' ;; \
+             output) printf '\\033[2J\\033[Hagent output\\nreal tool output\\n\\n› another draft\\n\\ncustom footer' ;; \
+             esac; last=$phase; fi; sleep 0.02; done"
+        );
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                activity_quantum: Duration::ZERO,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        install_live_session_of_kind(&sup, "codex", &command, AgentKind::Codex).await;
+        wait_for_pane_frame(
+            &sup,
+            "codex",
+            "agent output\n\n› Ask Codex to do anything\n\ncustom footer",
+        )
+        .await;
+
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("codex")
+            .cloned()
+            .expect("the Codex session is installed");
+        entry
+            .last_activity_at
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        let before = stamp_of(&sup, "codex").await;
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        for (phase, frame) in [
+            (
+                "b",
+                "agent output\n⠁\n› ⠂Ask Codex to do anything\n⠄\ncustom footer",
+            ),
+            (
+                "c",
+                "agent output\n⠈\n›\n\n  edited draft\n⠐\ncustom footer",
+            ),
+            ("d", "agent output\n⠠\n› another draft\n⠁\n⡀\ncustom footer"),
+        ] {
+            std::fs::write(&phase_file, phase).expect("advance the owned phase file");
+            wait_for_pane_frame(&sup, "codex", frame).await;
+            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        }
+        assert_eq!(classify(&sup, "codex").await, SessionStatus::Idle);
+        assert_eq!(
+            stamp_of(&sup, "codex").await,
+            before,
+            "composer animation and draft edits must not date the session"
+        );
+
+        std::fs::write(&phase_file, "output").expect("request real output");
+        wait_for_pane_frame(
+            &sup,
+            "codex",
+            "agent output\nreal tool output\n\n› another draft\n\ncustom footer",
+        )
+        .await;
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+        assert!(
+            stamp_of(&sup, "codex").await > before,
+            "real output above the composer must advance the activity stamp"
+        );
+        assert_eq!(classify(&sup, "codex").await, SessionStatus::Running);
     }
 
     /// The reap still runs when NO agent pane on the whole server is live
@@ -2584,6 +2768,107 @@ mod tests {
                  outage must not date every idle session to the recovery"
             );
         }
+    }
+
+    /// Codex composer redraws and draft edits are one still screen to the
+    /// sampler, while output above that composer remains activity. This
+    /// pins the boolean that decides whether `last_activity_at` moves;
+    /// canonicalizer-only assertions cannot prove the sampler consumes it.
+    #[farhelm_testtrace::test]
+    fn codex_normalized_samples_reach_idle_without_dating_input_but_output_is_dated() {
+        let integration = crate::agent_kind::integration_for(AgentKind::Codex)
+            .expect("Codex has an activity integration");
+        let frames = [
+            "output\n\n› Ask Codex to do anything\n\nfooter",
+            "output\n⠁\n› ⠂Ask Codex to do anything\n⠄\nfooter",
+            "output\n⠈\n› edited draft\n⠐\nfooter",
+            "output\n⠠\n› another draft\n⡀\nfooter",
+        ];
+        let mut sample = ActivitySample::default();
+        let mut dated_changes = 0;
+        for frame in frames {
+            let screen = integration.activity_screen(frame);
+            let changed = sample.observe_screen(
+                retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES),
+                retain_pane_tail(frame, SAMPLE_TAIL_BYTES),
+                screen.working,
+            );
+            dated_changes += u64::from(changed);
+        }
+        assert_eq!(
+            sample.unchanged_streak, 3,
+            "three normalized comparisons are enough for the live classifier to report idle"
+        );
+        assert_eq!(
+            dated_changes, 0,
+            "decoration and unsubmitted input must never request a last-activity update"
+        );
+
+        let output = "output\nnew tool result\n\n› another draft\n\nfooter";
+        let screen = integration.activity_screen(output);
+        assert!(
+            sample.observe_screen(
+                retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES),
+                retain_pane_tail(output, SAMPLE_TAIL_BYTES),
+                screen.working,
+            ),
+            "real output above the composer must request a last-activity update"
+        );
+        assert_eq!(sample.unchanged_streak, 0);
+    }
+
+    /// Failure invalidates all three pieces of sampled evidence. Recovery
+    /// is a baseline even when the recovered pane displays a busy widget;
+    /// only the following comparison can date output.
+    #[farhelm_testtrace::test]
+    fn codex_capture_failure_clears_all_evidence_and_recovery_does_not_date_output() {
+        let mut sample = ActivitySample::default();
+        assert!(!sample.observe_screen(
+            "canonical".to_string(),
+            "Working (3s • esc to interrupt)".to_string(),
+            true,
+        ));
+        sample.forget_tail();
+        assert_eq!(sample.tail, None);
+        assert_eq!(sample.comparison, None);
+        assert!(!sample.working);
+
+        assert!(
+            !sample.observe_screen(
+                "recovered output".to_string(),
+                "Working (4s • esc to interrupt)".to_string(),
+                true,
+            ),
+            "recovery has no retained baseline against which to prove a change"
+        );
+        assert!(
+            sample.working,
+            "fresh positive evidence is retained for status"
+        );
+        assert!(sample.observe_screen(
+            "later output".to_string(),
+            "Working (5s • esc to interrupt)".to_string(),
+            true,
+        ));
+    }
+
+    /// Claude has no comparison canonicalizer. Its screen remains the raw
+    /// capped tail and ordinary changes retain the pre-existing behavior.
+    #[farhelm_testtrace::test]
+    fn another_integrated_harness_preserves_raw_activity_comparison() {
+        let integration = crate::agent_kind::integration_for(AgentKind::Claude)
+            .expect("Claude has an integration");
+        let raw = format!("{}tail", "x".repeat(SAMPLE_TAIL_BYTES));
+        let screen = integration.activity_screen(&raw);
+        assert_eq!(screen.comparison, raw);
+        assert!(!screen.working);
+
+        let mut sample = ActivitySample::default();
+        let capped = retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES);
+        assert!(!sample.observe_screen(capped.clone(), capped, false));
+        let changed = format!("{}TAIL", "x".repeat(SAMPLE_TAIL_BYTES));
+        let changed = retain_pane_tail(&changed, SAMPLE_TAIL_BYTES);
+        assert!(sample.observe_screen(changed.clone(), changed, false));
     }
 
     /// The quantization gate, exhaustively, with no clock and no runtime.

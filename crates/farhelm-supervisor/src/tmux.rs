@@ -126,8 +126,7 @@ pub const TMUX_PAUSE_AFTER_SECS: u64 = 5;
 /// a mostly-empty pane is padded with.
 const LAST_WORDS_LINES: u32 = 50;
 
-/// Reduce a `capture-pane` transcript to the last non-blank text it
-/// holds, at most `max_bytes` of it.
+/// Trim pane padding and retain a valid UTF-8 suffix within `max_bytes`.
 ///
 /// Split out from [`TmuxDriver::capture_pane_text`] so the trimming and
 /// tail-truncation rules are unit-testable against constructed strings —
@@ -139,7 +138,11 @@ const LAST_WORDS_LINES: u32 = 50;
 /// is truncated from the FRONT when it is too long — see the caller's
 /// docs for why the tail is the part worth keeping — landing on a
 /// character boundary so the result is always valid UTF-8.
-fn last_words(transcript: &str, max_bytes: usize) -> String {
+///
+/// The sampler uses this after a Codex-only larger capture: its status
+/// recognizers must keep the raw 4096-byte tail while comparison cleanup
+/// happens against the larger temporary screen.
+pub(crate) fn retain_pane_tail(transcript: &str, max_bytes: usize) -> String {
     let trimmed = transcript.trim_end();
     if trimmed.len() <= max_bytes {
         return trimmed.to_string();
@@ -1475,7 +1478,7 @@ const CAPTURE_READ_CHUNK: usize = 64 * 1024;
 /// Headroom `capture_pane_plain` retains beyond the caller's `max_bytes`
 /// while streaming a capture.
 ///
-/// [`last_words`] trims trailing blank rows only AFTER the read has
+/// [`retain_pane_tail`] trims trailing blank rows only AFTER the read has
 /// finished, so a window sized to `max_bytes` exactly could be filled
 /// entirely by the padding of a very tall, mostly-empty pane and push the
 /// real text out. 64 KiB covers tmux's 10,000-row ceiling with an order of
@@ -3022,7 +3025,7 @@ impl TmuxDriver {
 
     /// The shared body of the two plain-text captures above:
     /// `capture-pane -p` over `history_lines` of scrollback (or the
-    /// visible grid alone when `None`), reduced by [`last_words`].
+    /// visible grid alone when `None`), reduced by [`retain_pane_tail`].
     ///
     /// The TAIL is kept when the result is over `max_bytes`, not the head:
     /// for the dead-pane caller these are last words, and a shell that
@@ -3047,7 +3050,7 @@ impl TmuxDriver {
     /// because the sampler runs this on a schedule, once per live session
     /// per rotation.
     ///
-    /// The retention slack exists because [`last_words`] trims trailing
+    /// The retention slack exists because [`retain_pane_tail`] trims trailing
     /// blank rows AFTER this point: a pane padded out with thousands of
     /// empty rows would otherwise have its real text pushed out of a
     /// window sized to `max_bytes` exactly.
@@ -3091,7 +3094,7 @@ impl TmuxDriver {
             .run_bytes_tail(&args, max_bytes.saturating_add(TAIL_RETAIN_ALLOWANCE))
             .await
             .context("capturing a pane's text")?;
-        Ok(last_words(&String::from_utf8_lossy(&tail), max_bytes))
+        Ok(retain_pane_tail(&String::from_utf8_lossy(&tail), max_bytes))
     }
 
     /// Run one tmux command and return AT MOST the last `retain` bytes of
@@ -5053,24 +5056,24 @@ mod tests {
     #[farhelm_testtrace::test]
     fn last_words_trims_padding_and_keeps_the_tail_within_the_cap() {
         assert_eq!(
-            last_words("SHELL-REFUSED\n\n\n   \n", 1024),
+            retain_pane_tail("SHELL-REFUSED\n\n\n   \n", 1024),
             "SHELL-REFUSED",
             "the blank rows a pane is padded to its full height with are not output"
         );
         assert_eq!(
-            last_words("noise\nthe real complaint", 15),
+            retain_pane_tail("noise\nthe real complaint", 15),
             "the real complaint"[3..],
             "an over-cap transcript keeps its END, not its beginning"
         );
         // A cap landing mid-character must not split it: the caller puts
         // this straight into a protocol error message.
         let multibyte = "aaaa\u{00e9}\u{00e9}\u{00e9}";
-        let cut = last_words(multibyte, 5);
+        let cut = retain_pane_tail(multibyte, 5);
         assert!(
             multibyte.ends_with(&cut) && cut.len() <= 5,
             "expected a valid suffix within the cap, got {cut:?}"
         );
-        assert_eq!(last_words("   \n\n", 1024), "");
+        assert_eq!(retain_pane_tail("   \n\n", 1024), "");
     }
 
     /// The cross-session guarantee `pane_in_session` actually delivers,
