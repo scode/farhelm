@@ -33,6 +33,7 @@ use super::shared::{
     DeleteTarget, HostOption, OpenDestination, RowState, effective_create_host, host_options,
     matching_host_option, session_locality,
 };
+use crate::rename::RenameDialog;
 
 /// Return keyboard focus to the persistent control that opened the composer.
 ///
@@ -45,6 +46,86 @@ fn focus_new_session_button() {
     document::eval(
         "document.querySelector('.new-session-button')?.focus({ preventScroll: true });",
     );
+}
+
+/// One independently mounted rename editor and the source it must never lose.
+///
+/// The listing may reorder, filter, fail, or later prove this source gone;
+/// none of those events may retarget the draft by row position. The generation
+/// makes a later editor distinct from deferred work for the same id, even
+/// though the ordinary pending-operation guard prevents that overlap today.
+#[derive(Clone, PartialEq, Eq)]
+struct RenameEditor {
+    id: String,
+    current_title: String,
+    generation: u64,
+    unavailable: bool,
+}
+
+/// Whether a request result still owns the editor generation it started.
+///
+/// Session ids are not enough: the same session can be edited again after a
+/// request lifetime ends. Every delayed completion path uses this predicate
+/// so an old result cannot close or annotate a newer draft.
+fn rename_result_owns_editor(editor: Option<&RenameEditor>, generation: u64) -> bool {
+    editor.is_some_and(|editor| editor.generation == generation)
+}
+
+/// Decide what a listing is allowed to say about the editor's source.
+///
+/// `None` means the listing has no authority to change availability. A
+/// filtered, archive-omitting, truncated, or mutation-local read may hide the
+/// source without proving that it left the fleet.
+fn listed_rename_unavailable(
+    editor: &RenameEditor,
+    authoritative: bool,
+    listing: &SessionListing,
+) -> Option<bool> {
+    (authoritative && absence_is_evidence(listing)).then(|| {
+        !listing
+            .sessions
+            .iter()
+            .any(|session| session.id == editor.id)
+    })
+}
+
+/// Whether a queued focus return may run against the rendered editor state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenameFocusReturn {
+    /// The originating dialog is still mounted; wait for its unmount.
+    Wait,
+    /// A newer dialog superseded the intent; discard it without focusing.
+    Discard,
+    /// No dialog remains, so the opener may be considered after render.
+    Ready,
+}
+
+/// Fence post-unmount focus work against a replacement editor generation.
+fn rename_focus_return_state(generation: u64, editor: Option<&RenameEditor>) -> RenameFocusReturn {
+    match editor {
+        Some(editor) if editor.generation == generation => RenameFocusReturn::Wait,
+        Some(_) => RenameFocusReturn::Discard,
+        None => RenameFocusReturn::Ready,
+    }
+}
+
+/// Focus a rename editor's opener after its owning dialog has unmounted.
+///
+/// Callers run this only from the post-render focus-return effect, after the
+/// dialog's focus event recorded ownership and a matching generation closed.
+/// The browser-side body check is the final user-focus guard: an unrelated
+/// control reached after close must always keep focus.
+fn focus_rename_toggle(id: &str) {
+    let id = serde_json::to_string(id).expect("session ids serialize as JSON strings");
+    document::eval(&format!(
+        r#"(() => {{
+            const active = document.activeElement;
+            if (active !== document.body && active !== document.documentElement) return;
+            const id = {id};
+            document.querySelector(`[data-session-id="${{CSS.escape(id)}}"] .session-row-menu`)
+                ?.focus({{ preventScroll: true }});
+        }})()"#,
+    ));
 }
 
 /// The shared preference (SPEC.md, Session list) as this page holds it:
@@ -572,23 +653,40 @@ pub(crate) fn ListView(
     // one is: this is the only component both the session list and the
     // hosts panel are mounted underneath.
     let mut host_menu_open = use_signal(|| None::<HostId>);
-    // Which row, if any, has its rename field open (PLAN_M5.md item 6),
-    // and the text being typed into it.
+    // The one stable rename editor, if any, and its text draft.
     //
-    // One at a time, unlike `confirming`'s set, and that is the whole
-    // interaction rather than a limitation: renaming is a focused edit the
-    // user finishes or abandons, and a second open field would be an
-    // invitation to type into two and lose track of which one Enter
-    // submits. The draft lives HERE rather than in `RenameForm` for a
-    // reason that has nothing to do with how many can be open: this
-    // component re-renders for reasons the user did not cause, and one of
-    // them (a failed listing read swapping the rows for an error line)
-    // unmounts the form entirely — a draft owned by the form would be
-    // silently discarded with it. Seeded from the row's current title when
-    // the field opens, which is also what keeps a read carrying someone
-    // else's rename from overwriting an edit in progress.
-    let mut renaming = use_signal(|| None::<String>);
+    // One at a time, unlike `confirming`'s set: rename is a focused edit the
+    // user finishes or abandons. The dialog is ListView-owned rather than
+    // nested in a row menu, so a listing can move or temporarily remove rows
+    // without reparenting the textarea. The draft remains separate from the
+    // editor record so an authoritative disappearance can preserve it for
+    // copying and cancellation.
+    let mut rename_editor = use_signal(|| None::<RenameEditor>);
     let mut rename_draft = use_signal(String::new);
+    let mut rename_generation = use_signal(|| 0_u64);
+    let mut rename_error = use_signal(|| None::<(u64, String)>);
+    // Focus ownership is recorded while the exact dialog generation is still
+    // mounted. Busy controls remain focusable, so only a real move outside
+    // ends ownership. The return request is consumed after unmount.
+    let mut rename_focus_owned = use_signal(|| false);
+    let mut rename_focus_return = use_signal(|| None::<(String, u64)>);
+    use_effect(move || {
+        let intent = rename_focus_return();
+        let editor = rename_editor();
+        let Some((id, generation)) = intent else {
+            return;
+        };
+        match rename_focus_return_state(generation, editor.as_ref()) {
+            RenameFocusReturn::Wait => return,
+            RenameFocusReturn::Discard => {
+                rename_focus_return.set(None);
+                return;
+            }
+            RenameFocusReturn::Ready => {}
+        }
+        rename_focus_return.set(None);
+        focus_rename_toggle(&id);
+    });
     // The optimistic rename corrections `apply_optimistic_renames` paints
     // over the server's listing, keyed by session id and carrying the read
     // sequence number that bounds when the server could first have told
@@ -986,16 +1084,19 @@ pub(crate) fn ListView(
             confirming_replace
                 .write()
                 .retain(|id| live_ids.contains(id.as_str()));
-            // An open rename field for a session that has left the
-            // listing entirely goes with it, the same tidiness the
-            // `confirming` retain above performs — there is no row
-            // left for it to sit in.
-            let renaming_vanished = renaming
-                .read()
-                .as_ref()
-                .is_some_and(|id| !live_ids.contains(id.as_str()));
-            if renaming_vanished {
-                renaming.set(None);
+            // A complete committed fleet read is the only absence proof
+            // strong enough to change an editor. It does not close one: a
+            // user may still need its draft. If the exact source returns on
+            // a later authoritative read, only the unavailable condition is
+            // cleared; the source snapshot and typed text remain untouched.
+            let current_editor = rename_editor.peek().clone();
+            if let Some(mut editor) = current_editor
+                && let Some(unavailable) =
+                    listed_rename_unavailable(&editor, authoritative, listing)
+                && editor.unavailable != unavailable
+            {
+                editor.unavailable = unavailable;
+                rename_editor.set(Some(editor));
             }
             // The SELECTED session reconciles on the same evidence: a
             // session deleted from another client must not keep a detail
@@ -1307,7 +1408,11 @@ pub(crate) fn ListView(
         if confirming.read().contains(&id)
             || confirming_archive.read().contains(&id)
             || confirming_replace.read().contains(&id)
-            || renaming.read().as_deref() == Some(id.as_str())
+            || rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str())
+                == Some(id.as_str())
         {
             return;
         }
@@ -1503,7 +1608,11 @@ pub(crate) fn ListView(
         if pending.read().contains(&target.id)
             || confirming_archive.read().contains(&target.id)
             || confirming_replace.read().contains(&target.id)
-            || renaming.read().as_deref() == Some(target.id.as_str())
+            || rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str())
+                == Some(target.id.as_str())
         {
             return;
         }
@@ -1648,7 +1757,11 @@ pub(crate) fn ListView(
             || pending.read().contains(&session.id)
             || confirming.read().contains(&session.id)
             || confirming_replace.read().contains(&session.id)
-            || renaming.read().as_deref() == Some(session.id.as_str())
+            || rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str())
+                == Some(session.id.as_str())
         {
             return;
         }
@@ -1740,7 +1853,10 @@ pub(crate) fn ListView(
             &confirming.read(),
             &confirming_archive.read(),
             &confirming_replace.read(),
-            renaming.read().as_deref(),
+            rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str()),
         ) {
             return;
         }
@@ -1790,7 +1906,7 @@ pub(crate) fn ListView(
     // lock (a create submit already minting a key, a host mutation in
     // flight); the three row-local sets cover this SPECIFIC row having a
     // stop/delete in flight, a destructive confirmation open, or its
-    // rename field open — any of which means this row's own `Session` is
+    // rename editor open — any of which means this row's own `Session` is
     // about to change or is mid-decision, not a stable thing to snapshot
     // into a fresh clone right now.
     let on_clone = move |session: Session| {
@@ -1801,7 +1917,10 @@ pub(crate) fn ListView(
             &confirming.read(),
             &confirming_archive.read(),
             &confirming_replace.read(),
-            renaming.read().as_deref(),
+            rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str()),
         ) {
             return;
         }
@@ -1835,7 +1954,10 @@ pub(crate) fn ListView(
             &confirming.read(),
             &confirming_archive.read(),
             &confirming_replace.read(),
-            renaming.read().as_deref(),
+            rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str()),
         ) {
             return;
         }
@@ -1850,17 +1972,9 @@ pub(crate) fn ListView(
         show_create.set(true);
     };
 
-    // The rename button's click: opens this row's field, seeds the draft
-    // from the title the row is showing right now, and never calls the API
-    // — exactly as `on_delete` opens the confirm prompt. Refuses a row
-    // with an operation already in flight or a confirmation already open,
-    // the same cross-guard those two keep against each other and for the
-    // same reason (the controls only disappear once a rerender lands, so a
-    // click queued just ahead of one can still arrive here).
-    //
-    // Seeding HERE rather than in the form is what makes reopening start
-    // from the current title while an edit already in progress is never
-    // overwritten by a poll (see `renaming`/`rename_draft`).
+    // Opening Rename owns one editor above the keyed rows. The source menu
+    // closes before the dialog mounts, so no fixed-position popup remains to
+    // reappear after completion or detach while the list reorders.
     let on_rename_start = move |(id, title): (String, String)| {
         // The shared token counts too: the disabled attribute on the menu's
         // rename control is cosmetic (a dispatched synthetic click still
@@ -1872,14 +1986,30 @@ pub(crate) fn ListView(
             || confirming.read().contains(&id)
             || confirming_archive.read().contains(&id)
             || confirming_replace.read().contains(&id)
+            || rename_editor.peek().is_some()
         {
             return;
         }
         rename_draft.set(title);
-        renaming.set(Some(id));
+        rename_error.set(None);
+        rename_focus_owned.set(false);
+        // A new editor is a distinct focus lifetime, even if the previous
+        // one named the same session. It must cancel any queued old return.
+        rename_focus_return.set(None);
+        let generation = rename_generation.peek().wrapping_add(1);
+        rename_generation.set(generation);
+        rename_editor.set(Some(RenameEditor {
+            id: id.clone(),
+            current_title: rename_draft.peek().clone(),
+            generation,
+            unavailable: false,
+        }));
+        if menu_open.peek().as_deref() == Some(id.as_str()) {
+            menu_open.set(None);
+        }
     };
 
-    // The rename field's submit. The title goes to the supervisor exactly
+    // The rename editor's submit. The title goes to the supervisor exactly
     // as typed (`api::rename_session`); everything decided here is what to
     // do with its answer.
     //
@@ -1894,13 +2024,27 @@ pub(crate) fn ListView(
     // title stays everywhere it was.
     let rename_base = base.clone();
     let rename_refresh = request_listing.clone();
-    let on_rename_submit = move |(id, title): (String, String)| {
+    let on_rename_submit = move |(generation, title): (u64, String)| {
+        let Some(editor) = rename_editor.peek().clone() else {
+            return;
+        };
+        if editor.generation != generation || editor.unavailable {
+            return;
+        }
+        let id = editor.id;
         if !begin_row_op(&id) {
             return;
         }
         // This row's own previous failure, cleared by the retry that
         // supersedes it and by nothing else (see `errors`).
         errors.write().remove(&id);
+        if rename_error
+            .peek()
+            .as_ref()
+            .is_some_and(|(error_generation, _)| *error_generation == generation)
+        {
+            rename_error.set(None);
+        }
         let base = rename_base.clone();
         let refresh = rename_refresh.clone();
         spawn(async move {
@@ -1921,15 +2065,16 @@ pub(crate) fn ListView(
                     renamed
                         .write()
                         .insert(id.clone(), (session.title.clone(), observed_from));
-                    // Closed only if this row's field is still the open
-                    // one. The form disables its own cancel while a
-                    // request is in flight, so the user has to beat a
-                    // rerender to get here — but if they do (cancel, then
-                    // open another row's field), a blind `set(None)` would
-                    // close a field they are typing in and throw the draft
-                    // away.
-                    if renaming.peek().as_deref() == Some(id.as_str()) {
-                        renaming.set(None);
+                    // The response owns only the exact editor it started.
+                    // Any later editor for the same id is a new generation,
+                    // so old deferred work cannot close its fresh draft or
+                    // return focus over a control the user has since reached.
+                    if rename_result_owns_editor(rename_editor.peek().as_ref(), generation) {
+                        if rename_focus_owned() {
+                            rename_focus_return.set(Some((id.clone(), generation)));
+                        }
+                        rename_editor.set(None);
+                        rename_error.set(None);
                     }
                     // The overlay paints the new title and can do nothing
                     // else — and a title is exactly what a filter can be ON,
@@ -1951,6 +2096,9 @@ pub(crate) fn ListView(
                 }
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("rename: {e}"));
+                    if rename_result_owns_editor(rename_editor.peek().as_ref(), generation) {
+                        rename_error.set(Some((generation, e)));
+                    }
                 }
             }
             end_row_op(&id);
@@ -2158,7 +2306,19 @@ pub(crate) fn ListView(
     let cancel_replace = use_callback(cancel_replace);
     let on_rename_start = use_callback(on_rename_start);
     let on_rename_submit = use_callback(on_rename_submit);
-    let on_rename_cancel = use_callback(move |_| renaming.set(None));
+    let on_rename_cancel = use_callback(move |generation| {
+        let current_editor = rename_editor.peek().clone();
+        if let Some(editor) = current_editor
+            && editor.generation == generation
+            && !pending.read().contains(&editor.id)
+        {
+            // Both cancellation paths originate inside the dialog: a click
+            // on Cancel or an ordinary Escape from one of its controls.
+            rename_focus_return.set(Some((editor.id, generation)));
+            rename_editor.set(None);
+            rename_error.set(None);
+        }
+    });
     // Cosmetic reflection of the same conditions, for the disabled
     // attributes. Not the guard — see `ops`.
     let busy = ops.busy();
@@ -2506,7 +2666,7 @@ pub(crate) fn ListView(
                         // view's own just-landed renames painted over it,
                         // so a renamed session reads correctly EVERYWHERE
                         // the row shows its title — the row itself, the
-                        // delete prompt that quotes it, the rename field
+                        // delete prompt that quotes it, the rename editor
                         // if it is reopened, and the `Session` that
                         // `on_open` carries into the session view.
                         //
@@ -2539,8 +2699,10 @@ pub(crate) fn ListView(
                                     confirming_replace: confirming_replace
                                         .read()
                                         .contains(&session.id),
-                                    renaming: renaming.read().as_deref()
-                                        == Some(session.id.as_str()),
+                                    renaming: rename_editor
+                                        .read()
+                                        .as_ref()
+                                        .is_some_and(|editor| editor.id == session.id),
                                     nav_disabled: nav_locked,
                                     menu_open: menu_open.read().as_deref()
                                         == Some(session.id.as_str()),
@@ -2556,7 +2718,6 @@ pub(crate) fn ListView(
                                         session.effective_activity(),
                                     ),
                                 },
-                                rename_draft,
                                 on_open: guarded_open,
                                 on_clone,
                                 on_replace_with,
@@ -2573,10 +2734,6 @@ pub(crate) fn ListView(
                                 on_cancel_archive: cancel_archive,
                                 on_rename_start,
                                 on_menu_toggle: toggle_menu,
-                                on_rename_submit,
-                                // The draft is deliberately left alone: the
-                                // next open reseeds it from the current row.
-                                on_rename_cancel,
                                 session,
                             }
                         }
@@ -2584,12 +2741,122 @@ pub(crate) fn ListView(
                 }
             },
         }
+        if let Some(editor) = rename_editor() {
+            RenameDialog {
+                draft: rename_draft,
+                busy: pending.read().contains(&editor.id),
+                busy_now: {
+                    let id = editor.id.clone();
+                    Callback::new(move |_| pending.read().contains(&id))
+                },
+                unavailable: editor.unavailable,
+                current_title: editor.current_title,
+                error: rename_error()
+                    .and_then(|(error_generation, error)| {
+                        (error_generation == editor.generation).then_some(error)
+                    }),
+                generation: editor.generation,
+                focus_owned: rename_focus_owned,
+                on_submit: on_rename_submit,
+                on_cancel: on_rename_cancel,
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only a complete fleet-wide listing may change rename availability.
+    ///
+    /// The default browser listing deliberately omits archived sessions, so
+    /// absence there cannot distinguish deletion from archiving. This pins
+    /// both that refusal and the authoritative transition without inventing
+    /// a product UI that requests the all-fleet view.
+    #[farhelm_testtrace::test]
+    fn rename_availability_changes_only_on_authoritative_absence() {
+        let editor = RenameEditor {
+            id: "source".to_string(),
+            current_title: "original title".to_string(),
+            generation: 17,
+            unavailable: false,
+        };
+        let listing = |sessions, omits_fleet_members| SessionListing {
+            sessions,
+            total: 0,
+            matching: None,
+            filtered: false,
+            omits_fleet_members,
+            truncated: false,
+        };
+
+        assert_eq!(
+            listed_rename_unavailable(&editor, true, &listing(Vec::new(), true)),
+            None,
+            "the default active-only view cannot prove why the source is absent"
+        );
+        assert_eq!(
+            listed_rename_unavailable(&editor, false, &listing(Vec::new(), false)),
+            None,
+            "a mutation-local read has no fleet-wide standing even when its reply is complete"
+        );
+        assert_eq!(
+            listed_rename_unavailable(&editor, true, &listing(Vec::new(), false)),
+            Some(true),
+            "a complete authoritative absence makes submission unavailable"
+        );
+
+        let source = crate::list::row::row_specimen("source");
+        let mut reconciled = RenameEditor {
+            unavailable: true,
+            ..editor.clone()
+        };
+        reconciled.unavailable =
+            listed_rename_unavailable(&reconciled, true, &listing(vec![source], false))
+                .expect("an authoritative listing supplies an availability answer");
+        assert!(!reconciled.unavailable);
+        assert_eq!(reconciled.id, editor.id);
+        assert_eq!(reconciled.current_title, editor.current_title);
+        assert_eq!(reconciled.generation, editor.generation);
+    }
+
+    /// Delayed results and focus intents belong to one editor generation.
+    ///
+    /// Pending rename cannot be cancelled through the product UI, so the
+    /// otherwise unreachable same-id replacement race is pinned at the pure
+    /// ownership gate instead of adding a bypass that would exist only for a
+    /// browser test.
+    #[farhelm_testtrace::test]
+    fn delayed_rename_work_cannot_act_on_a_newer_editor_generation() {
+        let editor = RenameEditor {
+            id: "same-session".to_string(),
+            current_title: "newer draft source".to_string(),
+            generation: 9,
+            unavailable: false,
+        };
+
+        assert!(rename_result_owns_editor(Some(&editor), 9));
+        assert!(
+            !rename_result_owns_editor(Some(&editor), 8),
+            "the same session id does not let an old result close the reopened editor"
+        );
+        assert_eq!(
+            rename_focus_return_state(9, Some(&editor)),
+            RenameFocusReturn::Wait,
+            "the originating dialog must unmount before focus can return"
+        );
+        assert_eq!(
+            rename_focus_return_state(8, Some(&editor)),
+            RenameFocusReturn::Discard,
+            "an old intent must not focus through a newer mounted dialog"
+        );
+        assert_eq!(
+            rename_focus_return_state(9, None),
+            RenameFocusReturn::Ready,
+            "the matching intent becomes eligible only after unmount"
+        );
+    }
 
     /// A clone (or replace — the two share this predicate, see its own doc)
     /// click is refused by EACH of its five guards independently, and
@@ -2636,7 +2903,7 @@ mod tests {
         );
         assert!(
             clone_is_refused(false, id, &empty, &empty, &empty, &empty, Some(id)),
-            "this row's own open rename field must refuse it"
+            "this row's own open rename editor must refuse it"
         );
         // A guard keyed to a DIFFERENT row must never refuse this one —
         // the per-row sets are per-row for exactly this reason, and a

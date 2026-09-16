@@ -15,7 +15,7 @@
 
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
-import { openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
+import { createSession, openRowMenu, SESSION_LISTING, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import {
   addTab,
@@ -777,16 +777,19 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
     const row = page.locator(`[data-session-id="${id}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
     await openRowMenu(row);
+    const toggle = row.locator(".session-row-menu");
     await row.locator(".session-row-rename").click();
     // The field opens seeded with the current title, which is what makes
     // renaming an edit rather than a retype.
-    await expect(row.locator(".rename-input")).toHaveValue(title);
-    await row.locator(".rename-input").fill(renamed);
-    await row.locator(".rename-submit").click();
+    const dialog = page.locator(".rename-dialog");
+    await expect(dialog.locator(".rename-input")).toHaveValue(title);
+    await dialog.locator(".rename-input").fill(renamed);
+    await dialog.locator(".rename-submit").click();
 
     // The field closes and the row reads the new name without waiting for
     // any re-read — the optimistic half of the contract.
-    await expect(row.locator(".rename-form")).toHaveCount(0);
+    await expect(dialog).toHaveCount(0);
+    await expect(toggle).toBeFocused();
     await expect(row.locator(".session-title")).toHaveText(renamed);
 
     // The server's own answer, not this view's: the supervisor serves its
@@ -801,6 +804,185 @@ test("rename-from-list: the row takes the new title and keeps it across re-reads
     await expect(row.locator(".action-error")).toHaveCount(0);
   } finally {
     if (id) await cleanupSession(request, id);
+  }
+});
+
+/**
+ * Click submission keeps its action focused while the response is pending.
+ *
+ * Native disabling used to blur Save onto the document body, erase the
+ * dialog's ownership record, and make a successful completion skip its
+ * return to the opener. Holding the route makes that browser event sequence
+ * observable; moving focus to the still-focusable read-only field also proves
+ * the modal remains keyboard-reachable for copying during the request.
+ */
+test("held rename success keeps dialog focus and returns it after unmount", async ({ page, request }) => {
+  const title = `rename-held-success-${Date.now()}`;
+  const renamed = `${title}-renamed`;
+  const session = await createTabSession(request, title);
+  let releaseRename!: () => void;
+  const release = new Promise<void>((resolve) => { releaseRename = resolve; });
+  let markEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    markEntered();
+    await release;
+    await route.continue();
+  });
+  try {
+    await page.goto("/");
+    const source = page.locator(`[data-session-id="${session.id}"]`);
+    await expect(source).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(source);
+    const toggle = source.locator(".session-row-menu");
+    await source.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    const field = dialog.locator(".rename-input");
+    const save = dialog.locator(".rename-submit");
+    await field.fill(renamed);
+    await save.click();
+    await entered;
+
+    await expect(save, "click submission must keep its focus owner").toBeFocused();
+    // ARIA disables the action semantically; native focusability must remain.
+    await expect(save).toHaveJSProperty("disabled", false);
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    await expect(field).toBeEnabled();
+    await expect(field).not.toBeEditable();
+    await expect(dialog.locator(".rename-cancel")).toBeDisabled();
+    await field.focus();
+    await expect(field, "the submitted title remains focusable and copyable").toBeFocused();
+
+    releaseRename();
+    await expect(dialog).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    await expect(source.locator(".session-title")).toHaveText(renamed);
+    await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
+  } finally {
+    releaseRename();
+    await page.unroute(`**/api/sessions/${session.id}/rename`);
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A focus destination chosen after submission is newer than focus return.
+ *
+ * The held success still closes its own dialog, but it may not reclaim focus
+ * from another control reached while the request was outstanding. The move is
+ * programmatic because the modal backdrop intentionally blocks pointer input
+ * to the sidebar; focus ownership is the contract, regardless of its source.
+ */
+test("held rename success preserves an unrelated focus destination", async ({ page, request }) => {
+  const title = `rename-held-external-focus-${Date.now()}`;
+  const renamed = `${title}-renamed`;
+  const session = await createTabSession(request, title);
+  let releaseRename!: () => void;
+  const release = new Promise<void>((resolve) => { releaseRename = resolve; });
+  let markEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  await page.route(`**/api/sessions/${session.id}/rename`, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    markEntered();
+    await release;
+    await route.continue();
+  });
+  try {
+    await page.goto("/");
+    const source = page.locator(`[data-session-id="${session.id}"]`);
+    await expect(source).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(source);
+    await source.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    const field = dialog.locator(".rename-input");
+    await field.fill(renamed);
+    await expect(field).toBeFocused();
+    await field.press("Enter");
+    await entered;
+    await expect(field).toBeEnabled();
+    await expect(field).not.toBeEditable();
+    await expect(field).toBeFocused();
+
+    const destination = page.locator(".new-session-button");
+    await destination.focus();
+    await expect(destination).toBeFocused();
+    releaseRename();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(destination, "completion must preserve the newer focus destination").toBeFocused();
+    await expect(source.locator(".session-title")).toHaveText(renamed);
+    await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
+  } finally {
+    releaseRename();
+    await page.unroute(`**/api/sessions/${session.id}/rename`);
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A held refusal restores the same correction surface and focus owner.
+ *
+ * This covers the failure half of busy-state focus: the submitted field stays
+ * mounted and read-only while pending, then becomes editable beside the local
+ * error. Correcting and retrying uses that same dialog and closes it without
+ * resurrecting the row menu.
+ */
+test("held rename refusal keeps local error, draft, focus, and retry", async ({ page, request }) => {
+  const title = `rename-held-refusal-${Date.now()}`;
+  const refused = `${title}-refused`;
+  const corrected = `${title}-corrected`;
+  const sentinel = "held rename refusal sentinel";
+  const session = await createTabSession(request, title);
+  let releaseRename!: () => void;
+  const release = new Promise<void>((resolve) => { releaseRename = resolve; });
+  let markEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+  const routePattern = `**/api/sessions/${session.id}/rename`;
+  await page.route(routePattern, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    markEntered();
+    await release;
+    await fulfillAsHelm(route, {
+      status: 400,
+      contentType: "text/plain",
+      body: sentinel,
+    });
+  });
+  try {
+    await page.goto("/");
+    const source = page.locator(`[data-session-id="${session.id}"]`);
+    await expect(source).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(source);
+    const toggle = source.locator(".session-row-menu");
+    await source.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    const field = dialog.locator(".rename-input");
+    await field.fill(refused);
+    await expect(field).toBeFocused();
+    await field.press("Enter");
+    await entered;
+    await expect(field).toBeEnabled();
+    await expect(field).not.toBeEditable();
+    await expect(field).toBeFocused();
+
+    releaseRename();
+    await expect(dialog.locator(".rename-error")).toContainText(sentinel);
+    await expect(field).toHaveValue(refused);
+    await expect(field).toBeEditable();
+    await expect(field).toBeFocused();
+
+    await field.fill(corrected);
+    await page.unroute(routePattern);
+    await dialog.locator(".rename-submit").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    await expect(source.locator(".session-title")).toHaveText(corrected);
+    await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
+  } finally {
+    releaseRename();
+    await page.unroute(routePattern);
+    await cleanupSession(request, session.id);
   }
 });
 
@@ -840,8 +1022,9 @@ test("rename-refused: a control-character title shows the supervisor's words and
     await expect(row).toBeVisible({ timeout: 15_000 });
     await openRowMenu(row);
     await row.locator(".session-row-rename").click();
-    await row.locator(".rename-input").fill(refused);
-    await row.locator(".rename-submit").click();
+    const dialog = page.locator(".rename-dialog");
+    await dialog.locator(".rename-input").fill(refused);
+    await dialog.locator(".rename-submit").click();
 
     // The supervisor's own sentence, relayed verbatim through the helm.
     await expect(row.locator(".action-error")).toContainText("control characters", {
@@ -849,16 +1032,16 @@ test("rename-refused: a control-character title shows the supervisor's words and
     });
     // The old title is still on screen next to the field that was
     // refused, not replaced by the draft.
-    await expect(row.locator(".rename-current-title")).toHaveText(title);
+    await expect(dialog.locator(".rename-current-title")).toHaveText(title);
     // The field stays open with the rejected text still in it, so fixing
     // the title is one keystroke rather than a retype.
-    await expect(row.locator(".rename-input")).toHaveValue(refused);
+    await expect(dialog.locator(".rename-input")).toHaveValue(refused);
     // Nothing about the session moved: not on the server...
     const fetched = await (await request.get(`/api/sessions/${id}`)).json();
     expect(fetched.title).toBe(title);
     // ...and not in the list, which still shows the old name once the
     // field is closed.
-    await row.locator(".rename-cancel").click();
+    await dialog.locator(".rename-cancel").click();
     await expect(row.locator(".session-title")).toHaveText(title);
   } finally {
     if (id) await cleanupSession(request, id);
@@ -900,7 +1083,7 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
 
     await openRowMenu(page.locator(`[data-session-id="${id}"]`));
     await page.locator(".session-row-rename").click();
-    const field = page.locator(".session-row-menu-panel .rename-input");
+    const field = page.locator(".rename-dialog .rename-input");
     await field.click();
     await page.keyboard.press("Control+A");
     await page.keyboard.insertText(pasted);
@@ -1181,15 +1364,15 @@ test("replay-stale-mount: a torn-down island's deferred ending cannot touch its 
 
 // A rename field is an edit in progress, and the list re-renders for
 // reasons the user did not cause: one failed listing read swaps the rows
-// for an error line, unmounting every row and the open field with them.
-// The draft has to survive that, or a transient network blip silently
-// throws away what someone was in the middle of typing.
+// for an error line. The ListView-owned dialog must retain the same textarea
+// DOM node through that replacement, or the browser loses the caret and IME
+// composition even if a copied draft happens to look right afterwards.
 //
 // The failure is injected the same way the confirming-state tests inject
 // theirs — a 500 latched on while the field is open, and a feed
 // notification to ask for the read that hits it — so what is exercised is
 // the real reader's real failure path.
-test("rename-draft-survives-a-failed-read: the field keeps what was typed", async ({
+test("rename-draft-survives-a-failed-read: the stable field keeps focus and its DOM identity", async ({
   page,
   request,
 }) => {
@@ -1230,7 +1413,12 @@ test("rename-draft-survives-a-failed-read: the field keeps what was typed", asyn
     await expect(row).toBeVisible({ timeout: 15_000 });
     await openRowMenu(row);
     await row.locator(".session-row-rename").click();
-    await row.locator(".rename-input").fill(draft);
+    const dialog = page.locator(".rename-dialog");
+    await dialog.locator(".rename-input").fill(draft);
+    await expect(dialog.locator(".rename-input")).toBeFocused();
+    await dialog.locator(".rename-input").evaluate((field) => {
+      (window as any).__renameTextarea = field;
+    });
 
     // Only now does a listing read fail, strictly after the field holds
     // the draft.
@@ -1241,20 +1429,137 @@ test("rename-draft-survives-a-failed-read: the field keeps what was typed", asyn
     await expect(page.locator(".status.error")).toBeVisible({ timeout: 10_000 });
     await expect(row).toHaveCount(0);
 
-    // The next read succeeds and the row comes back, with the field still
-    // open and still holding what was typed into it. The reader retries a
-    // failed read on its own; the notification is belt and braces.
+    // The dialog remains mounted while the rows are absent. A copied string
+    // in a remounted field is insufficient: identity and focus prove the
+    // selection/composition-bearing native control did not move.
+    await expect(dialog.locator(".rename-input")).toBeFocused();
+    expect(await dialog.locator(".rename-input").evaluate((field) =>
+      field === (window as any).__renameTextarea,
+    )).toBe(true);
+
+    // The next read succeeds and the row comes back with the same editor
+    // still open. The reader retries a failed read on its own; the
+    // notification is belt and braces.
     failing = false;
     feed.notify(3);
     await expect(row).toHaveCount(1, { timeout: 10_000 });
-    await expect(row.locator(".rename-input")).toHaveValue(draft);
+    await expect(dialog.locator(".rename-input")).toHaveValue(draft);
 
-    // And it still works: submitting from here renames the session.
-    await row.locator(".rename-submit").click();
-    await expect(row.locator(".session-title")).toHaveText(draft);
+    // Continue typing after the list changed, then prove the stable editor
+    // still submits to the original id rather than the row now at its old
+    // position.
+    await dialog.locator(".rename-input").press("End");
+    await page.keyboard.type("-tail");
+    await dialog.locator(".rename-submit").click();
+    await expect(row.locator(".session-title")).toHaveText(`${draft}-tail`);
   } finally {
     await page.unroute(SESSION_LISTING);
     if (id) await cleanupSession(request, id);
+  }
+});
+
+/**
+ * A reordered listing used to close the anchored menu that contained the
+ * editor. This test changes the response order while the native textarea is
+ * focused with an interior selection, then proves that the same node and
+ * selection receive more typing and save the source id rather than whichever
+ * row now occupies its former position. It also pins the IME Escape boundary:
+ * composing Escape belongs to the candidate UI, while ordinary Escape still
+ * cancels the dialog.
+ */
+test("rename survives a real committed row reorder without moving its textarea", async ({
+  page,
+  request,
+}) => {
+  const first = await createSession(request, {
+    cwd: "/tmp",
+    invocation: FAKE_AGENT_INVOCATION,
+    title: `rename-reorder-first-${Date.now()}`,
+  });
+  const second = await createSession(request, {
+    cwd: "/tmp",
+    invocation: FAKE_AGENT_INVOCATION,
+    title: `rename-reorder-second-${Date.now()}`,
+  });
+  const draft = `${first.title}-draft`;
+  const selectionStart = Math.floor(draft.length / 2);
+  const selectionEnd = selectionStart + 3;
+  const inserted = "-tail-";
+  const expected = `${draft.slice(0, selectionStart)}${inserted}${draft.slice(selectionEnd)}`;
+  let reverse = false;
+  const feed = await stubFeed(page);
+  try {
+    await page.route(SESSION_LISTING, async (route) => {
+      if (route.request().method() !== "GET" || !reverse) return route.continue();
+      const response = await route.fetch();
+      const body = await response.json();
+      const sourceIndex = body.sessions.findIndex((session: { id: string }) => session.id === first.id);
+      const [source] = body.sessions.splice(sourceIndex, 1);
+      // Move the source to the opposite edge, which makes the test's order
+      // premise true even when unrelated shared-stack rows are present.
+      if (sourceIndex === 0) body.sessions.push(source);
+      else body.sessions.unshift(source);
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    const source = page.locator(`[data-session-id="${first.id}"]`);
+    await expect(source).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(`[data-session-id="${second.id}"]`)).toBeVisible();
+    const sourceIndex = await page.locator(".session-row").evaluateAll((rows, id) =>
+      rows.findIndex((row) => row.getAttribute("data-session-id") === id), first.id);
+    await openRowMenu(source);
+    await source.locator(".session-row-rename").click();
+    const field = page.locator(".rename-dialog .rename-input");
+    await field.fill(draft);
+    await expect(field).toBeFocused();
+    await field.evaluate((node, [start, end]: [number, number]) => {
+      (window as any).__renameReorderField = node;
+      (node as HTMLTextAreaElement).setSelectionRange(start, end);
+      node.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        isComposing: true,
+      }));
+    }, [selectionStart, selectionEnd]);
+    await expect(page.locator(".rename-dialog")).toBeVisible();
+    await expect(field).toHaveValue(draft);
+    expect(await field.evaluate((node) => ({
+      start: (node as HTMLTextAreaElement).selectionStart,
+      end: (node as HTMLTextAreaElement).selectionEnd,
+    }))).toEqual({ start: selectionStart, end: selectionEnd });
+
+    reverse = true;
+    feed.notify(2);
+    await expect.poll(() => page.locator(".session-row").evaluateAll((rows, id) =>
+      rows.findIndex((row) => row.getAttribute("data-session-id") === id), first.id),
+    ).not.toBe(sourceIndex);
+    expect(await field.evaluate((node) => node === (window as any).__renameReorderField)).toBe(true);
+    await expect(field).toBeFocused();
+    expect(await field.evaluate((node) => ({
+      start: (node as HTMLTextAreaElement).selectionStart,
+      end: (node as HTMLTextAreaElement).selectionEnd,
+    }))).toEqual({ start: selectionStart, end: selectionEnd });
+    await page.keyboard.insertText(inserted);
+    await expect(field).toHaveValue(expected);
+    await field.press("Enter");
+    await expect(source.locator(".session-title")).toHaveText(expected);
+    await expect(page.locator(".rename-dialog")).toHaveCount(0);
+    await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
+    expect((await (await request.get(`/api/sessions/${first.id}`)).json()).title).toBe(expected);
+
+    await openRowMenu(source);
+    await source.locator(".session-row-rename").click();
+    const reopened = page.locator(".rename-dialog");
+    await expect(reopened.locator(".rename-input")).toBeFocused();
+    await reopened.locator(".rename-input").press("Escape");
+    await expect(reopened).toHaveCount(0);
+    await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
+  } finally {
+    await page.unroute(SESSION_LISTING);
+    await cleanupSession(request, first.id);
+    await cleanupSession(request, second.id);
   }
 });
 
@@ -1292,7 +1597,7 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
     // title — the reveal must not steal the caret out from under them.
     await openRowMenu(page.locator(`[data-session-id="${id}"]`));
     await page.locator(".session-row-rename").click();
-    const field = page.locator(".session-row-menu-panel .rename-input");
+    const field = page.locator(".rename-dialog .rename-input");
     await expect(field).toBeFocused();
     await field.fill("");
     await page.keyboard.type(typed);
