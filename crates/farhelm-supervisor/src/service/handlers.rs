@@ -125,18 +125,11 @@ const INTENT_KEY_CAP: usize = 512;
 /// the log line, which are the two places an unbounded field would cost
 /// something.
 ///
-/// The handler's own bound rather than an inherited one, for the reason
-/// `MAX_LEASE_BYTES` is: a post-handshake control frame is bounded only by
-/// `MAX_FRAME_LEN` (megabytes), and the hello-only caps in
-/// `farhelm_proto::io` stop applying the moment the connection is
-/// established. The reported id is stored in a column, logged, and
-/// eventually placed on an agent's command line, so it wants a bound at
-/// the doorway even though `agent_kind::is_plausible_conversation_id`
-/// happens to enforce the same number today. Keeping them separate is what
-/// stops a future relaxation of the record parser — whose input is a file
-/// this process at least chose to open — from silently widening what an
-/// in-session peer can push over the wire. Both vendors use UUIDs (36
-/// bytes), so 128 is generous headroom either way.
+/// This envelope must fit Pi's encoded ID and file locator. A post-handshake
+/// control frame otherwise permits megabytes, so the handler bounds the whole
+/// report before the kind-specific validation in `Supervisor::report_conversation`.
+/// Ordinary Claude, Codex, and Goose IDs still have a separate 128-byte limit;
+/// accepting an envelope of this size does not make an equally large ID valid.
 const MAX_CONVERSATION_BYTES: usize = crate::agent_kind::MAX_PI_LOCATOR_BYTES;
 
 /// Byte cap on `ControlMsg::ReportConversation`'s `source` — the vendor's
@@ -7035,27 +7028,42 @@ mod tests {
         );
     }
 
-    /// An id of exactly the cap is ACCEPTED and stored.
+    /// An ordinary ID accepts 128 bytes and rejects 129, independently of the
+    /// larger report envelope needed for Pi's encoded locator.
     ///
-    /// The refusal table above pins one byte past the bound; this pins the
-    /// bound itself, which is the half an off-by-one silently breaks. The
+    /// Pin both sides of this boundary rather than borrowing the envelope cap:
+    /// growing that cap must not change what this Claude fixture submits. The
     /// direction matters: a cap that refused at exactly 128 would not fail
     /// loudly anywhere — the session would simply stop being resumable the
     /// day a vendor's id format grew, and the scan fallback would cover for
     /// it convincingly enough that nobody would look here.
     #[farhelm_testtrace::test]
-    async fn a_report_at_exactly_the_byte_cap_is_accepted() {
+    async fn ordinary_report_ids_keep_their_own_byte_cap() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let auth = reporting_session(&sup, "reporting-session").await;
 
-        let at_cap = "a".repeat(MAX_CONVERSATION_BYTES);
+        let at_cap = "a".repeat(128);
         let reply = send_report(&sup, &auth, 72, &at_cap).await;
         assert!(
             matches!(reply, ControlMsg::ConversationReported { req_id: 72 }),
-            "an id of exactly {MAX_CONVERSATION_BYTES} bytes is inside the bound: {reply:?}"
+            "an ordinary id of exactly 128 bytes is inside the bound: {reply:?}"
+        );
+        let oversized = format!("{at_cap}a");
+        assert!(oversized.len() < MAX_CONVERSATION_BYTES);
+        let reply = send_report(&sup, &auth, 73, &oversized).await;
+        assert!(
+            matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 73,
+                    kind: ErrorKind::InvalidRequest,
+                    ..
+                }
+            ),
+            "the larger envelope must not permit a 129-byte ordinary id: {reply:?}"
         );
         assert_eq!(
             sup.session_snapshot(&auth.session_id)
