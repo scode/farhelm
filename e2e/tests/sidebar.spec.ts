@@ -45,6 +45,7 @@ import {
   countReads,
   createProfile,
   createSession,
+  FAKE_AGENT,
   forceBuildSkew,
   hideSeenState,
   localHostId,
@@ -5481,7 +5482,10 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
 });
 
 /** A focused recent is a keyboard launch shortcut, but pointer activation
- * remains a draft-only affordance so an accidental click cannot start work. */
+ * remains a draft-only affordance so an accidental click cannot start work.
+ * Both paths begin in command mode because a recent names a complete
+ * structured setup; leaving the mode unchanged would submit the dormant raw
+ * command while the row appeared to select something else. */
 test("composer Enter on a focused recent launches the filled setup", async ({ page, request }) => {
   const cwd = "/tmp";
   const launch = {
@@ -5504,6 +5508,10 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await form.getByLabel("folder", { exact: true }).fill(cwd);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await form.locator(".create-session-profile").selectOption("");
+    await form.getByLabel("agent command").fill(FAKE_AGENT);
+    await expect(form).toHaveAttribute("data-composer-mode", "command");
     const recent = form.locator(".launch-composer-recent-slots").getByRole("button").first();
     await expect(recent, "the seeded recent must be visible before its pointer and keyboard contracts are tested").toBeVisible();
     await recent.click();
@@ -5511,10 +5519,15 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     // draft, which is the observable that separates "fills only" from a
     // click that silently did nothing.
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(form, "an admitted recent names the active structured launch, not the dormant command").toHaveAttribute("data-composer-mode", "structured");
     await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo");
     expect(posts, "clicking a recent only fills the draft").toHaveLength(0);
+    // Re-enter command mode so keyboard activation proves the same whole-draft
+    // transition independently of the pointer path above.
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await expect(form).toHaveAttribute("data-composer-mode", "command");
     const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
-    await search.focus();
+    await expect(search).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(recent, "Tab from the search box must establish the keyboard-visible row focus before Enter").toBeFocused();
     await expect(recent.locator(".launch-composer-recent-hint")).toBeVisible();
@@ -5530,6 +5543,8 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
       cwd,
       launch: { harness: "codex", model: "enter-model", effort: "high", permissions: "yolo" },
     });
+    expect(posts[0]).not.toHaveProperty("invocation");
+    expect(posts[0]).not.toHaveProperty("profile_id");
   } finally {
     for (const id of created) await cleanupSession(request, id);
   }

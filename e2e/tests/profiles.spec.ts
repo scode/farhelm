@@ -301,6 +301,9 @@ async function openCreateDialog(page: Page) {
   await expect(page.locator(".create-session-form")).toBeVisible({ timeout: 20_000 });
   await page.locator(".create-session-form").getByRole("button", { name: "other / command" }).click();
   await expect(page.locator(".create-session-profile")).toBeVisible({ timeout: 20_000 });
+  // Entering the mode preserves its draft; choose a command explicitly so
+  // these catalog tests start from a known launch choice.
+  await page.locator(".create-session-profile").selectOption("");
 }
 
 /**
@@ -1563,7 +1566,7 @@ test.describe("agent profiles", () => {
     await page.locator(".new-session-button").click();
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-profile")).toBeDisabled();
+    await expect(form.locator(".create-session-profile")).toHaveCount(0);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
 
     await form.getByRole("button", { name: "other / command" }).click();
@@ -1656,11 +1659,11 @@ test.describe("agent profiles", () => {
 
     await expect(page.locator(".create-session-profile")).toHaveValue("");
     await expect(page.locator(".create-session-submit")).toBeEnabled();
-    // The survivor remains offered, but the button that entered this surface
-    // explicitly selected the command path rather than a remembered profile.
+    // The survivor remains offered, but the helper explicitly chose custom
+    // command rather than letting the remembered profile choose a launch.
     await expect(page.locator(`.create-session-profile option[value="${survivor.id}"]`))
       .toHaveCount(1);
-    await expect(page.locator(".create-session-form input[type=\"text\"]").nth(1)).toBeEnabled();
+    await expect(page.locator(".create-session-form").getByLabel("agent command")).toBeEnabled();
   });
 
   /**
@@ -1747,7 +1750,7 @@ test.describe("agent profiles", () => {
     const form = page.locator(".create-session-form");
     // Directory and title only: the command field is inert while a profile is
     // selected, which is the point — the profile says what runs.
-    await form.getByLabel("working directory").fill("/tmp");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await fillAdvancedTitle(form, title);
     await form.locator('button[type="submit"]').click();
 
@@ -1831,7 +1834,7 @@ test.describe("agent profiles", () => {
     await waitForOption(page, chosen.id);
     const form = page.locator(".create-session-form");
     await page.locator(".create-session-profile").selectOption(chosen.id);
-    await form.getByLabel("working directory").fill("/tmp");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await fillAdvancedTitle(form, `default-created-${stamp}`);
     hold = true;
     const [response] = await Promise.all([
@@ -1892,7 +1895,7 @@ test.describe("agent profiles", () => {
     await waitForOption(page, first.id);
 
     const form = page.locator(".create-session-form");
-    await form.getByLabel("working directory").fill("/nonexistent/definitely/not/here");
+    await form.getByLabel("folder", { exact: true }).fill("/nonexistent/definitely/not/here");
     await fillAdvancedTitle(form, `key-session-${stamp}`);
     await page.locator(".create-session-profile").selectOption(first.id);
 
@@ -2558,7 +2561,7 @@ test.describe("agent profiles", () => {
     await openCreateDialog(page);
     await waitForOption(page, second.id);
     const form = page.locator(".create-session-form");
-    await form.getByLabel("working directory").fill("/nonexistent/definitely/not/here");
+    await form.getByLabel("folder", { exact: true }).fill("/nonexistent/definitely/not/here");
     await fillAdvancedTitle(form, `turn-session-${stamp}`);
     await page.locator(".create-session-profile").selectOption(first.id);
 
@@ -2633,7 +2636,7 @@ test.describe("agent profiles", () => {
     await expect(page.locator(".create-session-profile")).toHaveValue("");
     await expect(form.getByLabel("agent command")).toHaveValue(command);
 
-    await form.getByLabel("working directory").fill("/nonexistent/late-default-test");
+    await form.getByLabel("folder", { exact: true }).fill("/nonexistent/late-default-test");
     await fillAdvancedTitle(form, `late-default-${Date.now()}`);
     await form.locator(".create-session-submit").click();
     await expect.poll(() => bodies.length, { timeout: 20_000 }).toBe(1);

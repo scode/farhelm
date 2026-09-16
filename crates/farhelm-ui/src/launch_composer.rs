@@ -71,6 +71,8 @@ pub(crate) struct ComposerFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ComposerSearchResult {
     Harness(LaunchHarness),
+    /// Switch the shared composer to its profile-or-raw-command controls.
+    Command,
     Model {
         id: String,
         harness: LaunchHarness,
@@ -247,6 +249,7 @@ pub(crate) fn grouped_search_results(
     for result in results {
         match result {
             ComposerSearchResult::Harness(_) => harnesses.push(result),
+            ComposerSearchResult::Command => harnesses.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
             ComposerSearchResult::Effort(_) => efforts.push(result),
             ComposerSearchResult::UsePath(_)
@@ -347,6 +350,9 @@ pub(crate) fn search_results(
         if harness_word(harness).contains(&folded_query) {
             results.push(ComposerSearchResult::Harness(harness));
         }
+    }
+    if "other / command".contains(&folded_query) {
+        results.push(ComposerSearchResult::Command);
     }
     for candidate in catalog {
         if harness.is_some_and(|selected| selected != candidate.harness) {
@@ -1513,6 +1519,19 @@ mod tests {
                 ComposerSearchResult::Recent(history.launches[0].clone()),
             ]
         );
+    }
+
+    /// Command mode must be an explicit picker result. An unmatched query is
+    /// deliberately absent here: search text never becomes an invocation.
+    #[test]
+    fn search_offers_other_command_without_treating_text_as_a_command() {
+        let history = LaunchHistory::default();
+
+        assert_eq!(
+            search_results(&history, &[], "command", None, None),
+            vec![ComposerSearchResult::Command],
+        );
+        assert!(search_results(&history, &[], "run-this", None, None).is_empty());
     }
 
     /// A symlink spelling and its resolved spelling are one destination.
