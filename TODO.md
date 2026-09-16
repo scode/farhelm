@@ -63,41 +63,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `rotation logs out an open client and drops its feed and terminal
   sockets`, in `e2e/tests/auth.spec.ts`. Chromium
   observed an aborted recovery detail read in a broad run and a missing sidebar row after a successful detail read in an
-  exact run. A failure past the exchange no longer cascades (the suite refresh moved to right after it); what remains is
-  the recovery provenance itself. Twenty local repetitions passed without reproducing either shape; the next failure's
-  retained trace carries network, DOM, and console. Establish provenance before changing authentication behavior or
-  recovery assertions.
-
-  Provenance established 2026-09-12, two new reproductions of the missing-sidebar-row shape via recorded hunts (batch
-  `d1859bb8-dc57-4c74-bc41-1c9ca25036cd`): the row is missing because the recovery batch's `/api/sessions?sort=activity`
-  and `/api/hosts` fetches were NEVER SENT — trace network snapshots show `send: -1` from creation until teardown, twice
-  in a row (the feed-handshake re-read batch too), while the same frame's profiles/detail/preferences reads were served
-  in tens of milliseconds throughout, and the reconnected feed and terminal sockets' upgrades themselves queued 4.3s and
-  45s. The helm and supervisor are innocent by logs (both silent through the whole window; supervisor logs preserved
-  from the second reproduction) and every request the helm received was answered. So the stall is in the BROWSER's
-  dispatch of exactly those two fetches, cause not established — what remains unknown is renderer-side network state a
-  Playwright trace does not carry. Note the designed recovery cannot show within the test's own 60s budget: the UI's
-  request timeout is 60s, and only a failed read hands the surface to its retry ladder, so any hung read outlives the
-  test. Next rung: renderer-level receipts in the UI's fetch wrapper (dispatch and completion per request,
-  console-carried) to catch a never-dispatched fetch in the act.
-
-  Receipts landed in #666; a 20-repetition Chromium hunt on 2026-09-16 (run `58d176c8-40d0-457a-8047-f08c0e5f1035`, 19
-  passed) caught the missing-row shape in repeat 6 with full pairing: receipts #16 and #20
-  (`GET /api/sessions?sort=activity`) dispatched from Rust and never completed, while same-batch detail, hosts, and
-  profiles reads completed in tens of milliseconds; the repeat-6 trace is preserved unpacked under `analyst-supplement/`
-  in the run record (Playwright wiped the checkout's `e2e/test-results` on a later run). Both uncompleted reads show no
-  recorded response or timing in the trace network — a missing answer, not a proven never-sent fetch: the `-1` timings
-  cannot distinguish a request the browser shelved from one the helm never answered, so the stall's location is
-  unestablished. Receipt #17 (`GET /api/hosts`) also lacks a completion, but its network entry shows the 401 arriving in
-  the same millisecond the logout unmounted the tree, so a dropped task — not a second stall — is the favored reading
-  there. The unanswered #20 holds the sessions surface past the test's 60s budget while its own 60s request timeout
-  would fire about 3s too late by the clock, so the retry ladder starves exactly as predicted. Two feed upgrades in the
-  same window likewise show no recorded response; the funnel receipts do not cover sockets, so feed-side dispatch
-  remains unobserved. What is still unknown is where these reads stall — same-batch, same-millisecond discrimination by
-  URL is observed twice but unexplained, and no cache headers differ between the endpoints. The fix fork: split
-  idempotent reads to a shorter timeout so an unanswered read fails into the retry ladder inside the budget (a product
-  policy change needing maintainer judgment — the funnel docs call 60s "deliberately generous rather than tuned"), or
-  instrument the transport to locate the stall. Do not weaken the recovery assertions meanwhile.
+  exact run. The post-exchange cascade is contained (the suite refresh moved to right after it); what remains is the
+  recovery provenance itself. Hunts through 2026-09-16 established that the missing-row shape is an unanswered
+  recovery-batch read starving the retry ladder past the test's budget, with the stall's location (browser queue vs helm
+  hang) still unestablished. Full evidence trail: `lore/2026-09-16-rotation-recovery-unanswered-reads.md`. The fix fork
+  needs the maintainer: split idempotent reads to a shorter timeout (a product policy change — the funnel docs call 60s
+  "deliberately generous rather than tuned"), or instrument the transport to locate the stall. Do not weaken the
+  recovery assertions meanwhile.
 
 - Investigate the remaining initial profile focus failures in `e2e/tests/profiles.spec.ts`. WebKit failed the editor
   focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus in
@@ -118,46 +90,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `7fd44a19-ce3f-42fb-a3df-410da327634a`.
   `stalling one tab's writes pauses only that tab; the agent and a sibling stay
   live` never established a HIGH_WATER
-  pause within its observation window. `a tab list past the island cap is listed
-  in full but only partly attached` had
-  the expected path and mounted/revealed state but a closed socket at readiness. Retain gate, attachment and
-  close-reason receipts; keep these failures distinct from the existing single-client stall entry, and do not weaken
-  liveness assertions based on a later passing run.
-
-  The island-cap shape reproduced 3/20 recorded WebKit repetitions on 2026-09-12 (batch
-  `396d6272-a07d-4bd4-b9f1-6409bc916cc9`, timelines attached in the run): the agent terminal's established socket
-  errored and closed about two seconds into the 32-phantom attach-refusal storm, with NO helm log line for it; every
-  reconnect-ladder attempt after that was refused within milliseconds for the rest of the test, and one past-cap
-  phantom's attach retried on a ladder of its own for 20s. The helm logged only the phantom refusals ("has no terminal
-  tab"); the supervisor's log was silent; what killed the agent attachment is not established.
-
-  The stall test's zero-pause shape also reproduced once in ten recorded repetitions (batch
-  `e5f7f17f-7f24-4118-8559-62a1ea5df624`, then 24 consecutive passes): one tab's socket closed about 1.2 seconds after
-  the flood started — before any HIGH_WATER crossing, with no helm log line — the pause poll then waited its full sixty
-  seconds over a dead socket, and at the supervisor's stall interval the session's other two sockets closed before
-  reconnect ladders that were refused instantly. That is the same early-silent-close signature as the island-cap
-  reproduction, and it is consistent with the helm's outbound side winning the race before the browser could pause, but
-  the closing half's own receipt (detach reason, queue depth) still needs a supervisor-side log from a reproduction —
-  preserve the stack's supervisor logs past teardown when hunting again.
-
-  A 20-repetition WebKit island-cap hunt on 2026-09-16 (run `4f6d89c8-2911-4672-877d-751b517a6be0`, stopped after 2
-  failures in 15 runs) reproduced with supervisor logs preserved, and both failures share one signature that supersedes
-  the "established socket died" reading: the agent island shows M5's "never finished connecting" banner — the 5s replay
-  idle timer expired with the socket still CONNECTING, bannered, closed it, and (first-mount rule) never retried; the
-  20s is the readiness budget polling that dead island, not a second mechanism. Each trace carries exactly one agent
-  network entry (101 received) and one console "closed before established" error; both traces plus the tailed supervisor
-  log are preserved unpacked under `analyst-supplement/` in the run record (Playwright wiped the checkout's
-  `e2e/test-results` on a later run). No retained helm line identifies the agent socket, and the supervisor logged only
-  session create/teardown — though the helm's generic "no such session" lines alongside the phantom refusals cannot all
-  be attributed elsewhere either. So the established chain is: handshake accepted, `open` never fired, bannered and
-  closed at 5s, never retried. Why the browser held that one handshake while 32 phantom upgrades churned beside it is a
-  hypothesis (burst churn starving one completion, possibly the same family as the rotation unanswered reads), not a
-  measured cause. The island code already anticipates the shape and deliberately does not recover it (`terminal.js`:
-  "only a socket that worked and then stopped is something to recover"), because its model is "helm not there", not
-  "helm there but one handshake stalled". The fix fork therefore needs the maintainer: retry a never-connected first
-  mount on the ladder (a product change against the M5 comment's letter), accept the burst as test-only pathology the
-  design need not survive (but staggering the mounts weakens the oversized-at-once fixture), or keep digging
-  browser-internally. The stall test was not re-hunted; its 24 consecutive passes stand.
+  pause within its observation window (reproduced once, then 24 consecutive passes; not re-hunted).
+  `a tab list past
+  the island cap is listed in full but only partly attached` had the expected path and
+  mounted/revealed state but a closed socket at readiness. Hunts through 2026-09-16 replaced the "established socket
+  died" reading with a first-mount chain — handshake accepted, `open` never fired, bannered and closed at 5s, never
+  retried — with the stalled handshake itself still hypothesis. Full evidence trail:
+  `lore/2026-09-16-island-cap-never-connected-first-mount.md`. The fix fork needs the maintainer: retry never-connected
+  first mounts on the ladder (against the M5 comment's letter), accept the burst as test-only pathology (but staggering
+  the mounts weakens the oversized-at-once fixture), or keep digging browser-internally. Keep these failures distinct
+  from the existing single-client stall entry, and do not weaken liveness assertions based on a later passing run.
 
 ### Difficult deflake
 
