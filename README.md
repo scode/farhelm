@@ -4,7 +4,7 @@
 > at this time, for a variety of reasons. Do not expect user-friendliness, do not expect the documentation to be correct
 > or helpful, and do not expect anything else either. This notice goes away when that changes.
 
-# farhelm
+# <img src="packaging/farhelm-desktop/icon.svg" width="40" align="middle" alt="F">arhelm
 
 Take the helm - control your agents far away and local.
 
@@ -27,6 +27,6 @@ open](https://raw.githubusercontent.com/scode/farhelm/9eb69b37fd9dd7dea97871f664
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
 ```
 
-Installs `farhelm` into `~/.local/bin` (`farhelm-desktop` too, on macOS). Does NOT auto-upgrade (yet) — re-run the same
-command to update. Setup and development instructions are still parked at [docs/old_readme.md](docs/old_readme.md) while
-this README is being rebuilt.
+Installs `farhelm` into `~/.local/bin`. On macOS it also installs `farhelm-desktop` and a macOS app bundle
+(`~/Applications/Farhelm.app`). Does NOT auto-upgrade (yet) — re-run the same command to update. Setup and development
+instructions are still parked at [docs/old_readme.md](docs/old_readme.md) while this README is being rebuilt.
