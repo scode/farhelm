@@ -305,15 +305,24 @@ Clone reuses the create form rather than a second submit path: the click builds 
 click. A `use_effect` inside the form compares that generation against the last one it applied and reseeds the form
 whenever the two disagree; comparing generations rather than mere presence is what makes cloning the SAME row twice in a
 row reseed a second time, since an unrelated rerender of that effect (a host reconnect, a catalog refresh) must not
-overwrite an edit in progress. A structured source seeds the composer from its stored declarative selection, preserving
-omitted harness defaults rather than parsing the compiled invocation. A legacy source also seeds the raw invocation for
-custom-command mode, including when profile mode is selected and displays the selected profile's invocation. For legacy
-sources, the profile choice is used only when the row's own profile snapshot is `Present` — the catalog still holds that
-id under the SAME name — which is deliberately STRICTER than an ordinary create's remembered-default rule (an id that
-merely still exists, under a new name, is not evidence that cloning it again is what today's catalog would still offer);
-every other answer falls back to the raw command. Trusting the id at all is still a snapshot decision, not a live one:
-submitting a profile-backed clone resolves that id against whatever definition the catalog holds at that moment, exactly
-like any other profile-backed create.
+overwrite an edit in progress. A structured source seeds the shared composer from its stored declarative selection,
+preserving omitted harness defaults rather than parsing the compiled invocation. A legacy source selects
+`other / command` in that same composer and seeds the raw invocation there, including when profile mode is selected and
+displays the selected profile's invocation. Destination, folder browser, optional name, search, and submission remain
+shared; only the structured model, effort, and permission controls are replaced by the profile picker and raw command
+field. For legacy sources, the profile choice is used only when the row's own profile snapshot is `Present` — the
+catalog still holds that id under the SAME name — which is deliberately STRICTER than an ordinary create's
+remembered-default rule (an id that merely still exists, under a new name, is not evidence that cloning it again is what
+today's catalog would still offer); every other answer falls back to the raw command. Trusting the id at all is still a
+snapshot decision, not a live one: submitting a profile-backed clone resolves that id against whatever definition the
+catalog holds at that moment, exactly like any other profile-backed create.
+
+Search is the composer's one initial and post-selection focus target in both modes. Its command-mode result set is built
+without the retained structured harness or model, so it can expose globally owned models but cannot offer an effort that
+would edit only a hidden draft. A harness, known model, or recent setup explicitly returns to structured mode; a folder
+changes the shared destination and leaves the active mode alone. The focus handoff runs only at dialog mount, explicit
+mode buttons, and accepted search results. Catalog, history, and operation rerenders cannot take focus back from another
+field.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this

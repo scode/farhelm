@@ -38,7 +38,7 @@ function row(page: Page, id: string) {
  * values into the request.
  */
 async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
-  await form.getByLabel("working directory").fill(cwd);
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -58,6 +58,13 @@ async function submitClonedCwd(page: Page, form: Locator, cwd: string) {
  */
 async function fillCloneTitle(form: Locator, title: string) {
   await form.getByLabel("name (optional)").fill(title);
+}
+
+/** Switch the shared harness picker to the legacy profile/command controls. */
+async function chooseCommandMode(form: Locator) {
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+  await expect(form).toHaveAttribute("data-composer-mode", "command");
+  await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
 }
 
 /**
@@ -205,7 +212,7 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
 
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
-    await expect(form.getByLabel("working directory")).toHaveValue(originalCwd);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);
     await expect(form.getByLabel("name (optional)")).toHaveValue(title);
     // The row's OWN profile (A) wins the picker over the helm's remembered
     // default (B, moved there by the throwaway session above) — see that
@@ -228,6 +235,16 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
       'agent command (the selected profile\'s own; choose "custom command" above to edit)',
     );
 
+    // The destination belongs to the shared shell, while the two launch
+    // drafts retain their own values across a round trip through a harness.
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(form).toHaveAttribute("data-composer-mode", "structured");
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(originalCwd);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await chooseCommandMode(form);
+    await expect(form.locator(".create-session-profile")).toHaveValue(profileA.id);
+    await expect(command).toHaveValue(invocationA);
+
     await form.locator(".create-session-profile").selectOption(profileB.id);
     await expect(command).toHaveValue(invocationB);
     await expect(command).toBeDisabled();
@@ -242,7 +259,7 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await form.locator(".create-session-profile").selectOption(profileA.id);
 
     const newCwd = stackScratchDir("clone-e2e-");
-    await form.getByLabel("working directory").fill(newCwd);
+    await form.getByLabel("folder", { exact: true }).fill(newCwd);
     const [response] = await Promise.all([
       page.waitForResponse(
         (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -272,6 +289,40 @@ test("clone pre-fills the create form from a profile-backed row, and the edited 
     await cleanupSession(request, original.id);
     await cleanupProfile(request, profileA.id);
     await cleanupProfile(request, profileB.id);
+  }
+});
+
+/**
+ * A deleted profile is not evidence for substituting another profile. Clone
+ * must keep the source invocation exact and surface command mode so a person
+ * can review or edit the fallback before a request is sent.
+ */
+test("a clone of a missing-profile session opens other command with its exact invocation", async ({ page, request }) => {
+  const invocation = FAKE_AGENT.replace("--script basic", "--script altscreen");
+  const profile = await createProfile(request, {
+    name: `clone-missing-profile-${Date.now()}`,
+    invocation,
+  });
+  const source = await createSession(request, {
+    title: `clone-missing-profile-source-${Date.now()}`,
+    cwd: "/tmp",
+    profile_id: profile.id,
+  });
+  try {
+    await cleanupProfile(request, profile.id);
+    await page.goto("/");
+    const sourceRow = row(page, source.id);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(sourceRow);
+    await sourceRow.locator(".session-row-clone").click();
+
+    const form = page.locator(".create-session-form");
+    await expect(form).toHaveAttribute("data-composer-mode", "command");
+    await expect(form.locator(".create-session-profile")).toHaveValue("");
+    await expect(form.getByLabel("agent command")).toHaveValue(invocation);
+  } finally {
+    await cleanupSession(request, source.id);
+    await cleanupProfile(request, profile.id);
   }
 });
 
@@ -321,14 +372,14 @@ test("each clone restores every field after an intervening draft edit", async ({
     const form = page.locator(".create-session-form");
     await expect(form).toBeVisible();
     await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-    await expect(form.getByLabel("working directory")).toHaveValue(cwdA);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdA);
     await expect(form.getByLabel("name (optional)")).toHaveValue(titleA);
     await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
 
     // Edit every field before cloning again — a partial reseed (one field
     // replaced, another left at this edit) would otherwise be invisible
     // to an assertion that only checked the fields B's clone changes.
-    await form.getByLabel("working directory").fill("/tmp/edited-in-between");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp/edited-in-between");
     await form.getByLabel("agent command").fill("sleep 999");
     await fillCloneTitle(form, "edited in between");
 
@@ -340,20 +391,20 @@ test("each clone restores every field after an intervening draft edit", async ({
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
     await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-    await expect(form.getByLabel("working directory")).toHaveValue(cwdB);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdB);
     await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
     await expect(form.getByLabel("agent command")).toHaveValue(FAKE_AGENT);
 
     // Edit again, close, then clone B a second time. A later mount of the
     // same source must not restore the abandoned draft merely because its
     // prefill resembles the previous clone.
-    await form.getByLabel("working directory").fill("/tmp/edited-again");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp/edited-again");
     await fillCloneTitle(form, "edited again");
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await openRowMenu(rowB);
     await rowB.locator(".session-row-clone").click();
-    await expect(form.getByLabel("working directory")).toHaveValue(cwdB);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwdB);
     await expect(form.getByLabel("name (optional)")).toHaveValue(titleB);
 
     const newCwd = stackScratchDir("clone-reseed-e2e-");
@@ -403,7 +454,7 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     const assertFreshDefaults = async (expectedCwd: string) => {
       await expect(form).toBeVisible();
       await expect(form.locator(".create-session-host")).toHaveValue(String(local));
-      await expect(form.getByLabel("working directory")).toHaveValue(expectedCwd);
+      await expect(form.getByLabel("folder", { exact: true })).toHaveValue(expectedCwd);
       await expect(form.getByRole("button", { name: "Codex", exact: true })).toHaveAttribute(
         "aria-pressed",
         "false",
@@ -419,7 +470,7 @@ test("closing a clone without submitting, or submitting it, both leave the next 
     await openRowMenu(source);
     await source.locator(".session-row-clone").click();
     await expect(form).toBeVisible();
-    await expect(form.getByLabel("working directory")).toHaveValue(sourceCwd);
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(sourceCwd);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
     await newSessionButton.click();

@@ -1943,7 +1943,7 @@ test.describe("multi-host", () => {
       });
 
       const newCwd = stackScratchDir("clone-remote-e2e-");
-      await form.getByLabel("working directory").fill(newCwd);
+      await form.getByLabel("folder", { exact: true }).fill(newCwd);
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -2048,7 +2048,7 @@ test.describe("multi-host", () => {
       await expect(form.locator(".create-session-profile")).toHaveValue(explicitProfile.id);
 
       const newCwd = stackScratchDir("clone-remote-explicit-e2e-");
-      await form.getByLabel("working directory").fill(newCwd);
+      await form.getByLabel("folder", { exact: true }).fill(newCwd);
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) => r.request().method() === "POST" && r.url().endsWith("/api/sessions"),
@@ -2924,7 +2924,7 @@ test.describe("multi-host", () => {
       });
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-host")).toBeDisabled();
-      await expect(form.getByLabel("working directory")).toBeDisabled();
+      await expect(form.getByLabel("folder", { exact: true })).toBeDisabled();
       release?.();
       await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     } finally {
@@ -2970,7 +2970,7 @@ test.describe("multi-host", () => {
       // reason. A host change now preserves any profile choice, so this reset
       // states that the test is intentionally exercising a typed command.
       await form.locator(".create-session-profile").selectOption("");
-      await form.getByLabel("working directory").fill("/tmp");
+      await form.getByLabel("folder", { exact: true }).fill("/tmp");
       await form.getByLabel("agent command").fill(FAKE_AGENT_INVOCATION);
       await form.getByLabel("name (optional)").fill(title);
       await page.route("**/api/sessions", async (route) => {

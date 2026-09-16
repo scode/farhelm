@@ -132,6 +132,7 @@ fn apply_composer_search_result(
     mut cwd: Signal<String>,
     mut cwd_raw_seed: Signal<Option<String>>,
     mut cwd_edited: Signal<bool>,
+    mut creation_surface: Signal<CreationSurface>,
     mut structured_harness: Signal<Option<LaunchHarness>>,
     mut structured_model: Signal<Option<String>>,
     mut structured_model_raw_seed: Signal<Option<String>>,
@@ -165,6 +166,12 @@ fn apply_composer_search_result(
         remembered_destination.set(None);
     }
     match result {
+        ComposerSearchResult::Command => {
+            // Search is a picker, including for the command mode. It never
+            // turns its query into an invocation; the existing command draft
+            // stays untouched until the person edits that field.
+            creation_surface.set(CreationSurface::Legacy);
+        }
         crate::launch_composer::ComposerSearchResult::UsePath(folder)
         | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
             reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
@@ -178,6 +185,7 @@ fn apply_composer_search_result(
             return Some(folder);
         }
         crate::launch_composer::ComposerSearchResult::Harness(harness) => {
+            creation_surface.set(CreationSurface::Structured);
             let before = LaunchSelection {
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
@@ -201,6 +209,10 @@ fn apply_composer_search_result(
             custom_model_harness.set(owner);
         }
         crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
+            // A model carries its harness ownership, so selecting it is also
+            // an explicit return to structured mode rather than leaving a
+            // structured draft hidden behind command controls.
+            creation_surface.set(CreationSurface::Structured);
             let before = LaunchSelection {
                 harness: structured_harness().unwrap_or(harness),
                 model: structured_model(),
@@ -239,6 +251,7 @@ fn apply_composer_search_result(
             structured_effort.set(Some(effort));
         }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
+            creation_surface.set(CreationSurface::Structured);
             composer_reset_reason.set(None);
             let selection = crate::launch_composer::select_recent(&entry);
             let owner = selection.model.as_ref().and_then(|model| {
@@ -643,21 +656,17 @@ fn install_composer_focus_trap() {
     );
 }
 
-/// Give each composer surface an explicit first focus target.
+/// Give the shared composer search focus at an explicit interaction boundary.
 ///
-/// A structured dialog starts at its searchable chooser. Legacy clones do
-/// not render that control, so they start at the agent selector instead of
-/// leaving focus on the page beneath the modal. This runs on a deliberate
-/// surface transition too, which keeps the same contract when Other and Back
-/// swap the controls after the dialog has mounted.
+/// Callers invoke this only when the dialog mounts, a mode button is pressed,
+/// or a search result is accepted. Ordinary rerenders must never reclaim focus
+/// from a field the user deliberately entered.
 fn focus_composer_surface() {
     document::eval(
         r#"(() => {
             const dialog = document.querySelector('.create-session-form[role="dialog"]');
             if (!dialog) return;
-            const target = dialog.querySelector(
-                '.launch-composer-search input:not([disabled]), .create-session-agent:not([disabled])'
-            );
+            const target = dialog.querySelector('.launch-composer-search input:not([disabled])');
             target?.focus({ preventScroll: true });
         })()"#,
     );
@@ -1174,10 +1183,11 @@ fn reseed_cloned_field(
 ///
 /// ## The agent picker (PLAN_M6_75.md item 8)
 ///
-/// The dialog offers the helm's whole catalog on every host and defaults to
-/// the helm-wide last-used profile, asking rather than guessing when that
-/// profile is gone. `profiles::resolve_agent` owns both halves of that rule.
-/// Changing the host leaves an explicit choice intact. The command field is
+/// The dialog offers the helm's whole catalog on every host. Ordinary New
+/// starts without a structured harness; choosing Other activates a raw-command
+/// draft, never the helm's remembered profile. Clone and Replace instead seed
+/// their source's profile or exact command. Changing the host leaves an explicit
+/// choice intact. The command field is
 /// disabled while a profile is selected, because the
 ///   two creation modes are mutually exclusive on the wire and a body naming
 ///   both is refused. Disabling it is also what keeps the intent binding
@@ -1199,14 +1209,9 @@ fn reseed_cloned_field(
 /// nothing in this section, or in the reseed effect below, branches on that
 /// field — the two verbs differ only past submit (see `IntentBinding::
 /// replace_source`), which is the whole point of routing both through one
-/// prefill mechanism instead of a second one. The one wrinkle it adds to
-/// the agent picker: a prefilled profile choice must WIN over the
-/// helm's remembered default on the render right after the clone,
-/// which is the opposite of the ordinary "nothing chosen yet, seed from the
-/// remembered default" rule two paragraphs up. The reseed effect (below)
-/// gets this for free rather than as a special case, because it sets
-/// `chosen_profile` before the remembered-default seeding runs, and that
-/// seeding already backs off the moment a choice already exists. Profile
+/// prefill mechanism instead of a second one. The reseed effect replaces the
+/// whole agent draft for each source generation, including the dormant command
+/// choice ordinary New starts with. Profile
 /// confirmation is independent of host reconciliation: the one helm catalog
 /// applies everywhere, so a delayed or unconfirmable host cannot suppress a
 /// valid source profile, and a later host answer cannot overwrite a person's
@@ -1388,10 +1393,11 @@ pub(super) fn CreateSessionForm(
     let mut title_raw_seed = use_signal(|| None::<String>);
     let mut title_edited = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
-    // The agent this dialog is going to use, once anything has decided it —
-    // the user picking, or the helm's remembered default being CONSUMED (see
-    // the effect below). `None` means nobody has decided yet.
-    let mut chosen_profile = use_signal(|| None::<AgentChoice>);
+    // Ordinary New must never inherit the last-used profile merely because
+    // its catalog arrives. This dormant command draft becomes active only
+    // when Other is selected; structured mode still requires a harness choice.
+    // Clone reseeding clears it before resolving that source's own agent.
+    let mut chosen_profile = use_signal(|| Some(AgentChoice::Command));
     // Whether an explicit choice has been overtaken by reality. Derived per
     // render rather than written back into `chosen_host`, so it cannot
     // outlive the condition that produced it — and so a host that comes back
@@ -1575,14 +1581,6 @@ pub(super) fn CreateSessionForm(
     // intent, and superseded the moment any part of that binding changes.
     let mut intent_key = use_signal(|| None::<(String, IntentBinding)>);
     let busy = ops.busy();
-
-    // The mount and every structured/legacy surface change need the same
-    // focus handoff. Reading only the surface means ordinary rerenders never
-    // steal focus while someone is editing a field.
-    use_effect(move || {
-        let _surface = creation_surface();
-        focus_composer_surface();
-    });
 
     // Mounting this component is the create surface's closed-to-open
     // transition. An explicit request is allowed through a latched build skew
@@ -2037,6 +2035,12 @@ pub(super) fn CreateSessionForm(
                 browse_error,
             );
             reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &entry.cwd);
+            // Admission precedes the mode transition so a stale destination
+            // cannot leave the user on a partially applied structured draft.
+            // Once admitted, the row's meaning is the whole structured setup;
+            // leaving command mode active would submit an unrelated dormant
+            // invocation when Enter follows this callback.
+            creation_surface.set(CreationSurface::Structured);
             composer_reset_reason.set(None);
             intent_key.set(None);
             true
@@ -2143,13 +2147,19 @@ pub(super) fn CreateSessionForm(
             intent_key.set(None);
         }
     });
+    let active_search_harness = (*creation_surface.read() == CreationSurface::Structured)
+        .then(&*structured_harness)
+        .flatten();
+    let active_search_model = (*creation_surface.read() == CreationSurface::Structured)
+        .then(&*structured_model)
+        .flatten();
     let search_result_groups =
         crate::launch_composer::grouped_search_results(crate::launch_composer::search_results(
             &recent_history,
             &catalog_models,
             &composer_search(),
-            structured_harness(),
-            structured_model().as_deref(),
+            active_search_harness,
+            active_search_model.as_deref(),
         ));
     let catalog_models_for_search_input = catalog_models.clone();
     let search_results_for_keys = search_result_groups
@@ -2178,11 +2188,9 @@ pub(super) fn CreateSessionForm(
     let browse_base_for_folder = browse_base.clone();
     let browse_hosts_for_folder = browse_hosts.clone();
     let hosts_for_destination_choice = hosts.clone();
-    // The host selector and its reconciliation notes are built ONCE and placed
-    // by whichever surface renders: inside the structured destination block,
-    // or under the legacy surface's own "host" label. One Element cloned into
-    // two mutually exclusive branches keeps the handler, the option marking,
-    // and the four notes from drifting apart the way two copies would.
+    // The host selector and its reconciliation notes are built once for the
+    // shared destination block. Command mode changes only launch controls, so
+    // it has no second host path that could drift from this one.
     //
     // The select is disabled for the whole round trip, exactly like the text
     // fields: the key is bound to the target, and a selection changing between
@@ -2341,6 +2349,7 @@ pub(super) fn CreateSessionForm(
             // gives browser tests a synchronous observation point for races
             // that deliberately keep the visible result unchanged.
             "data-history-fetched-revision": "{fetched_history_revision}",
+            "data-composer-mode": if *creation_surface.read() == CreationSurface::Structured { "structured" } else { "command" },
             "data-browse-live-connection": "{live_browse_connection().unwrap_or_default()}",
             "data-browse-activation-attempts": "{browse_activation_attempts}",
             "data-browse-reply-completions": "{browse_reply_completions}",
@@ -2426,7 +2435,7 @@ pub(super) fn CreateSessionForm(
                     LaunchIntent::Structured(selection)
                 } else {
                     let Some(choice) = resolve_now() else {
-                        error.set(Some("no agent is selected for this create — choose a profile, or choose \"custom command\" to run the command below".to_string()));
+                        error.set(Some("no agent is selected for this create — choose a profile or custom command in other / command mode".to_string()));
                         ops.release();
                         return;
                     };
@@ -2909,6 +2918,9 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
+            // Search belongs to the shared shell. A query can choose a
+            // structured harness, a command mode, a folder, or a saved setup;
+            // it never manufactures a command from text alone.
             if *creation_surface.read() == CreationSurface::Structured {
                 div { class: "launch-composer-summary", aria_live: "polite",
                     "model: "
@@ -2925,7 +2937,9 @@ pub(super) fn CreateSessionForm(
                     }
                 }
             }
-            if *creation_surface.read() == CreationSurface::Structured {
+            // Destination and its optional name are one draft regardless of
+            // which launch controls happen to be active below.
+            div {
                 div {
                     class: "launch-composer-search",
                     onclick: move |evt| evt.stop_propagation(),
@@ -2944,17 +2958,11 @@ pub(super) fn CreateSessionForm(
                         autocorrect: "off",
                         autocapitalize: "none",
                         spellcheck: "false",
-                        // The dialog opens in structured mode, so its
-                        // searchable chooser is the first meaningful focus
-                        // target rather than leaving keyboard users behind
-                        // the newly mounted modal.
-                        autofocus: true,
-                        // Dioxus can retain an already-created browser node
-                        // across the render that makes this dialog visible,
-                        // and HTML only applies `autofocus` while inserting a
-                        // node. Ask the mounted renderer as well so the
-                        // keyboard handoff is real in WebKit and Chromium,
-                        // not merely present in the serialized markup.
+                        // This node is shared by both modes and mounts once per
+                        // dialog. The renderer-level handoff covers engines
+                        // where focusing from the parent mount arrives before
+                        // the child can accept it, without replaying on later
+                        // catalog or history renders.
                         onmounted: move |element| {
                             let input = element.data();
                             spawn(async move {
@@ -2994,13 +3002,21 @@ pub(super) fn CreateSessionForm(
                                     .then(|| history.clone())
                                 })
                                 .unwrap_or_default();
+                            let active_harness = (*creation_surface.peek()
+                                == CreationSurface::Structured)
+                                .then(&*structured_harness)
+                                .flatten();
+                            let active_model = (*creation_surface.peek()
+                                == CreationSurface::Structured)
+                                .then(&*structured_model)
+                                .flatten();
                             let groups = crate::launch_composer::grouped_search_results(
                                 crate::launch_composer::search_results(
                                     &promoted_history,
                                     &catalog_models_for_search_input,
                                     &evt.value(),
-                                    structured_harness(),
-                                    structured_model().as_deref(),
+                                    active_harness,
+                                    active_model.as_deref(),
                                 ),
                             );
                             composer_search_index.set(
@@ -3104,9 +3120,10 @@ pub(super) fn CreateSessionForm(
                                             live_destination,
                                             remembered_destination,
                                             history_activation_attempts,
-                                            cwd,
-                                            cwd_raw_seed,
-                                            cwd_edited,
+                                        cwd,
+                                        cwd_raw_seed,
+                                        cwd_edited,
+                                        creation_surface,
                                             structured_harness,
                                             structured_model,
                                             structured_model_raw_seed,
@@ -3211,6 +3228,7 @@ pub(super) fn CreateSessionForm(
                                                                 result.clone(), history_target.clone(),
                                                                 live_destination, remembered_destination,
                                                                 history_activation_attempts, cwd, cwd_raw_seed, cwd_edited,
+                                                                creation_surface,
                                                                 structured_harness, structured_model,
                                                                 structured_model_raw_seed, structured_model_edited,
                                                                 custom_model_harness, structured_effort,
@@ -3238,6 +3256,7 @@ pub(super) fn CreateSessionForm(
                                                         | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! { "Use this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {harness:?}" },
+                                                        crate::launch_composer::ComposerSearchResult::Command => rsx! { "Other / command" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
@@ -3357,11 +3376,10 @@ pub(super) fn CreateSessionForm(
             // client-side "helpful" rewrite) — so every input here opts
             // out of every form of text mangling a browser might apply on
             // its own, for whichever of these two reasons applies to it.
-            if *creation_surface.read() == CreationSurface::Structured {
-                // The two columns preserve the form's destination-first tab
-                // order. The visual split only removes wasted wide-screen
-                // label space; it must not turn creation into a wizard.
-                div { class: "launch-composer-columns",
+            // The two columns preserve the form's destination-first tab
+            // order in every mode. Only the launch-specific controls in the
+            // choices column change when the user selects other / command.
+            div { class: "launch-composer-columns",
                     div { class: "launch-composer-column-destination",
                         // A destination is a host and its folder, so the structured
                         // composer keeps the controls that change either fact in one
@@ -3460,11 +3478,10 @@ pub(super) fn CreateSessionForm(
                                 }
                                 {destination_resets.clone()}
                             }
-                            // This is one of two conditional render sites for the
-                            // same optional name signal. Keeping only the active
-                            // surface's input mounted gives assistive technology one
-                            // destination block and preserves the strict label lookup
-                            // tests rely on.
+                            // The optional name belongs to the shared destination
+                            // block. Keeping one mounted input gives assistive
+                            // technology one destination and preserves strict label
+                            // lookup.
                             label { class: "launch-composer-name",
                                 // The label stays the accessible wrapper; only its
                                 // text takes the section-label caps, so the styling
@@ -3511,8 +3528,8 @@ pub(super) fn CreateSessionForm(
                                 ] {
                                     button {
                                         r#type: "button",
-                                        class: if *structured_harness.read() == Some(harness) { "selected" } else { "" },
-                                        aria_pressed: *structured_harness.read() == Some(harness),
+                                        class: if creation_surface() == CreationSurface::Structured && *structured_harness.read() == Some(harness) { "selected" } else { "" },
+                                        aria_pressed: creation_surface() == CreationSurface::Structured && *structured_harness.read() == Some(harness),
                                         disabled: busy,
                                         onclick: {
                                             let catalog = catalog_for_harness.clone();
@@ -3549,7 +3566,9 @@ pub(super) fn CreateSessionForm(
                                             structured_model.set(selection.model);
                                             structured_effort.set(selection.effort);
                                             custom_model_harness.set(owner);
+                                            creation_surface.set(CreationSurface::Structured);
                                             intent_key.set(None);
+                                            focus_composer_surface();
                                             }
                                         },
                                         "{label}"
@@ -3557,6 +3576,8 @@ pub(super) fn CreateSessionForm(
                                 }
                                 button {
                                     r#type: "button",
+                                    class: if *creation_surface.read() == CreationSurface::Legacy { "selected" } else { "" },
+                                    aria_pressed: *creation_surface.read() == CreationSurface::Legacy,
                                     disabled: busy,
                                     onclick: move |_| {
                                         if !draft_transition_allowed(ops) {
@@ -3566,20 +3587,19 @@ pub(super) fn CreateSessionForm(
                                             offered_history, create_target, fetched_history,
                                         );
                                         creation_surface.set(CreationSurface::Legacy);
-                                        // This is an explicit escape from the
-                                        // structured composer, not merely a change
-                                        // in which controls are visible. Leaving a
-                                        // remembered profile selected would make a
-                                        // later Launch run that profile instead of
-                                        // the command path the button promised.
-                                        chosen_profile.set(Some(AgentChoice::Command));
+                                        // Changing launch mode is not a profile
+                                        // selection. Keep the command-mode draft
+                                        // intact so a valid prefill or deliberate
+                                        // profile choice remains available here.
                                         clone_agent_state.set(CloneAgentState::UserTookOver);
                                         intent_key.set(None);
+                                        focus_composer_surface();
                                     },
                                     "other / command"
                                 }
                             }
                         }
+                        if *creation_surface.read() == CreationSurface::Structured {
                         div { class: "launch-composer-choice launch-composer-model-choice",
                             span { class: "launch-composer-section-label", "model" }
                             div { class: "launch-composer-model",
@@ -3872,46 +3892,15 @@ pub(super) fn CreateSessionForm(
                         if let Some(reason) = composer_reset_reason() {
                             div { class: "launch-composer-choice-error", role: "status", "{reason}" }
                         }
-                    }
-                }
-            } else {
-                // Legacy profiles and arbitrary commands remain available for
-                // compatibility, but they are an explicit alternate surface
-                // rather than a disabled row mixed into the ordinary launch
-                // choices. Returning here preserves the draft fields users
-                // already entered while making the selected mode visible.
-                div { class: "launch-composer-legacy-action",
-                    button {
-                        r#type: "button",
-                        disabled: busy,
-                        onclick: move |_| {
-                            if !draft_transition_allowed(ops) {
-                                return;
-                            }
-                            creation_surface.set(CreationSurface::Structured);
-                            intent_key.set(None);
-                            error.set(None);
-                        },
-                        "back to harnesses"
-                    }
-                }
-                // The legacy surface keeps a plain labelled host control ahead
-                // of its working-directory field below; only the structured
-                // surface presents host and folder as the destination block.
-                // Same Element, same notes, so the two surfaces cannot drift.
-                label { class: "launch-composer-host",
-                    "host"
-                    {host_select.clone()}
-                }
-                {host_notes.clone()}
-            }
+                        }
+                        if *creation_surface.read() == CreationSurface::Legacy {
             // The agent, offered from the helm catalog and defaulting
             // to what a session was last created from on this helm (SPEC.md's
             // creation rule; `profiles::resolve_agent`). The empty option is
             // the raw command path below rather than "no agent" — a create
             // always launches something, and this select is which of the two
             // mutually exclusive modes it uses.
-            label { class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
+            label {
                 "agent"
                 select {
                     class: "create-session-agent",
@@ -3921,7 +3910,7 @@ pub(super) fn CreateSessionForm(
                     // is bound to what is launched, so a selection that moved
                     // between minting and sending would publish a key
                     // belonging to a different create.
-                    disabled: busy || *creation_surface.read() == CreationSurface::Structured,
+                    disabled: busy,
                     value: "{chosen_agent}",
                     onchange: move |evt| {
                         if !draft_transition_allowed(ops) {
@@ -4022,113 +4011,40 @@ pub(super) fn CreateSessionForm(
                     ],
                 }
             }
-            label { class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
-                "working directory"
+            // The raw field shares the choices column with the profile picker.
+            // A selected profile shows its exact invocation but keeps the field
+            // inert; custom command mode edits and submits the raw draft.
+            label {
+                if by_profile {
+                    "agent command (the selected profile's own; choose \"custom command\" above to edit)"
+                } else {
+                    "agent command"
+                }
                 input {
                     r#type: "text",
-                    required: true,
+                    required: !by_profile,
                     autocomplete: "off",
                     autocorrect: "off",
                     autocapitalize: "none",
                     spellcheck: "false",
-                    // A clone can seed this from a peer-supplied path (see
-                    // `CreatePrefill`), shown ESCAPED while untouched
-                    // (`peer::display_peer`, applied by `reseed_cloned_field`)
-                    // so a directional override or an invisible character in
-                    // it cannot make the field say something different from
-                    // the bytes a submit would actually send — the same
-                    // escaped-display / raw-seed / edited-flag model
-                    // `profiles::ProfileDraft` uses (item2-review2.md F5).
-                    // `dir: "ltr"` is the SEPARATE per-value isolation every
-                    // other rendering of relayed text gets (`crate::peer`),
-                    // so a directional override also cannot visually reorder
-                    // this field against the labels and buttons around it.
                     dir: "ltr",
-                    value: "{cwd}",
-                    disabled: busy,
+                    value: "{displayed_invocation}",
+                    disabled: busy || by_profile,
                     oninput: move |evt| {
                         if !draft_transition_allowed(ops) {
                             return;
                         }
-                        cwd.set(evt.value());
-                        remembered_destination.set(None);
-                        invalidate_directory_browse(
-                            browse_generation, browse_request, browse_result, browse_error,
-                        );
-                        // The user is now typing their OWN text, not
-                        // reviewing a clone's — a submit from here on sends
-                        // exactly what this field shows, not the raw seed
-                        // (`profiles::submitted_field`).
-                        cwd_edited.set(true);
-                        // An edit makes the next submit a DIFFERENT
-                        // intent, so the key the last one used stops
-                        // applying here (this component's docs carry the
-                        // full argument for both edges of that rule).
+                        invocation.set(evt.value());
+                        invocation_edited.set(true);
+                        chosen_profile.set(Some(AgentChoice::Command));
+                        clone_agent_state.set(CloneAgentState::UserTookOver);
                         intent_key.set(None);
                     },
                 }
             }
-            button {
-                r#type: "button",
-                class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
-                disabled: busy || selected.is_none(),
-                onclick: move |_| {
-                    if !draft_transition_allowed(ops) {
-                        return;
-                    }
-                    request_directory_browse(
-                        browse_base.clone(),
-                        selected,
-                        &browse_hosts,
-                        browse_target,
-                        submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
-                        browse_generation, browse_request, browse_result, browse_error, browse_reply_completions,
-                        live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
-                    );
-                },
-                "browse this path"
-            }
-            if *creation_surface.read() == CreationSurface::Legacy {
-                // The legacy destination is its working-directory field plus
-                // the browse button above. The two resets follow them, as
-                // they do on the structured surface, and then this mirror
-                // mounts the same optional-name behavior, so both surfaces
-                // read host, folder, browse, resets, name in the same order.
-                // The two name sites are surface-guarded so exactly ONE name
-                // input exists in the DOM at a time: a hidden duplicate would
-                // double the accessible form and break strict label lookups,
-                // which is why this is not a `launch-composer-legacy-hidden`
-                // twin like the working-directory and command fields.
-                div { class: "launch-composer-folder-links",
-                    {destination_resets.clone()}
-                }
-                label { class: "launch-composer-name",
-                    span { class: "launch-composer-section-label", "name (optional)" }
-                    input {
-                        r#type: "text",
-                        autocomplete: "off",
-                        autocorrect: "off",
-                        autocapitalize: "none",
-                        spellcheck: "false",
-                        // Same escaped-display / raw-seed model and the same
-                        // per-value directional isolation as the structured
-                        // copy above; see that input's comments.
-                        dir: "ltr",
-                        value: "{title}",
-                        disabled: busy,
-                        oninput: move |evt| {
-                            if !draft_transition_allowed(ops) {
-                                return;
-                            }
-                            title.set(evt.value());
-                            title_edited.set(true);
-                            // An edit is a different intent, so the last
-                            // submit's idempotency key stops applying.
-                            intent_key.set(None);
-                        },
+                        }
                     }
                 }
-            }
             if let Some(reason) = browse_error.read().clone() {
                 PeerLine {
                     class: "create-session-error".to_string(),
@@ -4245,56 +4161,6 @@ pub(super) fn CreateSessionForm(
                             "{display_peer(&child)}"
                         }
                     }
-                }
-            }
-            // Present in both modes and INERT in one: a profile already says
-            // what to run, the wire refuses a create naming both, and the
-            // profile's own invocation is the only honest value to show while
-            // the field cannot be edited. `required` follows the mode for the
-            // same reason — an empty command is exactly right when a profile
-            // supplies it.
-            label { class: if *creation_surface.read() == CreationSurface::Structured { "launch-composer-legacy-hidden" } else { "" },
-                if by_profile {
-                    "agent command (the selected profile's own; choose \"custom command\" above to edit)"
-                } else {
-                    "agent command"
-                }
-                input {
-                    r#type: "text",
-                    required: !by_profile,
-                    autocomplete: "off",
-                    autocorrect: "off",
-                    autocapitalize: "none",
-                    spellcheck: "false",
-                    // In custom mode this shows the clone's escaped raw seed
-                    // or the user's edit, while profile mode replaces the
-                    // display with the selected definition's escaped
-                    // invocation. Submission still reads the raw-seed model
-                    // below, never this profile-mode presentation.
-                    dir: "ltr",
-                    value: "{displayed_invocation}",
-                    disabled: busy || by_profile || *creation_surface.read() == CreationSurface::Structured,
-                    oninput: move |evt| {
-                        if !draft_transition_allowed(ops) {
-                            return;
-                        }
-                        invocation.set(evt.value());
-                        invocation_edited.set(true);
-                        // Typing a command IS choosing the command path, and
-                        // recording it here is what keeps a late arrival from
-                        // taking the choice away: without it, a catalog
-                        // landing a moment later could seed a remembered
-                        // profile, disable this very field, and leave what was
-                        // just typed on screen but unused. The user said what
-                        // they want by typing it.
-                        chosen_profile.set(Some(AgentChoice::Command));
-                        clone_agent_state.set(CloneAgentState::UserTookOver);
-                        // An edit makes the next submit a DIFFERENT
-                        // intent, so the key the last one used stops
-                        // applying here (this component's docs carry the
-                        // full argument for both edges of that rule).
-                        intent_key.set(None);
-                    },
                 }
             }
             if let Some(err) = error.read().clone() {
