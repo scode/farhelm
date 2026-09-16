@@ -96,10 +96,12 @@ to detect: the flag is the whole of what the UI reads off a reply about complete
 against the counts (that comparison was the paged design's "underfilled listing" detector, and it went with the pages).
 "Short" is one predicate with three readers rather than a rule each place restates: it is exactly the condition the
 count banner prints "showing N of M" for, the same answer decides whether an absence may be read as a departure
-(otherwise the missing row's rename is retired, its editor closed, and — if it is the selected one — its pane torn down
-and replaced), and the same answer decides whether a remembered selection missing from the list is resolved directly
-rather than treated as gone. A UI that tells the user its list is incomplete and then reasons as though it were complete
-would be disagreeing with the one line whose job is to be believed.
+(otherwise the missing row's optimistic rename is retired, its editor is left usable, and — if it is the selected one —
+its pane is left alone), and the same answer decides whether a remembered selection missing from the list is resolved
+directly rather than treated as gone. A complete authoritative absence changes a ListView-owned rename editor to an
+unavailable-target state instead of closing it, preserving its draft for copying or cancellation; seeing the exact
+source again clears only that state. A UI that tells the user its list is incomplete and then reasons as though it were
+complete would be disagreeing with the one line whose job is to be believed.
 
 One consequence is worth recording because nothing on screen shows it: the auto-select fallback (SPEC.md's
 "newest-created non-archived session", for a client with no remembered selection) cannot be assumed to be the first row

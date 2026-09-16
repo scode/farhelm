@@ -1,15 +1,9 @@
-//! The rename control both surfaces share (PLAN_M5.md item 6).
+//! The rename editor's draft and keyboard semantics.
 //!
-//! SPEC.md puts rename on the session list AND in the session view, and
-//! the two want the same widget: a single-line field seeded with the
-//! current title, a submit, and a cancel. `RenameForm` is that widget and
-//! nothing else — it edits a draft its CALLER owns and hands the finished
-//! string back, leaving the request, the optimistic paint, and the error
-//! surface to whichever surface mounted it. Keeping it renderer-side-only
-//! is what lets `list::SessionRow` and `session_view::SessionView` differ
-//! in everything that is genuinely different (where the control sits, what
-//! the reply updates, where a refusal is shown) without either of them
-//! reimplementing the field.
+//! `RenameForm` owns only the native textarea behavior: a caller supplies
+//! the draft and receives a verbatim submission or cancellation. `RenameDialog`
+//! gives the list that field a stable modal parent, leaving requests,
+//! optimistic paint, and response ownership in `ListView`.
 //!
 //! What is deliberately NOT here: any notion of a valid title. The draft
 //! is sent verbatim, and every rule about what a title may contain lives
@@ -17,19 +11,54 @@
 
 use dioxus::prelude::*;
 
+/// Keep Tab inside the one-purpose rename dialog while it is mounted.
+///
+/// The sidebar stays live behind the modal. Native modal attributes describe
+/// that relationship to assistive technology but do not constrain browser
+/// focus in every renderer, so the listener belongs to this exact dialog
+/// node and vanishes with it.
+fn install_rename_focus_trap(generation: u64) {
+    document::eval(
+        &r#"(() => {
+            const dialog = document.querySelector('.rename-dialog[role="dialog"]');
+            if (!dialog || dialog.dataset.renameGeneration !== '__GENERATION__' || dialog.__farhelmRenameFocusTrap) return;
+            dialog.__farhelmRenameFocusTrap = true;
+            // Autofocus may already have been consumed by an earlier editor
+            // in this document. Mount owns one focus handoff, but a delayed
+            // bridge callback must yield to an outside control chosen since.
+            const active = document.activeElement;
+            if (!active || active === document.body || active.matches('.session-row-rename')) {
+                dialog.querySelector('.rename-input')?.focus({ preventScroll: true });
+            }
+            const focusable = () => [...dialog.querySelectorAll(
+                'button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            )].filter((node) => !node.hidden && node.getClientRects().length);
+            dialog.addEventListener('keydown', (event) => {
+                if (event.key !== 'Tab') return;
+                const nodes = focusable();
+                if (!nodes.length) return;
+                const first = nodes[0];
+                const last = nodes[nodes.length - 1];
+                if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
+                    event.preventDefault();
+                    (event.shiftKey ? last : first).focus();
+                }
+            });
+        })();"#.replace("__GENERATION__", &generation.to_string()),
+    );
+}
+
 /// One session's rename field: edits `draft`, submits it verbatim.
 ///
 /// ## Why the draft belongs to the caller
 ///
-/// This component is mounted only while a rename is open, and its host can
-/// be re-rendered out from under it by something the user did not do — a
-/// transient listing-read failure swaps `ListView`'s rows for an error
-/// line, which unmounts every row and this form with them. A draft owned
-/// here would vanish with it, silently discarding what the user had typed.
-/// Owned by the caller it survives that remount, and seeding stays the
-/// caller's job too: the draft is set from the CURRENT title at the moment
-/// the field is opened, which is also what keeps a read carrying another
-/// client's rename from overwriting an edit in progress.
+/// The dialog can be replaced only by a deliberate close, but its parent
+/// still re-renders for listing updates the user did not cause. A draft owned
+/// by the field would be lost with any future surface change; caller ownership
+/// keeps cancellation, a refusal, and authoritative source removal from
+/// discarding it. Seeding remains the caller's job too: the draft is set from
+/// the current title when the editor opens, so another client's listing update
+/// cannot overwrite an edit in progress.
 ///
 /// ## A textarea, not a text input, and why that is not cosmetic
 ///
@@ -64,16 +93,24 @@ use dioxus::prelude::*;
 /// silently capitalizing a typed word in place), and a rename that quietly
 /// altered the caller's own data would defeat the same contract.
 ///
-/// `busy` disables the whole form for the round trip, which is both the
-/// re-entry guard and the honest signal that the request is out. Cancel is
-/// refused while busy at the HANDLER too, not only by the attribute: the
-/// attribute's rerender is not synchronous with a click, and a cancel that
-/// slipped through would unmount the form — throwing away the draft a
-/// refusal is about to be reported for.
+/// `busy` makes the field read-only for the round trip. It deliberately does
+/// not disable it: the user may need to copy the exact submitted title, and
+/// keeping the focused field in the tab order prevents the browser from
+/// dropping focus onto the document body. Save follows the same rule with
+/// `aria-disabled`; a click-submitted request keeps focus on the action the
+/// user chose. The event handlers remain the authority because a rerender is
+/// not synchronous with the event that started the request.
 #[component]
 pub(crate) fn RenameForm(
     mut draft: Signal<String>,
     busy: bool,
+    /// Reads the parent operation set at event time. Rendered attributes can
+    /// lag the event that starts a request, so they are not an authority.
+    busy_now: Callback<(), bool>,
+    /// Blocks submission while leaving the draft selectable and Cancel usable.
+    /// A complete listing can prove the source vanished; that is not a reason
+    /// to lock the text a user may need to copy before dismissing the dialog.
+    submit_disabled: bool,
     on_submit: EventHandler<String>,
     on_cancel: EventHandler<()>,
 ) -> Element {
@@ -82,16 +119,17 @@ pub(crate) fn RenameForm(
             class: "rename-form",
             onsubmit: move |evt| {
                 evt.prevent_default();
-                // Signal-level re-entry check, not just the `disabled`
-                // attributes below: a rerender disabling them is not
-                // synchronous with the event that queued this submit.
-                if busy {
+                // Parent-state re-entry check, not just the rendered
+                // attributes below: their rerender is not synchronous with
+                // the event that queued this submit.
+                if busy_now.call(()) || submit_disabled {
                     return;
                 }
                 on_submit.call(draft());
             },
             textarea {
                 class: "rename-input",
+                aria_label: "new session title",
                 rows: "1",
                 // A textarea does not submit its form on Enter, so the
                 // single-line behavior is implemented here: Enter submits
@@ -111,7 +149,7 @@ pub(crate) fn RenameForm(
                 onkeydown: move |evt| {
                     if evt.key() == Key::Enter && !evt.is_composing() {
                         evt.prevent_default();
-                        if busy {
+                        if busy_now.call(()) || submit_disabled {
                             return;
                         }
                         on_submit.call(draft());
@@ -121,20 +159,32 @@ pub(crate) fn RenameForm(
                 autocorrect: "off",
                 autocapitalize: "none",
                 spellcheck: "false",
-                // Focus lands in the field the instant it appears, so
-                // renaming is type-then-Enter. The plain HTML attribute
-                // rather than a fallible `set_focus` whose discarded
-                // `Result` could silently drop the behavior — the same
-                // choice the confirm prompts make for their cancel button.
+                // Native autofocus handles first insertion. The dialog's
+                // mount handoff also covers later editors in a document
+                // where the browser has already consumed autofocus.
                 autofocus: true,
                 value: "{draft}",
-                disabled: busy,
-                oninput: move |evt| draft.set(evt.value()),
+                readonly: busy,
+                oninput: move |evt| {
+                    // A renderer can deliver an input event queued just
+                    // before `readonly` reached the DOM. The submitted
+                    // snapshot must remain the visible draft until the
+                    // request answers, so the handler carries the same gate.
+                    if !busy_now.call(()) {
+                        draft.set(evt.value());
+                    }
+                },
             }
             button {
                 r#type: "submit",
                 class: "btn btn-primary rename-submit",
-                disabled: busy,
+                disabled: submit_disabled,
+                aria_disabled: if busy { "true" },
+                onclick: move |evt| {
+                    if busy_now.call(()) {
+                        evt.prevent_default();
+                    }
+                },
                 "save"
             }
             button {
@@ -142,13 +192,88 @@ pub(crate) fn RenameForm(
                 class: "btn rename-cancel",
                 disabled: busy,
                 onclick: move |_| {
-                    if busy {
+                    if busy_now.call(()) {
                         return;
                     }
                     on_cancel.call(());
                 },
                 "cancel"
             }
+        }
+    }
+}
+
+/// The stable modal home for a list-owned rename draft.
+///
+/// A row menu is anchored to geometry that can disappear or move whenever a
+/// listing changes. This dialog deliberately is not: its parent survives
+/// listing errors, filters, and keyed row reordering, so the textarea keeps
+/// its DOM identity, selection, and IME composition for the whole editing
+/// lifetime. `generation` identifies that lifetime to callers; a session id
+/// alone is insufficient for deferred work because a later editor for that
+/// same session is a different focus and draft owner. The product UI refuses
+/// reopening while a request is pending, but the result boundary does not
+/// rely on that reachability rule for safety.
+#[component]
+pub(crate) fn RenameDialog(
+    draft: Signal<String>,
+    busy: bool,
+    busy_now: Callback<(), bool>,
+    unavailable: bool,
+    current_title: String,
+    error: Option<String>,
+    generation: u64,
+    focus_owned: Signal<bool>,
+    on_submit: EventHandler<(u64, String)>,
+    on_cancel: EventHandler<u64>,
+) -> Element {
+    rsx! {
+        div {
+            class: "rename-dialog-backdrop",
+            role: "presentation",
+        div {
+            class: "rename-dialog",
+            "data-rename-generation": "{generation}",
+            role: "dialog",
+            aria_modal: "true",
+            aria_label: "rename session",
+            onmounted: move |_| install_rename_focus_trap(generation),
+            // Focusout followed by focusin is an internal transition and
+            // ends owned. A move outside has no matching focusin and ends
+            // unowned. Busy controls stay focusable, so the render itself
+            // cannot manufacture the external case.
+            onfocusin: move |_| focus_owned.set(true),
+            onfocusout: move |_| focus_owned.set(false),
+            onkeydown: move |evt| {
+                // Escape accepts or dismisses candidates while an IME is
+                // composing. Treating that key as dialog cancellation would
+                // abandon the draft on an ordinary composition keystroke.
+                if evt.key() == Key::Escape
+                    && !evt.is_composing()
+                    && !busy_now.call(())
+                {
+                    on_cancel.call(generation);
+                }
+            },
+            span { class: "rename-current-title", "{current_title}" }
+            if unavailable {
+                p {
+                    class: "rename-unavailable",
+                    "this session is no longer available; copy the draft or cancel"
+                }
+            }
+            if let Some(error) = error {
+                p { class: "rename-error", "{error}" }
+            }
+            RenameForm {
+                draft,
+                busy,
+                busy_now,
+                submit_disabled: unavailable,
+                on_submit: move |title| on_submit.call((generation, title)),
+                on_cancel: move |_| on_cancel.call(generation),
+            }
+        }
         }
     }
 }

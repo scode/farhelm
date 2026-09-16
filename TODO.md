@@ -37,42 +37,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Validate both structured and legacy prefills (including a missing/renamed profile) and switching to another harness
   without losing shared fields or leaking legacy values into the structured request.
 
-- **Keep rename open during activity reordering.** While editing a session name under "recently active" sorting,
-  activity elsewhere can reorder the list and make the rename editor disappear. Reopening may restore it, but that part
-  of the report is uncertain. A background refresh or reorder must leave an in-progress rename visible and usable,
-  preserving the exact draft, keyboard focus, caret/selection, and binding to the original session id. Continuing to
-  type and saving must rename that session, regardless of its new position. Do not freeze fleet updates or require the
-  user to reopen the editor to finish.
-
-  Preliminary assessment: `commit_listing` in `crates/farhelm-ui/src/list/view.rs` calls `menu_row_reordered` and
-  unconditionally clears `menu_open` when the open row changes index. The rename form lives inside that menu panel in
-  `list/row.rs`, so this explicitly hides it even though `renaming` and `rename_draft` survive in `ListView`. Rows are
-  already keyed by session id; this is not an obvious missing-key bug. The existing dismissal avoids leaving a floating
-  panel at its old anchor coordinates. Separate an active editor's lifetime from transient action-menu dismissal: either
-  keep its position stable in an independently owned dialog or correctly reposition the existing panel without
-  remounting its input or losing focus. Do not merely remove the close and leave stale geometry. Inspect the related
-  layout/scroll dismissal and focus-return paths in `ListView`, `SessionRow`, and `menu_panel.rs`, while preserving
-  deliberate cancel and truthful handling when the source session is actually removed. Update the relevant panel
-  lifecycle documentation. Add a browser regression that proves a real list reorder while a draft and caret are active,
-  continues typing without reopening or refocusing, and verifies the saved title on the original id on both engines.
-  Existing draft-survival coverage in `e2e/tests/terminal-replay-rename.spec.ts` and menu-dismissal coverage in
-  `e2e/tests/sidebar.spec.ts` are starting points; preserving a hidden draft alone does not satisfy this behavior.
-
-- **Dismiss the popup after a successful rename.** Submitting the rename editor with Enter or its save button currently
-  reveals the original actions menu again (Rename, Replace, and the other row actions). Successful submission should
-  close the editor and its containing popup together, leaving the updated row with no action menu visible. A failed
-  rename must keep the editor, draft, and error available for correction; closing the popup on submit before success is
-  known would lose that behavior. Keep cancel behavior outside this item's scope.
-
-  Preliminary assessment: `on_rename_submit` in `crates/farhelm-ui/src/list/view.rs` clears `renaming` on success but
-  leaves `menu_open` set. `SessionRow` in `list/row.rs` then renders the ordinary action list in the still-open panel.
-  Close the originating rename popup on success with ownership checks so a late reply cannot dismiss a different
-  editor/menu opened since submission. Preserve the existing optimistic title update and listing refresh, and handle
-  focus return without stealing focus from another control the user has moved to. Coordinate with the rename-reorder
-  item above if the editor's ownership changes. Verify Enter and button submission both dismiss the entire popup after
-  success, saving failures preserve the editable draft, and delayed responses do not close an unrelated popup on either
-  browser engine.
-
 - **Stop false running indicators on idle agents.** Sessions frequently show a pulsing green running indicator when the
   agent is not actively working. Reported mostly with Codex, but the maintainer mostly uses Codex, so harness
   specificity is not established. At the time of the report both the current conversation and a companion Codex session
