@@ -25,7 +25,9 @@
   // Rows in the order they should appear; ages must agree with that order
   // because the list sorts by recent activity. `age` is seconds before the
   // capture. `wrapper` is the basename the invocation carries and therefore
-  // the badge the row shows. `status` is what the supervisor must actually
+  // the badge the row shows. `yolo: true` adds that harness's permission-bypass
+  // flag to the staged invocation so the real UI shows its unlock glyph.
+  // `status` is what the supervisor must actually
   // classify the pane as before the capture fires:
   //   running  the fake agent keeps redrawing a status line
   //   waiting  it shows a yes/no menu under a "Do you want to" question
@@ -42,6 +44,7 @@
       host: "build-box",
       cwd: "~/src/farhelm",
       wrapper: "claude",
+      yolo: true,
       status: "running",
       age: 120,
       open: true,
@@ -61,6 +64,7 @@
       host: "gpu-1",
       cwd: "~/work/docs",
       wrapper: "claude",
+      yolo: true,
       status: "idle",
       seen: false,
       age: 2460,
@@ -100,6 +104,7 @@
       host: "build-box",
       cwd: "~/src/ci",
       wrapper: "codex",
+      yolo: true,
       status: "idle",
       seen: false,
       age: 172800,

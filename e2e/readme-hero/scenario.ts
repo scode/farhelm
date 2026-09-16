@@ -36,6 +36,8 @@ export interface ScenarioSession {
   host: string;
   cwd: string;
   wrapper: Wrapper;
+  /** Use the harness's permission-bypass flag in the real staged invocation. */
+  yolo?: boolean;
   status: TargetStatus;
   seen?: boolean;
   exit_code?: number;
@@ -108,6 +110,9 @@ export function loadScenario(): Scenario {
     if (!keys.has(session.host)) fail(`session ${session.title}: unknown host ${session.host}`);
     if (!session.cwd) fail(`session ${session.title}: cwd is required`);
     if (!WRAPPERS.includes(session.wrapper)) fail(`session ${session.title}: wrapper must be claude or codex`);
+    if (session.yolo !== undefined && typeof session.yolo !== "boolean") {
+      fail(`session ${session.title}: yolo must be a boolean`);
+    }
     if (!STATUSES.includes(session.status)) fail(`session ${session.title}: unknown status ${session.status}`);
     if (session.status === "idle" && typeof session.seen !== "boolean") {
       fail(`session ${session.title}: idle sessions need seen: true or false`);
