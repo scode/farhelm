@@ -3037,6 +3037,21 @@ samp {
   gap: 6px;
 }
 
+/* The confirmation is wider than the popup's ordinary name/action row.
+   Give its consequence and scope full lines so both buttons remain visible
+   without horizontal scrolling, including after a failed focus handoff. */
+.profile-row-confirming {
+  flex-wrap: wrap;
+}
+
+.profile-row-confirming > .confirm-consequence,
+.profile-row-confirming > .confirm-title {
+  flex: 1 0 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin-right: 0;
+}
+
 /* Same shrink discipline the host and session rows keep: a profile name and
    an invocation are unbounded user data, and without a floor plus ellipsis
    they would push this row's edit and delete controls out of reach — which

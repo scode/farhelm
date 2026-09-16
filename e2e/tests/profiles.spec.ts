@@ -856,8 +856,9 @@ test.describe("agent profiles", () => {
    * popup's live focus request. Unknown evidence cannot skip that settlement
    * loop and turn `body` into an early dismissal destination. The delayed
    * placement observation ends without evidence when its deadline expires;
-   * merely hiding a known target would instead settle as Missing and permit
-   * transit dismissal once that request was no longer pending.
+   * merely hiding a known target can instead settle as Missing. Both preserve
+   * the popup during unowned body focus and retain an obligation for later
+   * outside-focus evidence; this case specifically exercises uncertainty.
    */
   test("unknown then transit waits for the pending focus request", async ({ page }) => {
     await listWithStubbedFeed(page);

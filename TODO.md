@@ -190,30 +190,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   self-actions; use isolated fixtures, never the live fleet, for mutating checks. This remains a queued change, not
   authorization to rename or stop any live session.
 
-- **Keep Profiles open when starting a legacy-profile deletion.** Clicking the red Delete control on a stored,
-  non-built-in legacy profile immediately dismisses the entire Profiles popup; no confirmation appears and the profile
-  remains. The maintainer explicitly confirmed this happens on the first Delete click, not on "confirm delete". The
-  reported catalog is tall, with read-only built-ins followed by editable legacy profiles sharing several built-in
-  names. Starting deletion must keep the popup visible and show the target profile's confirmation. Cancel must leave the
-  profile intact; confirming must remove only that stored profile, retain same-named built-ins, and visibly report a
-  refusal rather than dismissing the error. Existing sessions must retain their snapshotted launch settings.
-
-  Preliminary assessment: `on_delete_start` in `crates/farhelm-ui/src/profiles.rs` replaces the row controls with a
-  confirmation and requests `FocusDestination::DeleteCancel(id)`; it neither sends DELETE nor intentionally closes
-  Profiles. The request exists only in `on_delete_confirm`. Investigate the focus handoff when the clicked control is
-  removed, the focus coordinator, and `src/app_bar.rs`'s focus-out and layout/scroll dismissal paths. Expansion of the
-  confirmation or focus-induced scrolling in a tall popup are candidate triggers, not established causes. The backend
-  `delete_catalog_profile` in `crates/farhelm-helm/src/profiles.rs` protects built-ins by id, not display name, so a
-  duplicate name alone does not explain the reported first-click disappearance. Capture focus/layout events and request
-  issuance to establish the actual close path before changing dismissal rules.
-
-  Reproduce with a tall built-in-plus-legacy catalog in `e2e/tests/profiles.spec.ts`, clicking stored rows near the
-  viewport edge on Chromium and WebKit. Prove the initial click sends no deletion, the confirmation becomes visible and
-  keyboard-usable without reopening, cancellation preserves the row, and confirmation deletes the intended id while
-  preserving a same-named built-in. Preserve intentional outside-click/Escape dismissal and clear error behavior; do not
-  fix this by removing confirmation or disabling popup dismissal wholesale. Investigate native desktop behavior
-  separately if the browser engines do not reproduce it. No live profiles should be deleted to verify the fix.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
