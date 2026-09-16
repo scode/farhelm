@@ -123,13 +123,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   hunt on 2026-09-12 (batch `addd38f4-a637-49b0-86f6-b1bd947876de`) passed all twenty repetitions on both engines —
   non-reproduction evidence, consistent with the earlier twenty isolated repetitions.
 
-- Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
-  `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
-  `.host-details-toggle`. Twenty repetitions did not reproduce it. The run's other failure, the sidebar aliasing test's
-  disposed `route.fetch` response, was the WebKit navigation-disposal mechanism and is fixed; this one has no
-  reproduction or established cause. Preserve host-row state evidence before changing product behavior; the failure
-  alone does not establish a composer regression or a confirmed pre-composer cause.
-
 - Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
   `7fd44a19-ce3f-42fb-a3df-410da327634a`.
   `stalling one tab's writes pauses only that tab; the agent and a sibling stay
@@ -326,6 +319,23 @@ is a clean gate.
   and failure screenshot carry the row's actual state. On recurrence open the trace before changing the helper's wait or
   the popup's render path — this spec already holds several focus and popup races, and this one is not yet attributed to
   any of them.
+
+### Flakes difficult to repro
+
+Single sightings with unsuccessful targeted hunts and no actionable investigative lead: one retained failure, no
+reproduction since, no suspected mechanism to chase. What parks an entry here is the absence of a live lead, not a claim
+about any other bucket. On recurrence, move the entry back to the regular bucket with the new evidence rather than
+hunting blind from here.
+
+- Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
+  `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
+  `.host-details-toggle`. Moved here from the regular bucket on 2026-09-16: forty more clean executions (20 per engine,
+  runs `5d900ad2-9c84-4560-a5d6-c28502ba6418` and `b1fbf426-49b3-465e-9fb7-9206b4d334c4`) joined the earlier batch
+  `fca9d4df-ed2a-4dbd-9665-630d11d2f6f7` (twenty attempts, both engines each, forty clean) without a reproduction —
+  eighty executions total, all clean — and there is still no suspected mechanism to chase. The run's sibling failure,
+  the sidebar aliasing test's disposed `route.fetch` response, was the WebKit navigation-disposal mechanism and is
+  fixed. Preserve host-row state evidence before changing product behavior; the single failure alone establishes neither
+  a composer regression nor a confirmed pre-composer cause.
 
 ### Systematic deflake
 
