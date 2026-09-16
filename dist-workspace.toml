@@ -50,7 +50,7 @@
 #   exactly is worth more than browsable extras: binary plus LICENSE, and for
 #   the desktop archive also `Farhelm.icns` (declared under `binaries` in
 #   `packaging/farhelm-desktop/dist.toml`; the comment there says why).
-#   LICENSE stays because the binaries are MIT-licensed copies of this
+#   LICENSE stays because the binaries are Apache-2.0-licensed copies of this
 #   software. NOTE: if Homebrew publishing is ever flipped on (see
 #   `publish-jobs` below), the generated formula would install everything in
 #   `binaries` — the icon included — into `bin/`; that flip has to revisit
