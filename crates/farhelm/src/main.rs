@@ -46,6 +46,7 @@ mod fake_agent;
 mod goose_hook;
 mod hook;
 mod setup;
+mod uninstall;
 
 #[derive(Parser)]
 #[command(

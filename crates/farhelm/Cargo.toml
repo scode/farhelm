@@ -72,6 +72,10 @@ serde_json.workspace = true
 # harness. Keeping this regular dependency lets the shipped multi-call test
 # fixture and its integration-test binary use one serialization rule.
 shell-words.workspace = true
+# Installer ownership receipts carry SHA-256 digests; the uninstall verifier
+# streams claimed artifacts through this shared implementation before it can
+# authorize a later remover to name them.
+sha2.workspace = true
 # `farhelm helm setup` publishes each unit file through a uniquely named,
 # exclusively created staging file in the unit directory (setup.rs). A
 # predictable staging name is a symlink target and a race between two
