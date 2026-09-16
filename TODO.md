@@ -47,12 +47,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- Reassess the remaining `provisioning-attach-race` exclusion for
-  `provisioning::tests::local_provisioning_and_update_preserve_a_running_session` in `crates/farhelm-helm`. `FLAKES.md`
-  records the supervisor-restart attach race as fixed in #552, but its `deflake/known-flakes.txt` line survived removal
-  of the TODO entry. Check the recorded fix and current test before retiring the exclusion; remove this entry and the
-  exclusion together. This tracks the stale exclusion, not a newly observed failure.
-
 - Reassess the remaining `profiles-popup-close-lost` exclusion for `a popup-created profile is offered on every host` in
   `e2e/tests/profiles.spec.ts`. `FLAKES.md` records the editor-fill race as closed and the disable-blur dismissal race
   as fixed in #558, but the test remains in `deflake/known-flakes.txt` without its former TODO entry. Check those fixes
