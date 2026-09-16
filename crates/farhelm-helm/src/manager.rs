@@ -1206,9 +1206,9 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
 /// come to disagree about what a reply is evidence of.
 ///
 /// A mutation's reply is authoritative about everything it describes
-/// EXCEPT the two fields handled here, and for the same underlying reason:
-/// both are computed by machinery the reply did not run. `status` is
-/// [`merged_status`]'s subject. `last_activity_at` is the supervisor's
+/// EXCEPT the sampled status and timestamps handled here: each is computed
+/// by machinery the reply did not run. `status` is
+/// [`merged_status`]'s subject. Activity age and work-start ordering are the supervisor's
 /// sampler's, and a create/rename/restart/archive reply merely copies
 /// whatever the entry happened to hold when it was built — which can be
 /// OLDER than what a `ListSessions` drain already committed here, because
@@ -1216,13 +1216,12 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
 ///
 /// So the value is carried forward monotonically: a reply may push it
 /// forward, never back. `0` is the field's "unknown" (an old sender omits
-/// it entirely — see `SessionInfo::last_activity_at`), and it is also the
+/// it entirely — see `SessionInfo::last_activity_at` and
+/// `SessionInfo::last_work_started_at`), and it is also the
 /// smallest value the field takes, so a plain maximum is exactly the rule
 /// "never let an absent or stale answer erase a real one". Moving it
-/// backwards would be user-visible in the one place it is read: a session
-/// would drop down a most-recently-active list at the moment somebody
-/// renamed or restarted it, and stay there until the owning host's next
-/// refresh.
+/// backwards could undo activity/unseen evidence or drop a session down the
+/// recent-work list just because somebody renamed or restarted it.
 ///
 /// The `created_at` fallback a 0 implies is deliberately NOT applied here.
 /// It belongs at read and sort time, where the reader has both fields in
@@ -1231,6 +1230,9 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
 pub fn merge_cached_session(previous: &SessionInfo, incoming: &mut SessionInfo) {
     incoming.status = merged_status(&previous.status, incoming.status.clone());
     incoming.last_activity_at = previous.last_activity_at.max(incoming.last_activity_at);
+    incoming.last_work_started_at = previous
+        .last_work_started_at
+        .max(incoming.last_work_started_at);
 }
 
 /// Whether two published clients are the SAME live connection.
@@ -4685,6 +4687,7 @@ mod tests {
             title: id.to_string(),
             created_at,
             last_activity_at: created_at,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: format!("/{id}"),
             canonical_cwd: None,
@@ -4832,9 +4835,9 @@ mod tests {
         attempts.iter().map(|d| d.as_secs()).collect()
     }
 
-    /// The IN-MEMORY cache applies the same monotonic activity merge the
-    /// durable one does: a mutation's reply may push `last_activity_at`
-    /// forward, never back, and a 0 from an old sender never wins.
+    /// The IN-MEMORY cache applies the same monotonic timestamp merges the
+    /// durable one does: a mutation reply may push activity and work-start
+    /// keys forward, never back, and zero from an old sender never wins.
     ///
     /// Both halves of [`merge_cached_session`] have a call site, and a
     /// helper is only shared as long as both keep calling it. The durable
@@ -4848,9 +4851,10 @@ mod tests {
     /// list, nothing orders them, and a reply only ever echoes whatever
     /// the supervisor's entry held when it was built.
     #[farhelm_testtrace::test(start_paused = true)]
-    async fn an_in_memory_reply_never_walks_the_activity_stamp_backwards() {
+    async fn an_in_memory_reply_never_walks_recency_keys_backwards() {
         let listed = SessionInfo {
             last_activity_at: 900,
+            last_work_started_at: 900_000,
             ..session("s-1", 100)
         };
         let fixture = fixture(Cadence::default(), {
@@ -4895,34 +4899,54 @@ mod tests {
             incarnation: fixture.manager.status(host).expect("connected").incarnation,
             identity: None,
         };
-        let cached_stamp = |fixture: &Fixture| {
-            fixture
+        let cached_stamps = |fixture: &Fixture| {
+            let info = &fixture
                 .manager
                 .status(host)
                 .expect("connected")
                 .live_sessions
-                .expect("an identity-less host serves its list from memory")[0]
-                .last_activity_at
+                .expect("an identity-less host serves its list from memory")[0];
+            (info.last_activity_at, info.last_work_started_at)
         };
-        assert_eq!(cached_stamp(&fixture), 900, "what the drain committed");
+        assert_eq!(
+            cached_stamps(&fixture),
+            (900, 900_000),
+            "what the drain committed"
+        );
 
-        for (label, reply, expected) in [
-            ("a reply built before the drain landed", 500, 900),
-            ("a reply from a sender that predates the field", 0, 900),
-            ("a genuinely newer observation", 1_500, 1_500),
+        for (label, activity, work_start, expected) in [
+            (
+                "a reply built before the drain landed",
+                500,
+                500_000,
+                (900, 900_000),
+            ),
+            (
+                "a reply from a sender that predates the fields",
+                0,
+                0,
+                (900, 900_000),
+            ),
+            (
+                "genuinely newer observations",
+                1_500,
+                1_500_000,
+                (1_500, 1_500_000),
+            ),
         ] {
             fixture
                 .manager
                 .remember_session(
                     &claim,
                     &SessionInfo {
-                        last_activity_at: reply,
+                        last_activity_at: activity,
+                        last_work_started_at: work_start,
                         ..listed.clone()
                     },
                 )
                 .await
                 .expect("record the reply");
-            assert_eq!(cached_stamp(&fixture), expected, "{label}");
+            assert_eq!(cached_stamps(&fixture), expected, "{label}");
         }
     }
 

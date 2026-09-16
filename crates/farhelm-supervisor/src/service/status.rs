@@ -292,7 +292,7 @@ pub(crate) fn session_status(
 /// tail is up to `SAMPLE_TAIL_BYTES` and this runs once per session per
 /// reply, so cloning it would add a kilobytes-per-row allocation to the
 /// list path to avoid holding a leaf lock for a substring search.
-fn live_status(entry: &SessionEntry) -> SessionStatus {
+pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
     let activity = entry.activity.lock().expect("activity mutex poisoned");
     let baseline =
         if activity.samples >= 2 && activity.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE {
@@ -405,6 +405,9 @@ pub(crate) fn entry_info(
     // computation: nothing on the reply path may mint an activity time.
     info.last_activity_at = entry
         .last_activity_at
+        .load(std::sync::atomic::Ordering::Relaxed);
+    info.last_work_started_at = entry
+        .last_work_started_at
         .load(std::sync::atomic::Ordering::Relaxed);
     // The entry carries the SNAPSHOT (id and name as recorded at creation);
     // the existence beside it is deliberately unresolved. The supervisor

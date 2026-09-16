@@ -146,21 +146,16 @@ pub(crate) fn host_display_name(
 /// `{"session": {...}, "host": ...}` would have been tidier and would have
 /// broken every existing reader.
 ///
-/// The flattening is also why a new `SessionInfo` field needs nothing here to
-/// reach a client: `last_activity_at` is on every row already, so a client can
-/// show recent activity without a second request or a row shape of its own.
+/// The flattening is also why new `SessionInfo` timestamps need nothing here
+/// to reach a client: activity age and stable work ordering arrive as raw
+/// sibling fields without a second request or a row shape of their own.
 ///
-/// What travels is the RAW field, exactly as its supervisor reported it —
-/// `0` and all. `?sort=activity` does NOT order by that value; it orders by
-/// the EFFECTIVE one, `SessionInfo::effective_activity`, which reads `0` as
-/// "this sender never told us" and falls back to `created_at`. Serving the raw
-/// field is deliberate (a synthesized value written into it would be
-/// indistinguishable from an observation at the next merge — see
-/// `crate::manager::merge_cached_session`), and it puts one obligation on the
-/// client: a row rendered from `last_activity_at` directly will show 1970 for
-/// exactly the sessions the list sorted by their creation time. Apply
-/// `effective_activity` when displaying the stamp, or the rendering and the
-/// order disagree on the same row.
+/// What travels is exactly what the supervisor reported, zeroes included.
+/// `?sort=activity` applies `effective_work_started_at`, whose zero fallback
+/// is creation in milliseconds; row age applies `effective_activity`, whose
+/// zero fallback is creation in seconds. Neither derived value is written
+/// back, because a synthesized timestamp would be indistinguishable from an
+/// authoritative observation at the next monotonic cache merge.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct SessionRow {
     #[serde(flatten)]
@@ -314,8 +309,8 @@ pub(crate) fn sort_rows(rows: &mut [SessionRow], sort: store::ListSort) {
     match sort {
         store::ListSort::Created => rows.sort_by(|a, b| creation_tail(a).cmp(&creation_tail(b))),
         store::ListSort::Activity => rows.sort_by(|a, b| {
-            std::cmp::Reverse(a.info.effective_activity())
-                .cmp(&std::cmp::Reverse(b.info.effective_activity()))
+            std::cmp::Reverse(a.info.effective_work_started_at())
+                .cmp(&std::cmp::Reverse(b.info.effective_work_started_at()))
                 .then_with(|| creation_tail(a).cmp(&creation_tail(b)))
         }),
         store::ListSort::Title => rows.sort_by_cached_key(|row| {
@@ -583,6 +578,7 @@ mod tests {
                 title: id.to_string(),
                 created_at,
                 last_activity_at: created_at,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -639,35 +635,34 @@ mod tests {
     /// in two different sequences on two reads.
     #[farhelm_testtrace::test]
     fn the_other_orders_lead_with_their_own_component_and_share_the_tail() {
-        let keyed = |id: &str, created_at: i64, activity: i64, title: &str| {
+        let keyed = |id: &str, created_at: i64, work_start: i64, title: &str| {
             let mut row = row(id, created_at, 1);
-            row.info.last_activity_at = activity;
+            row.info.last_work_started_at = work_start;
             row.info.title = title.to_string();
             row
         };
 
         let mut rows = vec![
-            keyed("quiet", 800, 200, "aaa"),
-            keyed("busy", 100, 900, "zzz"),
-            keyed("tie-old", 200, 500, "aaa"),
-            keyed("tie-new", 300, 500, "zzz"),
+            keyed("quiet", 800, 200_000, "aaa"),
+            keyed("busy", 100, 900_000, "zzz"),
+            keyed("tie-old", 200, 500_000, "aaa"),
+            keyed("tie-new", 300, 500_000, "zzz"),
             keyed("unknown", 250, 0, "mmm"),
         ];
         sort_rows(&mut rows, store::ListSort::Activity);
         assert_eq!(
             ids(&rows),
             ["busy", "tie-new", "tie-old", "unknown", "quiet"],
-            "recent activity outranks a later creation time; equal activity falls through to \
-             creation time descending; an unknown stamp sorts by its creation time rather than \
-             at the epoch"
+            "recent work outranks a later creation time; equal starts fall through to creation \
+             time descending; an unknown key sorts by creation rather than at the epoch"
         );
 
         let mut rows = vec![
-            keyed("banana", 900, 900, "banana"),
-            keyed("apple", 100, 100, "Apple"),
-            keyed("same-old", 200, 900, "same"),
-            keyed("same-new", 300, 100, "Same"),
-            keyed("istanbul", 400, 400, "İstanbul"),
+            keyed("banana", 900, 900_000, "banana"),
+            keyed("apple", 100, 100_000, "Apple"),
+            keyed("same-old", 200, 900_000, "same"),
+            keyed("same-new", 300, 100_000, "Same"),
+            keyed("istanbul", 400, 400_000, "İstanbul"),
         ];
         sort_rows(&mut rows, store::ListSort::Title);
         assert_eq!(
@@ -675,6 +670,50 @@ mod tests {
             ["apple", "banana", "istanbul", "same-new", "same-old"],
             "the title order is case-insensitive (Apple precedes banana, İ folds), and titles \
              that differ only by case tie and break by creation time"
+        );
+    }
+
+    /// Activity age and completion continue to move independently of the
+    /// stable work-start order. Only a later confirmed burst promotes a row.
+    #[farhelm_testtrace::test]
+    fn recent_activity_order_moves_only_when_a_new_work_burst_starts() {
+        let mut a = row("a", 100, 1);
+        a.info.last_work_started_at = 1_000;
+        a.info.last_activity_at = 10;
+        let mut b = row("b", 200, 1);
+        b.info.last_work_started_at = 2_000;
+        b.info.last_activity_at = 20;
+
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(ids(&rows), ["b", "a"], "B's later burst begins above A");
+
+        a.info.last_activity_at = 9_999;
+        a.info.status = SessionStatus::Exited { exit_code: Some(0) };
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["b", "a"],
+            "continued output and completion advance age/status without reordering the burst"
+        );
+
+        a.info.last_work_started_at = 3_000;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "A promotes only when later work begins"
+        );
+
+        a.info.last_activity_at = 20_000;
+        let mut rows = vec![a, b];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "more output inside A's burst leaves the established order stable"
         );
     }
 
@@ -813,18 +852,18 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_cap_selects_membership_in_the_requested_order() {
         // `LIST_SESSIONS_CAP` filler rows created after the special row,
-        // with titles and activity stamps that sort AFTER it.
+        // with titles and work-start keys that sort AFTER it.
         let mut view: Vec<SessionRow> = (0..LIST_SESSIONS_CAP)
             .map(|i| {
                 let mut row = row(&format!("m{i:04}"), 1_000 + i as i64, 1);
                 row.info.title = format!("mmm-{i:04}");
-                row.info.last_activity_at = 1_000 + i as i64;
+                row.info.last_work_started_at = 1_000_000 + i as i64;
                 row
             })
             .collect();
         let mut special = row("survivor", 1, 1);
         special.info.title = "aaa-first".to_string();
-        special.info.last_activity_at = 9_999_999;
+        special.info.last_work_started_at = 9_999_999;
         view.push(special);
 
         for sort in [store::ListSort::Title, store::ListSort::Activity] {

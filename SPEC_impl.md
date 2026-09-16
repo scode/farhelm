@@ -776,6 +776,12 @@ as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversat
 other way and took the protocol to version 12, since two new tagged variants are exactly what an older decoder refuses
 outright instead of ignoring.
 
+`SessionInfo::last_work_started_at` is the millisecond ordering key for the session list's stable work bursts. It was
+added within protocol version 20 under the same additive rule: absent decodes to zero, and zero falls back to
+`created_at * 1000` with saturating integer arithmetic. It never falls back to `last_activity_at`, because continued
+output would then undo the stable ordering. A stale mutation reply merges this field by maximum in both the helm's
+in-memory and durable caches, so delayed request traffic cannot move a later supervisor observation backward.
+
 Version 13 adds the one shape on this wire that travels UPWARD as a request: `ControlMsg::AgentRequest`, answered by
 `AgentResponse`. Both legs of its journey carry the same pair. An agent inside a session dials its own supervisor's
 socket with the per-session credential — exactly as `farhelm spawn` does — and the supervisor forwards the request to
@@ -1040,22 +1046,43 @@ reports a failed listing rather than a silently shortened one.
   quiet decay in both its animated and reduced-motion forms, including its bounded inline context and detail rows;
   historical or quoted copies elsewhere in the pane do not. Waiting still wins.
 - Last-activity timestamp: the same ticker that samples for status also DATES the changes it sees, into a
-  `last_activity_at` column on the session row and onto the wire. It is the ordering key a "most recently active"
-  session list needs, seeded to the session's creation time so one that has never produced output sorts by age rather
-  than landing at the epoch, and restored verbatim on supervisor restart. Persisting it does not contradict the rule
-  that liveness is never persisted: a status is a claim about NOW and rots the instant the process it describes moves
-  on, while this is a claim about a past instant that the passage of time cannot falsify. The two must not be conflated
-  in the other direction either — classification still reads sample COUNTS and never this clock, for the
-  population-dependence reason above. The value advances only when the observed change is at least a minute newer than
-  what is already stored, and the reason is blast radius rather than resolution. Two costs, scaling differently: a
-  durable `UPDATE` per session per crossing, which without the quantum would be a write per busy session every two
-  seconds; and a fleet-wide UI wake, which is COALESCED — the helm detects a changed session by comparing whole
-  serialized `SessionInfo`s, but bumps the invalidation feed at most once per host refresh that found anything
-  different, however many sessions moved. So the wake is bounded per refresh while the writes are bounded per session,
-  and without a quantum a single busy agent would re-render every connected client on every drain. No user distinguishes
-  two sessions whose last output was twenty seconds apart. Writes are monotonic in SQL as well as in memory, so a
-  backwards clock step cannot walk a visibly busy session down the sort; a lost write costs sort precision until another
-  observed change crosses the quantum, and nothing else.
+  `last_activity_at` column on the session row and onto the wire. It drives the row's displayed age and the helm's
+  seen/unseen comparison, seeded to the session's creation time so one that has never produced output has an honest age,
+  and restored verbatim on supervisor restart. Persisting it does not contradict the rule that liveness is never
+  persisted: a status is a claim about NOW and rots the instant the process it describes moves on, while this is a claim
+  about a past instant that the passage of time cannot falsify. The two must not be conflated in the other direction
+  either — classification still reads sample COUNTS and never this clock, for the population-dependence reason above.
+  The value advances only when the observed change is at least a minute newer than what is already stored, and the
+  reason is blast radius rather than resolution. Two costs, scaling differently: a durable `UPDATE` per session per
+  crossing, which without the quantum would be a write per busy session every two seconds; and a fleet-wide UI wake,
+  which is COALESCED — the helm detects a changed session by comparing whole serialized `SessionInfo`s, but bumps the
+  invalidation feed at most once per host refresh that found anything different, however many sessions moved. So the
+  wake is bounded per refresh while the writes are bounded per session, and without a quantum a single busy agent would
+  re-render every connected client on every drain. No user distinguishes two sessions whose last output was twenty
+  seconds apart. Writes are monotonic in SQL as well as in memory, so a backwards clock step cannot make displayed
+  activity younger or undo an unseen observation; a lost write costs age precision after restart until another observed
+  change crosses the quantum, and nothing else.
+- Work-start ordering: the ticker separately advances `last_work_started_at` only when changed output moves a session
+  from a previously known idle or waiting state to running. The first sample, the first successful sample after a
+  capture failure, one or two quiet comparisons, continued output in the same burst, and completion do not advance it.
+  This uses the same live-status classifier replies use, so waiting recognition and three-comparison idle hysteresis
+  cannot drift between the badge and ordering. The key is milliseconds since the epoch, but allocation is
+  supervisor-local monotonic state rather than a bare clock read: startup seeds it to the greatest effective key across
+  every loaded row (ended rows included), and a start reserves `max(now_ms, previous + 1)` with saturation. This orders
+  same-millisecond bursts and survives a backward clock step on one supervisor. Separate supervisors still have only
+  their wall clocks and the helm's deterministic creation/id/host tie-breakers; this does not claim distributed
+  causality across skewed hosts.
+
+  New sessions start at their creation time in milliseconds. Rename and explicit restart share the same session key,
+  while their new run gets fresh transition evidence, so neither operation itself promotes. A start writes immediately,
+  outside the last-activity minute throttle. Failed writes keep the exact key and retry it on later visits; restart and
+  archive transfer that accepted history into their fresh sampler state under the lifecycle claim, without inheriting
+  old screen evidence. A later proven burst replaces an older pending key. The write holds the session lifecycle claim,
+  checks that the sampled entry is still the published generation, and updates SQLite only where id and generation both
+  match. No activity mutex is held across that write. Schema 17 adds the authoritative supervisor column and backfills
+  schema-16 rows from positive `last_activity_at`, otherwise `created_at`, with bounded integer arithmetic so SQLite
+  cannot promote overflow to REAL. Old helm cache JSON is not migrated: its serde default and creation fallback apply
+  until an authoritative refresh arrives.
 - Agent-kind integrations live in the supervisor as a small trait (`AgentIntegration`; `AgentKind` is the wire enum
   naming the kind itself): status sharpening over the sampled tail, and conversation-identity capture. Sharpening is a
   DEFAULTED trait method that may only promote a live baseline to waiting, never invent liveness, and never panic on
@@ -1425,16 +1452,16 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   every client written before there was a choice keeps its behavior; an unrecognized word is a 400, like an unknown
   status). `created` is `created_at` DESCENDING, then session id ascending, then HOST ID ascending — the first two are
   the order supervisors have always listed in and the third is what keeps the merged order total across hosts.
-  `activity` leads with the session's effective activity stamp descending, and `title` with its collated title
+  `activity` leads with the session's effective work-start key descending, and `title` with its collated title
   ascending; both then fall into that same creation-order tail, so every order is total and a stable sort of the same
-  rows always yields the same sequence. The effective activity stamp is `last_activity_at` when the sender supplied one
-  and `created_at` when it did not, so a session that has produced no observed output — or whose supervisor predates the
-  field — sorts by its creation time rather than piling up at the epoch. The title collation is Rust's
-  `str::to_lowercase` compared as code points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a
-  string, as `İ` does), which is neither SIMPLE lowercasing nor case FOLDING — so `ß` and `SS` stay distinct keys. The
-  result is case-insensitive and otherwise ordinal, deliberately not locale-aware (that is an ICU dependency and a
-  per-user setting this product does not have). The sort happens in Rust, in memory, over the whole merged fleet, on
-  every request; nothing about the order is stored, indexed, or cut.
+  rows always yields the same sequence. The effective work-start key is `last_work_started_at` when positive and
+  `created_at * 1000` otherwise, so an older sender or a session with no observed burst keeps a stable creation position
+  rather than moving with ordinary activity or piling up at the epoch. The title collation is Rust's `str::to_lowercase`
+  compared as code points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a string, as `İ` does),
+  which is neither SIMPLE lowercasing nor case FOLDING — so `ß` and `SS` stay distinct keys. The result is
+  case-insensitive and otherwise ordinal, deliberately not locale-aware (that is an ICU dependency and a per-user
+  setting this product does not have). The sort happens in Rust, in memory, over the whole merged fleet, on every
+  request; nothing about the order is stored, indexed, or cut.
 - Ordering is not filtering, and the two are kept apart: a sort changes the sequence, never the membership, so neither
   `total` nor `matching` moves with it.
 - One host does not fit the cache rule and cannot be made to: a supervisor reporting NO identity, against a registry row
