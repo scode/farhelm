@@ -13,7 +13,6 @@ playwright auth.spec.ts rotation logs out an open client and drops its feed and 
 playwright profiles.spec.ts Tab leaving the document preserves busy dismissal intent  # profiles-focus-premise
 playwright profiles.spec.ts a profile edited in another browser reaches this one over the real feed  # profiles-popup-focus-initial
 playwright profiles.spec.ts the profiles popup border box stays inside a constrained viewport  # profiles-webkit-initial-focus
-playwright profiles.spec.ts a popup-created profile is offered on every host  # profiles-popup-close-lost
 playwright sidebar.spec.ts the sidebar app bar stays pinned while the session list scrolls  # sidebar-scroll-teardown-timeout
 playwright terminal-multihost.spec.ts a failed removal stays visible with details collapsed  # host-removal-details-toggle
 playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
