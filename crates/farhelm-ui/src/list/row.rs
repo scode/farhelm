@@ -8,15 +8,16 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use crate::Session;
-#[cfg(test)]
-use crate::SessionStatus;
 use crate::archive::confirmation as archive_confirmation;
-use crate::icons::{LocalHostIcon, RemoteHostIcon};
+use crate::icons::{
+    EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, LocalHostIcon, PermissionGlyph,
+    PermissionIcon, QualifierGlyph, QualifierIcon, RemoteHostIcon,
+};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{existence_word, source_profile_label};
 use crate::rename::RenameForm;
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
+use crate::{LaunchHarness, Session, SessionStatus};
 
 use super::shared::{DeleteTarget, HostLocality, RowState};
 use crate::menu_panel::{
@@ -375,6 +376,10 @@ const INVOCATION_MARKERS: &[(&str, &[(&str, &str)])] = &[
             ("--full-auto", "full-auto"),
         ],
     ),
+    ("muse", &[("--yolo", "yolo")]),
+    // OpenCode calls its permission-bypass mode `--auto`; it is a YOLO
+    // equivalent, unlike Codex's separately sandboxed `--full-auto`.
+    ("opencode", &[("--auto", "yolo")]),
 ];
 
 /// The row's parsed view of a launch command: the program's basename to
@@ -389,7 +394,93 @@ const INVOCATION_MARKERS: &[(&str, &[(&str, &str)])] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CompactInvocation {
     pub(super) basename: String,
-    pub(super) marker: Option<&'static str>,
+    pub(super) harness: HarnessGlyph,
+    pub(super) permission: Option<PermissionGlyph>,
+}
+
+/// The complete, accessible account of the compact agent badge.
+///
+/// The sidebar reduces a known harness to one or two glyphs, but the reduced
+/// picture must never become the only place the invocation or permission
+/// meaning exists. This value keeps the visible classification and the
+/// tooltip/screen-reader wording together so a later glyph change cannot
+/// accidentally make the accessible account contradict it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AgentBadge {
+    harness: HarnessGlyph,
+    permission: Option<PermissionGlyph>,
+    description: String,
+}
+
+fn known_harness(program: &str) -> HarnessGlyph {
+    match program {
+        "codex" => HarnessGlyph::Codex,
+        "claude" => HarnessGlyph::Claude,
+        "muse" => HarnessGlyph::Muse,
+        "opencode" => HarnessGlyph::OpenCode,
+        _ => HarnessGlyph::Terminal,
+    }
+}
+
+fn permission_description(permission: PermissionGlyph) -> &'static str {
+    match permission {
+        PermissionGlyph::Yolo => "YOLO permission bypass",
+        PermissionGlyph::FullAuto => "sandboxed full-auto",
+    }
+}
+
+/// Describe a session's agent from declared structured intent or a bounded
+/// display parse of its retained invocation.
+///
+/// This helper intentionally has no path back to `LaunchSelection`: inferred
+/// legacy display facts are useful in a dense row, but they are not evidence
+/// strong enough to synthesize or mutate launch intent for clone or restart.
+fn agent_badge(session: &Session) -> AgentBadge {
+    if let Some(launch) = &session.launch {
+        let harness = match launch.harness {
+            LaunchHarness::Codex => HarnessGlyph::Codex,
+            LaunchHarness::Claude => HarnessGlyph::Claude,
+            LaunchHarness::Muse => HarnessGlyph::Muse,
+            LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
+        };
+        let permission = launch.permissions.map(|_| PermissionGlyph::Yolo);
+        let mut description = match harness {
+            HarnessGlyph::Codex => "Codex".to_string(),
+            HarnessGlyph::Claude => "Claude Code".to_string(),
+            HarnessGlyph::Muse => "Muse Code".to_string(),
+            HarnessGlyph::OpenCode => "OpenCode".to_string(),
+            HarnessGlyph::Terminal => unreachable!("structured selections always name a harness"),
+        };
+        if let Some(permission) = permission {
+            description.push_str(" — ");
+            description.push_str(permission_description(permission));
+        }
+        description.push_str(" — ");
+        description.push_str(&session.invocation);
+        return AgentBadge {
+            harness,
+            permission,
+            description,
+        };
+    }
+
+    let compact = compact_invocation(&session.invocation);
+    let mut description = if compact.harness == HarnessGlyph::Terminal {
+        format!("command: {}", compact.basename)
+    } else {
+        compact.basename.clone()
+    };
+    if let Some(permission) = compact.permission {
+        description.push_str(" — ");
+        description.push_str(permission_description(permission));
+    }
+    description.push_str(" — ");
+    description.push_str(&session.invocation);
+    AgentBadge {
+        harness: compact.harness,
+        permission: compact.permission,
+        description,
+    }
 }
 
 /// The row's one-glance parse of a launch command: the program's basename,
@@ -426,7 +517,8 @@ fn compact_invocation(invocation: &str) -> CompactInvocation {
     let trimmed = invocation.trim();
     let fallback = || CompactInvocation {
         basename: trimmed.to_string(),
-        marker: None,
+        harness: HarnessGlyph::Terminal,
+        permission: None,
     };
     let Ok(argv) = shell_words::split(invocation) else {
         return fallback();
@@ -438,23 +530,92 @@ fn compact_invocation(invocation: &str) -> CompactInvocation {
         Some(name) if !name.is_empty() => name.to_string(),
         _ => program.clone(),
     };
-    // Only the arguments BEFORE a bare `--` are candidates: past it, shell
-    // convention says everything is positional data, not a flag this
-    // program parses as its own.
-    let leading_args: Vec<&str> = argv[1..]
-        .iter()
-        .take_while(|arg| arg.as_str() != "--")
-        .map(String::as_str)
-        .collect();
-    let marker = INVOCATION_MARKERS
+    let harness = known_harness(&basename);
+    let permission = INVOCATION_MARKERS
         .iter()
         .find(|(vendor, _)| *vendor == basename)
         .and_then(|(_, flags)| {
+            let leading_args = invocation_switches(&basename, &argv[1..], flags);
             flags
                 .iter()
                 .find_map(|(flag, marker)| leading_args.contains(flag).then_some(*marker))
         });
-    CompactInvocation { basename, marker }
+    let permission = permission.and_then(|marker| match marker {
+        "yolo" | "no-sandbox" | "skip-perms" => Some(PermissionGlyph::Yolo),
+        "full-auto" => Some(PermissionGlyph::FullAuto),
+        _ => None,
+    });
+    CompactInvocation {
+        basename,
+        harness,
+        permission,
+    }
+}
+
+/// Recognize only switches whose argv role is unambiguous.
+///
+/// Shell quoting does not distinguish a switch from an option value after
+/// splitting. Skip the values of known options, and stop at unknown syntax
+/// (including subcommands), rather than claiming that a prompt/config value
+/// changes permissions. This deliberately recognizes only a prefix of legacy
+/// commands; structured launch provenance does not need this approximation.
+fn invocation_switches<'a>(
+    vendor: &str,
+    args: &'a [String],
+    markers: &[(&str, &str)],
+) -> Vec<&'a str> {
+    let valued: &[&str] = match vendor {
+        "codex" => &[
+            "-c",
+            "--config",
+            "-m",
+            "--model",
+            "-p",
+            "--profile",
+            "-C",
+            "--cd",
+            "-s",
+            "--sandbox",
+            "-a",
+            "--ask-for-approval",
+            "--add-dir",
+            "--enable",
+            "--disable",
+            "-i",
+            "--image",
+        ],
+        "claude" => &[
+            "--model",
+            "--permission-mode",
+            "--output-format",
+            "--input-format",
+            "--system-prompt",
+            "--append-system-prompt",
+            "--settings",
+        ],
+        "muse" | "opencode" => &["--model", "-m"],
+        _ => &[],
+    };
+    let mut switches = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if markers.iter().any(|(flag, _)| arg == flag) {
+            switches.push(arg.as_str());
+        } else if valued.contains(&arg.as_str()) {
+            // A marker-looking value remains data, even when quoted.
+            if args.next().is_none_or(|value| value == "--") {
+                break;
+            }
+        } else if arg
+            .split_once('=')
+            .is_some_and(|(key, _)| valued.contains(&key))
+        {
+            continue;
+        } else {
+            break;
+        }
+    }
+    switches
 }
 
 #[cfg(test)]
@@ -489,23 +650,24 @@ std::thread_local! {
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
-/// The row uses two lines unless the shared compact preference hides the
-/// second. The identity line reserves fixed status and locality slots, then
-/// carries the title and its qualifiers, the agent badge, and activity age.
-/// An ended status stays visible beside the title instead of stretching the
-/// status slot; an unknown locality leaves its reserved slot blank rather
-/// than claiming an identity. The second line names the host and abbreviated
-/// cwd, with each field retaining its full value in a tooltip.
+/// Compact rows use one visual line. Outside compact mode, an ended status or
+/// stale/archive qualifier adds a full-width detail line between identity and
+/// host metadata. The identity line reserves fixed status and locality slots,
+/// then carries title, glyph-only agent identity, and activity age. Compact
+/// ended states use the status slot for an icon, while their complete wording
+/// stays accessible; an unknown locality leaves its reserved slot blank rather
+/// than claiming an identity. The host line retains its full values in
+/// tooltips.
 ///
 /// The second line restores the host/directory pairing so rows from several
 /// machines can be scanned without mixing identity into the already dense
 /// first line. Compact mode is the explicit escape hatch for a fleet where
-/// that repeated context is less useful. The invocation stays as a compact
-/// first-line badge: profile name when present, otherwise program basename
-/// plus a recognized unattended-mode marker. The full cwd remains available
-/// on the open button in compact mode, and the invocation keeps its badge
-/// tooltip in either mode. See `abbreviate_home` and
-/// `compact_invocation` for what each abbreviation costs.
+/// that repeated context is less useful. A structured selection names the
+/// harness glyph directly; legacy rows use the retained invocation only for a
+/// conservative display classification, including profile-backed rows. The
+/// full cwd remains available on the open button in compact mode, and the
+/// agent tooltip retains the full invocation and permission meaning. See
+/// `abbreviate_home` and `compact_invocation` for the display constraints.
 ///
 /// A row the helm marked stale
 /// — its host is in some non-connected state — is dimmed and badged rather
@@ -750,14 +912,18 @@ pub(super) fn SessionRow(
     // attributes carry the original: an abbreviation the user cannot undo
     // would make the sidebar's own claim about a session unverifiable.
     let cwd_shown = abbreviate_home(&session.cwd);
-    // Only for a session NOT created from a profile: the branch below that
-    // renders `source_profile`'s snapshotted name never reads this value at
-    // all, so parsing argv and scanning for a marker on every render of a
-    // profile-backed row would be pure waste.
-    let invocation_compact = session
-        .source_profile
-        .is_none()
-        .then(|| compact_invocation(&session.invocation));
+    // A profile name is a useful provenance label, not evidence of the
+    // executable or permission mode it ran. The sidebar therefore classifies
+    // every legacy row from its retained invocation, profile-backed included;
+    // structured metadata remains authoritative where it exists.
+    let agent = agent_badge(&session);
+    // The profile remains provenance a user may need to inspect, even though
+    // it is not evidence for classification. Keep it in the native tooltip as
+    // well as the accessible name so neither display surface loses it.
+    let agent_tooltip = session.source_profile.as_ref().map_or_else(
+        || agent.description.clone(),
+        |source| format!("{} — {}", source_profile_label(source), agent.description),
+    );
     // `None` for a status nothing has classified yet, and the row then
     // renders no badge ELEMENT at all rather than an empty one — see
     // `status_badge`'s own docs for why an empty badge box would be the
@@ -771,14 +937,37 @@ pub(super) fn SessionRow(
     // convention two call sites have to maintain by hand.
     let unseen = session.has_unseen_output();
     let badge = status_badge(&session.status, session.annotation.as_deref(), unseen);
-    // Live statuses occupy the fixed leading slot as dots. Ended statuses
-    // carry details a dot cannot express, so their word stays with the title
-    // while the slot remains reserved; this aligns every later column without
-    // changing the status contract.
-    let (status_slot_badge, ended_badge) = match badge {
+    // Live statuses occupy the fixed leading slot as dots. In compact mode an
+    // ended status uses that same slot for an icon; noncompact rows put its
+    // complete wording on the full-width detail line below the identity.
+    let (status_slot_badge, mut ended_badge) = match badge {
         Some(badge) if badge.visible => (None, Some(badge)),
         badge => (badge, None),
     };
+    if let (
+        Some(detail),
+        SessionStatus::Exited {
+            exit_code: None, ..
+        },
+    ) = (&mut ended_badge, &session.status)
+    {
+        // `status_badge` is shared with the header, where its established
+        // concise wording stays intact. The sidebar's full detail contract
+        // needs this otherwise absent datum to remain explicit.
+        detail.text = detail.text.replacen("exited", "exited (code unknown)", 1);
+    }
+    let ended_glyph = match (&session.status, session.annotation.as_deref()) {
+        (SessionStatus::Exited { .. }, Some("stopped by user")) => Some(EndedGlyph::Stopped),
+        (SessionStatus::Exited { .. }, _) => Some(EndedGlyph::Exited),
+        (SessionStatus::Interrupted, _) => Some(EndedGlyph::Interrupted),
+        (SessionStatus::Error { .. }, _) => Some(EndedGlyph::Error),
+        _ => None,
+    };
+    // A noncompact detail line is meaningful when it carries either the
+    // complete ended message or a qualifier whose compact presentation is a
+    // glyph. Live and unknown rows otherwise keep their existing two-line
+    // height rather than acquiring an empty layout row.
+    let has_detail = ended_badge.is_some() || session.stale || session.archived;
     // The browser suite's stable wire token for locality, the same role
     // `data-host-kind` plays in the host panel: a plain string rather than
     // `Debug`'s derived spelling, so a rename of the enum's variants (their
@@ -1269,6 +1458,18 @@ pub(super) fn SessionRow(
                                 },
                                 dot_title: offers_mark_seen.then(|| mark_seen_label.to_string()),
                             }
+                        } else if compact {
+                            if let Some(glyph) = ended_glyph {
+                                if let Some(badge) = &ended_badge {
+                                    // The compact row button's tooltip names
+                                    // its cwd, so this wrapper keeps ended
+                                    // detail available to pointer users too.
+                                    span { class: "compact-ended-status", title: "{display_peer(&badge.text)}",
+                                        EndedStatusIcon { glyph }
+                                        span { class: "visually-hidden", "{badge.text}" }
+                                    }
+                                }
+                            }
                         }
                         }
                         // The locality slot (2026-09-03): a fixed leading
@@ -1302,53 +1503,45 @@ pub(super) fn SessionRow(
                             HostLocality::Unknown => rsx! {},
                         }
                         }
-                        // One grid child owns the whole identity cluster.
-                        // Keeping qualifiers inside it preserves the leading
-                        // and trailing grid tracks. They can wrap within this
-                        // cluster when several state words cannot fit beside
-                        // the title; a clipped-away state would be misleading.
-                        span { class: "session-identity-copy",
+                        // One grid child owns the title and compact-only
+                        // qualifiers. Noncompact qualifier words move into
+                        // the full-width detail line so they stay readable
+                        // without competing with the agent and activity.
+                        span { class: if compact { "session-identity-copy compact" } else { "session-identity-copy" },
                             // Native tooltips do not inherit DOM direction
                             // isolation. Escape invisible directional controls
                             // in this new display surface like other peer text.
                             span { class: "session-title", title: display_peer(&session.title), "{session.title}" }
-                            if let Some(badge) = ended_badge {
-                                StatusBadgeView {
-                                    badge,
-                                    dot_onclick: move |_| {},
-                                    dot_title: None,
+                            if compact {
+                                if session.stale {
+                                    span { class: "compact-qualifier", title: "stale",
+                                        QualifierIcon { glyph: QualifierGlyph::Stale }
+                                        span { class: "visually-hidden", "stale" }
+                                    }
                                 }
-                            }
-                            if session.stale {
-                                span { class: "stale-badge", title: "stale", "stale" }
-                            }
-                            if session.archived {
-                                span { class: "archived-badge", title: "archived", "archived" }
+                                if session.archived {
+                                    span { class: "compact-qualifier", title: "archived",
+                                        QualifierIcon { glyph: QualifierGlyph::Archived }
+                                        span { class: "visually-hidden", "archived" }
+                                    }
+                                }
                             }
                         }
-                        // The agent badge stays on the identity line, where
-                        // it can sit in its own right-aligned column before
-                        // activity time. A profile name is the agent the
-                        // user chose; raw invocation sessions retain the
-                        // compact program-and-marker label.
-                        if let Some(source) = &session.source_profile {
-                            span {
-                                class: "session-invocation session-agent peer-value",
-                                dir: "ltr",
-                                "data-profile-existence": "{existence_word(source.existence)}",
-                                title: "{source_profile_label(source)} — {session.invocation}",
-                                "{display_peer(&source.name)}"
+                        // The agent track is a bounded visual classifier.
+                        // Its tooltip also preserves profile provenance when
+                        // there is one, because that name remains useful even
+                        // though it is never trusted as harness evidence.
+                        span {
+                            class: "session-agent",
+                            title: "{display_peer(&agent_tooltip)}",
+                            HarnessIcon { glyph: agent.harness }
+                            if let Some(permission) = agent.permission {
+                                PermissionIcon { glyph: permission }
                             }
-                        } else if let Some(compact) = &invocation_compact {
-                            span {
-                                class: "session-invocation session-agent",
-                                title: "{session.invocation}",
-                                span { class: "peer-value", dir: "ltr", "{display_peer(&compact.basename)}" }
-                                if let Some(marker) = compact.marker {
-                                    " · "
-                                    span { class: "peer-value", dir: "ltr", "{marker}" }
-                                }
+                            if let Some(source) = &session.source_profile {
+                                span { class: "visually-hidden", "{display_peer(&source_profile_label(source))}. " }
                             }
+                            span { class: "visually-hidden", "{display_peer(&agent.description)}" }
                         }
                         // Beside the badge, and about something ELSE. The
                         // badge is the session's current (or, on a stale
@@ -1376,6 +1569,25 @@ pub(super) fn SessionRow(
                             }
                         }
                         }
+                    }
+                    if !compact && has_detail {
+                    // A full-width sibling of the identity grid, rather than
+                    // a wrapped child of its title track: status detail and
+                    // qualifiers may use the space beneath the agent and age
+                    // while the row's menu gutter remains fixed.
+                    span { class: "session-row-line session-row-detail",
+                        span { class: "session-detail-copy",
+                            if let Some(badge) = ended_badge {
+                                StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None }
+                            }
+                            if session.stale {
+                                span { class: "stale-badge", title: "stale", "stale" }
+                            }
+                            if session.archived {
+                                span { class: "archived-badge", title: "archived", "archived" }
+                            }
+                        }
+                    }
                     }
                     if !compact {
                     // The optional second line names the actual host beside
@@ -2580,10 +2792,15 @@ mod tests {
 
     /// Build a [`CompactInvocation`] the way `compact_invocation` would, for
     /// terser assertions below.
-    fn badge(basename: &str, marker: Option<&'static str>) -> CompactInvocation {
+    fn badge(
+        basename: &str,
+        harness: HarnessGlyph,
+        permission: Option<PermissionGlyph>,
+    ) -> CompactInvocation {
         CompactInvocation {
             basename: basename.to_string(),
-            marker,
+            harness,
+            permission,
         }
     }
 
@@ -2597,25 +2814,37 @@ mod tests {
     /// permission prompt skipped look identical to one that asks.
     #[farhelm_testtrace::test]
     fn the_invocation_badge_is_a_basename_plus_at_most_one_marker() {
-        assert_eq!(compact_invocation("sleep 300"), badge("sleep", None));
+        assert_eq!(
+            compact_invocation("sleep 300"),
+            badge("sleep", HarnessGlyph::Terminal, None)
+        );
         assert_eq!(
             compact_invocation("/usr/bin/codex --yolo"),
-            badge("codex", Some("yolo"))
+            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
         );
         assert_eq!(
             compact_invocation("claude --dangerously-skip-permissions --model opus"),
-            badge("claude", Some("skip-perms"))
+            badge("claude", HarnessGlyph::Claude, Some(PermissionGlyph::Yolo))
+        );
+        assert_eq!(
+            compact_invocation("opencode --auto"),
+            badge(
+                "opencode",
+                HarnessGlyph::OpenCode,
+                Some(PermissionGlyph::Yolo)
+            ),
+            "OpenCode's auto spelling is the requested YOLO equivalent"
         );
         assert_eq!(
             compact_invocation("codex --full-auto --yolo"),
-            badge("codex", Some("yolo")),
+            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo)),
             "the table's order, not the command line's, picks the marker"
         );
         // A flag is only a marker as a whole token: substring matching
         // would badge an unrelated argument that merely contains one.
         assert_eq!(
             compact_invocation("claude --model=yolo-9"),
-            badge("claude", None)
+            badge("claude", HarnessGlyph::Claude, None)
         );
     }
 
@@ -2627,7 +2856,7 @@ mod tests {
     fn the_no_sandbox_flag_earns_its_own_marker() {
         assert_eq!(
             compact_invocation("codex --dangerously-bypass-approvals-and-sandbox"),
-            badge("codex", Some("no-sandbox"))
+            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
         );
     }
 
@@ -2635,7 +2864,87 @@ mod tests {
     fn the_full_auto_flag_earns_its_own_marker() {
         assert_eq!(
             compact_invocation("codex --full-auto"),
-            badge("codex", Some("full-auto"))
+            badge(
+                "codex",
+                HarnessGlyph::Codex,
+                Some(PermissionGlyph::FullAuto)
+            )
+        );
+    }
+
+    /// Permission-looking option values must not claim an unsafe launch mode.
+    /// Known option arity permits later real switches; unknown syntax ends
+    /// inference because a later token may belong to that option or subcommand.
+    #[farhelm_testtrace::test]
+    fn permission_markers_require_switch_position() {
+        for command in [
+            "codex -c '--yolo'",
+            "codex -c '--full-auto'",
+            "codex --config=--yolo",
+            "codex --unknown '--yolo'",
+            "codex exec --yolo",
+            "codex -- --yolo",
+            "codex -c -- --yolo",
+        ] {
+            assert_eq!(compact_invocation(command).permission, None, "{command}");
+        }
+        for command in [
+            "codex -c '--full-auto' '--yolo'",
+            "codex --model=example --yolo",
+        ] {
+            assert_eq!(
+                compact_invocation(command).permission,
+                Some(PermissionGlyph::Yolo),
+                "{command}"
+            );
+        }
+        assert_eq!(
+            compact_invocation("claude --model '--dangerously-skip-permissions'").permission,
+            None
+        );
+        assert_eq!(compact_invocation("muse --model '--yolo'").permission, None);
+        assert_eq!(
+            compact_invocation("opencode --model '--auto'").permission,
+            None
+        );
+    }
+
+    /// Harness recognition is deliberately bounded to executable evidence:
+    /// each supported spelling earns its own glyph, while an arbitrary
+    /// command remains the neutral terminal instead of borrowing a profile
+    /// name or a flag from a different tool.
+    #[farhelm_testtrace::test]
+    fn recognized_executables_choose_their_own_harness_glyphs() {
+        assert_eq!(known_harness("codex"), HarnessGlyph::Codex);
+        assert_eq!(known_harness("claude"), HarnessGlyph::Claude);
+        assert_eq!(known_harness("muse"), HarnessGlyph::Muse);
+        assert_eq!(known_harness("opencode"), HarnessGlyph::OpenCode);
+        assert_eq!(known_harness("env"), HarnessGlyph::Terminal);
+    }
+
+    /// Structured metadata wins over a contradictory retained command, so a
+    /// display helper never turns a legacy-looking string into replacement
+    /// launch intent or hides the declared harness a user selected.
+    #[farhelm_testtrace::test]
+    fn structured_launch_metadata_is_authoritative_for_the_agent_badge() {
+        let session = Session {
+            launch: Some(crate::LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: Some(crate::LaunchPermission::Yolo),
+            }),
+            invocation: "unknown-command --anything".to_string(),
+            ..row_specimen("structured-agent-badge")
+        };
+        assert_eq!(
+            agent_badge(&session),
+            AgentBadge {
+                harness: HarnessGlyph::Claude,
+                permission: Some(PermissionGlyph::Yolo),
+                description: "Claude Code — YOLO permission bypass — unknown-command --anything"
+                    .to_string(),
+            }
         );
     }
 
@@ -2647,14 +2956,23 @@ mod tests {
     fn markers_are_tied_to_the_recognized_programs_own_flags() {
         // An unrecognized program earns no marker even though the flag
         // text is right there in its argv.
-        assert_eq!(compact_invocation("echo --yolo"), badge("echo", None));
+        assert_eq!(
+            compact_invocation("echo --yolo"),
+            badge("echo", HarnessGlyph::Terminal, None)
+        );
         // Codex's own flag, but past a bare `--`: shell convention says
         // everything from there on is positional data, not a flag this
         // program reads as its own.
-        assert_eq!(compact_invocation("codex -- --yolo"), badge("codex", None));
+        assert_eq!(
+            compact_invocation("codex -- --yolo"),
+            badge("codex", HarnessGlyph::Codex, None)
+        );
         // Claude Code's binary, but Codex's flag — the wrong vendor's flag
         // is not a marker.
-        assert_eq!(compact_invocation("claude --yolo"), badge("claude", None));
+        assert_eq!(
+            compact_invocation("claude --yolo"),
+            badge("claude", HarnessGlyph::Claude, None)
+        );
     }
 
     /// A bidi override character in the PROGRAM's basename rides through
@@ -2680,7 +2998,8 @@ mod tests {
             compact_invocation("/opt/bin/\u{202E}codex --yolo"),
             CompactInvocation {
                 basename: "\u{202E}codex".to_string(),
-                marker: None,
+                harness: HarnessGlyph::Terminal,
+                permission: None,
             },
             "the override character rides along in the basename field untouched, and the \
              corrupted name simply fails the exact match against the recognized `codex` vendor"
@@ -2695,7 +3014,7 @@ mod tests {
         // A backslash-escaped space in an otherwise unquoted path.
         assert_eq!(
             compact_invocation("/opt/with\\ space/bin/claude --dangerously-skip-permissions"),
-            badge("claude", Some("skip-perms"))
+            badge("claude", HarnessGlyph::Claude, Some(PermissionGlyph::Yolo))
         );
         // Adjacent quoted and unquoted fragments glue into ONE argv[0] —
         // the shape `shell_words::quote` itself produces for a path with
@@ -2706,7 +3025,7 @@ mod tests {
         // space was actually consumed as part of the same argv[0].
         assert_eq!(
             compact_invocation("\"/opt/with space\"/bin/codex --yolo"),
-            badge("codex", Some("yolo"))
+            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
         );
         // The whole path quoted, once with double quotes and once with
         // single — deliberately DISCRIMINATING fixtures, unlike the
@@ -2718,17 +3037,17 @@ mod tests {
         // consumed the space as part of argv[0] recovers the right answer.
         assert_eq!(
             compact_invocation("\"/opt/with space/bin/farhelm\" internal fake-agent"),
-            badge("farhelm", None)
+            badge("farhelm", HarnessGlyph::Terminal, None)
         );
         assert_eq!(
             compact_invocation("'/opt/with space/bin/farhelm' internal fake-agent"),
-            badge("farhelm", None)
+            badge("farhelm", HarnessGlyph::Terminal, None)
         );
         // A quoted flag: the parser strips the quotes, and the flag still
         // matches the marker table as a whole token.
         assert_eq!(
             compact_invocation("codex \"--yolo\""),
-            badge("codex", Some("yolo"))
+            badge("codex", HarnessGlyph::Codex, Some(PermissionGlyph::Yolo))
         );
         // `#` starts a real POSIX comment at a word boundary — this parser
         // is not a hand-rolled stand-in, it is the genuine article — so
@@ -2736,12 +3055,16 @@ mod tests {
         // entirely rather than surviving as a literal trailing token.
         assert_eq!(
             compact_invocation("sleep 300 #not-a-comment"),
-            badge("sleep", None)
+            badge("sleep", HarnessGlyph::Terminal, None)
         );
         // Single quotes behave exactly like double quotes for this parser.
         assert_eq!(
             compact_invocation("'codex' --full-auto"),
-            badge("codex", Some("full-auto"))
+            badge(
+                "codex",
+                HarnessGlyph::Codex,
+                Some(PermissionGlyph::FullAuto)
+            )
         );
     }
 
@@ -2755,16 +3078,22 @@ mod tests {
     /// it was given, with no marker.
     #[farhelm_testtrace::test]
     fn a_degenerate_invocation_falls_back_to_what_it_was_given() {
-        assert_eq!(compact_invocation(""), badge("", None));
-        assert_eq!(compact_invocation("   "), badge("", None));
+        assert_eq!(
+            compact_invocation(""),
+            badge("", HarnessGlyph::Terminal, None)
+        );
+        assert_eq!(
+            compact_invocation("   "),
+            badge("", HarnessGlyph::Terminal, None)
+        );
         assert_eq!(
             compact_invocation("/usr/bin/"),
-            badge("/usr/bin/", None),
+            badge("/usr/bin/", HarnessGlyph::Terminal, None),
             "a token with no basename to take stands as it is"
         );
         assert_eq!(
             compact_invocation("\"unbalanced --yolo"),
-            badge("\"unbalanced --yolo", None),
+            badge("\"unbalanced --yolo", HarnessGlyph::Terminal, None),
             "an unclosed quote is something shell_words itself cannot resolve, so this falls \
              back to the trimmed raw text with no marker rather than guessing at structure that \
              was never there"

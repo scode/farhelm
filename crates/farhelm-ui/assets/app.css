@@ -1987,16 +1987,15 @@ samp {
 }
 
 /* Fixed leading tracks keep every title aligned. A live status uses the
-   first slot's dot; ended wording moves into the identity copy, and unknown
-   locality leaves the second slot blank, so neither truth changes the
-   geometry. The agent track can shrink independently while the activity
-   column remains right-aligned. Ages have no day-count ceiling, so the last
-   track can grow beyond its usual four characters without overlapping the
-   agent badge. */
+   first slot's dot; compact ended rows use it for their distinct icon, while
+   noncompact detail moves below the identity grid. The agent track is only
+   as wide as its one or two glyphs, recovering title room that the old text
+   badge had reserved. Ages have no day-count ceiling, so the final track can
+   grow beyond four characters without overlapping the agent mark. */
 .session-row-identity {
   display: grid;
   grid-template-columns:
-    var(--row-slot) var(--row-slot) minmax(0, 1fr) minmax(0, min(8em, 35%)) minmax(4ch, max-content);
+    var(--row-slot) var(--row-slot) minmax(0, 1fr) max-content minmax(4ch, max-content);
   align-items: baseline;
   column-gap: var(--row-slot-gap);
 }
@@ -2023,6 +2022,17 @@ samp {
   white-space: nowrap;
 }
 
+/* A compact row stays one visual line even with both qualifier glyphs. The
+   title is the sole shrinkable item; state glyphs remain visible facts. */
+.session-identity-copy.compact {
+  flex-wrap: nowrap;
+}
+
+.session-identity-copy.compact .session-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .session-identity-copy .session-title {
   /* Keep a recognizable prefix of the session identity at the 280px floor.
      The surrounding grid still owns the hard width limit, so qualifiers and
@@ -2030,30 +2040,13 @@ samp {
   min-width: 4ch;
 }
 
-.session-identity-copy .status-badge,
-.session-identity-copy .stale-badge,
-.session-identity-copy .archived-badge {
-  /* Several state words need more room than a narrow identity track can
-     supply on one line. Wrap inside this track rather than hiding a whole
-     qualifier behind its parent's clip; cap an individual long error here
-     too, retaining StatusBadgeView's full-text tooltip. */
-  flex: 0 1 auto;
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .session-agent {
   grid-column: 4;
   justify-self: end;
-  width: fit-content;
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--fg-1);
 }
 .session-activity-column {
   grid-column: 5;
@@ -2078,6 +2071,81 @@ samp {
   width: 12px;
   height: 12px;
   flex: 0 0 auto;
+}
+
+/* Harness and qualifier glyphs share the text cap height but not one visual
+   vocabulary: a terminal is neutral, an open lock is a permission bypass,
+   and a closed lock explicitly says Codex full-auto remains sandboxed. */
+.sidebar-glyph {
+  width: 10px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.permission-glyph[data-glyph="yolo"] {
+  color: var(--warn);
+}
+
+.permission-glyph[data-glyph="full-auto"] {
+  color: var(--info);
+}
+
+.ended-status-glyph[data-glyph="exited"] {
+  color: var(--fg-1);
+}
+
+.ended-status-glyph[data-glyph="interrupted"] {
+  color: var(--warn);
+}
+
+.ended-status-glyph[data-glyph="error"] {
+  color: var(--danger-strong);
+}
+
+.compact-qualifier {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-1);
+}
+
+.compact-ended-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.compact-qualifier .qualifier-glyph[data-glyph="stale"] {
+  color: var(--warn);
+}
+
+/* Status detail is a grid sibling so its copy can span under both trailing
+   tracks without letting peer-controlled text widen the menu's outer row. */
+.session-row-detail {
+  display: grid;
+  grid-template-columns: var(--row-slot) var(--row-slot) minmax(0, 1fr);
+  column-gap: var(--row-slot-gap);
+}
+
+.session-detail-copy {
+  grid-column: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fg-1);
+}
+
+/* This is intentionally narrower than the shared badge rule. The sidebar
+   detail is the one surface where an ended message must remain fully visible;
+   it wraps long words instead of inheriting another caller's ellipsis cap. */
+.session-row-detail .status-badge {
+  max-width: none;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 0;
 }
 
 /* Local sessions need a persistent caution cue, including selected and
