@@ -4,7 +4,7 @@
 > at this time, for a variety of reasons. Do not expect user-friendliness, do not expect the documentation to be correct
 > or helpful, and do not expect anything else either. This notice goes away when that changes.
 
-# <img src="packaging/farhelm-desktop/icon.svg" width="40" align="middle" alt="F">arhelm
+# <img src="packaging/farhelm-desktop/icon.svg" width="48" height="48" align="absmiddle" alt=""> farhelm
 
 Take the helm - control your agents far away and local.
 
