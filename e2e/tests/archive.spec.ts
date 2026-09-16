@@ -453,9 +453,9 @@ test("an external archive invalidates an open detail confirmation", async ({ pag
  * under the user's hands the moment somebody else archives the session.
  *
  * The row itself does leave the sidebar, and must: the default view is not
- * showing archived sessions, and the actions menu is a lens that closes
- * with its row. What has to survive is the STATE — the open editor and its
- * unsent draft — which reopening the menu after restart puts back on screen.
+ * showing archived sessions. The list-owned dialog remains continuously
+ * visible above that change; its native field, focus, and exact draft survive
+ * without another interaction with the covered row menu.
  */
 test("an external archive does not close an open rename editor", async ({ page, request }) => {
   const session = await createSession(request, { title: `archive-rename-${Date.now()}` });
@@ -467,10 +467,13 @@ test("an external archive does not close an open rename editor", async ({ page, 
 
     await openRowMenu(target);
     await target.locator(".session-row-rename").click();
-    await expect(target.locator(".rename-form")).toBeVisible();
+    await expect(page.locator(".rename-dialog")).toBeVisible();
     // Typed and deliberately NOT submitted: an answer in progress is
     // exactly what a listing refresh must not be allowed to throw away.
-    await target.locator(".rename-input").fill(draft);
+    const field = page.locator(".rename-dialog .rename-input");
+    await field.fill(draft);
+    await expect(field).toBeFocused();
+    await field.evaluate((node) => { (window as any).__archiveRenameField = node; });
 
     const archived = await request.post(`/api/sessions/${session.id}/archive`);
     expect(archived.ok(), await archived.text()).toBeTruthy();
@@ -487,6 +490,9 @@ test("an external archive does not close an open rename editor", async ({ page, 
       }), session.id),
       { timeout: 20_000, message: "a successful default listing must omit the externally archived row" },
     ).toEqual({ listingPresent: true, targetRows: 0 });
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue(draft);
+    expect(await field.evaluate((node) => node === (window as any).__archiveRenameField)).toBe(true);
 
     // The sidebar cannot browse archives. Restart through the retained API
     // surface, then require the ordinary active listing to publish the same
@@ -509,15 +515,51 @@ test("an external archive does not close an open rename editor", async ({ page, 
     const restored = row(page, session.id);
     await expect(restored).toBeVisible({ timeout: 20_000 });
 
-    await openRowMenu(restored);
     await expect(
-      restored.locator(".rename-form"),
+      page.locator(".rename-dialog"),
       "the rename was still in progress; only the row went away",
     ).toBeVisible();
     await expect(
-      restored.locator(".rename-input"),
+      page.locator(".rename-dialog .rename-input"),
       "and the unsent draft went with it, character for character",
     ).toHaveValue(draft);
+    await expect(field).toBeFocused();
+    expect(await field.evaluate((node) => node === (window as any).__archiveRenameField)).toBe(true);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The default list excludes archives, so absence cannot prove deletion.
+ *
+ * The same response shape follows an external archive. The editor therefore
+ * keeps the exact draft and remains usable until a fleet-wide authoritative
+ * read supplies stronger evidence; the state-level test covers that latter
+ * transition directly.
+ */
+test("default-list absence retains an enabled rename editor and its draft", async ({ page, request }) => {
+  const session = await createSession(request, { title: `deleted-rename-${Date.now()}` });
+  const draft = `${session.title}-copy-me`;
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
+    await target.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    await dialog.locator(".rename-input").fill(draft);
+
+    const deleted = await request.delete(`/api/sessions/${session.id}`);
+    expect(deleted.ok(), await deleted.text()).toBeTruthy();
+    await expect(target).toHaveCount(0, { timeout: 20_000 });
+    await expect(dialog.locator(".rename-unavailable")).toHaveCount(0);
+    await expect(dialog.locator(".rename-input")).toHaveValue(draft);
+    await expect(dialog.locator(".rename-input")).toBeEditable();
+    await expect(dialog.locator(".rename-submit")).toBeEnabled();
+    await expect(dialog.locator(".rename-cancel")).toBeEnabled();
+    await dialog.locator(".rename-cancel").click();
+    await expect(dialog).toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
   }

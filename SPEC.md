@@ -248,6 +248,12 @@ session itself — **error** when the agent process could not be started at all 
 
 The client supports: create, open, rename, restart, clone, replace, replace with, stop, archive, delete.
 
+A list rename opens in a modal editor owned by the list rather than by the row-actions popup. Listing updates may
+reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
+session identity stay intact. A successful rename closes that editor; a refusal leaves its draft and error visible for
+correction. A complete, authoritative listing that no longer contains the source disables submission without discarding
+the draft, because a filtered, truncated, failed, or stale listing is not proof that the session disappeared.
+
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
   Terminal tabs keep running, and the session remains with its terminal still viewable.
 - **Restart** relaunches the agent in the same working directory, resuming the session's own conversation where

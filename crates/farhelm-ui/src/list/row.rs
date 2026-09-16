@@ -15,7 +15,6 @@ use crate::icons::{
 };
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{existence_word, source_profile_label};
-use crate::rename::RenameForm;
 use crate::status::{StatusBadgeView, confirm_consequence, replace_consequence, status_badge};
 use crate::{LaunchHarness, Session, SessionStatus};
 
@@ -643,10 +642,10 @@ std::thread_local! {
 /// could not legally host the toggle. Tab order follows the layers:
 /// closed, it walks open → toggle and on to the next row; open, the
 /// panel's controls follow the toggle (rename → clone → stop → archive →
-/// delete, as visible per `RowControlVisibility`); confirming, the
-/// panel holds consequence text plus confirm → cancel (with initial
-/// FOCUS on cancel — see "Focus-on-open" below); renaming, the panel
-/// holds the current title plus the field's input → save → cancel.
+/// delete, as visible per `RowControlVisibility`); confirming, the panel
+/// holds consequence text plus confirm → cancel (with initial FOCUS on
+/// cancel — see "Focus-on-open" below). Rename instead opens ListView's
+/// independent dialog and immediately closes this anchored panel.
 ///
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
@@ -748,25 +747,12 @@ std::thread_local! {
 /// title" the actual reading order, not just an incidental visual
 /// side effect that a later DOM-order change could quietly undo.
 ///
-/// ## Inline rename (PLAN_M5.md item 6)
+/// ## Rename ownership
 ///
-/// `renaming` swaps the actions panel's rename/clone/stop/archive/delete
-/// set for the session's own title plus `rename::RenameForm`, disabling (not
-/// hiding) the open button exactly as the confirm prompt does. The two
-/// states are mutually exclusive by construction — `ListView` refuses to
-/// open either while the other is showing — so the branches below can be a
-/// plain if/else chain rather than a composition of overlays.
-///
-/// Repeating the title inside the panel is load-bearing, not decoration:
-/// a REFUSED rename must show the rejected draft NEXT TO the name that
-/// still stands (SPEC.md requires the old title to stay while the
-/// supervisor's refusal is shown), and the row's own title line may be
-/// ellipsized past recognition in the narrow sidebar.
-///
-/// The draft itself is `ListView`'s (`rename_draft`), seeded when the
-/// field opens; everything the submitted string then goes through is
-/// `ListView`'s too. This component neither validates it nor decides what
-/// a refusal means.
+/// `renaming` still disables this row's open button, but no longer swaps the
+/// menu contents. ListView owns the dialog outside keyed rows, preserving the
+/// textarea through refreshes that reorder or temporarily remove this row.
+/// This row only supplies the source identity and title that seed that editor.
 ///
 /// Focus-on-open uses the plain HTML `autofocus` attribute on the cancel
 /// button (below), not Dioxus's `onmounted`/`set_focus` API: `set_focus`
@@ -816,24 +802,19 @@ std::thread_local! {
 /// `handle_menu_key` is the one place they meet a real event, shared with
 /// the host row's menu (see that module's own doc for why).
 ///
-/// The confirm and rename sub-states deliberately bind NOTHING. Their
-/// contents are not menu items — a text field and a two-button prompt —
-/// and arrow keys inside a rename field belong to the caret, not to a
-/// menu. Escape is left unbound there too, and that one is a decision
+/// Confirmation sub-states deliberately bind NOTHING. Their
+/// contents are not menu items — a two-button prompt — and arrow keys do
+/// not describe commands while it is visible. Escape is left unbound there
+/// too, and that one is a decision
 /// rather than an omission: closing the panel does not clear
-/// `ListView`'s confirming/renaming flag (see `menu_panel_placement_style`
-/// for why that state outlives the panel), so an Escape that dismissed
+/// `ListView`'s confirming flag (see `menu_panel_placement_style` for why
+/// that state outlives the panel), so an Escape that dismissed
 /// the prompt without answering it would leave the row primed to reopen
 /// straight back into the same prompt.
 ///
-/// What each of those states focuses on arrival differs, and the
-/// difference is deliberate rather than an inconsistency to iron out. A
-/// CONFIRMATION autofocuses its cancel button, because the risk is a
-/// stray Enter landing on a destructive action; cancel is one keystroke
-/// away from the moment the prompt appears. RENAME autofocuses its text
-/// area (`rename::RenameForm`), because the whole point of opening it is
-/// to type, and its cancel sits after Save in tab order — so backing out
-/// of a rename is Shift+Tab away, not Escape and not one Tab.
+/// A confirmation autofocuses its cancel button, because the risk is a stray
+/// Enter landing on a destructive action. The separate rename dialog owns its
+/// own focus, Escape, and cancellation lifecycle.
 #[component]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn SessionRow(
@@ -843,7 +824,6 @@ pub(super) fn SessionRow(
     /// The identity row never changes, so compactness cannot hide status,
     /// locality, or the menu target a keyboard user needs to reach.
     compact: bool,
-    rename_draft: Signal<String>,
     on_open: EventHandler<Session>,
     /// The "clone" menu item's click: hands the row's own `Session` up so
     /// `ListView` can seed a fresh create form from it
@@ -888,8 +868,6 @@ pub(super) fn SessionRow(
     /// keeps `ListView` from having to re-derive it.
     on_mark_seen: EventHandler<(String, Option<i64>)>,
     on_rename_start: EventHandler<(String, String)>,
-    on_rename_submit: EventHandler<(String, String)>,
-    on_rename_cancel: EventHandler<()>,
     on_menu_toggle: EventHandler<String>,
 ) -> Element {
     let RowState {
@@ -995,7 +973,6 @@ pub(super) fn SessionRow(
     let confirm_replace_id = session.id.clone();
     let cancel_replace_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
-    let rename_submit_id = session.id.clone();
     // The toggle is offered on a LIVE row (running, waiting, idle — SPEC.md;
     // an ended session has no dot and no meaningful unseen state) whose helm
     // answered the seen-state question at all (`unseen.is_some()`); staleness
@@ -1035,11 +1012,10 @@ pub(super) fn SessionRow(
     // out of this one value (see `MenuOrder`), so the rendered list and the
     // navigable list cannot disagree.
     let menu_order = session_menu_order(controls);
-    // Whether the panel is currently showing its ITEM list, as opposed to
-    // a confirm prompt or the rename field. Only the item list is a menu
-    // — see the "Keyboard" section above for why the other two states
-    // carry neither the ARIA role nor any key binding.
-    let showing_menu_items = !(confirming || confirming_archive || confirming_replace || renaming);
+    // Whether the panel is currently showing its item list rather than a
+    // confirmation prompt. Rename immediately closes this panel and mounts
+    // ListView's stable dialog, so it is not a panel sub-state.
+    let showing_menu_items = !(confirming || confirming_archive || confirming_replace);
     // The accessible name for the panel's prompt states. Only read when
     // one of them is showing; the menu state names its inner list
     // instead. Same clamp as the toggle's own name, for the same reason
@@ -1116,11 +1092,10 @@ pub(super) fn SessionRow(
     // keeps its position and gets the handback.
     //
     // That same unmount blindness is why the TOGGLE clears this too (its
-    // `onfocusin` below, through `forget_menu_focus`): this panel swaps its
-    // whole item list out for the rename field or a confirm prompt without
-    // ever closing, so the item holding focus can vanish silently and leave
-    // this signal — and `menu_requested` with it — naming a position focus
-    // has long since left.
+    // `onfocusin` below, through `forget_menu_focus`): a confirmation can
+    // replace the whole item list without closing the panel, so the item
+    // holding focus can vanish silently and leave this signal — and
+    // `menu_requested` with it — naming a position focus has long since left.
     let mut menu_focus = use_signal(|| None::<usize>);
     // The last position a keyboard step asked focus to move TO — see
     // `MenuWiring::requested`'s own doc for why this has to exist
@@ -1353,27 +1328,32 @@ pub(super) fn SessionRow(
     // unconditionally would yank focus away from whatever control the
     // user had just moved to, which is exactly what dismissed the menu in
     // the hosts-panel and filter-bar cases.
-    use_effect(use_reactive((&menu_open,), move |(menu_open,)| {
-        if menu_open {
-            return;
-        }
-        // ORDER MATTERS, and it is the opposite of the obvious one:
-        // discard the pending request FIRST — it names an item of the
-        // panel that just went away — and only then ask for the toggle.
-        // Cancelling after requesting would clear the very target this
-        // teardown just set, which is a silent way to lose focus
-        // entirely.
-        cancel_menu_focus(focus_queue);
-        let was_inside = menu_focus.peek().is_some();
-        menu_focus.set(None);
-        menu_requested.set(None);
-        open_intent.set(None);
-        // Detached the instant the panel unmounted; see `item_handles`.
-        item_handles.write().clear();
-        if was_inside {
-            focus_menu_toggle("data-session-id", &dismiss_id, ".session-row-menu");
-        }
-    }));
+    use_effect(use_reactive(
+        (&menu_open, &renaming),
+        move |(menu_open, renaming)| {
+            if menu_open {
+                return;
+            }
+            // ORDER MATTERS, and it is the opposite of the obvious one:
+            // discard the pending request FIRST — it names an item of the
+            // panel that just went away — and only then ask for the toggle.
+            // Cancelling after requesting would clear the very target this
+            // teardown just set, which is a silent way to lose focus
+            // entirely.
+            cancel_menu_focus(focus_queue);
+            let was_inside = menu_focus.peek().is_some();
+            menu_focus.set(None);
+            menu_requested.set(None);
+            open_intent.set(None);
+            // Detached the instant the panel unmounted; see `item_handles`.
+            item_handles.write().clear();
+            // Rename transfers focus to its independently mounted dialog.
+            // The ordinary menu teardown must not reclaim it for the toggle.
+            if was_inside && !renaming {
+                focus_menu_toggle("data-session-id", &dismiss_id, ".session-row-menu");
+            }
+        },
+    ));
     let row_class = row_class(session.stale, selected, menu_open);
 
     rsx! {
@@ -1412,7 +1392,7 @@ pub(super) fn SessionRow(
                     aria_current: if selected { "true" },
                     // Disabled by ANY of the three locks: the global nav
                     // lock (any in-flight op anywhere), or this row's own
-                    // confirmation or rename field being open — the
+                    // confirmation or standalone rename editor being open — the
                     // simplest way to satisfy "cancel is the only way back
                     // to normal" (see the component doc above) is to make
                     // the open button inert for the whole time a prompt is
@@ -1669,10 +1649,11 @@ pub(super) fn SessionRow(
                     // it is the way back INTO a menu whose focus has
                     // stepped out to it, so the full navigation set
                     // applies. The sub-state guard is the one exception:
-                    // with a confirm prompt or the rename field showing,
-                    // the toggle binds nothing, or Shift+Tab back to it
-                    // would offer an Escape that dismisses the panel while
-                    // leaving the prompt itself unanswered.
+                    // with a confirm prompt showing, the toggle binds
+                    // nothing, or Shift+Tab back to it would offer an Escape
+                    // that dismisses the panel while leaving the prompt
+                    // itself unanswered. Rename is absent here: it closes
+                    // this panel before its dialog mounts.
                     onkeydown: move |evt| {
                         if !menu_open {
                             let Some(intent) = closed_toggle_key_intent(&evt.key()) else {
@@ -1881,21 +1862,6 @@ pub(super) fn SessionRow(
                                 autofocus: true,
                                 onclick: move |_| on_cancel_replace.call(cancel_replace_id.clone()),
                                 "cancel"
-                            }
-                        } else if renaming {
-                            // The AUTHORITATIVE title stays beside the
-                            // field: a refused rename must never leave the
-                            // rejected DRAFT as the only name on this
-                            // surface (SPEC.md's "the old title stays"
-                            // while the refusal is shown).
-                            span { class: "rename-current-title", "{session.title}" }
-                            RenameForm {
-                                draft: rename_draft,
-                                busy,
-                                on_submit: move |title| {
-                                    on_rename_submit.call((rename_submit_id.clone(), title))
-                                },
-                                on_cancel: move |_| on_rename_cancel.call(()),
                             }
                         } else {
                             // The menu proper: ONLY the actionable rows,
@@ -2514,7 +2480,6 @@ mod tests {
     #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_row() {
         fn app() -> Element {
-            let rename_draft = use_signal(String::new);
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
@@ -2530,8 +2495,6 @@ mod tests {
             let on_confirm_archive = use_callback(|_: String| {});
             let on_cancel_archive = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
-            let on_rename_submit = use_callback(|_: (String, String)| {});
-            let on_rename_cancel = use_callback(|_: ()| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let session = row_specimen("session-1");
             rsx! {
@@ -2551,7 +2514,6 @@ mod tests {
                         locality: HostLocality::Unknown,
                         activity: None,
                     },
-                    rename_draft,
                     on_open,
                     on_clone,
                     on_replace_with,
@@ -2567,8 +2529,6 @@ mod tests {
                     on_confirm_archive,
                     on_cancel_archive,
                     on_rename_start,
-                    on_rename_submit,
-                    on_rename_cancel,
                     on_menu_toggle,
                 }
             }
@@ -2611,7 +2571,6 @@ mod tests {
         }
 
         fn app() -> Element {
-            let rename_draft = use_signal(String::new);
             let on_open = use_callback(|_: Session| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
@@ -2627,8 +2586,6 @@ mod tests {
             let on_confirm_archive = use_callback(|_: String| {});
             let on_cancel_archive = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
-            let on_rename_submit = use_callback(|_: (String, String)| {});
-            let on_rename_cancel = use_callback(|_: ()| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let selected = SELECTED.with(|selected| selected.get());
             rsx! {
@@ -2650,7 +2607,6 @@ mod tests {
                             locality: HostLocality::Unknown,
                             activity: None,
                         },
-                        rename_draft,
                         on_open,
                         on_clone,
                         on_replace_with,
@@ -2666,8 +2622,6 @@ mod tests {
                         on_confirm_archive,
                         on_cancel_archive,
                         on_rename_start,
-                        on_rename_submit,
-                        on_rename_cancel,
                         on_menu_toggle,
                     }
                 }

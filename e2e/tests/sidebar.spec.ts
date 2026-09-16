@@ -13,7 +13,7 @@
  *
  * The suite grew with the redesign's later PRs and now also covers the
  * row actions menu's own contracts (containment, float, selection
- * isolation, rename-in-panel, consequence wrap, stale-menu
+ * isolation, rename-dialog ownership, consequence wrap, stale-menu
  * reconciliation) and the sidebar's on-demand chrome (host details, the
  * permanent host selector).
  *
@@ -1825,8 +1825,8 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await openRowMenu(target);
     await expect(rename).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(target.locator(".rename-form")).toBeVisible();
-    await target.locator(".rename-cancel").click();
+    await expect(page.locator(".rename-dialog")).toBeVisible();
+    await page.locator(".rename-dialog .rename-cancel").click();
 
     // And so does Space, on a different command, so that neither key is
     // proven only through the other. Focus is re-established from the
@@ -2486,15 +2486,15 @@ test("opening another row's menu does not change the selection", async ({ page, 
 });
 
 /**
- * Rename happens inside the panel, with the row's open button visible
- * but disabled for the duration — cancel restores the action items and
- * re-enables navigation.
+ * Rename is a ListView dialog, with the row's open button visible but
+ * disabled for the duration. Cancel removes the dialog without reopening an
+ * actions panel and re-enables navigation.
  *
- * Pins the rename form's new home (a panel descendant, not an inline
- * row swap) and the navigation lock around an open editor: an enabled
- * open button would let one stray click abandon the edit implicitly.
+ * Pins the editor's stable dialog parent and the navigation lock around an
+ * open edit: an enabled open button would let one stray click abandon the
+ * edit implicitly.
  */
-test("rename lives in the panel and locks the row's open button while editing", async ({
+test("rename lives in a stable dialog and locks the row's open button while editing", async ({
   page,
   request,
 }) => {
@@ -2508,15 +2508,18 @@ test("rename lives in the panel and locks the row's open button while editing", 
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await openRowMenu(target);
+    const toggle = target.locator(".session-row-menu");
     await target.locator(".session-row-rename").click();
 
-    await expect(target.locator(".session-row-menu-panel .rename-form")).toBeVisible();
+    await expect(page.locator(".rename-dialog .rename-form")).toBeVisible();
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(target.locator(".session-row-open")).toBeVisible();
     await expect(target.locator(".session-row-open")).toBeDisabled();
 
-    await target.locator(".rename-cancel").click();
-    await expect(target.locator(".rename-form")).toHaveCount(0);
-    await expect(target.locator(".session-row-menu-panel .session-row-rename")).toBeVisible();
+    await page.locator(".rename-dialog .rename-cancel").click();
+    await expect(page.locator(".rename-dialog")).toHaveCount(0);
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
     await expect(target.locator(".session-row-open")).toBeEnabled();
   } finally {
     await cleanupSession(request, session.id);
