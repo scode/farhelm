@@ -87,7 +87,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
-/// Within version 19 the additive discipline of every prior version
+/// Within version 20 the additive discipline of every prior version
 /// continues to apply, with version 9's sharper reading intact: new
 /// optional fields with decode defaults are fine WHEN ignoring one is
 /// harmless; a field whose omission changes behavior, a new tagged variant,
@@ -169,7 +169,16 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// decode its new enum tag. Refusing this version mismatch is preferable to
 /// accepting a create whose durable launch provenance has been lost.
 ///
-/// `protocol_version_is_pinned_at_19` (renamed at every bump since `_at_4`)
+/// Version 20 makes every consequential agent selector explicit, adds
+/// profile discovery and stable host ids, carries arbitrary clone sources,
+/// and adds the expected-title precondition used by agent rename. It also
+/// Version 20 makes lifecycle targets, create and clone hosts, clone sources,
+/// and create selectors explicit; adds conditional agent rename and discovery
+/// envelopes; and carries an explicit inheritance selector for local spawn.
+/// Older peers would silently apply the defaults these fields remove, so the
+/// exact-match handshake must refuse mixed versions.
+///
+/// `protocol_version_is_pinned_at_20` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -181,7 +190,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -794,7 +803,7 @@ pub struct SessionInfo {
     ///
     /// A structured selection records its requested initial choices; this
     /// separately records the stored lifecycle bundle so replace and
-    /// selectorless inheritance cannot derive a different resume command
+    /// explicit inherited spawn cannot derive a different resume command
     /// after an integration or catalog change. Legacy rows and senders that
     /// predate the field leave it absent.
     #[serde(default)]
@@ -1541,24 +1550,19 @@ pub enum RestartMode {
 /// Internally tagged by `verb`, and every variant is a struct variant even
 /// where it currently carries nothing, so that giving a verb an argument
 /// later is an additive edit to that variant rather than a change of shape
-/// on the wire. The set is now complete for version 13: the two read-only
-/// listings, the three lifecycle verbs (`rename`, `stop`, `archive`), and
-/// the two CREATING verbs (`create`, `clone`) that were held back until
-/// the transport had carried real mutating traffic. All seven were added
-/// within one protocol version, so nothing on the wire distinguishes a
-/// build that has the creating verbs from one that does not — the
-/// version bump belongs to the relay as a whole, and a peer that speaks
-/// 13 speaks all of it.
+/// on the wire. Protocol 20 carries the three discovery verbs, three
+/// lifecycle verbs, profile resolution for spawn, and the two creating
+/// verbs. The exact-version handshake refuses older peers before they can
+/// interpret the now-required selectors with their former defaults.
 ///
 /// ## The two creating verbs, and why they take a host NAME
 ///
-/// `Create` and `Clone` both carry `host: Option<String>`, where `None`
-/// means the ASKING session's own host and `Some(name)` names any host in
-/// the fleet by the DISPLAY NAME [`AgentHost::name`] reports. A name
-/// rather than an id because ids are per-helm registry rows an agent has
-/// never been shown; the `hosts` listing is the catalog an agent reads a
-/// target out of, and the two verbs join to it on the one value that
-/// appears in both.
+/// `Create` and `Clone` both carry `host: Option<String>` so malformed old
+/// wire shapes remain decodable and can receive a correlated refusal.
+/// Protocol 20 requires `Some(name)`, naming a host by the display NAME
+/// [`AgentHost::name`] reports. The listing also exposes the stable host ID
+/// so duplicate names remain distinct, but acting commands accept names
+/// only and refuse ambiguity.
 ///
 /// That widening is the point of routing creates through the helm at all.
 /// A supervisor-local implementation could create on the asking session's
@@ -1574,16 +1578,11 @@ pub enum RestartMode {
 /// give an agent a fleet view that is sometimes the fleet and sometimes
 /// one machine, with nothing on the wire saying which.
 ///
-/// The three lifecycle verbs share one shape of target: `session_id:
-/// Option<String>`, where `None` means the ASKING session — the one the
-/// relay already proved this connection's credential belongs to, so the
-/// helm can substitute it without a second round of authority-checking —
-/// and `Some(id)` names any session the helm knows, on any host. That is
-/// deliberately wider than "only your own session": the feature's whole
-/// mental model is an agent talking to the HELM, which has fleet-wide
-/// authority already, and narrowing a lifecycle verb to the asker's own row
-/// would need a second, invented notion of per-session permission that
-/// nothing else in this system has.
+/// The three lifecycle verbs share one target shape: `session_id:
+/// Option<String>`. The optional wire representation lets the authoritative
+/// boundaries reject old requests with a correlated error; protocol 20
+/// requires `Some(id)`, including for deliberate self-actions. A named id
+/// may still select any session the helm knows, on any host.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum AgentVerb {
@@ -1600,15 +1599,19 @@ pub enum AgentVerb {
     /// for a page walk, and the honest shape when the fleet outgrows one
     /// answer is a filter on this verb rather than paging state.
     Sessions {},
+    /// The helm-wide profile catalog without launch arguments or provider
+    /// configuration. See [`AgentProfile`].
+    Profiles {},
     /// Change a session's title — SPEC.md's rename verb, reached through
     /// the same routing and recording the REST `/rename` route uses.
     /// Answered with [`AgentReply::Session`], the session's freshly
     /// recomputed row.
     Rename {
-        /// `None` for the asking session; see the enum's own docs for the
-        /// target-resolution rule this field shares with `Stop` and
-        /// `Archive`.
+        /// The exact target id. Acting on oneself requires naming it.
         session_id: Option<String>,
+        /// The exact title observed during discovery. The owning supervisor
+        /// compares it atomically with the write.
+        expected_title: Option<String>,
         /// Forwarded to the supervisor VERBATIM, with the exact acceptance
         /// rule `RenameSession::title` documents (control characters
         /// refused, otherwise anything up to the field cap, including the
@@ -1621,7 +1624,7 @@ pub enum AgentVerb {
     /// `Rename`/`Archive`, a stop's REST counterpart already replies with an
     /// empty object, so there is no fresher row to hand back.
     Stop {
-        /// `None` for the asking session; see the enum's own docs.
+        /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
     },
     /// Stop a session's agent and tabs, remove its terminal, and retain its
@@ -1629,24 +1632,27 @@ pub enum AgentVerb {
     /// [`AgentReply::Session`], carrying the durable post-teardown state
     /// (`archived: true`) exactly as the REST `/archive` route does.
     Archive {
-        /// `None` for the asking session; see the enum's own docs.
+        /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
     },
     /// Resolve a spawn-only profile name against the helm catalog. The
     /// supervisor relays this because it no longer owns that catalog.
-    ResolveProfile { name: String },
+    ResolveProfile {
+        /// Exact name selector. Duplicate names are refused.
+        name: Option<String>,
+        /// Exact opaque id selector. It is never interpreted as a name.
+        id: Option<String>,
+    },
     /// Create a session on any host in the fleet — SPEC.md's creation verb
     /// reached from inside a session. Answered with [`AgentReply::Created`].
     ///
-    /// The agent selector is EXACTLY ONE of `profile_name` and
-    /// `invocation`, or neither. Naming both is refused rather than
-    /// arbitrated (a profile already says what to run, so there is no
-    /// honest merge), and naming neither falls back to the helm's one
-    /// remembered default profile. `farhelm spawn` differs: its selectorless
-    /// form reuses the asking session's own stored bundle.
+    /// The agent selector is EXACTLY ONE of `profile_name`, `profile_id`,
+    /// and `invocation`. Naming several is refused rather than arbitrated,
+    /// and naming none is refused rather than consulting a remembered
+    /// default.
     Create {
-        /// The target host's display NAME, or `None` for the asking
-        /// session's own host. See the enum's docs for why a name.
+        /// The target host's display NAME. `None` is retained only so an old
+        /// wire shape can be decoded and refused.
         host: Option<String>,
         /// Required: SPEC.md's creation contract has no default working
         /// directory, and inheriting the asking session's would make
@@ -1654,6 +1660,9 @@ pub enum AgentVerb {
         cwd: String,
         /// A profile name resolved exactly against the helm-wide catalog.
         profile_name: Option<String>,
+        /// An exact profile identity, mutually exclusive with the name and
+        /// raw invocation selectors.
+        profile_id: Option<String>,
         /// A raw command line, the other half of the mutually exclusive
         /// selector.
         invocation: Option<String>,
@@ -1665,15 +1674,9 @@ pub enum AgentVerb {
         /// session the first attempt made rather than a second one.
         intent_key: Option<String>,
     },
-    /// Create a copy of the ASKING session on any host — same working
-    /// directory, same title, and the same agent — answered with
-    /// [`AgentReply::Created`].
-    ///
-    /// The source is always the asking session, never a named one. That is
-    /// narrower than the lifecycle verbs deliberately: "clone that session
-    /// over there" is expressible as a `Create` naming the same profile and
-    /// directory, so a `source_session` field would add a second way to
-    /// spell one thing while doubling the resolution rules below.
+    /// Create a copy of an explicitly named session on an explicitly named
+    /// host — same working directory, title, and agent unless overridden —
+    /// answered with [`AgentReply::Created`].
     ///
     /// AGENT RESOLUTION is the whole substance of this verb, and it has no
     /// silent fallback:
@@ -1684,9 +1687,11 @@ pub enum AgentVerb {
     ///   or raw invocation.
     /// - A source with no profile: its raw invocation, run on the target.
     Clone {
-        /// The target host's display NAME, or `None` for the asking
-        /// session's own host — which is a legitimate ask ("another one of
-        /// these, right here"), not a degenerate case.
+        /// The exact session to copy. It may be the asking session, but is
+        /// never inferred from it.
+        source_session_id: Option<String>,
+        /// The target host's display NAME. `None` is retained only so an old
+        /// wire shape can be decoded and refused.
         host: Option<String>,
         /// Override the source's working directory. Absent copies it,
         /// which is what makes a same-host clone mean "another session on
@@ -1719,9 +1724,10 @@ impl AgentVerb {
     /// the whole point of centralizing it.
     pub fn is_mutating(&self) -> bool {
         match self {
-            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::ResolveProfile { .. } => {
-                false
-            }
+            AgentVerb::Hosts {}
+            | AgentVerb::Sessions {}
+            | AgentVerb::Profiles {}
+            | AgentVerb::ResolveProfile { .. } => false,
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle three: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -1764,9 +1770,16 @@ pub enum AgentOutcome {
 pub enum AgentReply {
     Hosts {
         hosts: Vec<AgentHost>,
+        /// Host discovery is all-or-error; a partial catalog could make a
+        /// duplicate name look safe to select.
+        complete: bool,
+        /// Stable host identity of the authenticated asking session.
+        caller_host_id: String,
     },
     Sessions {
         sessions: Vec<AgentSession>,
+        /// Stable host identity of the authenticated asking session.
+        caller_host_id: String,
         /// True when the helm stopped short of the whole fleet, for either
         /// of two reasons: the row cap ([`LIST_SESSIONS_CAP`], the same one
         /// each supervisor applies to its own reply) was reached on some
@@ -1785,15 +1798,21 @@ pub enum AgentReply {
         /// not deliver it.
         truncated: bool,
     },
+    Profiles {
+        profiles: Vec<AgentProfile>,
+        /// Profile discovery is all-or-error for the same ambiguity reason
+        /// as host discovery.
+        complete: bool,
+        /// Stable host identity of the authenticated asking session.
+        caller_host_id: String,
+    },
     /// Answers `Rename` and `Archive` alike: the ONE session either verb
     /// acted on, freshly recomputed by the host that owns it. Sharing a
     /// reply shape between two verbs is deliberate — both are "here is the
     /// row now", and inventing `Renamed`/`Archived` twins would only be two
     /// names for the same fact with no behavioral difference a caller could
     /// key on.
-    Session {
-        session: AgentSession,
-    },
+    Session { session: AgentSession },
     /// Answers `Stop`. Empty on purpose, matching the REST `/stop` route's
     /// own empty-object success body: a stop has nothing fresher to report
     /// than "it happened", and the session's `status` is whatever the next
@@ -1829,9 +1848,7 @@ pub enum AgentReply {
     /// is exactly where it could come back true. That is the reason it is
     /// carried rather than special-cased away: a reply that dropped fields
     /// would be a second, nearly-identical shape to keep true.
-    Created {
-        session: AgentSession,
-    },
+    Created { session: AgentSession },
     /// A launch bundle resolved from the helm-wide profile catalog.
     ResolvedProfile {
         invocation: String,
@@ -1887,16 +1904,17 @@ pub const AGENT_MUTATION_UNKNOWN_REMEDY: &str = "check the session's current sta
 /// Deliberately a NARROWER projection than the helm's own `HostView`: an
 /// agent needs a name it can pass back as a target, enough state to know
 /// whether passing it is worth trying, and which host it is itself sitting
-/// on. Registry ids, destinations, install identities and incarnations are
-/// all things the helm owns and an agent has no verb for, so they are not
-/// on this wire — a field an agent cannot act on is a field that only
-/// invites it to invent uses.
+/// on. Registry ids join host and session discovery without relying on
+/// unique display names. Destinations, install identities and incarnations
+/// remain private to the helm; discovery is not a way to retarget a host.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentHost {
+    /// Stable helm registry identity. It is discovery context, while
+    /// `name` remains the accepted destination selector.
+    pub id: String,
     /// The host's display name — the same string the UI shows and the
     /// value [`AgentVerb::Create`] and [`AgentVerb::Clone`] name a target
-    /// by. Names, not ids, because ids are per-helm registry rows an agent
-    /// has no way to have learned.
+    /// by. The registry id is discovery context, not a destination selector.
     pub name: String,
     /// `"local"` or `"ssh"`.
     pub kind: String,
@@ -1911,6 +1929,18 @@ pub struct AgentHost {
     pub current: bool,
 }
 
+/// The non-secret portion of one helm profile exposed to an agent.
+///
+/// Invocation arguments, resume templates, provider configuration and
+/// credentials are deliberately absent. An agent needs identity and the
+/// accepted name selector; it does not need the private launch bundle.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentProfile {
+    pub id: String,
+    pub name: String,
+    pub builtin: bool,
+}
+
 /// One session, as an agent sees it.
 ///
 /// The same narrowing rule [`AgentHost`] follows: what an agent can name,
@@ -1920,8 +1950,13 @@ pub struct AgentHost {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSession {
     pub id: String,
-    /// The host's display NAME, not its id — matching [`AgentHost::name`],
-    /// so the two listings join on a value an agent can also type.
+    /// Registry identity from the same snapshot or mutation claim as this row.
+    /// Unlike the display name, it distinguishes hosts whose names coincide.
+    /// A stale mutation reply retains the claimed id without claiming that
+    /// the registry still points at the same supervisor incarnation.
+    pub host_id: String,
+    /// The host's display name, matching [`AgentHost::name`]. Join discovery
+    /// rows using `host_id`; names need not be unique.
     ///
     /// `None` means the helm had no name it could VOUCH for, which is a
     /// different statement from a host whose name happens to be short or
@@ -2053,15 +2088,14 @@ pub enum ControlMsg {
     ///
     /// `invocation` with its accompanying integration values is a resolved
     /// launch bundle. A profile-backed bundle also carries `source_profile`;
-    /// a raw bundle does not. `profile_name` is spawn-only and asks an
-    /// attached helm to resolve that name. A session-authenticated spawn may
-    /// omit both to copy its asking session's stored bundle.
+    /// a raw bundle does not. `profile_name` or `profile_id` is spawn-only
+    /// and asks an attached helm to resolve that exact selector. A
+    /// session-authenticated spawn must instead set `inherit_agent` to copy
+    /// its asking session's stored bundle.
     ///
     /// **A request naming more than one selector is refused with
-    /// [`ErrorKind::InvalidRequest`].** A full-authority peer naming none is
-    /// refused too. A session-authenticated peer is the sole exception:
-    /// omitting both selectors means copy the asking session's stored launch
-    /// bundle, which is the `farhelm spawn --cwd ...` default. The exclusivity is stated
+    /// [`ErrorKind::InvalidRequest`].** Naming none is refused too;
+    /// inheritance is an explicit selector rather than an omitted value. The exclusivity is stated
     /// here and enforced by the supervisor's create handler rather than
     /// made structurally impossible by the type, deliberately: a hybrid —
     /// a profile plus a hand-written override —
@@ -2093,7 +2127,7 @@ pub enum ControlMsg {
         /// directory, and the directory is always the caller's choice.
         cwd: String,
         /// The resolved agent command line. `None` is valid only for a
-        /// spawn profile-name lookup or selectorless spawn — see this
+        /// spawn profile lookup or explicit inherited spawn — see this
         /// variant's own exclusivity contract. A word equal to `{cwd}` in full is
         /// replaced at launch with the directory that launch hands tmux,
         /// under the same whole-element rule `{conversation}` obeys in
@@ -2128,6 +2162,13 @@ pub enum ControlMsg {
         /// The supervisor relays it to its attached helm; no supervisor
         /// catalog lookup is permitted.
         profile_name: Option<String>,
+        /// An exact helm profile identity selected only by `farhelm spawn`.
+        /// It is resolved as an id and never falls back to a name.
+        profile_id: Option<String>,
+        /// Explicit opt-in for a restricted spawn to copy the authenticated
+        /// parent's stored launch bundle. Omission is not inheritance.
+        #[serde(default)]
+        inherit_agent: bool,
         title: Option<String>,
         cols: u16,
         rows: u16,
@@ -2138,8 +2179,8 @@ pub enum ControlMsg {
         /// attachment, not the session) replays the original outcome
         /// instead of launching a second process. The resolved launch bundle
         /// joins the fingerprint, and version 11 adds `parent`; a retry cannot
-        /// change any of them under cover of the same key. Profile-name and
-        /// selectorless spawn forms are resolved before that fingerprint is
+        /// change any of them under cover of the same key. Profile selectors
+        /// and explicit inherited spawn are resolved before that fingerprint is
         /// built. `None` preserves
         /// pre-M3 behavior exactly: every request is its own create, with
         /// no deduplication — the safe default for raw API callers (curl,
@@ -2159,14 +2200,14 @@ pub enum ControlMsg {
         ///
         /// A helm-resolved profile bundle always carries `Some`, including
         /// `Some(Generic)` for an explicitly non-integrated profile. This
-        /// field must be absent with `profile_name` or selectorless spawn,
+        /// field must be absent with `profile_name`, `profile_id`, or inherited spawn,
         /// because those forms have not been resolved yet.
         agent_kind: Option<AgentKind>,
         /// Explicit override of the resume invocation template PLAN_M3.md
         /// item 7 would otherwise default from `invocation`'s first
         /// token. A helm-resolved profile bundle carries the profile's value
         /// here. This field must be absent with `profile_name` or
-        /// selectorless spawn, for the same unresolved-selector reason as
+        /// inherited spawn, for the same unresolved-selector reason as
         /// `agent_kind` above.
         /// Structured as an argv vector, not a shell string, so a
         /// path containing spaces survives without quoting heroics, and
@@ -2550,6 +2591,9 @@ pub enum ControlMsg {
         /// would be the same silently-altering-caller-data move the
         /// supervisor itself refuses to make.
         title: String,
+        /// `Some` makes this an exact compare-and-mutate operation.
+        /// Browser callers use `None`; agent rename always uses `Some`.
+        expected_title: Option<String>,
     },
     /// Success reply to `RenameSession`, shaped like `SessionCreated` and
     /// `SessionRestarted` deliberately: the caller gets the authoritative
@@ -3930,8 +3974,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_19() {
-        assert_eq!(PROTOCOL_VERSION, 19);
+    fn protocol_version_is_pinned_at_20() {
+        assert_eq!(PROTOCOL_VERSION, 20);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -5333,6 +5377,8 @@ mod tests {
             req_id: 1,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/some/dir".to_string(),
             invocation: Some("/opt/bin/claude".to_string()),
             title: None,
@@ -5355,6 +5401,8 @@ mod tests {
                 "req_id": 1,
                 "parent": null,
                 "profile_name": null,
+                "profile_id": null,
+                "inherit_agent": false,
                 "cwd": "/some/dir",
                 "invocation": "/opt/bin/claude",
                 "title": null,
@@ -5383,6 +5431,8 @@ mod tests {
             req_id: 2,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/some/dir".to_string(),
             invocation: Some("claude".to_string()),
             title: Some("demo".to_string()),
@@ -5402,6 +5452,8 @@ mod tests {
             "req_id": 2,
             "parent": null,
             "profile_name": null,
+            "profile_id": null,
+            "inherit_agent": false,
             "cwd": "/some/dir",
             "invocation": "claude",
             "title": "demo",
@@ -5423,8 +5475,8 @@ mod tests {
     }
 
     /// PLAN_M7.md item 2's named-spawn selector and parent reference, pinned
-    /// in both directions. The selectorless-spawn golden below completes the
-    /// valid protocol-15 create shapes.
+    /// in both directions. The inherited-spawn golden below completes the
+    /// valid protocol-20 create shapes.
     #[farhelm_testtrace::test]
     fn create_session_profile_name_and_parent_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
@@ -5433,6 +5485,8 @@ mod tests {
             cwd: "/some/dir".to_string(),
             invocation: None,
             profile_name: Some("Claude Code".to_string()),
+            profile_id: None,
+            inherit_agent: false,
             title: None,
             cols: 80,
             rows: 24,
@@ -5449,6 +5503,8 @@ mod tests {
             "cwd": "/some/dir",
             "invocation": null,
             "profile_name": "Claude Code",
+            "profile_id": null,
+            "inherit_agent": false,
             "title": null,
             "cols": 80,
             "rows": 24,
@@ -5462,21 +5518,22 @@ mod tests {
         assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
     }
 
-    /// A selectorless session-authenticated spawn has its own literal wire
-    /// golden because both selectors being null is meaningful in protocol
-    /// 15: the supervisor copies the asking session's stored launch bundle.
+    /// Explicit inherited spawn has its own literal wire golden because its
+    /// selectors are null and `inherit_agent` carries the deliberate choice.
     ///
     /// Full-authority creates still refuse this shape in their handler. The
     /// codec cannot make that authority distinction, so it must preserve the
     /// request for the restricted dispatcher to interpret.
     #[farhelm_testtrace::test]
-    fn create_session_selectorless_spawn_json_shape_is_pinned() {
+    fn create_session_inherited_spawn_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
             req_id: 4,
             parent: Some("parent-1".to_string()),
             cwd: "/some/dir".to_string(),
             invocation: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: true,
             title: Some("child".to_string()),
             cols: 80,
             rows: 24,
@@ -5493,6 +5550,8 @@ mod tests {
             "cwd": "/some/dir",
             "invocation": null,
             "profile_name": null,
+            "profile_id": null,
+            "inherit_agent": true,
             "title": "child",
             "cols": 80,
             "rows": 24,
@@ -5517,8 +5576,8 @@ mod tests {
     /// from a correlated `InvalidRequest` a client can display into a
     /// decode error that tears down the whole connection, taking every
     /// unrelated session on it along. The neither-selector case is a
-    /// full-authority handler refusal only; the selectorless-spawn golden
-    /// above pins its valid restricted meaning.
+    /// handler refusal; the inherited-spawn golden above pins the explicit
+    /// restricted form.
     #[farhelm_testtrace::test]
     fn a_create_naming_both_modes_or_neither_still_decodes_for_the_handler_to_refuse() {
         for invocation in [Some("agent".to_string()), None] {
@@ -5526,6 +5585,8 @@ mod tests {
                 req_id: 3,
                 parent: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 cwd: "/some/dir".to_string(),
                 invocation,
                 title: None,
@@ -5628,6 +5689,8 @@ mod tests {
             req_id: 6,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/some/dir".to_string(),
             // RAW mode deliberately: a legacy decoder's `invocation` is a
             // required `String`, so the PROFILE mode's `null` would fail
@@ -5719,6 +5782,8 @@ mod tests {
             req_id: 1,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/some/dir".to_string(),
             invocation: Some("agent".to_string()),
             title: None,
@@ -5742,6 +5807,8 @@ mod tests {
             req_id: 2,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/some/dir".to_string(),
             invocation: None,
             title: None,
@@ -6105,11 +6172,13 @@ mod tests {
                     req_id: 50,
                     session_id: "s1".to_string(),
                     title: "renamed title".to_string(),
+                    expected_title: None,
                 },
                 serde_json::json!({
                     "type": "rename_session",
                     "req_id": 50,
                     "session_id": "s1",
+                    "expected_title": null,
                     "title": "renamed title",
                 }),
             ),
@@ -6214,6 +6283,7 @@ mod tests {
                 req_id: 2,
                 session_id: "s1".to_string(),
                 title: "new title".to_string(),
+                expected_title: None,
             }
         );
     }
@@ -6245,6 +6315,7 @@ mod tests {
             req_id: 7,
             session_id: "s1".to_string(),
             title: "new title".to_string(),
+            expected_title: None,
         })
         .encode(&mut wire)
         .unwrap();
@@ -7031,6 +7102,7 @@ mod tests {
                 req_id: 10,
                 session_id: "s1".to_string(),
                 title: "renamed".to_string(),
+                expected_title: None,
             },
         ] {
             assert_eq!(
@@ -7075,7 +7147,11 @@ mod tests {
         let reply = ControlMsg::AgentResponse {
             req_id: 31,
             outcome: AgentOutcome::Ok {
-                reply: AgentReply::Hosts { hosts: Vec::new() },
+                reply: AgentReply::Hosts {
+                    hosts: Vec::new(),
+                    complete: true,
+                    caller_host_id: "1".to_string(),
+                },
             },
         };
         assert_eq!(reply.reply_req_id(), Some(31));
@@ -7195,7 +7271,8 @@ mod tests {
             req_id: 3,
             session_id: "s1".to_string(),
             request: AgentVerb::ResolveProfile {
-                name: "Claude Code".to_string(),
+                name: Some("Claude Code".to_string()),
+                id: None,
             },
         };
         assert_eq!(
@@ -7204,7 +7281,7 @@ mod tests {
                 "type": "agent_request",
                 "req_id": 3,
                 "session_id": "s1",
-                "request": { "verb": "resolve_profile", "name": "Claude Code" },
+                "request": { "verb": "resolve_profile", "name": "Claude Code", "id": null },
             })
         );
 
@@ -7249,11 +7326,14 @@ mod tests {
             outcome: AgentOutcome::Ok {
                 reply: AgentReply::Hosts {
                     hosts: vec![AgentHost {
+                        id: "2".to_string(),
                         name: "builder".to_string(),
                         kind: "ssh".to_string(),
                         state: "connected".to_string(),
                         current: false,
                     }],
+                    complete: true,
+                    caller_host_id: "1".to_string(),
                 },
             },
         };
@@ -7270,11 +7350,14 @@ mod tests {
                     "reply": {
                         "reply": "hosts",
                         "hosts": [{
+                            "id": "2",
                             "name": "builder",
                             "kind": "ssh",
                             "state": "connected",
                             "current": false,
                         }],
+                        "complete": true,
+                        "caller_host_id": "1",
                     },
                 },
             })
@@ -7286,6 +7369,7 @@ mod tests {
                 reply: AgentReply::Sessions {
                     sessions: vec![AgentSession {
                         id: "s1".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("builder".to_string()),
                         title: "auth".to_string(),
                         cwd: "/w".to_string(),
@@ -7296,6 +7380,7 @@ mod tests {
                         stale: true,
                     }],
                     truncated: true,
+                    caller_host_id: "1".to_string(),
                 },
             },
         };
@@ -7308,9 +7393,11 @@ mod tests {
                     "result": "ok",
                     "reply": {
                         "reply": "sessions",
+                        "caller_host_id": "1",
                         "truncated": true,
                         "sessions": [{
                             "id": "s1",
+                            "host_id": "1",
                             "host": "builder",
                             "title": "auth",
                             "cwd": "/w",
@@ -7387,7 +7474,8 @@ mod tests {
             req_id: 5,
             session_id: "s1".to_string(),
             request: AgentVerb::Rename {
-                session_id: None,
+                session_id: Some("s1".to_string()),
+                expected_title: Some("old title".to_string()),
                 title: "new title".to_string(),
             },
         };
@@ -7399,7 +7487,12 @@ mod tests {
                 "type": "agent_request",
                 "req_id": 5,
                 "session_id": "s1",
-                "request": { "verb": "rename", "session_id": null, "title": "new title" },
+                "request": {
+                    "verb": "rename",
+                    "session_id": "s1",
+                    "expected_title": "old title",
+                    "title": "new title"
+                },
             })
         );
 
@@ -7408,6 +7501,7 @@ mod tests {
             session_id: "s1".to_string(),
             request: AgentVerb::Rename {
                 session_id: Some("s2".to_string()),
+                expected_title: Some("old title".to_string()),
                 title: "new title".to_string(),
             },
         };
@@ -7417,14 +7511,21 @@ mod tests {
                 "type": "agent_request",
                 "req_id": 6,
                 "session_id": "s1",
-                "request": { "verb": "rename", "session_id": "s2", "title": "new title" },
+                "request": {
+                    "verb": "rename",
+                    "session_id": "s2",
+                    "expected_title": "old title",
+                    "title": "new title"
+                },
             })
         );
 
         let stop = ControlMsg::AgentRequest {
             req_id: 7,
             session_id: "s1".to_string(),
-            request: AgentVerb::Stop { session_id: None },
+            request: AgentVerb::Stop {
+                session_id: Some("s1".to_string()),
+            },
         };
         assert_eq!(stop.request_req_id(), Some(7));
         assert_eq!(stop.reply_req_id(), None);
@@ -7434,7 +7535,7 @@ mod tests {
                 "type": "agent_request",
                 "req_id": 7,
                 "session_id": "s1",
-                "request": { "verb": "stop", "session_id": null },
+                "request": { "verb": "stop", "session_id": "s1" },
             })
         );
 
@@ -7463,6 +7564,7 @@ mod tests {
                 reply: AgentReply::Session {
                     session: AgentSession {
                         id: "s1".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("this machine".to_string()),
                         title: "new title".to_string(),
                         cwd: "/w".to_string(),
@@ -7488,6 +7590,7 @@ mod tests {
                         "reply": "session",
                         "session": {
                             "id": "s1",
+                            "host_id": "1",
                             "host": "this machine",
                             "title": "new title",
                             "cwd": "/w",
@@ -7557,6 +7660,7 @@ mod tests {
                 host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
                 profile_name: Some("Claude Code".to_string()),
+                profile_id: None,
                 invocation: None,
                 title: Some("a title".to_string()),
                 intent_key: Some("key-1".to_string()),
@@ -7575,6 +7679,7 @@ mod tests {
                     "host": "builder",
                     "cwd": "/srv/work",
                     "profile_name": "Claude Code",
+                    "profile_id": null,
                     "invocation": null,
                     "title": "a title",
                     "intent_key": "key-1",
@@ -7582,16 +7687,16 @@ mod tests {
             })
         );
 
-        // Every optional absent: the "create one here, like the last one"
-        // shape, which is the one an agent sends when it names nothing but
-        // a directory.
+        // The old omitted-selector shape remains decodable so both
+        // authoritative boundaries can return a correlated refusal.
         let bare_create = ControlMsg::AgentRequest {
             req_id: 10,
             session_id: "s1".to_string(),
             request: AgentVerb::Create {
-                host: None,
+                host: Some("builder".to_string()),
                 cwd: "/srv/work".to_string(),
                 profile_name: None,
+                profile_id: None,
                 invocation: None,
                 title: None,
                 intent_key: None,
@@ -7605,9 +7710,10 @@ mod tests {
                 "session_id": "s1",
                 "request": {
                     "verb": "create",
-                    "host": null,
+                    "host": "builder",
                     "cwd": "/srv/work",
                     "profile_name": null,
+                    "profile_id": null,
                     "invocation": null,
                     "title": null,
                     "intent_key": null,
@@ -7619,6 +7725,7 @@ mod tests {
             req_id: 11,
             session_id: "s1".to_string(),
             request: AgentVerb::Clone {
+                source_session_id: Some("s1".to_string()),
                 host: Some("builder".to_string()),
                 cwd: None,
                 title: None,
@@ -7635,6 +7742,7 @@ mod tests {
                 "session_id": "s1",
                 "request": {
                     "verb": "clone",
+                    "source_session_id": "s1",
                     "host": "builder",
                     "cwd": null,
                     "title": null,
@@ -7649,6 +7757,7 @@ mod tests {
                 reply: AgentReply::Created {
                     session: AgentSession {
                         id: "s2".to_string(),
+                        host_id: "1".to_string(),
                         host: Some("builder".to_string()),
                         title: "a title".to_string(),
                         cwd: "/srv/work".to_string(),
@@ -7680,6 +7789,7 @@ mod tests {
                         "reply": "created",
                         "session": {
                             "id": "s2",
+                            "host_id": "1",
                             "host": "builder",
                             "title": "a title",
                             "cwd": "/srv/work",
@@ -7713,22 +7823,27 @@ mod tests {
             AgentReply::Hosts {
                 hosts: vec![
                     AgentHost {
+                        id: "1".to_string(),
                         name: "this machine".to_string(),
                         kind: "local".to_string(),
                         state: "connected".to_string(),
                         current: true,
                     },
                     AgentHost {
+                        id: "2".to_string(),
                         name: "builder".to_string(),
                         kind: "ssh".to_string(),
                         state: "unreachable-reprobing".to_string(),
                         current: false,
                     },
                 ],
+                complete: true,
+                caller_host_id: "1".to_string(),
             },
             AgentReply::Sessions {
                 sessions: vec![AgentSession {
                     id: "s1".to_string(),
+                    host_id: "1".to_string(),
                     host: Some("this machine".to_string()),
                     title: "auth-followup".to_string(),
                     cwd: "/home/u/ws".to_string(),
@@ -7739,6 +7854,7 @@ mod tests {
                     stale: true,
                 }],
                 truncated: true,
+                caller_host_id: "1".to_string(),
             },
         ] {
             let msg = ControlMsg::AgentResponse {
@@ -7769,6 +7885,7 @@ mod tests {
             AgentReply::Session {
                 session: AgentSession {
                     id: "s1".to_string(),
+                    host_id: "1".to_string(),
                     host: Some("builder".to_string()),
                     title: "renamed".to_string(),
                     cwd: "/home/u/ws".to_string(),
@@ -7787,6 +7904,7 @@ mod tests {
             AgentReply::Created {
                 session: AgentSession {
                     id: "created".to_string(),
+                    host_id: "1".to_string(),
                     host: Some("builder".to_string()),
                     title: "fresh".to_string(),
                     cwd: "/srv/work".to_string(),
@@ -7844,20 +7962,17 @@ mod tests {
 
         let omitted = br#"{"type":"agent_request","req_id":1,"session_id":"s1",
                           "request":{"verb":"clone"}}"#;
-        assert_eq!(
-            serde_json::from_slice::<ControlMsg>(omitted)
-                .expect("omitted optionals decode as absent"),
+        assert!(matches!(
+            serde_json::from_slice::<ControlMsg>(omitted).unwrap(),
             ControlMsg::AgentRequest {
-                req_id: 1,
-                session_id: "s1".to_string(),
                 request: AgentVerb::Clone {
+                    source_session_id: None,
                     host: None,
-                    cwd: None,
-                    title: None,
-                    intent_key: None,
+                    ..
                 },
+                ..
             }
-        );
+        ));
     }
 
     /// The shared validator pins the safety rules both stores must enforce:

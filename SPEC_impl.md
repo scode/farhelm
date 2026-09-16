@@ -917,14 +917,14 @@ allowed through to the same shared code, never the reverse.
 separating "what your creating verb produced" from "the row you changed" and the CLI checks it before printing an id. It
 is not a novelty claim: a create or clone carrying an idempotency key the target has already served replays that
 session, which arrives under this same tag. The helm draws the one distinction that matters from it — a clone whose
-result is the ASKING session is refused rather than reported, before anything durable is recorded for the replayed row.
-The two creating verbs name their target host by DISPLAY NAME, matching `AgentHost::name` — an agent has never been
-shown a registry id and could not have one. A name matching TWO registered hosts is refused as a `Conflict` naming the
-collision, never resolved to whichever row the listing ordered first: display names are not unique by construction (the
-local row renders as `this machine`, and an ssh destination may be spelled the same), and guessing between them would
-put a session on a machine nobody chose. A registered name carrying a control character can never be typed back at all,
-since the relay refuses one in `--host`; the not-found refusal says so by count, because the fix is a rename and an
-agent has no rename verb for hosts.
+result is the asking session or the named source is refused rather than reported, before anything durable is recorded
+for the replayed row. The two creating verbs name their target host by display name, matching `AgentHost::name`.
+Registry IDs join host and session discovery and distinguish duplicate labels; they are not destination selectors. A
+name matching two registered hosts is refused as a `Conflict` naming the collision, never resolved to whichever row the
+listing ordered first: display names are not unique by construction (the local row renders as `this machine`, and an ssh
+destination may be spelled the same), and guessing between them would put a session on a machine nobody chose. A
+registered name carrying a control character can never be typed back at all, since the relay refuses one in `--host`;
+the not-found refusal says so by count, because the fix is a rename and an agent has no rename verb for hosts.
 
 The helm resolves an agent's profile name exactly against its one catalog before the target call. Zero or multiple
 matches are `InvalidRequest` refusals that name candidates; one match becomes the invocation, agent kind, resume
@@ -932,19 +932,17 @@ template, and immutable profile snapshot carried to the supervisor. A clone foll
 through the same helm catalog on any host. A missing id is refused before a target call, with no fallback to the old
 name or source invocation.
 
-`Clone` reads its source LIVE from the asking session's host, by the same drain `GET /api/sessions/{id}` uses for a
-connected host, rather than from the helm's cache — the cache is for the stale list, and a clone built from it could
-copy a title or a directory the session no longer has. It also refuses a result whose id is the ASKING session: a
-same-host clone with no overrides rebuilds the exact fingerprint that created the asker, so an agent reusing that
-create's key triggers a legitimate reservation replay, and reporting the replayed row as `Created` would hand the caller
-its own id as a new one. Both verbs take the fence on `agent_request_locks` that the lifecycle verbs take, since a
-create that completes while the asking credential is being invalidated would otherwise leave a session running that
-nobody was told about.
+`Clone` resolves the explicitly named source's live owner, drains that owner's pinned connection, and rechecks the owner
+before dispatching to the destination. It does not use the helm's cache: a clone built from a cached row could copy a
+title or directory the session no longer has, or read from a host that stopped owning it. It refuses a result whose id
+is either the SOURCE or the ASKING session: a keyed replay must never be reported as a new child. Both verbs take the
+fence on `agent_request_locks` that the lifecycle verbs take, since a create that completes while the asking credential
+is being invalidated would otherwise leave a session running that nobody was told about.
 
 A KEYED RETRY IS BOUND TO THE RESOLVED BUNDLE SENT TO THE SUPERVISOR. The fingerprint covers the invocation, agent kind,
 resume template, and profile snapshot, so editing a profile between two attempts under one key makes the second request
 different and produces a conflict rather than replaying the first outcome under changed settings. The same applies when
-the remembered default changes or a clone's source metadata changes between attempts.
+a clone's source metadata changes between attempts.
 
 The relay's own doorway bound treats the host name SEPARATELY from the create payload (`AGENT_HOST_NAME_CAP`, the same
 number every session id is held to). It is routing metadata the helm consumes and no supervisor ever sees, so charging
@@ -965,10 +963,10 @@ key currently gets the same permanent, interactive scope any other helm-mediated
 a security requirement for these agent-originated requests: SPEC.md's temporary creation/cloning exception also covers
 their existing retry exposure. The current implementation remains described here until a separate retention change is
 made. Session-lifetime scoping is not merely unimplemented here — it is not expressible, since the target supervisor may
-never have heard of the asking session. Their selectorless defaults differ too: spawn copies the asking session's exact
-stored launch bundle on its own supervisor and therefore works offline, while the agent verb resolves the helm's one
-remembered default. Spawn with `--agent <name>` is the exception to that offline path: the supervisor sends
-`ResolveProfile` through the existing upward relay, and refuses with the omit-`--agent` remedy when no helm is attached.
+never have heard of the asking session. Spawn requires an explicit selector: `--inherit-agent` copies the asking
+session's exact stored launch bundle on its own supervisor and therefore works offline, while `--agent` and
+`--profile-id` send `ResolveProfile` through the existing upward relay and are refused with the `--inherit-agent` remedy
+when no helm is attached. Agent create likewise requires an explicit profile name, profile ID, or raw invocation.
 
 One divergence is worth stating rather than discovering later. A RAW clone — one whose source came from no profile —
 copies the invocation and nothing else, so the target re-derives the integrated kind from the invocation's first token
@@ -980,7 +978,7 @@ session — exposes `invocation` and `source_profile` and no integration fields 
 the wire, populating them everywhere a supervisor builds a session row, and persisting them for a reload to find.
 Refusing the raw clone instead is not available: SPEC.md promises a raw session "clones as that invocation".
 
-The two read verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
+The discovery verbs are answered from the helm's own listings, narrowed to what an agent can name and act on. Two
 narrowings are contractual rather than incidental. The session listing is the same whole-fleet listing the UI reads, cut
 at the same cap (`LIST_SESSIONS_CAP`, a few hundred rows) and additionally at an encoded-byte allowance of 6 MiB —
 leaving the reply's envelope room under the 8 MiB frame limit — and carries a `truncated` flag when either cuts it,
@@ -1695,28 +1693,27 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
-- `farhelm spawn --cwd <dir> [--title ...] [--agent ...] [--parent ...]
-  [--idempotency-key ...]` — the in-session
-  spawn CLI from SPEC.md.
-- `farhelm agent hosts|sessions` — the in-session ASKING CLI from SPEC.md, on the same injected credential spawn uses.
-  It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a refusal on stderr with a
-  non-zero exit exactly as spawn does. A table rather than JSON because the reader is a model quoting its own shell
-  output. Every dynamic cell is escaped to one printable line and every non-final column is capped at 48 characters:
-  these values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an ESC drives the
+- `farhelm spawn --cwd <dir> (--agent <name> | --profile-id <id> | --inherit-agent) [--title ...] [--parent ...]
+  [--idempotency-key ...]`
+  — the in-session spawn CLI from SPEC.md.
+- `farhelm agent hosts|sessions|profiles [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
+  credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
+  refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
+  model quoting its own shell output. The JSON form uses schema version 1, includes exact IDs, caller identity, and
+  completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration. Every
+  dynamic table cell is escaped to one printable line and every non-final column is capped at 48 characters: these
+  values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an ESC drives the
   terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its rows on stdout
   and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no timeout of its
   own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
-  section's version-13 paragraph).
-- `farhelm agent rename <title> [--session <id>]`, `farhelm agent stop [--session <id>]`, and
-  `farhelm agent archive [--session <id>]` — the in-session ACTING CLI, on the same relay and credential. Omitting
-  `--session` acts on the asking session itself; naming one acts on any session the helm knows, on any host — the same
-  wider-than-spawn authority the read-only verbs already have. Success prints one plain confirmation line on stdout
+  section's version-20 paragraph).
+- `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
+  `farhelm agent archive --session <id>` — the in-session ACTING CLI, on the same relay and credential. Every target is
+  explicit, including a deliberate self-action. Rename compares the observed title and changes it atomically in the
+  owning supervisor; a mismatch is a conflict with no mutation. Success prints one plain confirmation line on stdout
   (`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), its dynamic cells run through the same escaping the
-  listing tables use, so a scripted caller gets exactly one line rather than a table with one row — with one carve-out
-  this contract cannot avoid: a bare `stop`/`archive` (no `--session`) ends the ASKING session's own process tree, and
-  the host-wide marker sweep that reaches it can SIGTERM the `farhelm agent` process itself before it prints anything at
-  all. That is not a bug in the CLI — stopping or archiving yourself is supposed to end the whole tree, calling CLI
-  included — so a caller that needs the confirmation line should target a session other than its own.
+  listing tables use, so a scripted caller gets exactly one line rather than a table with one row. An explicit self-stop
+  or self-archive may terminate the CLI before that line is printed because it belongs to the process tree being ended.
 - SPEC.md's "with confirmation when anything is still running" rule for archive is a UI affordance and does NOT apply to
   `farhelm agent archive`. It is written for the panel, where a person is one click from ending work they may not know
   is running and a dialog is what puts the fact in front of them. This CLI has no such reader: its caller is the agent
@@ -1726,30 +1723,32 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   session asked to act on which before the request leaves it (`agent_requests::resolve_target`), so an archive an
   operator did not expect is attributable rather than anonymous. The same reasoning covers `stop`, whose SPEC wording
   puts the confirmation on restart rather than on the stop itself.
-- `farhelm agent create --cwd <dir> [--host <name>] [--profile <name> | --invocation <cmd>] [--title ...]
+- `farhelm agent create --host <name> --cwd <dir> (--profile <name> | --profile-id <id> | --invocation <cmd>) [--title ...]
   [--idempotency-key ...]`
-  and `farhelm agent clone [--host <name>] [--cwd <dir>] [--title ...]
-  [--idempotency-key ...]` — the in-session
-  CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs follow: stdout
-  is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation line on stderr
-  (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells). The id is the
-  one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as `--session` — so a
-  confirmation on stdout would make the two verbs that need parsing the two that cannot be. The listings are parsed too
-  (the relay fixture reads the hosts table, and `docs/old_readme.md` shows the same), but they are parsed as TABLES: a
-  table that grew a column is still a table, while an id that grew a sentence beside it is not an id. The stderr line is
-  written through a fallible `write!` whose result is discarded rather than through `eprintln!`, because the macro
-  panics on an unwritable stderr and the session already exists by then — turning a create that succeeded into a command
-  that failed would tell a caller holding the id to retry a create it must not repeat.
+  and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]
+  [--idempotency-key ...]` —
+  the in-session CREATING CLI, on the same relay and credential. These invert the stream convention the lifecycle verbs
+  follow: stdout is the new session's id and nothing else, matching `farhelm spawn`'s contract, with one confirmation
+  line on stderr (`created <id> "<title>" on <host> in <cwd>`, escaped the way the listing tables escape their cells).
+  The id is the one agent output meant to be captured as a SINGLE VALUE — an agent takes it and hands it back as
+  `--session` — so a confirmation on stdout would make the two verbs that need parsing the two that cannot be. The
+  listings are parsed too (the relay fixture reads the hosts table, and `docs/old_readme.md` shows the same), but they
+  are parsed as TABLES: a table that grew a column is still a table, while an id that grew a sentence beside it is not
+  an id. The stderr line is written through a fallible `write!` whose result is discarded rather than through
+  `eprintln!`, because the macro panics on an unwritable stderr and the session already exists by then — turning a
+  create that succeeded into a command that failed would tell a caller holding the id to retry a create it must not
+  repeat.
 
   `--host` takes a NAME from `farhelm agent hosts`, printed there WHOLE: the NAME column is exempt from the truncation
   every other non-final column takes, because that column is a selector rather than a description and a name cut at 48
-  characters is a host an agent can see and can never target. `--cwd` is required on `create` and has no default, since
-  inheriting the asking session's directory would make it a `clone` under another name. `--profile` and `--invocation`
-  are mutually exclusive, refused by clap before anything is sent (the helm refuses the same shape for every other
-  client), and naming neither falls back to the helm's remembered default. Every value-taking option on both verbs
-  carries `allow_hyphen_values`, because every one of these values is judged downstream — by the registry, by the helm's
-  catalog, by the target filesystem — and every one of them may legally begin with `-`; refusing such a value locally
-  would be this CLI declining to carry a name the far end would have explained.
+  characters is a host an agent can see and can never target. Duplicate names remain separate rows and are refused as
+  ambiguous targets. `--cwd` and `--host` are required on `create`; `--source-session` and `--host` are required on
+  clone. The three create selectors are mutually exclusive and exactly one is required, refused by clap before anything
+  is sent (the helm refuses malformed wire shapes too). Profile IDs use exact ID lookup without name fallback. Every
+  value-taking option on both verbs carries `allow_hyphen_values`, because every one of these values is judged
+  downstream — by the registry, by the helm's catalog, by the target filesystem — and every one of them may legally
+  begin with `-`; refusing such a value locally would be this CLI declining to carry a name the far end would have
+  explained.
 - `farhelm agent instructions`, and its alias `farhelm agent help` — print the agent-facing manual described above ("The
   instructions pointer") locally, generated by walking this same `AgentCmd` definition. Neither spelling touches the
   supervisor, the helm, or the session credential: both must work for an agent that has just been handed the pointer

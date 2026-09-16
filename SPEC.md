@@ -696,53 +696,58 @@ or refresh.
 
 The CLI's contract, since agents will script against it: on success it prints the child session id to stdout and exits
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
-status. Precondition failures exit nonzero with a message on stderr. Only `--cwd` is required; with no selector, the
-child reuses the asking session's own stored invocation, agent kind, resume template, and profile snapshot. That path
-works with no helm attached. `--agent <name>` resolves the exact name through the attached helm's catalog and is refused
-with a remedy when no helm is attached. The title is generated when omitted. An optional idempotency key makes retries
-safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather than
-creating another. Keys are scoped to the host and live as long as the child session does. Guaranteed Farhelm-injected
-environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are
-illustrative, not contract. (The user's login-shell environment is separately guaranteed; see Durability.)
+status. Precondition failures exit nonzero with a message on stderr. `--cwd` and exactly one agent selector are
+required. `--inherit-agent` explicitly reuses the asking session's stored invocation, agent kind, resume template, and
+profile snapshot, and works with no helm attached. `--agent <name>` resolves the exact name through the attached helm's
+catalog; `--profile-id <id>` selects the exact catalog row without treating the id as a name. Both catalog selectors are
+refused with a remedy when no helm is attached. The title is generated when omitted. An optional idempotency key makes
+retries safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather
+than creating another. Keys are scoped to the host and live as long as the child session does. Guaranteed
+Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
+Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
+see Durability.)
 
 A session can also ASK, not only create. `farhelm agent <verb>`, run inside a session with the same injected credential
 spawn uses, reaches the helm rather than the session's own supervisor: the supervisor forwards the question to the helm
 currently attached to that session and relays the answer back, because a session has no way to reach the helm's machine
-directly. The verbs are answered with the HELM's view — every host it knows, every session it knows, whichever machine
-they are on — with the asking session and its host marked. That is deliberately wider than spawn's own-host-only rule
-above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way, including questions
-about the session's own host, so there is one answer to what an agent sees. The failure this defines is "no helm is
-attached to this session", reported as such, with opening the session in a client as the remedy — never a silent
-fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on the
-asking session or on any session named by id, with the helm applying its ordinary rules to the operation exactly as it
-would for a client request. There is no `farhelm agent replace`: an agent replacing its own session would be killing
-itself mid-request, which is a design question this version leaves open rather than answers by accident.
+directly. The verbs are answered with the HELM's view — every host and profile it knows, and every session it knows,
+whichever machine they are on — with the asking session and its host marked. That is deliberately wider than spawn's
+own-host-only rule above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way,
+including questions about the session's own host, so there is one answer to what an agent sees. The failure this defines
+is "no helm is attached to this session", reported as such, with opening the session in a client as the remedy — never a
+silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on
+any session named by id, including the asking session when the caller deliberately supplies its id, with the helm
+applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the title
+the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
+concurrent rename. There is no `farhelm agent replace`: an agent replacing its own session would be killing itself
+mid-request, which is a design question this version leaves open rather than answers by accident.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
-`farhelm agent create` makes a session on any host, and `farhelm agent clone` copies the asking session onto any host —
-in both cases naming the target by the display NAME the hosts listing reports, since that is the only handle an agent
-has ever been shown; an aliased host is named by its alias only. Both print the new session's id on stdout and nothing
-else, matching spawn's contract, with the human-readable confirmation on stderr. Omitting the host means the asking
-session's own, which is a legitimate ask rather than a degenerate case. The preconditions are the helm's ordinary ones:
-a directory that does not exist on the target is that supervisor's own refusal, reported verbatim rather than
-paraphrased on the way back, and an unreachable target is refused with its state named. The new session appears in every
-client the way any other create does.
+`farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
+source session onto an explicitly named host. Host selectors use the display NAME the hosts listing reports; stable host
+IDs are also exposed so duplicate names remain visibly distinct, but acting commands do not silently reinterpret a name
+as an ID. Both print the new session's id on stdout and nothing else, matching spawn's contract, with the human-readable
+confirmation on stderr. The preconditions are the helm's ordinary ones: a directory that does not exist on the target is
+that supervisor's own refusal, reported verbatim rather than paraphrased on the way back, and an unreachable target is
+refused with its state named. The new session appears in every client the way any other create does.
 
 Agent-requested cross-host create and clone are temporary exceptions to the host-to-host security boundary below. They
 currently allow arbitrary execution on the target host; this exposure is explicitly accepted pending the guardrails
 tracked in TODO.md's Maybe later bucket. Their existence does not authorize additional cross-host execution
 capabilities. Cross-host stop, archive, and rename are separately permitted bounded operations.
 
-The agent is resolved by NAME in the helm's catalog. `create --profile` resolves that name once into a launch bundle,
-and a clone follows its source's snapshotted profile id on any host while the helm still holds it. No match is a refusal
-naming the profile. There is deliberately no fallback to the source's raw invocation: a command line written for one
-machine may name a binary that is absent, a different build, or one that takes different flags on another. A session
-created from a raw invocation has no profile to follow and clones as that invocation. A create naming neither a profile
-nor an invocation falls back to the helm-wide remembered default.
+`create --profile` resolves an exact NAME in the helm's catalog; duplicate names are refused. `create --profile-id`
+selects an exact ID without falling back to a matching name. A clone follows its explicitly selected source's
+snapshotted profile id on any host while the helm still holds it. No match is a refusal naming the profile. There is
+deliberately no fallback to the source's raw invocation: a command line written for one machine may name a binary that
+is absent, a different build, or one that takes different flags on another. A session created from a raw invocation has
+no profile to follow and clones as that invocation. Create requires exactly one profile name, profile ID, or raw
+invocation; it never chooses the remembered default for an agent.
 
-Profile names and IDs are ordinary fleet metadata that agents may discover, including through suggestions in a no-match
-refusal. This does not make raw profile command lines or embedded credentials public, and it does not require a
-dedicated profile-listing command.
+Profile names and IDs are ordinary fleet metadata exposed by `farhelm agent profiles`. Discovery also has `--json` forms
+with a versioned envelope, exact IDs, the caller's host identity, and completeness fields. It never exposes raw profile
+command lines, credentials, resume templates, or provider configuration. Duplicate names remain separate rows; an acting
+command refuses an ambiguous name rather than choosing one.
 
 `farhelm agent instructions` (also spelled `farhelm agent help`) prints the agent-facing account of all of the above:
 the verbs, the `*` marker, that a session's own credential is what authorizes the question, and what to do about "no

@@ -1042,6 +1042,7 @@ mod tests {
 
         let second = tokio::spawn(mutation(AgentVerb::Rename {
             session_id: None,
+            expected_title: None,
             title: "t".to_string(),
         }));
         // The second task's arrival at the claim, observed rather than

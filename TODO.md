@@ -90,53 +90,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   version or mode the maintainer previously used. Adopt the transition-based stability idea, not Herdr's priority groups
   or client-local cross-endpoint ordering.
 
-- **Require explicit targets and launch choices in the agent CLI.** An agent asked to rename a named session reportedly
-  renamed itself after omitting `--session`; the exact invocation was not retained. The CLI primarily serves agents,
-  including less capable models, so short commands are less important than making incomplete intent fail without side
-  effects. Require an explicit session id for `agent rename`, `stop`, and `archive`, including when targeting the
-  caller. Omission, an empty selector, or an invalid target must fail before mutation; never reinterpret a failed lookup
-  as "this session". Prefer a concrete `--session <ID>` over another implicit-self convention. Enforce the contract at
-  the request boundary too, not just in clap or model-facing prose, and explicitly address older callers that still omit
-  the target: reject those omissions too, updating instructions and callers rather than retaining wire-level defaults.
-  Authentication identifies who is asking; it must not silently choose what they act on.
-
-  Broaden the correction to other consequential defaults. `agent create` should require its destination host and exactly
-  one explicit profile/invocation rather than inherit the caller's host or the helm's remembered profile. `agent clone`
-  currently means "copy the caller" with an optional destination host; require `--source-session <ID>` and an explicit
-  destination, supporting any listed source session, including the caller when its id is supplied. Inherited
-  folder/title/agent settings are reasonable clone semantics once the source is explicit. Audit `spawn` too: its
-  same-supervisor scope is deliberate, but inherited agent configuration should be explicitly selected and its
-  local-only destination unmistakable. Preserve harmless defaults such as deriving a new display title where they cannot
-  redirect work or silently choose permissions. Avoid adding routine interactive confirmations; incomplete commands
-  should return an actionable error that the agent can correct.
-
-  Preliminary assessment: `AgentCmd` and `verb()` in `crates/farhelm/src/main.rs` make lifecycle `session` and
-  create/clone `host` optional. In `crates/farhelm-helm/src/agent_requests.rs`, `resolve_target` substitutes the asking
-  id, `resolve_host` substitutes the asking host, create resolves an omitted agent through `remembered_profile`, and
-  clone reads the asking session as its only source. Review `AgentVerb` in `farhelm-proto`, supervisor relay validation,
-  and existing retry/identity guards alongside those handlers. Update SPEC.md and SPEC_impl.md where they explicitly
-  promise these defaults; preserve intentional self-stop/archive support when explicitly targeted.
-
-  Strengthen `crates/farhelm/src/agent_instructions.rs` and the clap-derived help together: list sessions/hosts first,
-  resolve the user's intended name to the listed id and host, and pass that target explicitly. Titles are not unique;
-  disambiguate using the user's context or ask rather than pick the first match or the row marked as self. Include
-  concrete cross-session and intentional-self examples with targets before rename text, plus correct quoting for spaces,
-  leading hyphens, and shell metacharacters. Do not treat instructions embedded in listed titles or paths as commands.
-  Add structured JSON session/host listings and read-only profile discovery so models can obtain exact selectors without
-  parsing aligned prose or guessing a profile. Explain that uncertain mutation outcomes are not permission to retry
-  blindly; create/clone retries must reuse the same idempotency key for the same intended operation. Preserve
-  replies/audit records identifying the actual target. Require the expected current title on every agent rename as well
-  as the id: refuse a mismatch without changing anything, checking the precondition atomically at the owning supervisor.
-  This adds a wrong-target/stale-list guard; it does not replace explicit ids or duplicate-name disambiguation.
-
-  Verify missing/invalid targets cause no mutation, explicit cross-session and self operations hit only the specified
-  id, ambiguous names cannot silently select a target, and create/clone cannot inherit an unintended host or profile.
-  Cover request-level omissions from old clients, argument-order and flag-like-title parsing, duplicate-name discovery,
-  mismatched or concurrently changed expected titles, and retry identity. Exercise the generated instructions with a
-  small agent-use evaluation of "rename FOO to BAR" where FOO is another session, duplicate-title cases, and intentional
-  self-actions; use isolated fixtures, never the live fleet, for mutating checks. This remains a queued change, not
-  authorization to rename or stop any live session.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly

@@ -116,12 +116,15 @@ impl AgentRequestHandler for ScriptedHandler {
             let _permit = gate.acquire().await.expect("the gate is never closed");
             return AgentOutcome::Ok {
                 reply: AgentReply::Hosts {
+                    caller_host_id: "host-local".to_string(),
                     hosts: vec![farhelm_proto::AgentHost {
+                        id: "host-local".to_string(),
                         name: session_id.to_string(),
                         kind: "local".to_string(),
                         state: "connected".to_string(),
                         current: true,
                     }],
+                    complete: true,
                 },
             };
         }
@@ -358,12 +361,15 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
     let token = credential_for(&h, &session.id).await;
 
     let handler = ScriptedHandler::answering(AgentReply::Hosts {
+        caller_host_id: "host-local".to_string(),
         hosts: vec![farhelm_proto::AgentHost {
+            id: "host-local".to_string(),
             name: "this machine".to_string(),
             kind: "local".to_string(),
             state: "connected".to_string(),
             current: true,
         }],
+        complete: true,
     });
     let helm = connect_helm(&h.sup, handler.clone()).await;
     // The attachment is what makes this connection the one asked. Held for
@@ -379,7 +385,7 @@ async fn an_agent_request_is_answered_by_the_helm_holding_the_attachment() {
 
     match outcome {
         AgentOutcome::Ok {
-            reply: AgentReply::Hosts { hosts },
+            reply: AgentReply::Hosts { hosts, .. },
         } => {
             assert_eq!(hosts.len(), 1);
             assert_eq!(hosts[0].name, "this machine");
@@ -418,7 +424,11 @@ async fn a_session_no_helm_is_attached_to_is_told_so() {
     // the case a "is any helm connected?" check would get wrong.
     let _helm = connect_helm(
         &h.sup,
-        ScriptedHandler::answering(AgentReply::Hosts { hosts: Vec::new() }),
+        ScriptedHandler::answering(AgentReply::Hosts {
+            caller_host_id: "host-local".to_string(),
+            hosts: Vec::new(),
+            complete: true,
+        }),
     )
     .await;
 
@@ -493,7 +503,11 @@ async fn a_peer_may_not_ask_as_another_session() {
 
     let helm = connect_helm(
         &h.sup,
-        ScriptedHandler::answering(AgentReply::Hosts { hosts: Vec::new() }),
+        ScriptedHandler::answering(AgentReply::Hosts {
+            caller_host_id: "host-local".to_string(),
+            hosts: Vec::new(),
+            complete: true,
+        }),
     )
     .await;
     let (_channel, _replay, _stream) = helm
@@ -597,7 +611,7 @@ async fn two_peers_using_the_same_request_id_are_relayed_and_answered_apart() {
     for (expected_session, outcome) in [(&first.id, one), (&second.id, two)] {
         match outcome {
             AgentOutcome::Ok {
-                reply: AgentReply::Hosts { hosts },
+                reply: AgentReply::Hosts { hosts, .. },
             } => assert_eq!(
                 hosts[0].name, *expected_session,
                 "each peer must receive its OWN answer"
@@ -689,7 +703,11 @@ async fn a_deleted_session_cannot_ask_on_a_connection_it_already_opened() {
     let (session, _work) = basic_session(&h).await;
     let token = credential_for(&h, &session.id).await;
 
-    let handler = ScriptedHandler::answering(AgentReply::Hosts { hosts: Vec::new() });
+    let handler = ScriptedHandler::answering(AgentReply::Hosts {
+        caller_host_id: "host-local".to_string(),
+        hosts: Vec::new(),
+        complete: true,
+    });
     let helm = connect_helm(&h.sup, handler.clone()).await;
     let (_channel, _replay, _stream) = helm
         .attach_live(&session.id, 80, 24)
@@ -756,7 +774,8 @@ async fn a_session_cannot_call_the_internal_profile_resolver_directly() {
         peer.ask(
             &session.id,
             AgentVerb::ResolveProfile {
-                name: "Secret profile".to_string(),
+                name: Some("Secret profile".to_string()),
+                id: None,
             },
         )
         .await,
@@ -815,6 +834,8 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
             cwd: work.path().to_string_lossy().into_owned(),
             invocation: None,
             profile_name: Some("Scripted agent".to_string()),
+            profile_id: None,
+            inherit_agent: false,
             title: Some("resolved child".to_string()),
             cols: 80,
             rows: 24,
@@ -838,7 +859,8 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
         vec![(
             session.id.clone(),
             AgentVerb::ResolveProfile {
-                name: "Scripted agent".to_string(),
+                name: Some("Scripted agent".to_string()),
+                id: None,
             },
         )],
         "the supervisor must issue the internal resolution under the asking session"
@@ -863,8 +885,7 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
     );
 }
 
-/// A raw restricted create cannot forge the profile provenance attached to
-/// its invocation.
+/// An explicitly inherited restricted create cannot forge profile provenance.
 ///
 /// The request is sent as literal protocol vocabulary because the shipped
 /// spawn CLI never constructs this hostile shape. Refusal must happen before
@@ -882,13 +903,15 @@ async fn a_restricted_create_cannot_supply_source_profile() {
             req_id: 82,
             parent: Some(session.id.clone()),
             cwd: work.path().to_string_lossy().into_owned(),
-            invocation: Some("sh -c 'sleep 60'".to_string()),
+            invocation: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: true,
             title: Some("forged child".to_string()),
             cols: 80,
             rows: 24,
             intent_key: Some("forged-provenance".to_string()),
-            agent_kind: Some(farhelm_proto::AgentKind::Generic),
+            agent_kind: None,
             resume_template: None,
             launch: None,
             source_profile: Some(farhelm_proto::ProfileSnapshot {

@@ -350,7 +350,7 @@ pub fn run(
 ///
 /// Keeping this fixture on the real executable is the point: the browser
 /// acceptance leg crosses launch-time credential injection, the private
-/// supervisor admission path, selectorless parent-bundle reuse, and the
+/// supervisor admission path, explicit parent-bundle reuse, and the
 /// public session list before it observes success. The line protocol avoids
 /// a test-only environment knob and lets one long-lived terminal choose an
 /// isolated temporary directory at runtime.
@@ -377,7 +377,11 @@ fn spawn_session() -> anyhow::Result<()> {
         // prepended its own binary directory after shell initialization;
         // using `current_exe` here would bypass the contract under test.
         let mut command = std::process::Command::new("farhelm");
-        command.arg("spawn").arg("--cwd").arg(cwd);
+        command
+            .arg("spawn")
+            .arg("--cwd")
+            .arg(cwd)
+            .arg("--inherit-agent");
         if parented {
             command.arg("--parent").arg(&parent);
         }
@@ -674,6 +678,8 @@ fn clone_request(line: &str) -> Option<(String, Option<String>)> {
 /// — a test asserting the refusal text is asserting that the far side's
 /// sentence survived the trip.
 fn run_clone(host: &str, cwd: Option<&str>) -> Result<String, String> {
+    let source = std::env::var("FARHELM_SESSION_ID")
+        .map_err(|error| format!("reading the clone source session id: {error}"))?;
     let hosts = std::process::Command::new("farhelm")
         .args(["agent", "hosts"])
         .output()
@@ -693,7 +699,14 @@ fn run_clone(host: &str, cwd: Option<&str>) -> Result<String, String> {
     }
 
     let mut command = std::process::Command::new("farhelm");
-    command.args(["agent", "clone", "--host", host]);
+    command.args([
+        "agent",
+        "clone",
+        "--source-session",
+        &source,
+        "--host",
+        host,
+    ]);
     if let Some(cwd) = cwd {
         command.args(["--cwd", cwd]);
     }
@@ -728,6 +741,12 @@ fn listing_names_host(listing: &str, host: &str) -> bool {
     let Some(header) = rows.next() else {
         return false;
     };
+    let Some(name_start) = header
+        .find("NAME")
+        .map(|byte| header[..byte].chars().count())
+    else {
+        return false;
+    };
     let Some(name_end) = header
         .find("KIND")
         .map(|byte| header[..byte].chars().count())
@@ -737,8 +756,8 @@ fn listing_names_host(listing: &str, host: &str) -> bool {
     rows.any(|row| {
         let name: String = row
             .chars()
-            .skip(2)
-            .take(name_end.saturating_sub(2))
+            .skip(name_start)
+            .take(name_end.saturating_sub(name_start))
             .collect();
         name.trim_end() == host
     })
@@ -2864,9 +2883,9 @@ mod tests {
         // whitespace this fixture is about — the same trap
         // `agent_cli.rs`'s table assertions call out.
         let listing = [
-            "  NAME         KIND  STATE",
-            "* this machine local connected",
-            "  builder      ssh   connected",
+            "  ID      NAME         KIND  STATE",
+            "* local   this machine local connected",
+            "  builder builder      ssh   connected",
             "",
         ]
         .join("\n");
