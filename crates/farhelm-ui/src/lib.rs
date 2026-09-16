@@ -376,6 +376,8 @@ pub enum LaunchHarness {
     Codex,
     Claude,
     Muse,
+    Goose,
+    Pi,
     /// OpenCode's generic integration has no captured conversation or
     /// synthesized resume command, despite being a first-class composer row.
     OpenCode,
@@ -385,6 +387,8 @@ pub enum LaunchHarness {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchEffort {
+    Off,
+    Minimal,
     Low,
     Medium,
     High,
@@ -398,6 +402,9 @@ pub enum LaunchEffort {
 #[serde(rename_all = "snake_case")]
 pub enum LaunchPermission {
     Yolo,
+    Approve,
+    SmartApprove,
+    Chat,
 }
 
 /// Mirror of the helm's session JSON (farhelm-proto `SessionInfo`). Kept

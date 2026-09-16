@@ -189,8 +189,7 @@ const REQUEST_ID: u64 = 1;
 /// user ever writes `$farhelm ...`, so the line buys exactly one thing —
 /// knowing the command exists — and the instructions themselves are paid
 /// for only by a session that goes and runs it.
-pub const POINTER_LINE: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and follow \
-     its output.";
+pub const POINTER_LINE: &str = farhelm_supervisor::agent_kind::INSTRUCTIONS_POINTER;
 
 /// Write [`POINTER_LINE`] and nothing else, ignoring any failure.
 ///
@@ -411,6 +410,26 @@ fn parse_payload(bytes: &[u8]) -> Result<(String, String), &'static str> {
         Some(serde_json::Value::String(source)) => source.clone(),
         _ => String::new(),
     };
+    match value.get("vendor") {
+        Some(serde_json::Value::String(vendor)) if vendor == "pi" => {
+            let session_file = match value.get("session_file") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(serde_json::Value::String(path)) => Some(path.clone()),
+                Some(_) => return Err("pi-session-file-not-a-string"),
+            };
+            let locator = farhelm_supervisor::agent_kind::PiLocator {
+                version: 1,
+                session_id: session_id.clone(),
+                session_file,
+            };
+            let encoded = farhelm_supervisor::agent_kind::encode_pi_locator(locator)
+                .map_err(|_| "invalid-pi-locator")?;
+            return Ok((encoded, source));
+        }
+        Some(serde_json::Value::String(_)) => return Err("unknown-vendor"),
+        Some(_) => return Err("vendor-not-a-string"),
+        None => {}
+    }
     Ok((session_id.clone(), source))
 }
 

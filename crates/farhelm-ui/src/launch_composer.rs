@@ -13,6 +13,8 @@ use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// A stable display order prevents catalog entry order from moving buttons.
 const EFFORT_ORDER: &[LaunchEffort] = &[
+    LaunchEffort::Off,
+    LaunchEffort::Minimal,
     LaunchEffort::Low,
     LaunchEffort::Medium,
     LaunchEffort::High,
@@ -29,6 +31,8 @@ const EFFORT_ORDER: &[LaunchEffort] = &[
 /// display conversions.
 pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
     match effort {
+        LaunchEffort::Off => "off",
+        LaunchEffort::Minimal => "minimal",
         LaunchEffort::Low => "low",
         LaunchEffort::Medium => "medium",
         LaunchEffort::High => "high",
@@ -36,6 +40,50 @@ pub(crate) const fn effort_value(effort: LaunchEffort) -> &'static str {
         LaunchEffort::Max => "max",
         LaunchEffort::Ultra => "ultra",
     }
+}
+
+/// Return the lowercase phrase used for a permission in visible summaries.
+///
+/// The wire spelling for `SmartApprove` uses an underscore, while people see
+/// the same spaced phrase as Goose's segmented control. Keeping that choice
+/// here prevents recent rows and the live summary from falling back to Rust's
+/// `Debug` spelling.
+pub(crate) const fn permission_value(permission: LaunchPermission) -> &'static str {
+    match permission {
+        LaunchPermission::Yolo => "yolo",
+        LaunchPermission::Approve => "approve",
+        LaunchPermission::SmartApprove => "smart approve",
+        LaunchPermission::Chat => "chat",
+    }
+}
+
+/// Normalize a permission to the modes the selected harness can represent.
+///
+/// Pi's missing tool gate is deliberately represented as YOLO even when an
+/// older stored selection omitted the optional field. Goose owns the three
+/// approval modes; moving one of them elsewhere clears it rather than letting
+/// an unsupported hidden choice reach launch.
+pub(crate) const fn normalized_permissions(
+    harness: LaunchHarness,
+    permissions: Option<LaunchPermission>,
+) -> Option<LaunchPermission> {
+    match harness {
+        LaunchHarness::Pi => Some(LaunchPermission::Yolo),
+        LaunchHarness::Goose => permissions,
+        _ => match permissions {
+            Some(
+                LaunchPermission::Approve | LaunchPermission::SmartApprove | LaunchPermission::Chat,
+            ) => None,
+            permissions => permissions,
+        },
+    }
+}
+
+/// Return the permission phrase a complete selection presents to the user.
+pub(crate) fn selection_permission_value(selection: &LaunchSelection) -> &'static str {
+    normalized_permissions(selection.harness, selection.permissions)
+        .map(permission_value)
+        .unwrap_or("default")
 }
 
 /// Return the lowercase word search matches a harness by.
@@ -144,14 +192,26 @@ pub(crate) fn model_enter_target(
     if draft.trim().is_empty() {
         return ModelEnterTarget::Nothing;
     }
-    if let Some(model) = catalog
+    let owners = catalog
         .iter()
-        .find(|model| model.id.eq_ignore_ascii_case(draft))
+        .filter(|model| model.id.eq_ignore_ascii_case(draft))
+        .collect::<Vec<_>>();
+    if let Some(current) =
+        harness.filter(|current| owners.iter().any(|model| model.harness == *current))
     {
         return ModelEnterTarget::Option(ModelOption::Model {
-            id: model.id.clone(),
-            harness: model.harness,
+            id: owners[0].id.clone(),
+            harness: current,
         });
+    }
+    if owners.len() == 1 {
+        return ModelEnterTarget::Option(ModelOption::Model {
+            id: owners[0].id.clone(),
+            harness: owners[0].harness,
+        });
+    }
+    if !owners.is_empty() {
+        return ModelEnterTarget::NeedsHarness(draft.to_string());
     }
     match harness {
         Some(harness) => ModelEnterTarget::Custom {
@@ -175,13 +235,18 @@ pub(crate) fn model_options(
 ) -> Vec<ModelOption> {
     let folded_query = query.to_ascii_lowercase();
     let mut options = Vec::new();
-    if harness != Some(LaunchHarness::OpenCode) {
+    if !matches!(
+        harness,
+        Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi)
+    ) {
         options.push(ModelOption::HarnessDefault);
     }
     for owner in [
         LaunchHarness::Codex,
         LaunchHarness::Claude,
         LaunchHarness::Muse,
+        LaunchHarness::Goose,
+        LaunchHarness::Pi,
         LaunchHarness::OpenCode,
     ] {
         if !show_all && harness.is_some_and(|selected| selected != owner) {
@@ -274,8 +339,10 @@ pub(crate) fn grouped_search_results(
 /// the form.
 ///
 /// Omitted fields are named as defaults so absence is never mistaken for an
-/// invisible retained value. This is the complete accessible description; the
-/// compact row surface puts its harness in a separately styled leading span.
+/// invisible retained value. Pi is the compatibility exception: an omitted
+/// permission from an older snapshot is presented as its mandatory YOLO mode.
+/// This is the complete accessible description; the compact row surface puts
+/// its harness in a separately styled leading span.
 pub(crate) fn selection_summary(selection: &LaunchSelection) -> String {
     format!(
         "{:?} · {}",
@@ -294,10 +361,7 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
     format!(
         "{} · permissions: {}",
         selection_summary_before_permissions(selection),
-        selection
-            .permissions
-            .map(|permissions| format!("{permissions:?}"))
-            .unwrap_or_else(|| "default".to_string()),
+        selection_permission_value(selection),
     )
 }
 
@@ -345,6 +409,8 @@ pub(crate) fn search_results(
         LaunchHarness::Codex,
         LaunchHarness::Claude,
         LaunchHarness::Muse,
+        LaunchHarness::Goose,
+        LaunchHarness::Pi,
         LaunchHarness::OpenCode,
     ] {
         if harness_word(harness).contains(&folded_query) {
@@ -641,29 +707,61 @@ pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
 ///
 /// Unknown model IDs are valid custom IDs once the person has selected their
 /// owning harness. They cannot have model-specific effort constraints locally,
-/// so this applies the harness-wide vocabulary and OpenCode's required-model
-/// rule. The helm validates the final request again, including Zen provider
-/// syntax for custom OpenCode IDs.
+/// so this applies the harness-wide vocabulary and the required-model rules
+/// for OpenCode, Goose, and Pi. It also rejects Goose-only permission modes on
+/// every other harness while accepting an omitted Pi permission as the older
+/// spelling of YOLO. The helm validates the final request again, including Zen
+/// provider syntax for custom OpenCode IDs.
 pub(crate) fn selection_is_compatible(
     selection: &LaunchSelection,
     catalog: &[LaunchCatalogModel],
 ) -> bool {
-    if selection.harness == LaunchHarness::OpenCode && selection.model.is_none() {
+    if matches!(
+        selection.harness,
+        LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi
+    ) && selection.model.is_none()
+    {
         return false;
     }
-    let known_model = selection
-        .model
-        .as_ref()
-        .and_then(|model| catalog.iter().find(|candidate| candidate.id == *model));
-    if known_model.is_some_and(|model| model.harness != selection.harness) {
+    let known_models = selection.model.as_ref().map(|model| {
+        catalog
+            .iter()
+            .filter(|candidate| candidate.id == *model)
+            .collect::<Vec<_>>()
+    });
+    if known_models.as_ref().is_some_and(|models| {
+        !models.is_empty()
+            && !models
+                .iter()
+                .any(|model| model.harness == selection.harness)
+    }) {
         return false;
     }
-    selection.effort.is_none_or(|effort| {
-        known_model.map_or_else(
-            || compatible_efforts(selection.harness, None, catalog).contains(&effort),
-            |model| model.efforts.contains(&effort),
-        )
-    })
+    let effort_is_compatible = selection.effort.is_none_or(|effort| {
+        known_models
+            .as_ref()
+            .and_then(|models| {
+                models
+                    .iter()
+                    .find(|model| model.harness == selection.harness)
+            })
+            .map_or_else(
+                || compatible_efforts(selection.harness, None, catalog).contains(&effort),
+                |model| model.efforts.contains(&effort),
+            )
+    });
+    let permissions_are_compatible = match (selection.harness, selection.permissions) {
+        (LaunchHarness::Goose, _)
+        | (LaunchHarness::Pi, None | Some(LaunchPermission::Yolo))
+        | (_, None | Some(LaunchPermission::Yolo)) => true,
+        (
+            _,
+            Some(
+                LaunchPermission::Approve | LaunchPermission::SmartApprove | LaunchPermission::Chat,
+            ),
+        ) => false,
+    };
+    effort_is_compatible && permissions_are_compatible
 }
 
 /// Move a structured choice to another harness without retaining impossible
@@ -673,7 +771,8 @@ pub(crate) fn selection_is_compatible(
 /// harness on which it was entered. The caller passes that ownership so a
 /// harness click and a search result make exactly the same reconciliation.
 /// Effort is independent when the new harness still offers it; only an effort
-/// the new model or harness cannot accept is cleared.
+/// the new model or harness cannot accept is cleared. Goose-only permissions
+/// clear elsewhere, while Pi always becomes YOLO because it has no tool gate.
 pub(crate) fn reconcile_harness_selection(
     mut selection: LaunchSelection,
     model_owner: Option<LaunchHarness>,
@@ -681,15 +780,28 @@ pub(crate) fn reconcile_harness_selection(
     catalog: &[LaunchCatalogModel],
 ) -> (LaunchSelection, Option<LaunchHarness>) {
     selection.harness = harness;
-    let known_owner = selection.model.as_ref().and_then(|model| {
+    let known_owners = selection.model.as_ref().map(|model| {
         catalog
             .iter()
-            .find(|candidate| candidate.id == *model)
+            .filter(|candidate| candidate.id == *model)
             .map(|candidate| candidate.harness)
+            .collect::<Vec<_>>()
     });
-    let owner = known_owner.or(model_owner);
-    let retained_owner = (owner == Some(harness)).then_some(harness);
-    if owner.is_some() && retained_owner.is_none() {
+    let known_is_owned = known_owners
+        .as_ref()
+        .is_some_and(|owners| owners.contains(&harness));
+    let owner = known_is_owned.then_some(harness).or(model_owner);
+    let retained_owner = known_is_owned
+        .then_some(harness)
+        .or((model_owner == Some(harness)).then_some(harness));
+    if (known_owners
+        .as_ref()
+        .is_some_and(|owners| !owners.is_empty())
+        && !known_is_owned)
+        || (known_owners.as_ref().is_none_or(|owners| owners.is_empty())
+            && owner.is_some()
+            && retained_owner.is_none())
+    {
         selection.model = None;
     }
     if selection.effort.is_some_and(|effort| {
@@ -697,6 +809,7 @@ pub(crate) fn reconcile_harness_selection(
     }) {
         selection.effort = None;
     }
+    selection.permissions = normalized_permissions(harness, selection.permissions);
     (selection, retained_owner)
 }
 
@@ -718,7 +831,30 @@ pub(crate) fn reconciliation_reset_reason(
     if before.effort.is_some() && after.effort.is_none() {
         cleared.push("the selected effort is not in Farhelm's offering for that model or harness");
     }
-    (!cleared.is_empty()).then(|| format!("{}, so it was cleared", cleared.join("; ")))
+    let mut notices = Vec::new();
+    if !cleared.is_empty() {
+        notices.push(format!("{}, so it was cleared", cleared.join("; ")));
+    }
+    match (before.permissions, after.harness, after.permissions) {
+        (
+            Some(
+                LaunchPermission::Approve
+                | LaunchPermission::SmartApprove
+                | LaunchPermission::Chat,
+            ),
+            LaunchHarness::Pi,
+            Some(LaunchPermission::Yolo),
+        ) => notices.push(
+            "the selected permission is unavailable because Pi supports only YOLO, so it was replaced"
+                .to_string(),
+        ),
+        (Some(_), _, None) if before.permissions != after.permissions => notices.push(
+            "the selected permission is unavailable for this harness, so it was cleared"
+                .to_string(),
+        ),
+        _ => {}
+    }
+    (!notices.is_empty()).then(|| notices.join("; "))
 }
 
 /// Return the catalog-supported effort choices for a harness and optional
@@ -775,8 +911,8 @@ mod tests {
     /// describe the exact same saved defaults. Specifically: `selection_summary`
     /// is exactly `"{harness:?} · "` followed by
     /// `selection_summary_without_harness`, which is exactly
-    /// `selection_summary_before_permissions` followed by
-    /// `" · permissions: {permission:?}"`, so no two renderings of one saved
+    /// `selection_summary_before_permissions` followed by the readable
+    /// permission phrase, so no two renderings of one saved
     /// setup can name different values.
     #[test]
     fn selection_summary_without_harness_preserves_the_saved_tail() {
@@ -793,11 +929,11 @@ mod tests {
         );
         assert_eq!(
             selection_summary_without_harness(&selection),
-            "model: gpt-6-astra · effort: High · permissions: Yolo"
+            "model: gpt-6-astra · effort: High · permissions: yolo"
         );
         assert_eq!(
             selection_summary(&selection),
-            "Codex · model: gpt-6-astra · effort: High · permissions: Yolo"
+            "Codex · model: gpt-6-astra · effort: High · permissions: yolo"
         );
     }
 
@@ -1229,6 +1365,123 @@ mod tests {
         assert_eq!(owner, None);
     }
 
+    /// Permission reconciliation is part of the harness transition itself.
+    /// Pi must never expose an omitted or Goose-only mode, while a portable
+    /// YOLO choice remains selected when the user leaves Pi.
+    #[test]
+    fn harness_transition_normalizes_permissions_and_reports_replacements() {
+        let goose = LaunchSelection {
+            harness: LaunchHarness::Goose,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::SmartApprove),
+        };
+        let (pi, _) = reconcile_harness_selection(goose.clone(), None, LaunchHarness::Pi, &[]);
+        assert_eq!(pi.permissions, Some(LaunchPermission::Yolo));
+        assert_eq!(
+            reconciliation_reset_reason(&goose, &pi).as_deref(),
+            Some(
+                "the selected permission is unavailable because Pi supports only YOLO, so it was replaced"
+            )
+        );
+
+        let omitted = LaunchSelection {
+            permissions: None,
+            ..goose.clone()
+        };
+        let (pi_from_default, _) =
+            reconcile_harness_selection(omitted.clone(), None, LaunchHarness::Pi, &[]);
+        assert_eq!(pi_from_default.permissions, Some(LaunchPermission::Yolo));
+        assert_eq!(
+            reconciliation_reset_reason(&omitted, &pi_from_default),
+            None
+        );
+
+        let (codex, _) = reconcile_harness_selection(pi, None, LaunchHarness::Codex, &[]);
+        assert_eq!(codex.permissions, Some(LaunchPermission::Yolo));
+
+        let (codex_from_goose, _) =
+            reconcile_harness_selection(goose.clone(), None, LaunchHarness::Codex, &[]);
+        assert_eq!(codex_from_goose.permissions, None);
+        assert_eq!(
+            reconciliation_reset_reason(&goose, &codex_from_goose).as_deref(),
+            Some("the selected permission is unavailable for this harness, so it was cleared")
+        );
+    }
+
+    /// Compatibility mirrors the helm boundary for all permission variants.
+    /// An old Pi snapshot may omit its mode, but Goose approval modes cannot
+    /// cross into any other harness.
+    #[test]
+    fn compatibility_rejects_goose_permissions_outside_goose() {
+        for permission in [
+            LaunchPermission::Approve,
+            LaunchPermission::SmartApprove,
+            LaunchPermission::Chat,
+        ] {
+            assert!(selection_is_compatible(
+                &LaunchSelection {
+                    harness: LaunchHarness::Goose,
+                    model: Some("custom/provider-model".into()),
+                    effort: None,
+                    permissions: Some(permission),
+                },
+                &[],
+            ));
+            for harness in [
+                LaunchHarness::Codex,
+                LaunchHarness::Claude,
+                LaunchHarness::Muse,
+                LaunchHarness::OpenCode,
+                LaunchHarness::Pi,
+            ] {
+                assert!(!selection_is_compatible(
+                    &LaunchSelection {
+                        harness,
+                        model: Some("custom/provider-model".into()),
+                        effort: None,
+                        permissions: Some(permission),
+                    },
+                    &[],
+                ));
+            }
+        }
+        for permissions in [None, Some(LaunchPermission::Yolo)] {
+            assert!(selection_is_compatible(
+                &LaunchSelection {
+                    harness: LaunchHarness::Pi,
+                    model: Some("custom/provider-model".into()),
+                    effort: None,
+                    permissions,
+                },
+                &[],
+            ));
+        }
+    }
+
+    /// Older Pi snapshots omitted the optional field. Their summaries still
+    /// have to name Pi's sole effective mode, while Goose modes use the same
+    /// readable words as the controls.
+    #[test]
+    fn permission_summaries_are_readable_and_pi_omission_means_yolo() {
+        let pi = LaunchSelection {
+            harness: LaunchHarness::Pi,
+            model: Some("x-ai/grok-4.6".into()),
+            effort: None,
+            permissions: None,
+        };
+        assert_eq!(selection_permission_value(&pi), "yolo");
+        assert!(selection_summary(&pi).ends_with("permissions: yolo"));
+
+        let goose = LaunchSelection {
+            harness: LaunchHarness::Goose,
+            permissions: Some(LaunchPermission::SmartApprove),
+            ..pi
+        };
+        assert_eq!(selection_permission_value(&goose), "smart approve");
+        assert!(selection_summary(&goose).ends_with("permissions: smart approve"));
+    }
+
     /// A model-specific effort restriction must be reflected before submit.
     ///
     /// This keeps the picker from offering a known-invalid combination while
@@ -1256,6 +1509,41 @@ mod tests {
         assert_eq!(
             compatible_efforts(LaunchHarness::Codex, Some("custom"), &catalog),
             vec![LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High]
+        );
+    }
+
+    /// An exact shared model keeps a selected owner, but cannot guess between
+    /// its owners while the composer still has no harness selection.
+    #[test]
+    fn shared_model_enter_requires_an_owner_only_when_ambiguous() {
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "x-ai/grok-4.6".into(),
+                harness: LaunchHarness::Goose,
+                efforts: vec![LaunchEffort::Low],
+            },
+            LaunchCatalogModel {
+                id: "x-ai/grok-4.6".into(),
+                harness: LaunchHarness::Pi,
+                efforts: vec![LaunchEffort::Minimal],
+            },
+        ];
+        assert_eq!(
+            model_enter_target(&[], None, "x-ai/grok-4.6", &catalog, None),
+            ModelEnterTarget::NeedsHarness("x-ai/grok-4.6".into())
+        );
+        assert_eq!(
+            model_enter_target(
+                &[],
+                None,
+                "x-ai/grok-4.6",
+                &catalog,
+                Some(LaunchHarness::Pi)
+            ),
+            ModelEnterTarget::Option(ModelOption::Model {
+                id: "x-ai/grok-4.6".into(),
+                harness: LaunchHarness::Pi
+            })
         );
     }
 

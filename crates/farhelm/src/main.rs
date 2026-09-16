@@ -43,6 +43,7 @@ use std::path::PathBuf;
 
 mod agent_instructions;
 mod fake_agent;
+mod goose_hook;
 mod hook;
 mod setup;
 
@@ -457,6 +458,8 @@ enum InternalCmd {
         #[arg(long)]
         announce: bool,
     },
+    /// The credential-free MCP reporter Goose retains in session metadata.
+    GooseHook,
     /// A scripted TUI standing in for real agents in tests: prompts,
     /// echoes, colors, terminal modes, and raw-byte output — deterministic
     /// and free of vendor auth (PLAN_M1.md's test harness).
@@ -828,6 +831,61 @@ fn main() -> anyhow::Result<()> {
             InternalCmd::Launch { spec } => {
                 // On success exec never returns; reaching here is failure.
                 Err(farhelm_supervisor::launch::exec_launch_spec(&spec))
+            }
+            InternalCmd::GooseHook => {
+                std::panic::set_hook(Box::new(|_| {}));
+                let enabled =
+                    std::env::var_os(farhelm_supervisor::launch::GOOSE_REPORTER_ENABLED_ENV_VAR)
+                        .as_deref()
+                        == Some(std::ffi::OsStr::new("1"));
+                if enabled {
+                    let session_id =
+                        std::env::var(farhelm_supervisor::launch::SESSION_ID_ENV_VAR).ok();
+                    let token =
+                        std::env::var(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR).ok();
+                    let socket = std::env::var(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR)
+                        .ok()
+                        .map(PathBuf::from);
+                    let hook_log = match (&session_id, &socket) {
+                        (Some(id), Some(socket)) => socket
+                            .parent()
+                            .map(|dir| dir.join("hook-log").join(format!("{id}.log"))),
+                        _ => None,
+                    };
+                    let credential = match (session_id, token, socket) {
+                        (Some(session_id), Some(token), Some(socket)) => {
+                            Some(hook::HookCredential {
+                                session_id,
+                                token,
+                                socket,
+                            })
+                        }
+                        _ => None,
+                    };
+                    if let Ok(goose_id) = std::env::var("AGENT_SESSION_ID") {
+                        let payload = serde_json::to_vec(&serde_json::json!({
+                            "session_id": goose_id,
+                            "source": "goose"
+                        }))?;
+                        hook::run_with(
+                            credential,
+                            std::io::Cursor::new(payload),
+                            std::time::Duration::from_secs(2),
+                            hook_log,
+                        );
+                    }
+                }
+                let instructions =
+                    (std::env::var_os(farhelm_supervisor::launch::GOOSE_INSTRUCTIONS_ENV_VAR)
+                        .as_deref()
+                        == Some(std::ffi::OsStr::new("1")))
+                    .then_some(hook::POINTER_LINE);
+                goose_hook::serve(
+                    std::io::BufReader::new(std::io::stdin()),
+                    std::io::stdout(),
+                    instructions,
+                );
+                Ok(())
             }
             InternalCmd::Hook { announce } => {
                 // No tracing init, and this one is necessity rather than

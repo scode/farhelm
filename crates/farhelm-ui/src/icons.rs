@@ -55,6 +55,8 @@ pub(crate) enum HarnessGlyph {
     Codex,
     Claude,
     Muse,
+    Goose,
+    Pi,
     OpenCode,
     Terminal,
 }
@@ -64,6 +66,9 @@ pub(crate) enum HarnessGlyph {
 pub(crate) enum PermissionGlyph {
     Yolo,
     FullAuto,
+    Approve,
+    SmartApprove,
+    Chat,
 }
 
 /// An ended session's distinct sidebar silhouette.
@@ -95,6 +100,8 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
         HarnessGlyph::Codex => "codex",
         HarnessGlyph::Claude => "claude",
         HarnessGlyph::Muse => "muse",
+        HarnessGlyph::Goose => "goose",
+        HarnessGlyph::Pi => "pi",
         HarnessGlyph::OpenCode => "opencode",
         HarnessGlyph::Terminal => "terminal",
     };
@@ -108,6 +115,8 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
                 HarnessGlyph::Codex => rsx! { path { d: "M10 2.4A4.8 4.8 0 1 0 10 9.6L8.5 8.1A2.7 2.7 0 1 1 8.5 3.9Z", fill: "currentColor" } },
                 HarnessGlyph::Claude => rsx! { path { d: "M2 2h2v6h6v2H2z", fill: "currentColor" } },
                 HarnessGlyph::Muse => rsx! { path { d: "M1.2 10V2h1.9l2.9 4.6L8.9 2h1.9v8H9V5.2L6.8 8.7H5.2L3 5.2V10z", fill: "currentColor" } },
+                HarnessGlyph::Goose => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "G" } },
+                HarnessGlyph::Pi => rsx! { text { x: "3", y: "9", fill: "currentColor", font_size: "9", "P" } },
                 HarnessGlyph::OpenCode => rsx! {
                     // Source geometry uses a 240×300 canvas. A nested group
                     // preserves that ratio inside this common 12px glyph box.
@@ -128,6 +137,9 @@ pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
     let (token, closed) = match glyph {
         PermissionGlyph::Yolo => ("yolo", false),
         PermissionGlyph::FullAuto => ("full-auto", true),
+        PermissionGlyph::Approve => ("approve", true),
+        PermissionGlyph::SmartApprove => ("smart-approve", true),
+        PermissionGlyph::Chat => ("chat", true),
     };
     rsx! {
         svg { class: "sidebar-glyph permission-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.25", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",

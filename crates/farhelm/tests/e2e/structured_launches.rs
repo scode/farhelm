@@ -72,6 +72,8 @@ impl FakeHarness {
                     LaunchHarness::Codex => "codex",
                     LaunchHarness::Claude => "claude",
                     LaunchHarness::Muse => "muse",
+                    LaunchHarness::Goose => "goose",
+                    LaunchHarness::Pi => "pi",
                     LaunchHarness::OpenCode => "opencode",
                 })
                 .to_string_lossy()
@@ -89,9 +91,11 @@ impl FakeHarness {
         if let Some(model) = &selection.model {
             match selection.harness {
                 LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
-                LaunchHarness::Claude | LaunchHarness::Muse | LaunchHarness::OpenCode => {
-                    argv.extend(["--model".to_string(), model.clone()])
-                }
+                LaunchHarness::Claude
+                | LaunchHarness::Muse
+                | LaunchHarness::Goose
+                | LaunchHarness::Pi
+                | LaunchHarness::OpenCode => argv.extend(["--model".to_string(), model.clone()]),
             }
         }
         if let Some(effort) = selection.effort {
@@ -107,18 +111,25 @@ impl FakeHarness {
                     "--reasoning-effort".to_string(),
                     effort.as_cli_arg().to_string(),
                 ]),
+                // Goose carries effort in `GOOSE_THINKING_EFFORT`, outside
+                // the executable argv this fixture records.
+                LaunchHarness::Goose => {}
+                LaunchHarness::Pi => {
+                    argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
+                }
                 LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             }
         }
         if selection.permissions == Some(LaunchPermission::Yolo) {
-            argv.push(
-                match selection.harness {
-                    LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
-                    LaunchHarness::Claude => "--dangerously-skip-permissions",
-                    LaunchHarness::OpenCode => "--auto",
-                }
-                .to_string(),
-            );
+            let flag = match selection.harness {
+                LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
+                LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
+                LaunchHarness::OpenCode => Some("--auto"),
+                LaunchHarness::Goose | LaunchHarness::Pi => None,
+            };
+            if let Some(flag) = flag {
+                argv.push(flag.to_string());
+            }
         }
         shell_words::join(argv)
     }
@@ -191,6 +202,8 @@ fn agent_kind(selection: &LaunchSelection) -> AgentKind {
     match selection.harness {
         LaunchHarness::Codex => AgentKind::Codex,
         LaunchHarness::Claude => AgentKind::Claude,
+        LaunchHarness::Goose => AgentKind::Goose,
+        LaunchHarness::Pi => AgentKind::Pi,
         // Muse deliberately remains a Generic runtime integration: it has no
         // conversation-resume contract for this release.
         LaunchHarness::Muse => AgentKind::Generic,
@@ -488,7 +501,11 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
     if let Some(model) = &selection.model {
         let model_flag = match selection.harness {
             LaunchHarness::Codex => "-m",
-            LaunchHarness::Claude | LaunchHarness::Muse | LaunchHarness::OpenCode => "--model",
+            LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::OpenCode => "--model",
         };
         assert!(
             words.windows(2).any(|pair| pair == [model_flag, model]),
@@ -500,12 +517,16 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Codex => format!("model_reasoning_effort={}", effort.as_cli_arg()),
             LaunchHarness::Claude => effort.as_cli_arg().to_string(),
             LaunchHarness::Muse => effort.as_cli_arg().to_string(),
+            LaunchHarness::Goose => return,
+            LaunchHarness::Pi => effort.as_cli_arg().to_string(),
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         };
         let flag = match selection.harness {
             LaunchHarness::Codex => "-c",
             LaunchHarness::Claude => "--effort",
             LaunchHarness::Muse => "--reasoning-effort",
+            LaunchHarness::Goose => return,
+            LaunchHarness::Pi => "--thinking",
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         };
         assert!(
@@ -520,6 +541,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
             LaunchHarness::Claude => "--dangerously-skip-permissions",
             LaunchHarness::OpenCode => "--auto",
+            LaunchHarness::Goose | LaunchHarness::Pi => return,
         };
         assert!(
             words.iter().any(|word| word == flag),

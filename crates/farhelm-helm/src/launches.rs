@@ -48,6 +48,26 @@ const MUSE_EFFORTS: &[LaunchEffort] = &[
     LaunchEffort::High,
     LaunchEffort::Xhigh,
 ];
+/// Goose exposes these request levels through `GOOSE_THINKING_EFFORT`.
+/// Model providers may still clamp or reject a request at runtime.
+const GOOSE_EFFORTS: &[LaunchEffort] = &[
+    LaunchEffort::Off,
+    LaunchEffort::Low,
+    LaunchEffort::Medium,
+    LaunchEffort::High,
+    LaunchEffort::Max,
+];
+/// Pi accepts these request levels through `--thinking`; they are not a
+/// promise that every OpenRouter model advertises matching reasoning support.
+const PI_EFFORTS: &[LaunchEffort] = &[
+    LaunchEffort::Off,
+    LaunchEffort::Minimal,
+    LaunchEffort::Low,
+    LaunchEffort::Medium,
+    LaunchEffort::High,
+    LaunchEffort::Xhigh,
+    LaunchEffort::Max,
+];
 /// OpenCode's inspected interactive CLI has no portable effort flag. An empty
 /// catalog vocabulary makes an explicit effort invalid rather than guessing a
 /// translation to a provider-specific variant.
@@ -83,6 +103,46 @@ const CATALOG: &[CatalogModel] = &[
         id: "muse-spark-1.3-contributor",
         harness: LaunchHarness::Muse,
         efforts: MUSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "z-ai/glm-5.3-flash",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "x-ai/grok-4.5",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "x-ai/grok-4.6",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "z-ai/glm-5.3",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "z-ai/glm-5.3-flash",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "x-ai/grok-4.5",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "x-ai/grok-4.6",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "z-ai/glm-5.3",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "opencode/glm-5.3-flash",
@@ -135,10 +195,37 @@ pub(crate) struct CompiledLaunch {
 /// The result contains no user-provided shell syntax. A custom model is one
 /// argv element after validation, and `shell_words::join` does the only
 /// quoting at the boundary where the supervisor later splits the invocation.
-pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, String> {
+pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, String> {
+    // Pi has no vendor approval mode. Its only offered safety label records
+    // that absence, so make an omitted Pi choice durable before history and
+    // retry paths receive the compiled selection.
+    if selection.harness == LaunchHarness::Pi && selection.permissions.is_none() {
+        selection.permissions = Some(LaunchPermission::Yolo);
+    }
     validate_selection(&selection)?;
 
-    let mut argv = vec![program(selection.harness).to_string()];
+    let mut argv = Vec::new();
+    if selection.harness == LaunchHarness::Goose
+        && (selection.effort.is_some() || selection.permissions.is_some())
+    {
+        argv.push("env".to_string());
+        if let Some(effort) = selection.effort {
+            argv.push(format!("GOOSE_THINKING_EFFORT={}", effort.as_cli_arg()));
+        }
+        if let Some(permission) = selection.permissions {
+            let mode = match permission {
+                LaunchPermission::Yolo => "auto",
+                LaunchPermission::Approve => "approve",
+                LaunchPermission::SmartApprove => "smart_approve",
+                LaunchPermission::Chat => "chat",
+            };
+            argv.push(format!("GOOSE_MODE={mode}"));
+        }
+    }
+    argv.push(program(selection.harness).to_string());
+    if selection.harness == LaunchHarness::Goose {
+        argv.push("session".to_string());
+    }
     if let Some(model) = &selection.model {
         match selection.harness {
             LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
@@ -148,6 +235,12 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             LaunchHarness::OpenCode => argv.extend([
                 "--model".to_string(),
                 opencode_model_argument(model)?.to_string(),
+            ]),
+            LaunchHarness::Goose | LaunchHarness::Pi => argv.extend([
+                "--provider".to_string(),
+                "openrouter".to_string(),
+                "--model".to_string(),
+                model.clone(),
             ]),
         }
     }
@@ -166,17 +259,22 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             ]),
             // `validate_selection` has already rejected this combination.
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
+            LaunchHarness::Goose => {}
+            LaunchHarness::Pi => {
+                argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
+            }
         }
     }
     if selection.permissions == Some(LaunchPermission::Yolo) {
-        argv.push(
-            match selection.harness {
-                LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
-                LaunchHarness::Claude => "--dangerously-skip-permissions",
-                LaunchHarness::OpenCode => "--auto",
-            }
-            .to_string(),
-        );
+        let flag = match selection.harness {
+            LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
+            LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
+            LaunchHarness::OpenCode => Some("--auto"),
+            LaunchHarness::Goose | LaunchHarness::Pi => None,
+        };
+        if let Some(flag) = flag {
+            argv.push(flag.to_string());
+        }
     }
 
     Ok(CompiledLaunch {
@@ -186,6 +284,8 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<CompiledLaunch, Stri
             LaunchHarness::Claude => AgentKind::Claude,
             LaunchHarness::Muse => AgentKind::Generic,
             LaunchHarness::OpenCode => AgentKind::Generic,
+            LaunchHarness::Goose => AgentKind::Goose,
+            LaunchHarness::Pi => AgentKind::Pi,
         },
         resume_template: None,
         selection,
@@ -198,25 +298,43 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Claude => "claude",
         LaunchHarness::Muse => "muse",
         LaunchHarness::OpenCode => "opencode",
+        LaunchHarness::Goose => "goose",
+        LaunchHarness::Pi => "pi",
     }
 }
 
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
-    if selection.harness == LaunchHarness::OpenCode && selection.model.is_none() {
-        return Err("choose an OpenCode model before launching".to_string());
+    if selection.model.is_none() {
+        let message = match selection.harness {
+            LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
+            LaunchHarness::Goose => Some("choose a Goose model before launching"),
+            LaunchHarness::Pi => Some("choose a Pi model before launching"),
+            LaunchHarness::Codex | LaunchHarness::Claude | LaunchHarness::Muse => None,
+        };
+        if let Some(message) = message {
+            return Err(message.to_string());
+        }
     }
     if let Some(model) = &selection.model {
         validate_model_id(model)?;
         if selection.harness == LaunchHarness::OpenCode {
             opencode_model_argument(model)?;
         }
-        if let Some(known) = CATALOG.iter().find(|entry| entry.id == model) {
-            if known.harness != selection.harness {
+        let known = CATALOG
+            .iter()
+            .filter(|entry| entry.id == model)
+            .collect::<Vec<_>>();
+        if !known.is_empty() {
+            if !known.iter().any(|entry| entry.harness == selection.harness) {
                 return Err(format!(
-                    "model {model:?} belongs to {:?}, not {:?}",
-                    known.harness, selection.harness
+                    "model {model:?} belongs to a different harness than {:?}",
+                    selection.harness
                 ));
             }
+            let known = known
+                .into_iter()
+                .find(|entry| entry.harness == selection.harness)
+                .expect("owner checked");
             if let Some(effort) = selection.effort
                 && !known.efforts.contains(&effort)
             {
@@ -234,6 +352,17 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
             "Farhelm's released {:?} offering does not include effort {:?}",
             selection.harness, effort
         ));
+    }
+    match (selection.harness, selection.permissions) {
+        (LaunchHarness::Goose, _)
+        | (LaunchHarness::Pi, Some(LaunchPermission::Yolo))
+        | (_, None)
+        | (_, Some(LaunchPermission::Yolo)) => {}
+        (_, Some(permission)) => {
+            return Err(format!(
+                "permission {permission:?} is only supported by Goose"
+            ));
+        }
     }
     Ok(())
 }
@@ -276,6 +405,8 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Claude => CLAUDE_EFFORTS,
         LaunchHarness::Muse => MUSE_EFFORTS,
         LaunchHarness::OpenCode => OPENCODE_EFFORTS,
+        LaunchHarness::Goose => GOOSE_EFFORTS,
+        LaunchHarness::Pi => PI_EFFORTS,
     }
 }
 
@@ -550,5 +681,187 @@ mod tests {
                 "the contributor catalog must not imply {effort:?} support"
             );
         }
+    }
+
+    /// Goose and Pi share OpenRouter IDs but compile distinct, literal argv
+    /// contracts; choosing one must never silently route to the other.
+    #[test]
+    fn goose_and_pi_compile_their_native_openrouter_contracts() {
+        let goose = compile(LaunchSelection {
+            harness: LaunchHarness::Goose,
+            model: Some("x-ai/grok-4.6".into()),
+            effort: Some(LaunchEffort::Max),
+            permissions: Some(LaunchPermission::SmartApprove),
+        })
+        .expect("Goose selection compiles");
+        assert_eq!(
+            shell_words::split(&goose.invocation).unwrap(),
+            [
+                "env",
+                "GOOSE_THINKING_EFFORT=max",
+                "GOOSE_MODE=smart_approve",
+                "goose",
+                "session",
+                "--provider",
+                "openrouter",
+                "--model",
+                "x-ai/grok-4.6"
+            ]
+        );
+
+        let pi = compile(LaunchSelection {
+            harness: LaunchHarness::Pi,
+            model: Some("x-ai/grok-4.6".into()),
+            effort: Some(LaunchEffort::Minimal),
+            permissions: None,
+        })
+        .expect("Pi selection compiles");
+        assert_eq!(pi.selection.permissions, Some(LaunchPermission::Yolo));
+        assert_eq!(
+            shell_words::split(&pi.invocation).unwrap(),
+            [
+                "pi",
+                "--provider",
+                "openrouter",
+                "--model",
+                "x-ai/grok-4.6",
+                "--thinking",
+                "minimal"
+            ]
+        );
+    }
+
+    /// Goose's four visible permission modes are environment values, while
+    /// an omitted mode and effort must leave the process environment alone.
+    /// This pins the full mapping rather than one representative mode.
+    #[test]
+    fn goose_maps_every_permission_without_unsolicited_overrides() {
+        let base = LaunchSelection {
+            harness: LaunchHarness::Goose,
+            model: Some("z-ai/glm-5.3".into()),
+            effort: None,
+            permissions: None,
+        };
+        assert_eq!(
+            shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap(),
+            [
+                "goose",
+                "session",
+                "--provider",
+                "openrouter",
+                "--model",
+                "z-ai/glm-5.3"
+            ],
+            "omitted choices must not write Goose environment overrides"
+        );
+        for (permission, mode) in [
+            (LaunchPermission::Yolo, "auto"),
+            (LaunchPermission::Approve, "approve"),
+            (LaunchPermission::SmartApprove, "smart_approve"),
+            (LaunchPermission::Chat, "chat"),
+        ] {
+            let compiled = compile(LaunchSelection {
+                permissions: Some(permission),
+                ..base.clone()
+            })
+            .expect("every offered Goose permission compiles");
+            assert_eq!(
+                shell_words::split(&compiled.invocation).unwrap(),
+                [
+                    "env",
+                    &format!("GOOSE_MODE={mode}"),
+                    "goose",
+                    "session",
+                    "--provider",
+                    "openrouter",
+                    "--model",
+                    "z-ai/glm-5.3"
+                ]
+            );
+        }
+    }
+
+    /// Pi has no tool-approval flag. Omission and explicit YOLO compile to
+    /// the same argv, and Goose's approval modes are all rejected.
+    #[test]
+    fn pi_accepts_only_its_yolo_label_without_an_approve_flag() {
+        let base = LaunchSelection {
+            harness: LaunchHarness::Pi,
+            model: Some("z-ai/glm-5.3".into()),
+            effort: None,
+            permissions: None,
+        };
+        let omitted = shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap();
+        let yolo = shell_words::split(
+            &compile(LaunchSelection {
+                permissions: Some(LaunchPermission::Yolo),
+                ..base.clone()
+            })
+            .unwrap()
+            .invocation,
+        )
+        .unwrap();
+        assert_eq!(omitted, yolo);
+        assert!(!yolo.iter().any(|argument| argument == "--approve"));
+        for permission in [
+            LaunchPermission::Approve,
+            LaunchPermission::SmartApprove,
+            LaunchPermission::Chat,
+        ] {
+            assert!(
+                compile(LaunchSelection {
+                    permissions: Some(permission),
+                    ..base.clone()
+                })
+                .is_err(),
+                "Pi must reject {permission:?}"
+            );
+        }
+    }
+
+    /// Every explicit-model harness names itself in the refusal. OpenCode's
+    /// established wording remains stable while Goose and Pi avoid claiming
+    /// the wrong catalog.
+    #[test]
+    fn missing_model_errors_name_the_selected_harness() {
+        for (harness, expected) in [
+            (
+                LaunchHarness::OpenCode,
+                "choose an OpenCode model before launching",
+            ),
+            (
+                LaunchHarness::Goose,
+                "choose a Goose model before launching",
+            ),
+            (LaunchHarness::Pi, "choose a Pi model before launching"),
+        ] {
+            assert_eq!(compile(selection(harness)).unwrap_err(), expected);
+        }
+    }
+
+    /// Shared model IDs are valid for both owners, while Goose-only modes
+    /// remain invalid for every other harness.
+    #[test]
+    fn shared_models_keep_owner_and_goose_modes_do_not_cross_harnesses() {
+        for harness in [LaunchHarness::Goose, LaunchHarness::Pi] {
+            assert!(
+                compile(LaunchSelection {
+                    harness,
+                    model: Some("z-ai/glm-5.3".into()),
+                    effort: None,
+                    permissions: None,
+                })
+                .is_ok()
+            );
+        }
+        assert!(
+            compile(LaunchSelection {
+                harness: LaunchHarness::Pi,
+                model: Some("z-ai/glm-5.3".into()),
+                effort: None,
+                permissions: Some(LaunchPermission::Chat),
+            })
+            .is_err()
+        );
     }
 }

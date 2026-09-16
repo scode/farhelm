@@ -21,8 +21,10 @@
 //!
 //! This does not make farhelm an agent-configuring integration: the hook rides one launch's argv
 //! and touches no user configuration or record directory, and a launch that carries no hook (an
-//! unsupported kind, an argv shape that forbids injection, hooks disabled) is served by the scan
-//! exactly as before. So the ordering to hold in mind is: identity is REPORTED where it can be,
+//! unsupported kind, an argv shape that forbids injection, hooks disabled) can use a scan only
+//! for Claude and Codex. Goose and Pi instead reconcile their durable reported row before
+//! constructing offers; no vendor file is opened by that reconciliation.
+//! So the ordering to hold in mind is: identity is REPORTED where it can be,
 //! and inferred where it cannot — the scan is the fallback, never the override.
 
 use super::core::{SessionEntry, Supervisor};
@@ -464,7 +466,8 @@ impl Supervisor {
     /// a tick that a poll has just made redundant.
     pub(crate) async fn capture_pass_for(&self, reason: CaptureReason) {
         if self.agent_home.is_none() {
-            // No home means no scan, so there is no pass to run — but the
+            // No home means no scan. Report-only rows still need their mirror
+            // refreshed, independently of any vendor directory. The
             // liveness tripwire is not part of the scan. It is a statement
             // about a hook that did not report, which is a fact about the
             // session rather than about any file on disk, and this is
@@ -479,6 +482,7 @@ impl Supervisor {
             // makes its check-and-latch atomic against a concurrent caller.
             let entries: Vec<Arc<SessionEntry>> =
                 self.sessions.lock().await.values().cloned().collect();
+            refresh_report_only_captures(self, &entries).await;
             report_liveness_tripwire(&entries, self.capture_window, crate::agent_kind::now_unix());
             return;
         }
@@ -726,6 +730,55 @@ fn is_spoken_for(
         .is_some_and(|ids| ids.contains(conversation))
 }
 
+/// Reconcile report-only identities with the durable row before serving an offer.
+///
+/// A startup report can arrive before its in-memory entry is published, and Pi's
+/// restart verifier can withdraw a stale file independently of the report handler.
+/// Neither transition has a vendor scan to repair its mirror. These kinds therefore
+/// read their own row once per capture pass, including when no agent home exists.
+/// A different mirrored identity wins over this observation. A change away and
+/// back can still leave a stale offer until the next pass; restart reads the row.
+async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
+    for entry in entries {
+        if !matches!(
+            entry.snapshot.kind,
+            farhelm_proto::AgentKind::Goose | farhelm_proto::AgentKind::Pi
+        ) {
+            continue;
+        }
+        let before = entry
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .committed_conversation()
+            .map(str::to_string);
+        let row = match sup.store.session(&entry.info.id).await {
+            Ok(Some(row)) => row,
+            Ok(None) => continue,
+            Err(error) => {
+                warn!(session = %entry.info.id, %error, "could not refresh reported conversation");
+                continue;
+            }
+        };
+        if row.generation != entry.generation
+            || row.agent_kind != entry.snapshot.kind
+            || row.conversation_source.as_deref() != Some("hook")
+        {
+            continue;
+        }
+        let Some(conversation) = row.captured_conversation else {
+            continue;
+        };
+        if !crate::agent_kind::accepts_reported_conversation(row.agent_kind, &conversation) {
+            continue;
+        }
+        let mut state = entry.capture.lock().expect("capture mutex poisoned");
+        if state.committed_conversation() == before.as_deref() {
+            state.advance(CaptureState::Reported { conversation });
+        }
+    }
+}
+
 /// One conversation-capture rescan across every session this supervisor
 /// holds (PLAN_M3.md item 8).
 ///
@@ -804,6 +857,7 @@ fn is_spoken_for(
 /// has a retry state, so a failed one costs a poll interval rather than
 /// the capture.
 pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>], may_write: bool) {
+    refresh_report_only_captures(sup, entries).await;
     let bounds = sup.capture_window;
     let now = crate::agent_kind::now_unix();
     // Deliberately AHEAD of the agent-home bail below. The tripwire is a
@@ -1001,10 +1055,13 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             .await;
             continue;
         }
+        let Some(root) = integration.record_root(home, cwd) else {
+            continue;
+        };
         scanning.push(Scanning {
             entry,
             integration,
-            root: integration.record_root(home, cwd),
+            root,
             cwd,
             window,
             first_input_at: at,
