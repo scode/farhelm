@@ -244,20 +244,25 @@ The app-bar profiles popup has one explicit focus request at a time. Opening lan
 lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete prompt
 lands on cancel; and completing a save or delete chooses the surviving row control described by the catalog transition.
 Escape and layout invalidation close the popup and restore its toggle. Focus-out instead preserves the outside
-destination the user chose. A page operation may defer either dismissal while it keeps the popup mounted, but it never
-consumes the obligation: the popup closes once the operation is idle if focus or layout still requires it. A catalog
-refresh patches unchanged keyed profile rows in place, so it does not replay focus after locally absorbed mutations. A
-terminal whose retained output becomes visible while the popup is mounted does not take focus. Closing the popup does
-not hand focus to that terminal; the user can click it when they want to type there.
+destination the user chose. Document/body focus after an internal control replacement is transit, not an outside
+destination, even when the bounded replacement-focus request cannot place focus. The confirmation stays mounted and
+reachable; a recorded trusted outside pointer or Tab choice still dismisses it. A page operation may defer either
+dismissal while it keeps the popup mounted, but it never consumes the obligation: the popup closes once the operation is
+idle if focus or layout still requires it. A catalog refresh patches unchanged keyed profile rows in place, so it does
+not replay focus after locally absorbed mutations. A terminal whose retained output becomes visible while the popup is
+mounted does not take focus. Closing the popup does not hand focus to that terminal; the user can click it when they
+want to type there.
 
 A trusted outside pointer or Tab destination supersedes pending opening and completion focus. The popup DOM node records
 that choice synchronously, so even a focus commit already sent across the renderer bridge must yield before moving
 focus. The Rust request worker observes the same obligation; internal form transitions still express newer in-popup
-intent. Unknown classification supplies no dismissal evidence and leaves the obligation pending. A subsequent outside
-focus event or window focus return reconsiders it with a new observation revision once its current observation has
-finished, preserving the original intent's identity and provenance. Notifications during that observation coalesce into
-one queued recheck if it returns Unknown; old classifier completions cannot clear a newer obligation. There is no outer
-timer retry chain; each reconsideration retains the existing bounded classification and pending-focus settlement.
+intent. Unknown classification and unowned body-focus transit supply no dismissal evidence and leave the obligation
+pending. Escape also reaches the current popup while failed placement leaves focus on body; it does not move focus from
+an unrelated outside control. A subsequent outside focus event or window focus return reconsiders it with a new
+observation revision once its current observation has finished, preserving the original intent's identity and
+provenance. Notifications during that observation coalesce into one queued recheck if it returns Unknown; old classifier
+completions cannot clear a newer obligation. There is no outer timer retry chain; each reconsideration retains the
+existing bounded classification and pending-focus settlement.
 
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
