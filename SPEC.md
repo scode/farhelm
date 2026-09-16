@@ -174,6 +174,15 @@ pair, on hosts provisioning does not cover. Everything else — session operatio
 
 ## Install and uninstall
 
+[docs/install_uninstall.md](docs/install_uninstall.md) must document the current installation, update and uninstall
+process in user-facing terms and stay accurate as that behavior changes. Assume readers understand filesystems, macOS
+and Linux; minimize implementation detail. Explain the commands, installed and retained files, service behavior,
+operator prerequisites, ownership and deletion safeguards, their limits, and how to handle refusals or partial removal.
+Identify each installation ownership record by its exact path and explain what it contains before relying on the term
+"ownership checks." Distinguish operator shutdown prerequisites from checks actually enforced by the command. Changes to
+those user-visible behaviors must update the document in the same change. Installation instructions must link to it so
+users can find both the removal procedure and its safety guarantees.
+
 ### Installation and updates
 
 The standalone installer installs Farhelm for the current user without root. It places `farhelm` in `~/.local/bin` by
