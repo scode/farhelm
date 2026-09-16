@@ -74,11 +74,16 @@
 //! [`ActivitySample::observe_screen`] reports the screen actually changed, and
 //! only when the change is at least [`ACTIVITY_STAMP_QUANTUM`] newer than
 //! the value already held. Everything else — every reply, every listing —
-//! only ever reads it. A lost write costs precision in a "most recently
-//! active" sort and nothing more: this process keeps answering from the
+//! only ever reads it. A lost write costs activity-age precision after
+//! restart: this process keeps answering from the
 //! in-memory cell, and the next observed change past the quantum writes
 //! again. `may_record` gates the durable half exactly as it does
 //! capture's, for the same reason.
+//!
+//! Stable list ordering has its own `last_work_started_at` key. Only a
+//! known idle/waiting-to-running transition with changed normalized output
+//! advances it, immediately and independently of the activity-age quantum.
+//! Pending writes retain their exact key so retry timing cannot reorder work.
 //!
 //! The capture half is a `may_record` question in the same PARTIAL way: a
 //! supervisor that may not record still scans the agents' record trees and
@@ -129,17 +134,21 @@
 //! places it is honoured are chosen:
 //!
 //! - At the top of the loop, before sleeping.
-//! - Between individual pane samples — each is a separate bounded tmux
-//!   subprocess, so the worst a stop waits on is one capture, itself
-//!   bounded by that command's own deadline.
-//! - NOT during a capture pass, which is deliberately shielded: once a
-//!   pass has begun it runs to completion so its durable writes and their
-//!   in-memory mirrors cannot be separated by a shutdown.
+//! - Between individual pending work-start retries and pane samples. A
+//!   retry keeps its lifecycle claim through its generation-fenced SQLite
+//!   write; a sample keeps one bounded tmux subprocess whole.
+//! - NOT inside either operation. Splitting a retry could separate its
+//!   durable write from the in-memory state that mirrors it, while aborting
+//!   a capture could leave the tmux subprocess behind.
+//! - NOT during a conversation-capture pass: once begun, its durable writes
+//!   and in-memory mirrors complete together before shutdown returns.
 //!
-//! So the honest bound on how long a stop takes is: one pane capture
-//! (bounded), plus a capture pass if one had already started. It is NOT
-//! "the next await point", which the first version of this doc claimed
-//! while the code only checked at the top of the loop.
+//! So the retry phase adds at most the lifecycle wait and SQLite write for
+//! one entry before honoring a stop. The sampling phase adds one pane capture
+//! and its immediate work-start write; an already-started conversation pass
+//! must also finish. It is NOT "the next await
+//! point", which the first version of this doc claimed while the code only
+//! checked at the top of the loop.
 //!
 //! `TickerHandle::shutdown` waits for the task to actually be gone and
 //! fails if it panicked, so "no leaked task" and "the ticker did not die
@@ -150,7 +159,7 @@
 use super::capture::CaptureReason;
 use super::core::{SampleRead, SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_launch_artifacts;
-use super::status::observe_entry;
+use super::status::{live_status, observe_entry};
 use super::terminals::{Terminal, tabs_from_pane_states};
 use crate::store::LastOutcome;
 use crate::tmux::retain_pane_tail;
@@ -274,6 +283,24 @@ fn advanced_activity_stamp(stored: i64, now: i64, quantum: i64) -> Option<i64> {
     (now.saturating_sub(stored) >= quantum).then_some(now)
 }
 
+/// Whether one successful comparison proves a new work burst began.
+///
+/// `Running` by itself is deliberately insufficient: it is also the
+/// conservative default before a baseline exists and after capture failure.
+/// Changed output must cross a previously observed idle or waiting boundary.
+fn observed_work_start(
+    previous: &farhelm_proto::SessionStatus,
+    current: &farhelm_proto::SessionStatus,
+    changed: bool,
+) -> bool {
+    changed
+        && matches!(
+            previous,
+            farhelm_proto::SessionStatus::Idle | farhelm_proto::SessionStatus::Waiting
+        )
+        && matches!(current, farhelm_proto::SessionStatus::Running)
+}
+
 /// Permits in [`Supervisor::sampling_admission`] — see that field's docs
 /// for why the ticker may not draw on the request semaphore at all.
 ///
@@ -356,6 +383,14 @@ pub(crate) struct ActivitySample {
     /// A positive Codex work indicator from the most recent successful
     /// capture. It is discarded with the raw tail after a capture failure.
     pub(crate) working: bool,
+    /// Newest work-start key whose generation-conditional durable write has
+    /// not succeeded yet.
+    ///
+    /// A write failure keeps the same key for the next visit; a later proven
+    /// burst replaces it with the newer key. Lifecycle replacement transfers
+    /// this accepted history into a fresh sample without carrying over the
+    /// old screen or allowing late observations from an obsolete entry.
+    pub(crate) pending_work_started_at: Option<i64>,
 }
 
 impl ActivitySample {
@@ -371,6 +406,25 @@ impl ActivitySample {
     /// exactly why each has its own named constructor.)
     pub(crate) fn unsampled() -> Arc<std::sync::Mutex<ActivitySample>> {
         Arc::new(std::sync::Mutex::new(ActivitySample::default()))
+    }
+
+    /// Reset run evidence while preserving an already accepted durable retry.
+    ///
+    /// Callers hold the session lifecycle claim, as does the write path, so
+    /// the copied key cannot race a newly accepted burst. The replacement owns
+    /// its own cell: rejecting a late old-generation observation must not clear
+    /// its retry. A pending key records history, not evidence that the new pane
+    /// has started work.
+    pub(crate) fn replacement(
+        previous: &std::sync::Mutex<ActivitySample>,
+    ) -> Arc<std::sync::Mutex<ActivitySample>> {
+        Arc::new(std::sync::Mutex::new(ActivitySample {
+            pending_work_started_at: previous
+                .lock()
+                .expect("activity mutex poisoned")
+                .pending_work_started_at,
+            ..ActivitySample::default()
+        }))
     }
 
     /// Fold one freshly captured screen into this sample.
@@ -892,6 +946,15 @@ async fn sample_pass(
         *cursor = None;
         return;
     }
+    // Durable retry is independent of current liveness and capture. A
+    // session may finish, or the tmux probe may fail, after its immediate
+    // write failed; neither event invalidates the burst already observed.
+    for entry in &entries {
+        if stop_requested(stop) {
+            return;
+        }
+        persist_work_started(sup, entry, false).await;
+    }
     let states = match injected_sample_fault(sup, SampleRead::PaneStates) {
         Some(fault) => Err(fault),
         None => sup.tmux.pane_states().await,
@@ -1113,6 +1176,10 @@ async fn sample_pass(
             |integration| integration.activity_screen(&tail),
         );
         let comparison = retain_pane_tail(&screen.comparison, SAMPLE_TAIL_BYTES);
+        // The old verdict is read before replacing the sample. A first or
+        // recovery sample is therefore only a baseline: it cannot invent a
+        // transition from no prior observation.
+        let previous_status = live_status(entry);
         let changed = entry
             .activity
             .lock()
@@ -1120,7 +1187,92 @@ async fn sample_pass(
             .observe_screen(comparison, status_tail, screen.working);
         if changed {
             note_activity(sup, entry).await;
+            if observed_work_start(&previous_status, &live_status(entry), changed) {
+                persist_work_started(sup, entry, true).await;
+            }
         }
+    }
+}
+
+/// Allocate or retry a sampler-observed work start under its lifecycle fence.
+///
+/// `new_start` is true only for changed output after a known idle or waiting
+/// state. Retries reuse the pending key; they never consult the clock. The
+/// lifecycle claim closes the gap between checking the published entry and
+/// the generation-conditional SQL update, while the activity mutex is held
+/// only for the small pending-key edits on either side of that await.
+async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, new_start: bool) {
+    if !new_start
+        && entry
+            .activity
+            .lock()
+            .expect("activity mutex poisoned")
+            .pending_work_started_at
+            .is_none()
+    {
+        return;
+    }
+    let _lifecycle = sup.lifecycle_locks.claim(&entry.info.id).await;
+    let current = sup.sessions.lock().await.get(&entry.info.id).cloned();
+    let is_current_run = current.is_some_and(|current| {
+        current.generation == entry.generation && Arc::ptr_eq(&current.activity, &entry.activity)
+    });
+    if !is_current_run {
+        entry
+            .activity
+            .lock()
+            .expect("activity mutex poisoned")
+            .pending_work_started_at = None;
+        return;
+    }
+
+    if new_start {
+        let at = sup.reserve_work_start();
+        entry
+            .last_work_started_at
+            .fetch_max(at, std::sync::atomic::Ordering::Relaxed);
+        if !sup.may_record() {
+            // Like `last_activity_at`, replies still reflect what this
+            // process observed. The ownership fence prohibits turning that
+            // observation into durable authority, including a deferred
+            // write if this process later gains the claim.
+            return;
+        }
+        let mut activity = entry.activity.lock().expect("activity mutex poisoned");
+        activity.pending_work_started_at = Some(
+            activity
+                .pending_work_started_at
+                .map_or(at, |pending| pending.max(at)),
+        );
+    }
+    let pending = entry
+        .activity
+        .lock()
+        .expect("activity mutex poisoned")
+        .pending_work_started_at;
+    let Some(at) = pending else {
+        return;
+    };
+    if !sup.may_record() {
+        return;
+    }
+
+    match sup
+        .store
+        .record_work_started(&entry.info.id, entry.generation, at)
+        .await
+    {
+        Ok(()) => {
+            let mut activity = entry.activity.lock().expect("activity mutex poisoned");
+            if activity.pending_work_started_at == Some(at) {
+                activity.pending_work_started_at = None;
+            }
+        }
+        Err(error) => warn!(
+            session = %entry.info.id,
+            error = %format!("{error:#}"),
+            "could not persist this session's work-start time; the sampler will retry the same key"
+        ),
     }
 }
 
@@ -1321,7 +1473,7 @@ mod tests {
     use crate::store::{LastOutcome, StoredSession, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
     use tokio::sync::mpsc;
 
     /// A cadence short enough that a test spends milliseconds rather than
@@ -1479,6 +1631,7 @@ mod tests {
                     title: id.to_string(),
                     created_at: now,
                     last_activity_at: now,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -2871,6 +3024,102 @@ mod tests {
         assert!(sample.observe_screen(changed.clone(), changed, false));
     }
 
+    /// Promotion requires positive output evidence across a known rest
+    /// boundary. This table pins the cases that look similar in a live
+    /// reply but have different authority to reorder the durable list.
+    #[farhelm_testtrace::test]
+    fn only_changed_output_after_idle_or_waiting_begins_a_work_burst() {
+        use SessionStatus::{Idle, Running, Waiting};
+
+        for previous in [Idle, Waiting] {
+            assert!(observed_work_start(&previous, &Running, true));
+            assert!(
+                !observed_work_start(&previous, &Running, false),
+                "a status change without changed output is not proof that work began"
+            );
+        }
+        assert!(
+            !observed_work_start(&Running, &Running, true),
+            "continued output in one burst must keep its existing ordering key"
+        );
+        assert!(
+            !observed_work_start(&Idle, &Idle, true),
+            "output that does not leave the classified rest state is not a running burst"
+        );
+        assert!(
+            !observed_work_start(&Waiting, &Waiting, true),
+            "a redraw of the same pending question must not promote the session"
+        );
+    }
+
+    /// Equal and backward wall-clock readings still reserve distinct keys
+    /// after the greatest durable key loaded by this supervisor.
+    #[farhelm_testtrace::test]
+    async fn work_start_allocator_is_seeded_and_monotonic_across_clock_steps() {
+        let state = StateDir::new();
+        let clock = Arc::new(AtomicI64::new(500));
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                work_start_clock: {
+                    let clock = Arc::clone(&clock);
+                    Arc::new(move || clock.load(Ordering::Relaxed))
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+
+        sup.seed_work_start_allocator(700);
+        assert_eq!(sup.reserve_work_start(), 701);
+        assert_eq!(
+            sup.reserve_work_start(),
+            702,
+            "same-millisecond bursts stay ordered"
+        );
+        clock.store(100, Ordering::Relaxed);
+        assert_eq!(
+            sup.reserve_work_start(),
+            703,
+            "a backward wall clock cannot move this supervisor's sequence backward"
+        );
+        sup.seed_work_start_allocator(i64::MAX);
+        assert_eq!(
+            sup.reserve_work_start(),
+            i64::MAX,
+            "the sequence saturates rather than overflowing at the integer boundary"
+        );
+    }
+
+    /// Construction seeds from durable rows, including rows with no live
+    /// terminal, before the first new observation can reserve a key.
+    #[farhelm_testtrace::test]
+    async fn work_start_allocator_reloads_the_persisted_maximum() {
+        let state = StateDir::new();
+        let first = supervisor_with(&state, SupervisorSeams::default()).await;
+        session_with_stale_activity(&first, "ended", 100).await;
+        first
+            .store
+            .record_work_started("ended", 0, 9_000)
+            .await
+            .expect("seed the authoritative maximum");
+        drop(first);
+
+        let reloaded = supervisor_with(
+            &state,
+            SupervisorSeams {
+                work_start_clock: Arc::new(|| 50),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        assert_eq!(
+            reloaded.reserve_work_start(),
+            9_001,
+            "an ended row still sets the allocator floor after restart"
+        );
+    }
+
     /// The quantization gate, exhaustively, with no clock and no runtime.
     ///
     /// A pure function precisely so this can be asserted rather than
@@ -2884,7 +3133,7 @@ mod tests {
     /// The backwards cases are the ones with a real-world trigger: a host
     /// clock stepped back by NTP or a suspend/resume hands this an earlier
     /// `now` than the value already stored, and advancing on it would walk
-    /// a visibly busy session DOWN a most-recently-active sort.
+    /// a session's displayed activity age backward and undo unseen evidence.
     ///
     /// The boundary cases are DERIVED from [`ACTIVITY_STAMP_QUANTUM`]
     /// rather than from a second copy of the number, so a change to the
@@ -2971,6 +3220,7 @@ mod tests {
                     title: id.to_string(),
                     created_at: at,
                     last_activity_at: at,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -3003,6 +3253,232 @@ mod tests {
             .await
             .insert(id.to_string(), Arc::clone(&entry));
         entry
+    }
+
+    /// Failed durable writes retain one exact key, while a second proven
+    /// burst is allowed to replace that pending fact with the newer one.
+    /// Archive between the failed write and retry must preserve that accepted
+    /// history even though it discards the live pane's classification evidence.
+    #[farhelm_testtrace::test]
+    async fn work_start_retry_reuses_the_key_and_a_new_burst_supersedes_it() {
+        let state = StateDir::new();
+        let clock = Arc::new(AtomicI64::new(10_000));
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                work_start_clock: {
+                    let clock = Arc::clone(&clock);
+                    Arc::new(move || clock.load(Ordering::Relaxed))
+                },
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let entry = session_with_stale_activity(&sup, "retry", 100).await;
+        entry
+            .last_work_started_at
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open store alongside supervisor");
+            conn.execute_batch(
+                "CREATE TRIGGER reject_work_start
+                 BEFORE UPDATE OF last_work_started_at ON sessions
+                 BEGIN SELECT RAISE(FAIL, 'injected work-start failure'); END;",
+            )
+            .expect("install a checked write failure");
+        }
+
+        persist_work_started(&sup, &entry, true).await;
+        let first = entry
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .pending_work_started_at
+            .expect("the failed write stays pending");
+        assert_eq!(
+            sup.store
+                .session("retry")
+                .await
+                .expect("read row")
+                .expect("row")
+                .last_work_started_at,
+            0,
+            "test premise: the trigger rejected the first durable write"
+        );
+
+        clock.store(50_000, Ordering::Relaxed);
+        persist_work_started(&sup, &entry, false).await;
+        assert_eq!(
+            entry
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .pending_work_started_at,
+            Some(first),
+            "a retry must not consult the now-different clock"
+        );
+
+        persist_work_started(&sup, &entry, true).await;
+        let newer = entry
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .pending_work_started_at
+            .expect("the newer failed burst remains pending");
+        assert!(newer > first, "a genuine later burst receives a newer key");
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open store alongside supervisor");
+            conn.execute_batch("DROP TRIGGER reject_work_start;")
+                .expect("restore writes");
+        }
+        clock.store(90_000, Ordering::Relaxed);
+        let old = entry;
+        let lifecycle = sup.lifecycle_locks.claim("retry").await;
+        let entry = sup
+            .teardown_for_archive(&old, "retry")
+            .await
+            .unwrap_or_else(|_| panic!("archive the terminal-less retry fixture"));
+        sup.sessions
+            .lock()
+            .await
+            .insert("retry".to_string(), Arc::clone(&entry));
+        drop(lifecycle);
+        assert!(
+            entry.info.archived,
+            "fixture must cross the actual archive boundary"
+        );
+        assert_eq!(
+            entry
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .pending_work_started_at,
+            Some(newer)
+        );
+        // An obsolete entry can still be visited by a previously snapshotted
+        // sampler pass. Its rejection must not erase the transferred retry.
+        persist_work_started(&sup, &old, false).await;
+        persist_work_started(&sup, &entry, false).await;
+
+        assert_eq!(
+            sup.store
+                .session("retry")
+                .await
+                .expect("read row")
+                .expect("row")
+                .last_work_started_at,
+            newer,
+            "the durable retry writes the newest authoritative burst"
+        );
+        let reloaded = crate::store::SessionStore::open(&state.path().join("supervisor.db"), false)
+            .await
+            .expect("reopen the durable store");
+        assert_eq!(
+            reloaded
+                .session("retry")
+                .await
+                .expect("reload row")
+                .expect("row")
+                .last_work_started_at,
+            newer,
+            "reload must retain the accepted burst after archive"
+        );
+        assert_eq!(
+            entry
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .pending_work_started_at,
+            None,
+            "a successful write retires only the key it persisted"
+        );
+    }
+
+    /// An observation retained from an old generation cannot advance the
+    /// session-wide cell or the replacement row.
+    #[farhelm_testtrace::test]
+    async fn stale_generation_work_observations_are_discarded_before_allocation() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        let old = session_with_stale_activity(&sup, "restarted", 100).await;
+        old.last_work_started_at
+            .store(123_000, std::sync::atomic::Ordering::Relaxed);
+        let mut replacement = entry_with(None, LastOutcome::Running);
+        replacement.info = old.info.clone();
+        replacement.generation = old.generation + 1;
+        replacement.last_work_started_at = Arc::clone(&old.last_work_started_at);
+        let replacement = Arc::new(replacement);
+        sup.sessions
+            .lock()
+            .await
+            .insert("restarted".to_string(), replacement);
+        let before_allocator = sup.work_start_allocator.load(Ordering::Relaxed);
+
+        persist_work_started(&sup, &old, true).await;
+
+        assert_eq!(
+            old.last_work_started_at.load(Ordering::Relaxed),
+            123_000,
+            "the shared session cell must not take an old run's late observation"
+        );
+        assert_eq!(
+            sup.work_start_allocator.load(Ordering::Relaxed),
+            before_allocator,
+            "a stale observation is rejected before it consumes an ordering key"
+        );
+        assert_eq!(
+            sup.store
+                .session("restarted")
+                .await
+                .expect("read row")
+                .expect("row")
+                .last_work_started_at,
+            0
+        );
+    }
+
+    /// A claimless supervisor may answer from what it just observed but may
+    /// neither write it nor retain a deferred write for later authority.
+    #[farhelm_testtrace::test]
+    async fn claimless_work_start_is_in_memory_only() {
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                work_start_clock: Arc::new(|| 8_000),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let entry = session_with_stale_activity(&sup, "claimless", 100).await;
+        entry
+            .last_work_started_at
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        sup.may_record.store(false, Ordering::SeqCst);
+
+        persist_work_started(&sup, &entry, true).await;
+
+        assert_eq!(entry.last_work_started_at.load(Ordering::Relaxed), 8_000);
+        assert_eq!(
+            entry
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .pending_work_started_at,
+            None,
+            "gaining ownership later must not retroactively authorize this observation"
+        );
+        assert_eq!(
+            sup.store
+                .session("claimless")
+                .await
+                .expect("read row")
+                .expect("row")
+                .last_work_started_at,
+            0
+        );
     }
 
     /// A supervisor that may not RECORD still dates activity for its own
@@ -3695,6 +4171,7 @@ mod tests {
                     hook_warned: Arc::clone(&entry.hook_warned),
                     activity: Arc::clone(&entry.activity),
                     last_activity_at: Arc::clone(&entry.last_activity_at),
+                    last_work_started_at: Arc::clone(&entry.last_work_started_at),
                     generation: entry.generation,
                     scope: entry.scope.clone(),
                 })
@@ -3809,6 +4286,7 @@ mod tests {
                     title: id.to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -4411,6 +4889,90 @@ mod tests {
             classify(&sup, "unintegrated").await,
             SessionStatus::Idle,
             "the same screen without an integration keeps the generic baseline"
+        );
+    }
+
+    /// A real pane leaving a recognized waiting screen promotes and writes
+    /// the authoritative session row in the same sampler visit.
+    ///
+    /// This is the owned integration boundary for recent-work ordering: it
+    /// drives `capture-pane`, the shared classifier, allocation, the
+    /// generation fence, and SQLite. A sort-helper test cannot establish
+    /// that the key users receive survives supervisor restart.
+    #[farhelm_testtrace::test]
+    async fn waiting_to_running_sample_persists_the_authoritative_work_start() {
+        const START: i64 = 2_000_000_000_000;
+        let state = StateDir::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                work_start_clock: Arc::new(|| START),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await;
+        let tmux_name = "fh-resuming".to_string();
+        let pane = spawn_pane(&sup, &tmux_name, "printf 'work resumed\\n'; sleep 300").await;
+        let base =
+            install_durable_running_entry(&sup, "resuming", Terminal { tmux_name, pane }).await;
+        let mut integrated = entry_with(base.terminal.clone(), LastOutcome::Running);
+        integrated.info = base.info.clone();
+        integrated.snapshot = IntegrationSnapshot {
+            kind: AgentKind::Claude,
+            resume_template: None,
+        };
+        integrated.last_activity_at = Arc::clone(&base.last_activity_at);
+        integrated.last_work_started_at = Arc::clone(&base.last_work_started_at);
+        integrated.generation = base.generation;
+        let entry = Arc::new(integrated);
+        {
+            let mut activity = entry.activity.lock().expect("activity mutex");
+            // Establish both raw status and comparison evidence through
+            // the sampler's observation seam; a raw-tail-only seed would
+            // correctly count the next capture as baseline recovery.
+            for _ in 0..4 {
+                activity.observe(CLAUDE_APPROVAL_DIALOG.to_string());
+            }
+        }
+        sup.sessions
+            .lock()
+            .await
+            .insert("resuming".to_string(), Arc::clone(&entry));
+        assert_eq!(
+            live_status(&entry),
+            SessionStatus::Waiting,
+            "premise: the retained screen is a known waiting boundary"
+        );
+
+        let (_stop, mut stop) = never_stopped();
+        let mut cursor = None;
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        assert_eq!(live_status(&entry), SessionStatus::Running);
+        assert_eq!(
+            entry
+                .last_work_started_at
+                .load(std::sync::atomic::Ordering::Relaxed),
+            START
+        );
+        assert_eq!(
+            sup.store
+                .session("resuming")
+                .await
+                .expect("read authoritative row")
+                .expect("row survives")
+                .last_work_started_at,
+            START,
+            "the observed transition is durable, not only an in-memory sort hint"
+        );
+        assert_eq!(
+            entry
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .pending_work_started_at,
+            None,
+            "the immediate durable write leaves no retry behind"
         );
     }
 }

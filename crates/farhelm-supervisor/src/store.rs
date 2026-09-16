@@ -120,7 +120,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 16;
+const SCHEMA_VERSION: i64 = 17;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1191,6 +1191,15 @@ pub struct StoredSession {
     /// listable, so re-minting would move a value a client may already
     /// have seen.
     pub last_activity_at: i64,
+    /// Millisecond ordering key for the last confirmed work burst.
+    ///
+    /// Separate from [`StoredSession::last_activity_at`]: continued output
+    /// and completion must leave the session's list position alone. Fresh
+    /// rows start at creation in milliseconds; the sampler advances this
+    /// only after changed output crosses a known idle or waiting boundary.
+    /// [`SessionStore::record_work_started`] also fences the write by launch
+    /// generation so a delayed observation cannot stamp a replacement run.
+    pub last_work_started_at: i64,
     /// Strict creation order within this supervisor installation.
     ///
     /// Unlike `created_at`, this cannot tie. Retries preserve the original
@@ -1573,7 +1582,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  archived              INTEGER NOT NULL DEFAULT 0,
                  last_activity_at      INTEGER NOT NULL DEFAULT 0,
                  conversation_source   TEXT,
-                 launch                TEXT
+                 launch                TEXT,
+                 last_work_started_at  INTEGER NOT NULL DEFAULT 0
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1594,7 +1604,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             PRAGMA user_version = 16;
+             PRAGMA user_version = 17;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2006,6 +2016,24 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 15 to 16")?;
         version = 16;
     }
+    if version == 16 {
+        // SQLite silently promotes an overflowing INTEGER multiplication to
+        // REAL. Bound the seconds-to-milliseconds conversion first so the
+        // authoritative key remains an INTEGER on every upgraded row.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN last_work_started_at INTEGER NOT NULL DEFAULT 0;
+             UPDATE sessions SET last_work_started_at = CASE
+                 WHEN (CASE WHEN last_activity_at > 0 THEN last_activity_at ELSE created_at END) > 9223372036854775 THEN 9223372036854775807
+                 WHEN (CASE WHEN last_activity_at > 0 THEN last_activity_at ELSE created_at END) < -9223372036854775 THEN -9223372036854775808
+                 ELSE (CASE WHEN last_activity_at > 0 THEN last_activity_at ELSE created_at END) * 1000
+             END;
+             PRAGMA user_version = 17;
+             COMMIT;",
+        )
+        .context("migrating schema from version 16 to 17")?;
+        version = 17;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2142,9 +2170,9 @@ fn insert_session_row(
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
           source_profile_id, source_profile_name, parent, session_token, archived, \
-          last_activity_at, conversation_source, launch) \
+          last_activity_at, last_work_started_at, conversation_source, launch) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2176,6 +2204,7 @@ fn insert_session_row(
             session_token,
             i64::from(row.archived),
             row.last_activity_at,
+            row.last_work_started_at,
             row.conversation_source,
             row.launch
                 .as_ref()
@@ -2211,7 +2240,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
-                               archived, last_activity_at, conversation_source, launch";
+                               archived, last_activity_at, last_work_started_at, conversation_source, launch";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2261,17 +2290,18 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             launch_scoped: r.get::<_, i64>(18)? != 0,
             created_at: r.get(19)?,
             last_activity_at: r.get(25)?,
+            last_work_started_at: r.get(26)?,
             creation_seq: 0,
             source_profile: None,
             archived: r.get::<_, i64>(24)? != 0,
-            conversation_source: r.get(26)?,
+            conversation_source: r.get(27)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
         r.get(11)?,
         (r.get(20)?, r.get(21)?),
         r.get::<_, i64>(23)?,
-        r.get(27)?,
+        r.get(28)?,
     ))
 }
 
@@ -2863,6 +2893,7 @@ impl SessionStore {
                 // rule instead of by a coincidence a later change could
                 // break.
                 last_activity_at: preserved_last_activity_at,
+                last_work_started_at: 0,
                 creation_seq: 0,
                 title: preserved_title,
                 // A retry repeats the launch generation already assigned
@@ -3765,6 +3796,31 @@ impl SessionStore {
         .context("activity record task panicked")?
     }
 
+    /// Persist a sampler-observed work burst only for the generation that
+    /// produced it. A delayed sample must never stamp a replacement launch.
+    pub async fn record_work_started(
+        &self,
+        id: &str,
+        generation: i64,
+        at_millis: i64,
+    ) -> anyhow::Result<()> {
+        let id = id.to_string();
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            conn.lock()
+                .expect("session-store mutex poisoned")
+                .execute(
+                    "UPDATE sessions SET last_work_started_at = ?3
+                     WHERE id = ?1 AND generation = ?2 AND last_work_started_at < ?3",
+                    rusqlite::params![id, generation, at_millis],
+                )
+                .context("recording work-start time")?;
+            Ok(())
+        })
+        .await
+        .context("waiting for work-start write")?
+    }
+
     /// Claim a conversation identity for a session (PLAN_M3.md item 8), if
     /// none is claimed yet and nothing has declared the correlation
     /// ambiguous.
@@ -4597,6 +4653,7 @@ mod tests {
                     title: id.to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -5485,6 +5542,7 @@ mod tests {
                     title: "demo".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -5537,6 +5595,7 @@ mod tests {
                     archived: false,
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -6143,6 +6202,7 @@ mod tests {
                     title: "demo".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent --flag".to_string(),
@@ -6178,6 +6238,72 @@ mod tests {
         assert_eq!(rows[0].tmux_name, "fh-abc");
         assert_eq!(rows[0].pane, "%3");
         assert_eq!(rows[0].outcome, LastOutcome::Running);
+    }
+
+    /// Appending adjacent session columns must not shift the fallible launch
+    /// decoder onto conversation provenance or lose the structured snapshot.
+    ///
+    /// Distinct nonempty values pin the positional boundary introduced by the
+    /// work-start column. Both public readers are checked because a single-row
+    /// lookup and the startup bulk load must decode the same projection.
+    #[farhelm_testtrace::test]
+    async fn work_start_provenance_and_launch_survive_both_session_readers() {
+        let (_dir, store) = fresh_store().await;
+        let launch = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: Some("gpt-6-astra".to_string()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+        };
+        let expected_work_start = 1_700_000_123_456;
+        store
+            .insert_session(
+                StoredSession {
+                    conversation_source: Some("hook".to_string()),
+                    id: "s1".to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "structured".to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_123,
+                    last_work_started_at: expected_work_start,
+                    creation_seq: 0,
+                    cwd: "/tmp/work".to_string(),
+                    invocation: "codex --model gpt-6-astra".to_string(),
+                    launch: Some(launch.clone()),
+                    tmux_name: "fh-s1".to_string(),
+                    pane: "%3".to_string(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Codex,
+                    resume_template: Some(vec![
+                        "codex".to_string(),
+                        "resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some("/tmp/work".to_string()),
+                    captured_conversation: Some("conversation-7".to_string()),
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert positional fixture");
+
+        let assert_columns = |row: &StoredSession| {
+            assert_eq!(row.last_work_started_at, expected_work_start);
+            assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+            assert_eq!(row.launch.as_ref(), Some(&launch));
+        };
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_columns(&row);
+
+        let rows = store.load_all().await.expect("bulk read");
+        assert_columns(rows.iter().find(|row| row.id == "s1").expect("present"));
     }
 
     /// A fresh database (`user_version` 0) must come up on `user_version`
@@ -6474,6 +6600,7 @@ mod tests {
                     title: "s1".to_string(),
                     created_at: SENTINEL_CREATED_AT,
                     last_activity_at: SENTINEL_CREATED_AT,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -6537,6 +6664,7 @@ mod tests {
             title: id.to_string(),
             created_at: now_unix(),
             last_activity_at: now_unix(),
+            last_work_started_at: 0,
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),
@@ -7341,6 +7469,7 @@ mod tests {
                     conversation_source: None,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     ..launching_row("s1")
                 },
@@ -7359,6 +7488,7 @@ mod tests {
                     conversation_source: None,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     ..launching_row("s1")
                 },
@@ -7411,6 +7541,7 @@ mod tests {
                     conversation_source: None,
                     created_at: CREATED,
                     last_activity_at: CREATED,
+                    last_work_started_at: 0,
                     ..launching_row("s1")
                 },
                 None,
@@ -7531,6 +7662,7 @@ mod tests {
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "agent".to_string(),
@@ -8067,6 +8199,7 @@ mod tests {
                     title: "s1".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: format!("w run {} claude", crate::agent_kind::CWD_PLACEHOLDER),
@@ -8380,6 +8513,7 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN last_activity_at;
              ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
+             ALTER TABLE sessions DROP COLUMN last_work_started_at;
              PRAGMA user_version = 11;",
         )
         .expect("downgrade the fixture to the pre-archive schema");
@@ -8473,6 +8607,77 @@ mod tests {
         );
     }
 
+    /// Version 17 seeds the authoritative work-start key without letting
+    /// SQLite promote an overflowing multiplication to REAL.
+    ///
+    /// The four rows distinguish the source choice from the arithmetic:
+    /// positive activity wins, nonpositive activity falls back to creation,
+    /// and each integer boundary saturates while remaining an INTEGER.
+    #[farhelm_testtrace::test]
+    async fn schema_16_rows_seed_bounded_integer_work_start_keys() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&db_path, true)
+            .await
+            .expect("fresh store");
+        for (id, created_at, last_activity_at) in [
+            ("activity", 8, 7),
+            ("creation", 8, 0),
+            ("high", 1, i64::MAX),
+            ("low", i64::MIN, 0),
+        ] {
+            let mut row = launching_row(id);
+            row.created_at = created_at;
+            row.last_activity_at = last_activity_at;
+            store
+                .insert_session(row, None)
+                .await
+                .expect("insert migration fixture");
+        }
+        drop(store);
+        {
+            let conn = Connection::open(&db_path).expect("open raw v17 fixture");
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN last_work_started_at;
+                 PRAGMA user_version = 16;",
+            )
+            .expect("downgrade only the additive v17 step");
+        }
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v16");
+        for (id, expected) in [
+            ("activity", 7_000),
+            ("creation", 8_000),
+            ("high", i64::MAX),
+            ("low", i64::MIN),
+        ] {
+            assert_eq!(
+                migrated
+                    .session(id)
+                    .await
+                    .expect("read migrated row")
+                    .expect("row survives")
+                    .last_work_started_at,
+                expected,
+                "migration seed for {id}"
+            );
+        }
+        let conn = Connection::open(&db_path).expect("inspect storage classes");
+        let non_integers: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE typeof(last_work_started_at) != 'integer'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect migrated keys");
+        assert_eq!(
+            non_integers, 0,
+            "every saturated key stays an SQLite INTEGER"
+        );
+    }
+
     /// The v12-to-v13 migration gives every preexisting row a
     /// `last_activity_at` equal to its own `created_at`.
     ///
@@ -8513,6 +8718,7 @@ mod tests {
                         conversation_source: None,
                         created_at: *created_at,
                         last_activity_at: *created_at,
+                        last_work_started_at: 0,
                         ..launching_row(id)
                     },
                     None,
@@ -8526,11 +8732,13 @@ mod tests {
         restore_pre_v15_profiles_table(&conn);
         // Same "every later column has to come off" requirement
         // `schema_11_rows_migrate_as_unarchived` documents — conversation
-        // provenance and structured launch metadata postdate this migration too.
+        // provenance, structured launch metadata and work-start ordering
+        // postdate this migration too.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN last_activity_at;
              ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
+             ALTER TABLE sessions DROP COLUMN last_work_started_at;
              PRAGMA user_version = 12;",
         )
         .expect("downgrade the fixture to the pre-activity schema");
@@ -8604,9 +8812,13 @@ mod tests {
 
         let conn = Connection::open(&db_path).expect("open fixture");
         restore_pre_v15_profiles_table(&conn);
+        // Remove every column added after v13 before replaying the ladder.
+        // Leaving the v17 work-start column behind would make its own
+        // migration fail on a duplicate instead of exercising provenance.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
+             ALTER TABLE sessions DROP COLUMN last_work_started_at;
              PRAGMA user_version = 13;",
         )
         .expect("downgrade the fixture to the pre-report schema");
@@ -9257,6 +9469,7 @@ mod tests {
                     title: "s1".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp/work".to_string(),
                     invocation: "claude".to_string(),
@@ -9462,6 +9675,7 @@ mod tests {
             title: title.to_string(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
             creation_seq: 0,
             cwd: "/tmp/work".to_string(),
             invocation: "agent".to_string(),

@@ -358,6 +358,14 @@ particular order gets creation time. No mandatory hierarchy. Sessions may carry 
 the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
 `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
+The option labelled most recent activity orders by the most recent observed START of a work burst, not by every line of
+continued output and not by whether the burst later finished. A session promotes when it moves from known idle or
+waiting into running with changed output; both idle-to-running and waiting-to-running count. Its later output and
+completion keep that position. This is deliberately not active-first grouping: a newer finished session can remain above
+older work. Creation time is the stable fallback where an older supervisor has no work-start observation. The
+last-activity time shown in the row and the seen/unseen comparison remain independent and continue to advance with
+output. The key is authoritative supervisor data, so every client agrees without keeping a private rank.
+
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
 view, so they are outside its count. The host selector is a narrowing query, so its count says how many matched
 alongside how big the default non-archived view is.

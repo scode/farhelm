@@ -60,8 +60,8 @@ use farhelm_proto::{
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::time::Duration;
+use std::sync::atomic::{AtomicI64, AtomicU64};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -543,6 +543,23 @@ pub enum SampleRead<'a> {
 /// so the cost is one `Option` check per read.
 pub type SampleFault = Arc<dyn Fn(SampleRead<'_>) -> Option<String> + Send + Sync>;
 
+/// Millisecond wall clock used to date a sampler-observed work burst.
+///
+/// Production reads `SystemTime`; tests inject a private sequence so same-
+/// millisecond bursts and backward clock steps are deterministic without
+/// changing process-wide state.
+pub type WorkStartClock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+/// Read the production clock without letting pre-epoch or oversized values
+/// escape the ordering key's nonnegative `i64` domain.
+fn work_start_now() -> i64 {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    i64::try_from(millis).unwrap_or(i64::MAX)
+}
+
 /// A hook awaited after a missing sink is reserved but before opening starts.
 ///
 /// The reservation race test needs to hold this exact boundary: another
@@ -772,6 +789,12 @@ pub struct SupervisorSeams {
     /// and a test that wants to see the value move must start from a seed
     /// at least a second in the past rather than from "now".
     pub activity_quantum: Duration,
+    /// Wall clock input to the monotonic work-start allocator.
+    ///
+    /// The clock alone is not an ordering guarantee. [`Supervisor`] folds
+    /// it through a process-local allocator seeded from durable rows so a
+    /// repeated or backward reading still produces a nondecreasing key.
+    pub work_start_clock: WorkStartClock,
     /// Extra environment entries every launch of every session in this
     /// supervisor starts with, injected into tmux (`-e`) so they reach the
     /// login shell before it sources anything.
@@ -893,6 +916,7 @@ impl Default for SupervisorSeams {
             sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
+            work_start_clock: Arc::new(work_start_now),
             launch_env: Vec::new(),
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
             launch_shell: None,
@@ -2321,6 +2345,7 @@ fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
         hook_warned: Arc::clone(&entry.hook_warned),
         activity: Arc::clone(&entry.activity),
         last_activity_at: Arc::clone(&entry.last_activity_at),
+        last_work_started_at: Arc::clone(&entry.last_work_started_at),
         generation: entry.generation,
         scope: entry.scope.clone(),
     })
@@ -2350,8 +2375,8 @@ fn renamed_entry(entry: &SessionEntry, title: String) -> Arc<SessionEntry> {
 /// [`renamed_entry`] needs, which is why the two build their cells
 /// differently.
 ///
-/// `last_activity_at` is the one cell that is NOT run-scoped and is
-/// therefore shared rather than re-minted; the comment at its field below
+/// The activity and work-start timestamps are NOT run-scoped and are
+/// therefore shared rather than re-minted; the comment at the activity field below
 /// argues why fencing it would be a bug rather than a safeguard. Anyone
 /// adding a cell here should decide which of the two it is before copying
 /// either pattern.
@@ -2405,14 +2430,15 @@ fn relaunched_entry(
         // session would trip the wire silently.
         hooked: hook_flag(false),
         hook_warned: hook_flag(false),
-        // Never carried over, whatever `reset_capture` says: the sampled
+        // Classification is never carried over, whatever `reset_capture` says: the sampled
         // tail and the unchanged-sample streak beside it both describe a
         // process that no longer exists. Inheriting them would classify the
         // replacement launch from its predecessor's screen — quiet because
         // the OLD pane stopped changing, or sharpened `Waiting` from a
-        // dialog the previous run was showing when it died.
-        activity: ActivitySample::unsampled(),
-        // The one cell SHARED across a relaunch, and the exception to the
+        // dialog the previous run was showing when it died. Only an already
+        // accepted work-start key awaiting persistence survives the reset.
+        activity: ActivitySample::replacement(&entry.activity),
+        // Timestamp cells are SHARED across a relaunch, and the exception to the
         // paragraph above is deliberate. The generation fence exists
         // because the cells beside it describe one RUN: a late write about
         // a process that has ended must not be read as describing the
@@ -2430,6 +2456,7 @@ fn relaunched_entry(
         // place. Monotonicity across processes and clock steps is still
         // the store's predicate to enforce.
         last_activity_at: Arc::clone(&entry.last_activity_at),
+        last_work_started_at: Arc::clone(&entry.last_work_started_at),
         generation,
         scope,
     })
@@ -3247,8 +3274,8 @@ pub(crate) struct SessionEntry {
     /// every reply — the same shape `outcome` uses, and for the same
     /// reason: the entry itself is immutable behind its `Arc`.
     ///
-    /// SESSION-SCOPED, not generation-scoped — the one mutable cell here
-    /// that a relaunch shares instead of re-minting, and the distinction
+    /// SESSION-SCOPED, not generation-scoped — like the work-start key,
+    /// a relaunch shares this cell instead of re-minting it. The distinction
     /// deserves to be read before anyone "fixes" it into line with its
     /// neighbours. The cells above describe one RUN, so
     /// [`relaunched_entry`] gives the new launch fresh ones and a late
@@ -3270,6 +3297,15 @@ pub(crate) struct SessionEntry {
     /// Cross-process and clock-step monotonicity stay the store's job
     /// (`SessionStore::record_activity`).
     pub(crate) last_activity_at: Arc<std::sync::atomic::AtomicI64>,
+    /// Session-scoped recent-work key, in allocator-produced milliseconds.
+    ///
+    /// Rename and restart share this cell because neither operation proves
+    /// a new burst began. Unlike `last_activity_at`, the sampler updates it
+    /// only while holding the lifecycle claim and after confirming that its
+    /// run is still current. That extra guard is required precisely because
+    /// the cell is shared across generations: generation-conditional SQL
+    /// alone would protect the row while an old capture still moved memory.
+    pub(crate) last_work_started_at: Arc<std::sync::atomic::AtomicI64>,
     /// Which LAUNCH of this session this entry describes
     /// (`store::StoredSession::generation`).
     ///
@@ -3576,6 +3612,12 @@ pub struct Supervisor {
     /// rather than a plain bool: `serve`'s reload can flip it while
     /// handlers are already running.
     pub(crate) may_record: std::sync::atomic::AtomicBool,
+    /// Last key reserved for an observed work burst in this process.
+    ///
+    /// Seeded from every loaded row, including ended sessions. This is a
+    /// supervisor-local guarantee only: separate hosts still compare their
+    /// wall clocks and deterministic aggregate tie-breakers.
+    pub(crate) work_start_allocator: AtomicI64,
     /// Collapses concurrent creates that share an intent key into one
     /// launch; see [`KeyedLocks`] for why an in-process lock is the whole
     /// mechanism and what it is (and is not) responsible for.
@@ -4289,6 +4331,11 @@ impl Supervisor {
         let (sessions, may_record) =
             Self::reload_sessions(&state_dir, &store, &tmux, &seams, ownership.is_some()).await?;
 
+        let work_start_seed = sessions
+            .values()
+            .map(|entry| entry.info.effective_work_started_at())
+            .max()
+            .unwrap_or(0);
         let supervisor = Arc::new(Supervisor {
             state_dir,
             tmux,
@@ -4314,6 +4361,7 @@ impl Supervisor {
             seams,
             ownership,
             may_record: std::sync::atomic::AtomicBool::new(may_record),
+            work_start_allocator: AtomicI64::new(work_start_seed),
             intent_locks: Arc::new(KeyedLocks::default()),
             lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_request_locks: Arc::new(KeyedLocks::default()),
@@ -4913,6 +4961,7 @@ impl Supervisor {
                         // durable value survives a restart when the
                         // sampler's in-memory state deliberately does not.
                         last_activity_at: row.last_activity_at,
+                        last_work_started_at: row.last_work_started_at,
                         creation_seq: Some(row.creation_seq),
                         cwd: row.cwd,
                         // This was accepted while the session was created.
@@ -4993,6 +5042,7 @@ impl Supervisor {
                     // zero would tell a recency sort that a session with
                     // years of history has never done anything.
                     last_activity_at: activity_stamp(row.last_activity_at),
+                    last_work_started_at: activity_stamp(row.last_work_started_at),
                     generation: row.generation,
                     // The SELECTION comes straight back out of the row
                     // rather than from this supervisor's own probe: the
@@ -5176,6 +5226,13 @@ impl Supervisor {
         let (sessions, may_record) =
             Self::reload_sessions(&self.state_dir, &self.store, &self.tmux, &self.seams, true)
                 .await?;
+        if let Some(seed) = sessions
+            .values()
+            .map(|entry| entry.info.effective_work_started_at())
+            .max()
+        {
+            self.seed_work_start_allocator(seed);
+        }
         *self.sessions.lock().await = sessions;
         self.may_record
             .store(may_record, std::sync::atomic::Ordering::SeqCst);
@@ -6123,6 +6180,7 @@ impl Supervisor {
                     // session it describes may have been producing output
                     // for hours since the original create.
                     last_activity_at: row.last_activity_at,
+                    last_work_started_at: row.last_work_started_at,
                     creation_seq: Some(row.creation_seq),
                     cwd: row.cwd,
                     canonical_cwd: row.canonical_cwd,
@@ -6260,6 +6318,7 @@ impl Supervisor {
                 hook_warned: hook_flag(false),
                 activity: ActivitySample::unsampled(),
                 last_activity_at: activity_stamp(info.last_activity_at),
+                last_work_started_at: activity_stamp(info.last_work_started_at),
                 generation,
                 scope,
             }),
@@ -6437,6 +6496,7 @@ impl Supervisor {
                 // preserved column back out anyway, so this value only
                 // survives on the path where no prior row was found.
                 last_activity_at: created_at,
+                last_work_started_at: created_at.saturating_mul(1_000),
                 creation_seq: 0,
                 cwd: cwd.to_string(),
                 invocation: invocation.clone(),
@@ -6576,6 +6636,7 @@ impl Supervisor {
                         // that has not launched, so creation is the only
                         // honest seed — see the retry path's copy above.
                         last_activity_at: created_at,
+                        last_work_started_at: created_at.saturating_mul(1_000),
                         creation_seq: 0,
                         cwd: cwd.to_string(),
                         invocation: invocation.clone(),
@@ -6643,6 +6704,7 @@ impl Supervisor {
             // two only diverge once the ticker has watched this session's
             // pane change.
             last_activity_at: created_at,
+            last_work_started_at: created_at.saturating_mul(1_000),
             creation_seq: Some(creation_seq),
             cwd: cwd.to_string(),
             // Keep the user-facing spelling above. This separate fact is
@@ -6688,6 +6750,11 @@ impl Supervisor {
                 existence: ProfileExistence::Present,
             }),
         };
+        // Creation uses its own timestamp rather than pretending the
+        // sampler observed a work transition. It still raises the allocator
+        // floor: a later backward clock step must not put this supervisor's
+        // next observed burst below a key it assigned moments earlier.
+        self.seed_work_start_allocator(info.last_work_started_at);
 
         // The takeover must win before any artifact is removed. A late
         // launch or delete can make `restart_pending_launch` refuse the
@@ -7083,6 +7150,7 @@ impl Supervisor {
                 // just committed: all three say creation, because nothing
                 // has been seen happening here yet.
                 last_activity_at: activity_stamp(info.last_activity_at),
+                last_work_started_at: activity_stamp(info.last_work_started_at),
                 // Normally zero because create is the first launch. A keyed
                 // retry defensively preserves any generation already stored
                 // rather than moving the durable fence backwards.
@@ -8279,6 +8347,9 @@ impl Supervisor {
             // read and every later reply answer from one place.
             last_activity_at: entry
                 .last_activity_at
+                .load(std::sync::atomic::Ordering::Relaxed),
+            last_work_started_at: entry
+                .last_work_started_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             creation_seq: entry.info.creation_seq,
             cwd: entry.info.cwd.clone(),
@@ -9878,6 +9949,41 @@ impl Supervisor {
         self.may_record.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Raise the allocator floor to a key already assigned elsewhere.
+    ///
+    /// Reload and fresh creation both call this. Without the latter, a
+    /// backward clock step after creating a session could reserve a work
+    /// burst below that session's creation position even though both were
+    /// assigned by this supervisor process.
+    pub(crate) fn seed_work_start_allocator(&self, seed: i64) {
+        self.work_start_allocator
+            .fetch_max(seed, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Reserve the next supervisor-local work-start ordering key.
+    ///
+    /// The wall clock supplies cross-supervisor approximation. The atomic
+    /// supplies the stronger local rule: equal readings and backward clock
+    /// movement still order separately observed bursts in observation order.
+    pub(crate) fn reserve_work_start(&self) -> i64 {
+        let now = (self.seams.work_start_clock)();
+        let mut previous = self
+            .work_start_allocator
+            .load(std::sync::atomic::Ordering::Relaxed);
+        loop {
+            let reserved = now.max(previous.saturating_add(1));
+            match self.work_start_allocator.compare_exchange_weak(
+                previous,
+                reserved,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            ) {
+                Ok(_) => return reserved,
+                Err(actual) => previous = actual,
+            }
+        }
+    }
+
     /// Record the conversation identity a session's own agent reported
     /// from inside its process, through the launch hook.
     ///
@@ -11352,6 +11458,7 @@ pub(crate) mod tests {
                 title: "t".to_string(),
                 created_at: 1_700_000_000,
                 last_activity_at: 1_700_000_000,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -11380,6 +11487,7 @@ pub(crate) mod tests {
             hook_warned: hook_flag(false),
             activity: ActivitySample::unsampled(),
             last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
+            last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
             generation: 0,
             scope: None,
         }
@@ -11405,6 +11513,7 @@ pub(crate) mod tests {
                     title: title.to_string(),
                     created_at: entry.info.created_at,
                     last_activity_at: entry.info.last_activity_at,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: entry.info.cwd.clone(),
                     invocation: entry.info.invocation.clone(),
@@ -11666,6 +11775,7 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test]
     fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
+        old.activity.lock().unwrap().pending_work_started_at = Some(123_456);
         old.first_input.lock().unwrap().at = Some(1_700_000_000);
         *old.capture.lock().unwrap() = CaptureState::Provisional {
             conversation: "conv-old".to_string(),
@@ -11679,6 +11789,17 @@ pub(crate) mod tests {
             None,
             LastOutcome::Launching,
             false,
+        );
+        assert_eq!(
+            relaunched.activity.lock().unwrap().pending_work_started_at,
+            Some(123_456),
+            "an accepted burst remains retryable after run replacement"
+        );
+        old.activity.lock().unwrap().pending_work_started_at = None;
+        assert_eq!(
+            relaunched.activity.lock().unwrap().pending_work_started_at,
+            Some(123_456),
+            "discarding an obsolete sample must not clear the replacement's retry"
         );
         assert_eq!(
             relaunched.first_input.lock().unwrap().at,
@@ -11716,6 +11837,18 @@ pub(crate) mod tests {
                 .last_activity_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             1_900_000_000
+        );
+        assert!(
+            Arc::ptr_eq(&old.last_work_started_at, &relaunched.last_work_started_at),
+            "restart preserves the session's burst position until sampled output proves a new one"
+        );
+        old.last_work_started_at
+            .store(1_900_000_000_123, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            relaunched
+                .last_work_started_at
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1_900_000_000_123
         );
     }
 
@@ -12038,6 +12171,7 @@ pub(crate) mod tests {
                         title: id.to_string(),
                         created_at: now_unix(),
                         last_activity_at: stored_activity_at,
+                        last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
@@ -12186,6 +12320,7 @@ pub(crate) mod tests {
                     title: "error row".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -12342,6 +12477,7 @@ pub(crate) mod tests {
                     title: "scoped".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -12428,6 +12564,7 @@ pub(crate) mod tests {
                         title: "identity".to_string(),
                         created_at: now_unix(),
                         last_activity_at: now_unix(),
+                        last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "claude".to_string(),
@@ -12547,6 +12684,7 @@ pub(crate) mod tests {
                     title: "hooked".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "claude".to_string(),
@@ -12638,6 +12776,7 @@ pub(crate) mod tests {
                     title: "unhooked".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -12715,6 +12854,7 @@ pub(crate) mod tests {
                         title: id.to_string(),
                         created_at: now_unix(),
                         last_activity_at: now_unix(),
+                        last_work_started_at: 0,
                         creation_seq: 0,
                         cwd: "/tmp".to_string(),
                         invocation: "agent".to_string(),
@@ -12814,6 +12954,7 @@ pub(crate) mod tests {
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -12906,6 +13047,7 @@ pub(crate) mod tests {
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -12986,6 +13128,7 @@ pub(crate) mod tests {
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -13714,6 +13857,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -14609,6 +14753,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -14695,6 +14840,7 @@ pub(crate) mod tests {
                     title: "ended".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -15220,6 +15366,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -15315,6 +15462,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/".to_string(),
                     invocation: "agent".to_string(),
@@ -15739,6 +15887,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),
@@ -15848,6 +15997,7 @@ pub(crate) mod tests {
             title: "as created".to_string(),
             created_at: now_unix(),
             last_activity_at: now_unix(),
+            last_work_started_at: 0,
             creation_seq: 0,
             cwd: cwd.clone(),
             invocation: "agent".to_string(),
@@ -16012,6 +16162,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "''".to_string(),
@@ -16234,6 +16385,7 @@ pub(crate) mod tests {
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: cwd.clone(),
                     invocation: "agent".to_string(),

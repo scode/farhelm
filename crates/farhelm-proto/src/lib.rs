@@ -771,6 +771,14 @@ pub struct SessionInfo {
     /// and a real stamp is the point.
     #[serde(default)]
     pub last_activity_at: i64,
+    /// Milliseconds when this supervisor last observed a new burst of work.
+    ///
+    /// This intentionally differs from activity: continued output advances
+    /// the latter but must not reorder a recent-work list. A zero from an
+    /// older sender falls back to creation time through
+    /// [`Self::effective_work_started_at`].
+    #[serde(default)]
+    pub last_work_started_at: i64,
     /// Monotonic creation order assigned by this session's supervisor.
     ///
     /// `None` means the sender predates the field. Consumers comparing
@@ -919,6 +927,16 @@ impl SessionInfo {
             self.last_activity_at
         } else {
             self.created_at
+        }
+    }
+
+    /// The stable ordering key for recent work, with a legacy creation-time
+    /// fallback that never follows later output.
+    pub fn effective_work_started_at(&self) -> i64 {
+        if self.last_work_started_at > 0 {
+            self.last_work_started_at
+        } else {
+            self.created_at.saturating_mul(1_000)
         }
     }
 }
@@ -3887,6 +3905,7 @@ mod tests {
             title: "demo".to_string(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             canonical_cwd: Some("/resolved/tmp".to_string()),
@@ -3929,6 +3948,7 @@ mod tests {
                 title: "child".to_string(),
                 created_at: 1_700_000_000,
                 last_activity_at: 1_700_000_000,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -4123,6 +4143,7 @@ mod tests {
             title: "demo".to_string(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
             creation_seq: Some(7),
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
@@ -4161,6 +4182,7 @@ mod tests {
                         "title": "demo",
                         "created_at": 1_700_000_000,
                         "last_activity_at": 1_700_000_000,
+                        "last_work_started_at": 0,
                         "creation_seq": 7,
                         "cwd": "/tmp",
                         "invocation": "agent",
@@ -4569,6 +4591,7 @@ mod tests {
                     title: "demo".to_string(),
                     created_at: 0,
                     last_activity_at: 0,
+                    last_work_started_at: 0,
                     creation_seq: Some(1),
                     cwd: "/tmp".to_string(),
                     canonical_cwd: None,
@@ -4612,6 +4635,7 @@ mod tests {
                 title: "demo".to_string(),
                 created_at: 0,
                 last_activity_at: 0,
+                last_work_started_at: 0,
                 creation_seq: Some(1),
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -4791,6 +4815,7 @@ mod tests {
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
                 last_activity_at: 1_700_000_000,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -4842,13 +4867,9 @@ mod tests {
     /// informative pinned separately in
     /// `session_info_tabs_json_shape_is_pinned`.
     ///
-    /// `last_activity_at` (version 11's addition) rides along in both
-    /// halves rather than earning a test of its own — the golden below
-    /// already pins its wire name and its bare-integer type, and the
-    /// old-shape decode below pins its default. It is given a value
-    /// DIFFERENT from `created_at` here for one reason worth stating: the
-    /// two are independent fields, and equal values would let a
-    /// serialization that derived one from the other pass unnoticed.
+    /// `last_activity_at` and `last_work_started_at` ride along in both
+    /// halves rather than earning separate wire-shape tests. Their distinct
+    /// values pin that output age and stable work ordering are independent.
     #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
@@ -4858,6 +4879,7 @@ mod tests {
             title: "demo".to_string(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_600,
+            last_work_started_at: 1_700_000_700_123,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
@@ -4878,6 +4900,7 @@ mod tests {
                 "title": "demo",
                 "created_at": 1_700_000_000,
                 "last_activity_at": 1_700_000_600,
+                "last_work_started_at": 1_700_000_700_123_i64,
                 "creation_seq": null,
                 "cwd": "/tmp",
                 "invocation": "agent",
@@ -4902,6 +4925,7 @@ mod tests {
             .remove("last_activity_at");
         let decoded: SessionInfo = serde_json::from_value(without).expect("decodes without it");
         assert_eq!(decoded.last_activity_at, 0);
+        assert_eq!(decoded.last_work_started_at, 1_700_000_700_123);
         assert_eq!(
             decoded.created_at, 1_700_000_000,
             "dropping one timestamp must not disturb the other"
@@ -4923,9 +4947,9 @@ mod tests {
         );
 
         // JSON shaped as if none of `annotation`, `restart_offer`, `tabs`,
-        // (version 8) `created_at`, or (version 11) `last_activity_at` had
-        // been added YET — must still decode, defaulting every one of
-        // them. This is intra-version additive
+        // (version 8) `created_at`, (version 11) `last_activity_at`, or the
+        // stable work-start key had been added YET — must still decode,
+        // defaulting every one of them. This is intra-version additive
         // discipline, not real cross-build interop: an actual pre-M3 (v4)
         // peer is refused outright at the handshake (see
         // `PROTOCOL_VERSION`'s own docs) and never reaches this decode
@@ -4964,6 +4988,10 @@ mod tests {
             "a sender that predates last_activity_at must default to 0, which readers take as \
              \"unknown, fall back to created_at\" rather than as an instant in 1970"
         );
+        assert_eq!(
+            decoded.last_work_started_at, 0,
+            "an old sender leaves work ordering on the stable creation fallback"
+        );
     }
 
     /// The activity fallback every reader is supposed to apply, pinned as
@@ -4983,6 +5011,7 @@ mod tests {
             title: "demo".to_string(),
             created_at,
             last_activity_at,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
@@ -5013,6 +5042,43 @@ mod tests {
         );
     }
 
+    /// Work ordering uses a millisecond creation fallback and never the
+    /// independently moving activity timestamp.
+    #[farhelm_testtrace::test]
+    fn effective_work_start_falls_back_stably_and_saturates() {
+        let mut info = SessionInfo {
+            id: "s1".to_string(),
+            parent: None,
+            title: "demo".to_string(),
+            created_at: 1_700_000_000,
+            last_activity_at: 1_800_000_000,
+            last_work_started_at: 0,
+            creation_seq: None,
+            cwd: "/tmp".to_string(),
+            canonical_cwd: None,
+            invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
+            status: SessionStatus::default(),
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
+            archived: false,
+            source_profile: None,
+        };
+        assert_eq!(info.effective_work_started_at(), 1_700_000_000_000);
+        info.last_activity_at = i64::MAX;
+        assert_eq!(
+            info.effective_work_started_at(),
+            1_700_000_000_000,
+            "ordinary output age cannot move the stable burst order"
+        );
+        info.created_at = i64::MAX;
+        assert_eq!(info.effective_work_started_at(), i64::MAX);
+        info.last_work_started_at = 42;
+        assert_eq!(info.effective_work_started_at(), 42);
+    }
+
     /// PLAN_M4.md item 2's `SessionInfo::tabs` addition, golden-pinned
     /// with tabs actually present — the sibling test above only pins the
     /// empty-tabs case alongside `annotation`/`restart_offer`. `TabInfo`'s
@@ -5031,6 +5097,7 @@ mod tests {
             title: "demo".to_string(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             canonical_cwd: None,
@@ -5866,6 +5933,7 @@ mod tests {
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
                 last_activity_at: 1_700_000_000,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -5963,6 +6031,7 @@ mod tests {
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
                 last_activity_at: 1_700_000_000,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -5987,6 +6056,7 @@ mod tests {
                     "title": "demo",
                     "created_at": 1_700_000_000,
                     "last_activity_at": 1_700_000_000,
+                    "last_work_started_at": 0,
                     "creation_seq": null,
                     "cwd": "/tmp",
                     "invocation": "claude",
@@ -6192,6 +6262,7 @@ mod tests {
                         title: "renamed title".to_string(),
                         created_at: 1_700_000_000,
                         last_activity_at: 1_700_000_000,
+                        last_work_started_at: 0,
                         creation_seq: None,
                         cwd: "/tmp".to_string(),
                         canonical_cwd: None,
@@ -6214,6 +6285,7 @@ mod tests {
                         "title": "renamed title",
                         "created_at": 1_700_000_000,
                         "last_activity_at": 1_700_000_000,
+                        "last_work_started_at": 0,
                         "creation_seq": null,
                         "cwd": "/tmp",
                         "invocation": "claude",
@@ -6453,6 +6525,7 @@ mod tests {
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
                 last_activity_at: 1_700_000_000,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/tmp".to_string(),
                 canonical_cwd: None,
@@ -7180,6 +7253,7 @@ mod tests {
                 title: "t".repeat(4096),
                 created_at: 0,
                 last_activity_at: 0,
+                last_work_started_at: 0,
                 creation_seq: None,
                 cwd: "/secret".to_string(),
                 canonical_cwd: None,

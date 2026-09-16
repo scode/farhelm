@@ -202,6 +202,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                     title: "some-agent".into(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     // This fixture covers a legacy supervisor reply that
                     // supplies an accepted expanded directory but no
@@ -316,6 +317,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                         title: "structured tilde".into(),
                         created_at: 1_700_000_001,
                         last_activity_at: 1_700_000_001,
+                        last_work_started_at: 0,
                         creation_seq: Some(77),
                         cwd: "/home/person/work/project".into(),
                         canonical_cwd: Some("/srv/repo/project".into()),
@@ -463,6 +465,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                         title: id.into(),
                         created_at: 1_700_000_000,
                         last_activity_at: 1_700_000_000,
+                        last_work_started_at: 0,
                         creation_seq: Some(1),
                         cwd: "/work".into(),
                         canonical_cwd: None,
@@ -589,6 +592,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                     title: "t".into(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     cwd: "/some/dir".into(),
                     canonical_cwd: None,
@@ -1366,6 +1370,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -1485,6 +1490,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                     title: "sess-1".into(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     cwd: "/sess-1".into(),
                     canonical_cwd: None,
@@ -1588,6 +1594,7 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -1808,6 +1815,7 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -1892,6 +1900,7 @@ async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -2026,6 +2035,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -2156,6 +2166,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -2305,6 +2316,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/sess-1".into(),
             canonical_cwd: None,
@@ -2491,6 +2503,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             title: "replaced-with-title".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/replaced-with".into(),
             canonical_cwd: None,
@@ -2599,6 +2612,7 @@ async fn a_replace_with_override_of_an_archived_source_creates_it_and_removes_th
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/replaced-with-archived".into(),
             canonical_cwd: None,
@@ -2793,6 +2807,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             title: "sess-1".into(),
             created_at: 1_700_000_500,
             last_activity_at: 1_700_000_500,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/override-delete-fails".into(),
             canonical_cwd: None,
@@ -3014,6 +3029,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
                     title: "sess-1".into(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     cwd: "/sess-1".into(),
                     canonical_cwd: None,
@@ -3528,6 +3544,7 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
                     title: "t".into(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     cwd: "/some/dir".into(),
                     canonical_cwd: None,
@@ -3674,6 +3691,7 @@ async fn rename_session_forwards_the_title_verbatim() {
             title: expected_title.clone(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/distinctive/dir".into(),
             canonical_cwd: None,
@@ -3849,6 +3867,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                         title: String::new(),
                         created_at: 1_700_000_000,
                         last_activity_at: 1_700_000_000,
+                        last_work_started_at: 0,
                         creation_seq: None,
                         cwd: "/some/dir".into(),
                         canonical_cwd: None,
@@ -4281,6 +4300,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                     title: "sess-new".into(),
                     created_at: 1_700_000_500,
                     last_activity_at: 1_700_000_500,
+                    last_work_started_at: 0,
                     creation_seq: None,
                     cwd: "/work".into(),
                     canonical_cwd: None,
@@ -4448,6 +4468,7 @@ async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
         title: "sess-stale".into(),
         created_at: 1_700_000_700,
         last_activity_at: 1_700_000_700,
+        last_work_started_at: 0,
         creation_seq: Some(5),
         cwd: "/work".into(),
         canonical_cwd: None,
@@ -7283,17 +7304,17 @@ async fn an_identity_less_hosts_archived_rows_leave_the_default_view_s_total() {
 
 /// A session with the two fields the non-default orders read.
 ///
-/// `rest_harness::session` copies `created_at` into `last_activity_at` and
+/// The default fixture falls back to creation for work ordering and copies
 /// the id into the title, which makes every order the same order — useless
 /// here, where the whole point is telling three sequences apart.
 fn sortable(
     id: &str,
     created_at: i64,
-    last_activity_at: i64,
+    work_start_seconds: i64,
     title: &str,
 ) -> farhelm_proto::SessionInfo {
     farhelm_proto::SessionInfo {
-        last_activity_at,
+        last_work_started_at: work_start_seconds * 1000,
         title: title.to_string(),
         ..rest_harness::session(id, created_at)
     }
@@ -7326,7 +7347,7 @@ async fn sortable_fleet() -> rest_harness::Harness {
                 sessions: vec![
                     sortable("alpha-busy", 200, 900, "alpha"),
                     // The legacy shape: a supervisor that predates
-                    // `last_activity_at` sends 0, which is "unknown" and must
+                    // `last_work_started_at` sends 0, which is "unknown" and must
                     // sort by creation time rather than at the epoch.
                     sortable("alpha-legacy", 100, 0, "zeta"),
                 ],

@@ -302,6 +302,7 @@ mod tests {
             title: "x".to_string(),
             created_at,
             last_activity_at: created_at,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: "/tmp".to_string(),
             canonical_cwd: None,

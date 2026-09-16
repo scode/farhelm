@@ -3648,6 +3648,7 @@ mod tests {
             title: id.into(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,
+            last_work_started_at: 0,
             creation_seq: None,
             cwd: format!("/{id}"),
             canonical_cwd: None,

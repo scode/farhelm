@@ -88,6 +88,7 @@ pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
         title: id.to_string(),
         created_at,
         last_activity_at: created_at,
+        last_work_started_at: 0,
         creation_seq: None,
         cwd: format!("/{id}"),
         canonical_cwd: None,

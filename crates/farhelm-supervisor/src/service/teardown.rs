@@ -425,7 +425,10 @@ impl Supervisor {
             // holding.
             hooked: Arc::clone(&entry.hooked),
             hook_warned: Arc::clone(&entry.hook_warned),
-            activity: ActivitySample::unsampled(),
+            // Reset live classification but keep an accepted burst's failed
+            // durable write retryable after this session becomes archived.
+            activity: ActivitySample::replacement(&entry.activity),
+            last_work_started_at: Arc::clone(&entry.last_work_started_at),
             // Shared rather than reset, unlike the sampler cell above:
             // archiving ends the RUN, not the session's history. This cell
             // is session-scoped everywhere (a relaunch shares it too — see
@@ -930,6 +933,7 @@ mod tests {
                     title: id.to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),
@@ -1137,6 +1141,7 @@ mod tests {
                     title: "hooked".to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "claude".to_string(),
@@ -1276,6 +1281,7 @@ mod tests {
                     title: id.to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "sleep 60".to_string(),
@@ -1366,6 +1372,7 @@ mod tests {
                     title: "previous scope".to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
                     creation_seq: 0,
                     cwd: "/tmp".to_string(),
                     invocation: "agent".to_string(),

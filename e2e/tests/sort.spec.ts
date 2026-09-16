@@ -24,20 +24,18 @@
  * the order they arrived. A page that re-sorted locally would survive every
  * single-page test in this file and fail that one.
  *
- * ## Why the default is pinned by the request rather than by observed activity
+ * ## Why the default is pinned at the browser boundary
  *
- * The default order is "recently active", and a fixture that made activity
- * order differ VISIBLY from creation order is not practical here: the
- * supervisor quantizes `last_activity_at` to a minute
- * (`ACTIVITY_STAMP_QUANTUM` in crates/farhelm-supervisor/src/service/ticker.rs),
- * so a session's stamp cannot move above a newer session's until at least a
- * minute after its own creation — longer than this suite's per-test timeout,
- * and a sleep nobody should pay on every run. Sessions that have produced no
- * output carry their creation time as their activity stamp, so the two orders
- * coincide for anything this suite can build.
+ * The default order is recent WORK, whose key advances only when the
+ * supervisor observes changed output after a known idle or waiting state.
+ * Manufacturing that transition here would turn a browser-ordering test into
+ * a test of ticker cadence, pane capture, classifier hysteresis, and durable
+ * supervisor state. Those contracts belong to the sampler's owned tests; this
+ * file owns whether the browser asks the helm for the promised order and
+ * renders the returned pages without rearranging them.
  *
  * The default is therefore pinned in two halves that together say the same
- * thing: every read asks for `sort=activity` (so the helm, not the page, is
+ * thing: every read asks for `sort=activity` (so the helm, rather than the page, is
  * doing the ordering, and the UI is not leaning on the helm's own `created`
  * default), and switching to `title` visibly reorders the rows (so the
  * parameter is not decorative). The fixture's titles are chosen so those two
@@ -240,9 +238,9 @@ test.describe("session list ordering", () => {
    * order, so either ordering is visibly wrong for the other.
    *
    * `sleep 300` rather than the fake agent: it produces no output at all, so
-   * every row's activity stamp stays its creation time for the life of the
-   * test and the activity order cannot drift under an assertion mid-run (see
-   * this file's header on the quantum). The waits between creates are what
+   * every row's work-start key stays its creation time for the life of the
+   * test and the activity order cannot drift under an assertion mid-run.
+   * Real output transitions are covered in work-start-order.spec.ts. The waits between creates are what
    * make the creation order deterministic in the first place — `created_at`
    * has one-second granularity and the helm tiebreaks equal stamps by
    * session id, which is a UUID.
