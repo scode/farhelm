@@ -45,6 +45,8 @@ import {
   listSessions,
   openRowMenu,
   pinAutoSelect,
+  readPreferences,
+  patchPreferences,
   SESSION_LISTING,
   type SessionRow,
   stubFeed,
@@ -209,18 +211,13 @@ test("list renders the session row with title, cwd, invocation, and the status t
   await expect(row).toBeVisible();
   await expect(row.locator(".session-title")).toHaveText("e2e-session");
   await expect(row.locator(".session-cwd")).toHaveText(expected.cwd);
-  // The row shows a COMPACT invocation now (the 2026-08 UI refresh): the
-  // basename of argv[0], plus a marker for an unattended-mode flag when
-  // there is one — the fixture's quoted absolute path to the debug binary
-  // therefore reads `farhelm`, with no marker to add. The `title` is what
-  // still proves the row is showing THIS session's command line rather
-  // than a neighbour's, which is the property the old exact-text
-  // assertion was really protecting.
-  await expect(row.locator(".session-invocation")).toHaveText("farhelm");
-  await expect(row.locator(".session-invocation")).toHaveAttribute(
-    "title",
-    expected.invocation,
-  );
+  // The row now reduces the invocation to a glyph track. The fixture's
+  // quoted absolute path therefore gets the neutral terminal glyph; its
+  // complete invocation stays in accessible text and the native tooltip.
+  // That still proves the row belongs to this session rather than a
+  // neighbour, which is the property the old exact-text assertion guarded.
+  await expect(row.locator(".session-agent .harness-glyph")).toHaveAttribute("data-glyph", "terminal");
+  await expect(row.locator(".session-agent")).toContainText(expected.invocation);
   // No extended timeout: the row being visible means this listing has
   // already rendered, and the status it carries settled before the
   // navigation. A wait longer than the default here would be waiting for
@@ -2338,10 +2335,10 @@ test("an inline confirming state survives a listing refresh; cancel still works 
     // armed. The `title` is asserted alongside it because that is the
     // attribute carrying the invocation verbatim whatever the compaction
     // rules become.
-    await expect(row.locator(".session-invocation")).toHaveText(marker, {
+    await expect(row.locator(".session-agent")).toContainText(marker, {
       timeout: 10_000,
     });
-    await expect(row.locator(".session-invocation")).toHaveAttribute("title", marker);
+    await expect(row.locator(".session-agent")).toHaveAttribute("title", `command: ${marker} — ${marker}`);
 
     // Still confirming, still the same wording and title — a refresh must
     // not have cleared it (nor silently deleted anything: no DELETE was
@@ -3665,18 +3662,15 @@ test("an error session shows its badge with detail and deletes without confirmin
   releaseDelete();
 });
 
-// Review-swarm fix batch item 21: the shim's own detail is argv-derived,
-// so — unlike every OTHER badge's fixed, short vocabulary — its length is
-// not bounded by anything this UI controls. Without `app.css`'s
-// `.status-badge` cap (`max-width`/`min-width: 0`/`overflow: hidden`), a
-// long detail can widen the row past its siblings' shrink budget and push
-// the stop/delete buttons out of reach. Pinned in the browser's actual
-// layout engine, not just against the CSS source: the badge visibly
-// clips (its scrollWidth exceeds its clientWidth) and the delete button
-// stays on screen and clickable regardless.
-test("a long error detail clips the badge without pushing the delete button out of reach", async ({
-  page,
+// Launch errors contain arbitrary argv text. The complete message must wrap
+// within the row's available width, including an unbroken path, while leaving
+// the menu reachable. Compact mode trades that visible detail for a labelled
+// icon and must recover the ordinary single-line height.
+test("a long error detail wraps completely and compact ended rows stay one line", async ({
+  page, request,
 }) => {
+  const preferences = await readPreferences(request);
+  await patchPreferences(request, { compact: false });
   const detail = `exec_failed argv0=${"/very/long/path/segment".repeat(40)} errno=2`;
   const session = {
     id: "synthetic-error-long",
@@ -3694,13 +3688,23 @@ test("a long error detail clips the badge without pushing the delete button out 
     }),
   );
 
+  try {
   await page.goto("/");
   const row = page.locator(`[data-session-id="${session.id}"]`);
   const badge = row.locator(".status-badge.error");
   await expect(badge).toBeVisible();
 
-  const clips = await badge.evaluate((el) => el.scrollWidth > el.clientWidth);
-  expect(clips).toBe(true);
+  await expect(badge).toHaveText(`error — ${detail}`);
+  const geometry = await badge.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const row = el.closest(".session-row-open")!.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return { width: box.width, available: row.right - box.left, height: box.height,
+      line: parseFloat(style.fontSize), scroll: el.scrollWidth, client: el.clientWidth };
+  });
+  expect(geometry.width).toBeGreaterThan(geometry.available - 20);
+  expect(geometry.height).toBeGreaterThan(geometry.line * 2);
+  expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1);
 
   await openRowMenu(row);
   const deleteButton = row.locator(".session-row-delete");
@@ -3710,8 +3714,59 @@ test("a long error detail clips the badge without pushing the delete button out 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
-  await deleteButton.click();
-  await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+  await row.locator(".session-row-menu").click();
+  await page.getByRole("checkbox", { name: "compact", exact: true }).check();
+  await expect(row.locator(".session-row-detail")).toHaveCount(0);
+  await expect(row.locator('.ended-status-glyph[data-glyph="error"]')).toBeVisible();
+  await expect(row.locator(".compact-ended-status")).toHaveAttribute("title", `error — ${detail}`);
+  expect((await row.boundingBox())!.height).toBeLessThan(40);
+  } finally {
+    await patchPreferences(request, { compact: preferences.compact ?? null });
+  }
+});
+
+/**
+ * Compact state and harness marks have a fixed visual budget even when all
+ * state qualifiers are present. Synthetic rows pin the exact displayed
+ * semantics without needing the real vendor programs installed in the fleet.
+ */
+test("compact rows retain distinct ended and harness glyphs within two characters", async ({ page, request }, testInfo) => {
+  const preferences = await readPreferences(request);
+  const cases = [
+    { id: "stopped", invocation: "codex --yolo", harness: "codex", permission: "yolo", status: { state: "exited", exit_code: 0 }, annotation: "stopped by user" },
+    { id: "exited", invocation: "muse --yolo", harness: "muse", permission: "yolo", status: { state: "exited", exit_code: 7 }, annotation: null },
+    { id: "interrupted", invocation: "claude --dangerously-skip-permissions", harness: "claude", permission: "yolo", status: { state: "interrupted" }, annotation: null },
+    { id: "error", invocation: "opencode --auto", harness: "opencode", permission: "yolo", status: { state: "error", detail: "cannot launch" }, annotation: null },
+    { id: "full-auto", invocation: "codex --full-auto", harness: "codex", permission: "full-auto", status: { state: "idle" }, annotation: null },
+    { id: "unknown", invocation: "sleep 300", harness: "terminal", permission: null, status: { state: "idle" }, annotation: null },
+  ];
+  await patchPreferences(request, { compact: true });
+  await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
+    status: 200, contentType: "application/json",
+    body: JSON.stringify({ sessions: cases.map((item) => ({ ...item, title: `example-${item.id}`, cwd: "/tmp", stale: true, archived: true })), total: cases.length, truncated: false }),
+  }));
+  try {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.goto("/");
+    await expect(page.locator(".session-row")).toHaveCount(cases.length);
+    for (const item of cases) {
+      const row = page.locator(`[data-session-id="${item.id}"]`);
+      await expect(row.locator(`.harness-glyph[data-glyph="${item.harness}"]`)).toBeVisible();
+      await expect(row.locator(".session-agent")).toHaveAttribute("title", new RegExp(item.invocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      await expect(row.locator(".permission-glyph")).toHaveCount(item.permission ? 1 : 0);
+      if (item.permission) await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
+      if (["stopped", "exited", "interrupted", "error"].includes(item.id)) {
+        await expect(row.locator(`.ended-status-glyph[data-glyph="${item.id}"]`)).toBeVisible();
+        await expect(row.locator(".status-dot")).toHaveCount(0);
+      }
+      await expect(row.locator(".session-row-detail")).toHaveCount(0);
+      expect((await row.boundingBox())!.height).toBeLessThan(40);
+      expect((await row.locator(".session-agent").boundingBox())!.width).toBeLessThanOrEqual(23);
+    }
+    await testInfo.attach("compact-glyphs.png", { body: await page.screenshot(), contentType: "image/png" });
+  } finally {
+    await patchPreferences(request, { compact: preferences.compact ?? null });
+  }
 });
 
 // Review-swarm fix batch item 21's other half: the SAME injection idiom

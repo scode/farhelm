@@ -110,47 +110,46 @@ rows in hand even when the cap cut the listing, where under a non-creation order
 cut: a cut listing is a fleet of hundreds, the fallback exists to keep the pane from sitting empty rather than to be
 exact, and the alternative was a second request shape for that corner.
 
-The sidebar uses two lines unless the shared compact preference hides the second. Its identity line is status, locality,
-title, stale/archive qualifiers, agent badge, and a right-aligned activity-time column before the narrow menu gutter.
-The second line is the host name and directory, joined by `:` when the helm supplied a name. This restores host
-visibility for confirmed local sessions too: a host name is an identity fact, while the locality icon answers a separate
-question. The status and locality tracks keep fixed icon-sized widths: live status uses the first slot's dot, ended
-status keeps its truthful word beside the title, and an absent status or unknown locality leaves its slot blank. This
-keeps later columns aligned without inventing dots or locality. The activity track has a four-character minimum and
-grows for unbounded ages such as `1000d`. Stale and archived qualifiers stay inside the identity group and wrap there
-when necessary, so a narrow row cannot clip away an entire state label. Those exceptional rows can be taller even in
-compact mode; the surrounding icon, agent, activity, and menu columns retain their positions. A legacy row with no name
-leaves that fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the
-session's host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why),
-`Remote` when both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a
-hosts read that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale,
-archived and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed
-`Local` verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
+The sidebar uses an identity line and, outside compact mode, a host/directory line plus a detail line when there is
+ended status or a stale/archive qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph
+agent badge, and a right-aligned activity-time column before the narrow menu gutter. The host line is the host name and
+directory, joined by `:` when the helm supplied a name. This restores host visibility for confirmed local sessions too:
+a host name is an identity fact, while the locality icon answers a separate question. The status and locality tracks
+keep fixed icon-sized widths: live status uses the first slot's dot, compact ended status replaces that dot with a
+distinct stopped, exit, interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank.
+Compact rows therefore remain one visual line; stale and archive survive there as small labelled glyphs. The full
+status, annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never
+acquire the live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line
+under the title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without
+ellipsis, clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded
+ages such as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch
+metadata is authoritative, while a legacy row receives only conservative shell-word executable/flag recognition; a
+profile name is not proof of either. C/M/L are Farhelm letter paths for Codex, Muse, and Claude, OpenCode uses its
+attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that
+fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's
+host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when
+both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read
+that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale, archived
+and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local`
+verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
 `session_locality` has no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality
 still never SUPPRESSES an available host label, it only ever leaves the row free to show one it already has, and the
 glyph rule adds a second promise on top rather than replacing the first. Legacy rows without a host name at all
 necessarily show none regardless — locality answers whether a name would be shown, not whether one exists to show. The
-invocation is rendered compactly: the profile's snapshotted name when the session was created from one, otherwise the
-program's basename plus a marker for an unattended-mode flag (`claude · skip-perms`). The working directory is
+agent track is rendered as glyphs: structured launch metadata decides the harness and permission mark when present,
+otherwise conservative recognition uses the program basename plus a permission glyph. Legacy recognition skips known
+option values and stops at unknown syntax, subcommands, or `--`, so argument data cannot earn a permission glyph. The
+full invocation and a profile's snapshotted name remain in its accessible text and tooltip. The working directory is
 tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold
 against properly. Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute
 — the row is a summary, and the full truth stays one hover away.
 
-The status badge's dot-or-word split (SPEC.md's Status section) is decided in Rust, in `status::status_badge`, not in
-CSS: the badge carries its word on every path and a flag saying whether that word is shown or only left for a screen
-reader, so the badge element's text content is the status word on every status, live or ended. That is deliberate beyond
-accessibility — the browser suite's status oracles read text, and a design where a live status existed only as a color
-would have cost every one of them.
-
-The split is NARROWER than the TODO entry that asked for it, and deliberately so. That entry said "replace the
-`running`/`idle`/`exited` text with a color-coded dot", naming an ended status among the words to remove; the decision
-taken before the work started was to convert the LIVE statuses only. A dot is a good trade for a live status because
-there is nothing to lose: `running`, `waiting`, and `idle` are one word each carrying no information the color does not
-already carry. An ended status is not: its badge also carries the exit code, the "stopped by user" annotation, and the
-launch shim's exec-failure detail — facts no dot can hold and no tooltip should be the only home for, since they are
-usually the reason the row needs attention at all. Rendering them somewhere else on the row was considered and rejected
-as spending more of the density the refresh was buying than the words cost. SPEC.md's Status section is the
-authoritative statement of the resulting rule; this paragraph only records why it is not what the TODO said.
+`status::status_badge` supplies the status wording; the row chooses its presentation according to compact mode. Live
+states keep their text for screen readers alongside the colored dot. Ended states use a distinct icon in compact mode,
+with the complete wording in accessible text and a tooltip. Outside compact mode the wording gets a full-width wrapping
+line. Keeping that detail beside the title used to truncate it despite unused space elsewhere in the row, and keeping it
+visible in compact mode made stopped rows taller than live ones. The two presentations preserve the same facts while
+honoring the user's density choice.
 
 The relative age beside it needs a `now`, and there is no honest one on the wire. `last_activity_at` is written by the
 session's HOST and compared against the VIEWER's wall clock, which on a remote helm is a different machine and in a

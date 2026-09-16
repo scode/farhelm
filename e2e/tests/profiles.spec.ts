@@ -2078,14 +2078,12 @@ test.describe("agent profiles", () => {
     await expect(label).toContainText(before);
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
 
-    // The row's OWN meta-line badge (`.session-invocation`, always in the
-    // DOM regardless of the panel) carries the same snapshotted name — it
-    // is a second surface the panel chip's assertions above never touch,
-    // and the row.rs source this checks against is a different render
-    // branch than the panel chip's.
-    const badge = row(page, session.id).locator(".session-invocation");
-    await expect(badge).toHaveText(before);
-    await expect(badge).toHaveAttribute("title", `profile: ${before} — ${FAKE_AGENT}`);
+    // The row's own glyph track keeps the profile snapshot in its tooltip
+    // and accessible text. It is a second surface from the menu-panel chip,
+    // so this pins provenance without restoring obsolete visible badge text.
+    const badge = row(page, session.id).locator(".session-agent");
+    await expect(badge).toContainText(before);
+    await expect(badge).toHaveAttribute("title", `profile: ${before} — command: farhelm — ${FAKE_AGENT}`);
 
     await updateProfile(request, profile.id, { name: after });
     await settleExistence(request, title, "renamed");
@@ -2099,14 +2097,14 @@ test.describe("agent profiles", () => {
     ).toContainText(before);
     await expect(label).not.toContainText(after);
 
-    // The meta-line badge keeps the same snapshot, with its `title`
+    // The glyph track keeps the same accessible snapshot, with its `title`
     // qualified the same way `source_profile_label` qualifies the panel
     // chip's tooltip.
-    await expect(badge).toHaveText(before);
+    await expect(badge).toContainText(before);
     await expect(badge).not.toHaveText(after);
     await expect(badge).toHaveAttribute(
       "title",
-      `profile: ${before} (renamed since) — ${FAKE_AGENT}`,
+      `profile: ${before} (renamed since) — command: farhelm — ${FAKE_AGENT}`,
     );
 
     // The catalog, meanwhile, says the new name — the two surfaces disagree
@@ -2180,12 +2178,12 @@ test.describe("agent profiles", () => {
     await expect(label).toHaveAttribute("data-profile-existence", "present", { timeout: 20_000 });
     const presentLabelColor = await label.evaluate((element) => getComputedStyle(element).color);
 
-    // The row's own meta-line badge, same present-state snapshot as the
-    // panel chip — see the rename test above for why this is a second
+    // The row's own glyph track keeps the same present-state snapshot as
+    // the panel chip — see the rename test above for why this is a second
     // surface worth its own assertion.
-    const badge = row(page, session.id).locator(".session-invocation");
-    await expect(badge).toHaveText(name);
-    await expect(badge).toHaveAttribute("title", `profile: ${name} — ${FAKE_AGENT}`);
+    const badge = row(page, session.id).locator(".session-agent");
+    await expect(badge).toContainText(name);
+    await expect(badge).toHaveAttribute("title", `profile: ${name} — command: farhelm — ${FAKE_AGENT}`);
     const presentBadgeColor = await badge.evaluate((element) => getComputedStyle(element).color);
 
     await cleanupProfile(request, profile.id);
@@ -2201,10 +2199,10 @@ test.describe("agent profiles", () => {
     ).toBeVisible();
 
     // The badge keeps the same snapshot as a plain historical label.
-    await expect(badge).toHaveText(name);
+    await expect(badge).toContainText(name);
     await expect(badge).toHaveAttribute(
       "title",
-      `profile: ${name} — ${FAKE_AGENT}`,
+      `profile: ${name} — command: farhelm — ${FAKE_AGENT}`,
     );
     expect(await label.evaluate((element) => getComputedStyle(element).color))
       .toBe(presentLabelColor);
