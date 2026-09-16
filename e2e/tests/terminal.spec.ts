@@ -1767,7 +1767,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
       "does not exist",
     );
     // Preserved, not cleared or reset: the same values the user typed.
-    await expect(form.getByLabel("working directory")).toHaveValue(
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(
       "/nonexistent/definitely/not/here",
     );
     await expect(form.getByLabel("agent command")).toHaveValue("true");
@@ -1785,7 +1785,7 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
     // double-submission guard in `CreateSessionForm`'s `onsubmit` would
     // otherwise leave the control permanently disabled after its first,
     // failed attempt).
-    await form.getByLabel("working directory").fill("/tmp");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await form.locator('button[type="submit"]').click();
     await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, title)));
     await expect(page.locator(".titlebar .title")).toHaveText(title);

@@ -16,7 +16,7 @@
  */
 import { expect, test } from "./helpers/evidence";
 import type { APIRequestContext } from "@playwright/test";
-import { cleanupSession, SESSION_LISTING } from "./helpers/fleet";
+import { cleanupSession, FAKE_AGENT, SESSION_LISTING } from "./helpers/fleet";
 
 type CatalogModel = {
   id: string;
@@ -175,4 +175,72 @@ test("empty composer search does not launch an incomplete selection", async ({ p
   const after = await listedSessions(request);
   expect(after.map((session) => session.id).sort(), "no session may have been created by the empty Enter")
     .toEqual([...before].sort());
+});
+
+/**
+ * Command mode is a complete branch of the shared composer, not a secondary
+ * form or an interpretation of arbitrary query text. The test keeps a
+ * conflicting structured draft dormant while it checks shared controls,
+ * search scope, mode-local draft restoration, focus, and the outgoing raw
+ * request. Those observables distinguish a coherent mode from controls that
+ * merely remain visible while another draft is submitted.
+ */
+test("New selects other command explicitly and preserves the raw invocation", async ({ page, request }) => {
+  const model = await codexCatalogModel(request);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator('.create-session-form[role="dialog"]');
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+
+  // Seed structured-only choices before leaving the mode. Command search and
+  // summary must then ignore them without destroying the draft.
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Claude", exact: true }).click();
+  await form.getByRole("button", { name: "yolo", exact: true }).click();
+
+  await search.fill("command");
+  await expect(form.getByRole("option", { name: "Other / command", exact: true })).toBeVisible();
+  await search.press("Enter");
+  await expect(form).toHaveAttribute("data-composer-mode", "command");
+  await expect(search, "search acceptance keeps the shared combobox focused in command mode").toBeFocused();
+  await expect(form.locator(".launch-composer-summary"), "structured settings are dormant in command mode").toHaveCount(0);
+  await expect(form.locator(".create-session-host"), "destination controls stay mounted in command mode").toBeVisible();
+  await expect(form.getByLabel("folder", { exact: true })).toBeVisible();
+  await expect(form.getByLabel("name (optional)")).toBeVisible();
+  const profile = form.locator(".create-session-profile");
+  await profile.selectOption("");
+  const command = form.getByLabel("agent command");
+  await command.fill(FAKE_AGENT);
+
+  await search.fill(model.id);
+  await expect(form.getByRole("option", { name: `Model: ${model.id} (Codex)`, exact: true }),
+    "command search exposes globally owned models instead of filtering by a dormant harness").toBeVisible();
+  await search.press("Enter");
+  await expect(form, "accepting an owned model explicitly activates its structured harness").toHaveAttribute("data-composer-mode", "structured");
+  await expect(form.getByRole("combobox", { name: "model", exact: true })).toHaveValue(model.id);
+  await expect(search).toBeFocused();
+  await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+  await expect(command, "the command draft survives a structured search round trip").toHaveValue(FAKE_AGENT);
+
+  await search.fill(model.efforts[0]);
+  await expect(form.getByRole("group", { name: "Efforts" }),
+    "command search offers no action that only edits the dormant structured draft").toHaveCount(0);
+
+  await search.fill("/tmp");
+  // Recent folders can also contain /tmp. Enter accepts the selected direct
+  // path action, independently of any matching entry in persisted history.
+  await expect(form.getByRole("option", { name: "Use this path: /tmp", exact: true, selected: true })).toBeVisible();
+  await search.press("Enter");
+  await expect(form).toHaveAttribute("data-composer-mode", "command");
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/tmp");
+  await expect(search, "folder acceptance keeps focus in shared search").toBeFocused();
+
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().endsWith("/api/sessions")),
+    form.locator(".create-session-submit").click(),
+  ]);
+  const body = response.request().postDataJSON();
+  expect(body).toMatchObject({ invocation: FAKE_AGENT });
+  expect(body).not.toHaveProperty("launch");
+  const created = await response.json() as ListedSession;
+  await cleanupSession(request, created.id);
 });

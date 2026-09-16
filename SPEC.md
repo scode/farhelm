@@ -195,17 +195,22 @@ Session creation is one action, not a wizard. Only the working directory is fund
   invalid combination cannot launch. The one exception to "New preselects nothing": the permissions mode remembers the
   last SUCCESSFUL structured launch, helm-wide across every client; "reset choices" returns the segment to that
   remembered value rather than to the harness default, and a recent-setup row's own saved choice overrides it when used.
-  The launch-composer search matches harnesses, models scoped by the chosen harness, effort words offered by that
-  harness and model, folders, and recent setups. Accepting a result applies it and clears the box while keeping focus
-  there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch path; Enter on a
-  non-empty query with no result never launches, and Escape closes the result list without clearing the query, so Enter
-  after Escape does nothing until the box is emptied.
-- Legacy agent profile or arbitrary command: an explicit secondary creation surface. Existing callers, profiles, and
-  their helm-wide last-used profile behavior remain compatible, but New does not silently choose a remembered profile.
-  Values from this surface cannot affect a structured request, or its idempotency key. The helm owns the remembered
-  profile default: remote supervisor metadata must not override an explicit user choice or indefinitely determine the
-  default profile for sessions on other hosts. This does not make the structured composer preselect a harness or
-  profile. See the maintainer-confirmed decisions below.
+  The launch-composer search matches harnesses, `other / command`, models scoped by the chosen harness, effort words
+  offered by that harness and model, folders, and recent setups. Accepting a result applies it and clears the box while
+  keeping focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch path;
+  Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing the
+  query, so Enter after Escape does nothing until the box is emptied.
+- Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
+  replaces only the model, effort, and permissions controls with the profile picker and raw invocation field. Existing
+  callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not silently choose
+  a remembered profile. Values from this mode cannot affect a structured request or its idempotency key. The helm owns
+  the remembered profile default: remote supervisor metadata must not override an explicit user choice or indefinitely
+  determine the default profile for sessions on other hosts. Choosing this mode does not make the structured composer
+  preselect a harness or profile. Search in this mode ignores the retained structured draft: harnesses and known models
+  remain available globally, while effort actions are absent until a structured harness is active. Accepting a harness,
+  model, or recent setup activates the structured launch it names; accepting a folder keeps the current mode. The
+  structured model/effort/permissions summary is absent while a profile or command is active. See the
+  maintainer-confirmed decisions below.
 - Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
   identity. A recent row fills every saved choice and directory; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

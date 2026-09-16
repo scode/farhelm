@@ -3455,8 +3455,8 @@ samp {
   font-size: 13px;
 }
 
-/* A dialog's inputs belong to its raised control surface. This override
-   deliberately leaves the sidebar's legacy create form on its old surface. */
+/* A dialog's inputs belong to its raised control surface. The shared composer
+   keeps that treatment while its launch controls change modes. */
 .launch-composer-backdrop .create-session-form input[type="text"],
 .launch-composer-backdrop .create-session-form .create-session-host,
 .launch-composer-backdrop .create-session-form .launch-composer-search input {
@@ -3506,14 +3506,6 @@ samp {
   font-size: 12px;
   line-height: 1.4;
 }
-
-/* Profile and raw-command controls remain mounted so their draft can survive
-   an explicit trip through Other, but the structured surface must not present
-   them as disabled ordinary choices. */
-.launch-composer-backdrop .create-session-form .launch-composer-legacy-hidden {
-  display: none;
-}
-
 
 /* The whole heading-plus-slots band is absent from the DOM (see
    `create_form.rs`'s `recent_launches` guard) whenever no recent matches the

@@ -94,7 +94,7 @@ async function createSession(
   // have recorded before this test started.
   await form.getByRole("button", { name: "other / command" }).click();
   await form.locator(".create-session-profile").selectOption("");
-  await form.getByLabel("working directory").fill(cwd);
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
   // Name is visible on the top action row now; find it by label rather
   // than by DOM position, which a future reorder could otherwise retarget.

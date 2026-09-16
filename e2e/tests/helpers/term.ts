@@ -115,7 +115,7 @@ export async function fillCreateForm(
   // the request's source of intent. This also makes the helper independent of
   // whatever profile-backed create a shared stack last recorded.
   await form.locator(".create-session-profile").selectOption("");
-  await form.getByLabel("working directory").fill(cwd);
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
   await form.getByLabel("agent command").fill(invocation);
   // The name field sits on the top action row now, visible without opening
   // anything — fill it by its label directly rather than by DOM position.

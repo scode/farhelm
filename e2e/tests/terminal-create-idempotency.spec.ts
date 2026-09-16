@@ -124,14 +124,14 @@ test("a create whose reply is lost is retried with the same key and yields one s
 // the key alone rather than about whether the corrected request happens to
 // succeed — and so both attempts land in the same observable state.
 for (const field of [
-  { name: "working directory", edit: "/nonexistent/also/not/here" },
-  { name: "agent command", edit: "also-not-an-agent" },
+  { name: "working directory", label: "folder", edit: "/nonexistent/also/not/here" },
+  { name: "agent command", label: "agent command", edit: "also-not-an-agent" },
 ]) {
   test(`editing the ${field.name} after a failed create mints a new intent key`, async ({
     page,
     request,
   }) => {
-    const title = `intent-new-${field.index}-${Date.now()}`;
+    const title = `intent-new-${field.name}-${Date.now()}`;
     const keys: (string | undefined)[] = [];
     await page.route("**/api/sessions", async (route) => {
       if (route.request().method() !== "POST") {
@@ -154,7 +154,7 @@ for (const field of [
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 
-      await form.getByLabel(field.name).fill(field.edit);
+      await form.getByLabel(field.label, { exact: true }).fill(field.edit);
       await form.locator('button[type="submit"]').click();
       await expect(form.locator(".create-session-error")).toBeVisible();
 
@@ -199,7 +199,7 @@ test("editing the title after a failed create mints a new intent key", async ({
     await expect(form.locator(".create-session-error")).toBeVisible();
 
     await form.getByLabel("name (optional)").fill(`${title}-renamed`);
-    await form.getByLabel("working directory").fill("/tmp");
+    await form.getByLabel("folder", { exact: true }).fill("/tmp");
     await form.locator('button[type="submit"]').click();
     const id = await sessionIdFor(rowByTitle(page, `${title}-renamed`));
     await waitForSessionRevealed(page, id);
@@ -251,8 +251,8 @@ test("the create form's inputs are disabled while a create is in flight", async 
       ),
       form.locator('button[type="submit"]').click(),
     ]);
-    for (const label of ["name (optional)", "working directory", "agent command"]) {
-      await expect(form.getByLabel(label)).toBeDisabled();
+    for (const label of ["name (optional)", "folder", "agent command"]) {
+      await expect(form.getByLabel(label, { exact: true })).toBeDisabled();
     }
     release(true);
     const id = await sessionIdFor(rowByTitle(page, title));

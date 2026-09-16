@@ -264,6 +264,16 @@ test("replace with pre-fills clone's form from the source, and editing the harne
     await expect(form.getByLabel("name (optional)")).toHaveValue(title);
     await expect(form.locator(".create-session-submit")).toContainText("replace");
 
+    // Replace with has the same shell as New and Clone: switching launch
+    // modes cannot change the fixed source destination or its editable name.
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "other / command", exact: true }).click();
+    await expect(form).toHaveAttribute("data-composer-mode", "command");
+    await expect(form.locator('.launch-composer-search input[role="combobox"]')).toBeFocused();
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue(cwd);
+    await expect(form.getByLabel("name (optional)")).toHaveValue(title);
+    await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(form).toHaveAttribute("data-composer-mode", "structured");
+
     const search = form.locator('.launch-composer-search input[role="combobox"]');
     await expect(search).toBeFocused();
 

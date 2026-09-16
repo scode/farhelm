@@ -20,23 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Consistent replace-with composer.** "Replace with" sometimes opens the regular harness composer and sometimes a
-  different form with an agent-profile dropdown, command field, and "back to harnesses" button. Use one composer layout
-  for New, Clone, and Replace with: shared destination, folder, name, search, and launch controls. Keep
-  arbitrary-command and profile support through "other / command", showing the profile picker and command field where
-  model, effort, and permissions otherwise appear. Legacy sessions open this same layout with their profile or exact
-  command prefilled; switching to a harness changes the agent-specific controls while preserving folder and name. Share
-  the common input controls and handlers; structured and command/profile launches still need their own validation.
-  Preliminary assessment: `prefill_from` in `crates/farhelm-ui/src/list/create_form.rs` copies `Session.launch`, and the
-  prefill effect selects `CreationSurface::Structured` when that snapshot exists, `Legacy` otherwise. This explains the
-  two reported shapes; the affected sessions' stored metadata has not been inspected. The distinction preserves launch
-  intent: legacy profiles and arbitrary commands lack declarative harness settings, so do not infer those settings by
-  parsing the invocation or silently change what would launch. Preserve valid profile identity and raw-command fallback,
-  directory, title, replace-with's fixed source host, and create-then-delete behavior. Reconcile SPEC.md's explicit
-  secondary legacy surface with its shared-launcher requirement, and update SPEC_impl.md alongside the eventual fix.
-  Validate both structured and legacy prefills (including a missing/renamed profile) and switching to another harness
-  without losing shared fields or leaking legacy values into the structured request.
-
 - **Stop false running indicators on idle agents.** Sessions frequently show a pulsing green running indicator when the
   agent is not actively working. Reported mostly with Codex, but the maintainer mostly uses Codex, so harness
   specificity is not established. At the time of the report both the current conversation and a companion Codex session
