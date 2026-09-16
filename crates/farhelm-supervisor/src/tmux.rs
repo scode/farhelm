@@ -194,6 +194,14 @@ pub const TAB_WINDOW_OPTION: &str = "@farhelm-tab";
 /// equally lacks.
 pub const AGENT_WINDOW_OPTION: &str = "@farhelm-agent";
 
+/// The launch generation whose explicit Stop completed successfully.
+///
+/// Natural agent exit does not prove its descendants were cleaned up. This
+/// session option preserves the successful Stop observation after the
+/// supervisor exits. It is not a liveness exemption: consumers must still
+/// inspect panes, OS sessions and scopes, and compare the launch generation.
+pub const CLEANED_GENERATION_OPTION: &str = "@farhelm-cleaned-generation";
+
 /// One deadline covers attaching the control client, taking the replay
 /// snapshot, and enabling live output. A wedged tmux command must fail
 /// the attach request instead of leaving it holding the global
@@ -2727,6 +2735,34 @@ impl TmuxDriver {
         .with_context(|| format!("marking a window with {option}"))
     }
 
+    /// Publish successful explicit Stop for an already-observed owned session.
+    ///
+    /// The caller holds the session lifecycle claim and has completed cleanup.
+    /// Absent or foreign panes are excluded by the caller: creating a server
+    /// or marking a recycled session would invent evidence for a past launch.
+    /// A publication failure remains an error even though cleanup succeeded,
+    /// so the user can retry Stop to make its completion observable.
+    pub async fn record_cleaned_generation(
+        &self,
+        session: &str,
+        generation: i64,
+    ) -> anyhow::Result<()> {
+        // set-option resolves a pane even for a session-scoped user option.
+        // The colon makes the exact session selector a pane target; a bare
+        // =name is interpreted as a window name and cannot find the session.
+        self.run(&[
+            "-N",
+            "set-option",
+            "-t",
+            &format!("={session}:"),
+            CLEANED_GENERATION_OPTION,
+            &generation.to_string(),
+        ])
+        .await
+        .map(|_| ())
+        .context("cleanup completed, but recording its generation failed; retry Stop")
+    }
+
     /// Kill the window containing `pane`, tolerating its absence.
     ///
     /// The tolerated diagnostics are the same ones [`Self::kill_session`]
@@ -5254,6 +5290,78 @@ mod tests {
             !error.contains("TAB-PANE-TEXT"),
             "the refusal must not carry the sibling's screen either: {error}"
         );
+    }
+
+    /// A failed publication cannot create a substrate or mark a name neighbour.
+    ///
+    /// This pins both safety properties of the session-option command: -N
+    /// leaves an absent server absent, and the exact session target cannot
+    /// publish another session's cleanup evidence after its owner disappears.
+    #[farhelm_testtrace::test]
+    async fn cleaned_generation_refuses_missing_server_and_name_neighbour() {
+        let absent = tempfile::tempdir().expect("absent-server directory");
+        let driver = TmuxDriver::new(absent.path());
+        assert!(!driver.socket.exists());
+        let error = driver
+            .record_cleaned_generation("fh-missing", 4)
+            .await
+            .expect_err("no server");
+        assert!(format!("{error:#}").contains("cleanup completed"));
+        assert!(
+            !driver.socket.exists(),
+            "publication must not start a server"
+        );
+
+        let server = ScratchServer::start().await;
+        server
+            .driver
+            .create_session("fh-neighbourextra", "/", 80, 24, &[], &["/bin/cat".into()])
+            .await
+            .expect("owned neighbour fixture");
+        assert!(
+            server
+                .driver
+                .has_session("fh-neighbourextra")
+                .await
+                .unwrap()
+        );
+        server
+            .driver
+            .record_cleaned_generation("fh-neighbour", 4)
+            .await
+            .expect_err("exact missing session");
+        let observed = server
+            .driver
+            .run(&[
+                "show-options",
+                "-qv",
+                "-t",
+                "=fh-neighbourextra:",
+                CLEANED_GENERATION_OPTION,
+            ])
+            .await
+            .expect("query neighbour evidence");
+        assert!(
+            observed.is_empty(),
+            "foreign session was incorrectly marked"
+        );
+        server
+            .driver
+            .record_cleaned_generation("fh-neighbourextra", 5)
+            .await
+            .expect("exact target");
+        let observed = server
+            .driver
+            .run(&[
+                "show-options",
+                "-qv",
+                "-t",
+                "=fh-neighbourextra:",
+                CLEANED_GENERATION_OPTION,
+            ])
+            .await
+            .expect("query completed evidence");
+        assert_eq!(observed, "5\n");
     }
 
     /// `kill_session` must never let tmux resolve its target by prefix.

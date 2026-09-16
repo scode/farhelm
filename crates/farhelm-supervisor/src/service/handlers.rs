@@ -1210,7 +1210,31 @@ async fn handle_stop_session(
                 )
                 .await
             }
-            None => send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await,
+            None => {
+                // Preserve explicit cleanup evidence while the lifecycle
+                // claim still prevents a restart from changing generation.
+                // Gone or reassigned panes need no marker and must not make
+                // this path create a server or mark another session.
+                if pane_state.is_some()
+                    && let Some(terminal) = &entry.terminal
+                    && let Err(error) = sup
+                        .tmux
+                        .record_cleaned_generation(&terminal.tmux_name, entry.generation)
+                        .await
+                {
+                    send_reply(
+                        &tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: format!("{error:#}"),
+                            kind: ErrorKind::Internal,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+                send_reply(&tx, &ControlMsg::SessionStopped { req_id }).await;
+            }
         }
     });
     tasks.spawn(async move {

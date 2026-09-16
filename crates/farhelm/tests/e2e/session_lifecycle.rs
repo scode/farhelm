@@ -4788,6 +4788,132 @@ async fn stop_is_idempotent() {
         .expect("stopping a terminal-less session must succeed: nothing can be running");
 }
 
+/// Successful cleanup is observable after a supervisor exits, but the
+/// observation must remain tied to the stopped launch. A restart's live
+/// process cannot inherit permission to uninstall from an older Stop.
+#[farhelm_testtrace::test]
+async fn explicit_stop_records_only_its_completed_launch_generation() {
+    use farhelm_supervisor::tmux::CLEANED_GENERATION_OPTION;
+
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let socket = h.state.path().join("tmux.sock");
+    let target = format!("=fh-{}:", session.id);
+    let read_option = || async {
+        let output = tmux_query(
+            &socket,
+            &[
+                "show-options",
+                "-qv",
+                "-t",
+                &target,
+                CLEANED_GENERATION_OPTION,
+            ],
+        )
+        .await;
+        assert!(
+            output.status.success(),
+            "query cleanup option: {:?}",
+            output.stderr
+        );
+        output.stdout
+    };
+    assert!(
+        read_option().await.is_empty(),
+        "new launch has no successful Stop"
+    );
+    // A renamed pane belongs to an unrecognized owner. Stop must refuse
+    // before cleanup and must not publish success on that foreign session.
+    let moved = tmux_query(&socket, &["rename-session", "-t", &target, "foreign-owner"]).await;
+    assert!(moved.status.success());
+    let observed = tmux_query(
+        &socket,
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            "=foreign-owner:",
+            "#{session_name}:#{pane_dead}",
+        ],
+    )
+    .await;
+    assert!(observed.status.success());
+    assert_eq!(
+        observed.stdout, b"foreign-owner:0\n",
+        "live foreign-owner premise"
+    );
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect_err("Stop refuses unrecognized pane owner");
+    let evidence = tmux_query(
+        &socket,
+        &[
+            "show-options",
+            "-qv",
+            "-t",
+            "=foreign-owner:",
+            CLEANED_GENERATION_OPTION,
+        ],
+    )
+    .await;
+    assert!(evidence.status.success());
+    assert!(
+        evidence.stdout.is_empty(),
+        "failed Stop cannot publish cleanup success"
+    );
+    let restored = tmux_query(
+        &socket,
+        &[
+            "rename-session",
+            "-t",
+            "=foreign-owner",
+            &format!("fh-{}", session.id),
+        ],
+    )
+    .await;
+    assert!(restored.status.success());
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("initial Stop");
+    assert_eq!(read_option().await, b"0\n");
+
+    h.client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Fresh, false)
+        .await
+        .expect("restart stopped session");
+    wait_for_agent_ready(&socket, &session.id).await;
+    let retained = tmux_query(
+        &socket,
+        &[
+            "display-message",
+            "-p",
+            "-t",
+            &target,
+            "#{pane_start_command}",
+        ],
+    )
+    .await;
+    assert!(retained.status.success());
+    assert!(
+        String::from_utf8(retained.stdout)
+            .unwrap()
+            .contains(&format!("{}.1.json", session.id)),
+        "restart must have a new retained launch generation"
+    );
+    assert_eq!(
+        read_option().await,
+        b"0\n",
+        "restart cannot claim it was stopped"
+    );
+    h.client
+        .stop_session(&session.id)
+        .await
+        .expect("Stop restarted session");
+    assert_eq!(read_option().await, b"1\n");
+}
+
 /// Unknown ids are the one failure mode stop and delete share, and both
 /// must report it the same way `Attach` does.
 #[farhelm_testtrace::test]

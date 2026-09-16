@@ -1,4 +1,4 @@
-//! Read-only inventory of the supervisor user's live executable processes.
+//! Read-only executable and OS-session inventory of the supervisor user's processes.
 //!
 //! This is the observation seam for operations such as a future safe
 //! uninstaller. It reuses [`crate::procs`] rather than maintaining another
@@ -14,6 +14,9 @@ pub struct ExecutableProcess {
     pub pid: u32,
     /// The parent process observed by the final identity read.
     pub parent_pid: u32,
+    /// The OS session observed between the two stable process-identity reads.
+    /// Descendants can retain this association after their parent exits.
+    pub session_id: u32,
     /// The platform's opaque process-start identity token.
     pub start_time: u64,
     /// The native executable path, unchanged from the kernel response.
@@ -36,7 +39,7 @@ pub struct ProcessInventory {
 }
 
 /// The smallest observation surface needed by [`inventory`]. Keeping process
-/// table, identity, and executable reads injectable makes PID-reuse and
+/// table, identity, executable, and session reads injectable makes PID-reuse and
 /// partial-failure cases deterministic without weakening the native path.
 trait Reader {
     fn snapshot(&mut self) -> Result<(crate::procs::ProcessTable, Vec<String>), String>;
@@ -45,6 +48,7 @@ trait Reader {
         pid: u32,
     ) -> Result<Option<(u32, u64, crate::procs::ProcessState)>, String>;
     fn read_executable(&mut self, pid: u32) -> Result<PathBuf, String>;
+    fn read_session_id(&mut self, pid: u32) -> Result<u32, String>;
 }
 
 /// Production adapter that delegates every observation to the existing
@@ -66,6 +70,21 @@ impl Reader for NativeReader {
     fn read_executable(&mut self, pid: u32) -> Result<PathBuf, String> {
         crate::procs::read_executable(pid)
     }
+
+    fn read_session_id(&mut self, pid: u32) -> Result<u32, String> {
+        let native_pid = libc::pid_t::try_from(pid)
+            .map_err(|error| format!("converting pid for getsid: {error}"))?;
+        // SAFETY: getsid only observes a numeric PID and takes no pointers.
+        let sid = unsafe { libc::getsid(native_pid) };
+        if sid < 0 {
+            Err(format!(
+                "getsid({pid}): {}",
+                std::io::Error::last_os_error()
+            ))
+        } else {
+            Ok(sid as u32)
+        }
+    }
 }
 
 /// Observe native executable paths for live, stable same-euid process identities.
@@ -81,9 +100,10 @@ pub fn processes() -> Result<ProcessInventory, String> {
 
 /// Run the identity-checked walk against one observation provider.
 ///
-/// The initial and final reads deliberately bracket the executable lookup;
-/// only a matching start-time token can make the path attributable to the
-/// snapshot row.
+/// The initial and final reads deliberately bracket executable and session
+/// lookups; only a matching start-time token can make those observations
+/// attributable to the snapshot row. An OS session can survive its leader,
+/// which is why parent ancestry alone is insufficient for callers.
 fn inventory<R: Reader>(reader: &mut R) -> Result<ProcessInventory, String> {
     let (table, mut uncertainties) = reader.snapshot()?;
     let mut pids: Vec<_> = table.keys().copied().collect();
@@ -109,10 +129,11 @@ fn inventory<R: Reader>(reader: &mut R) -> Result<ProcessInventory, String> {
             continue;
         }
 
-        // The final identity read is required even when the path lookup
-        // failed. A process that exited during that lookup is absent; only a
-        // still-live original identity makes the executable error reportable.
+        // The final identity read is required even when either lookup failed.
+        // A process that exited during inspection is absent; only a still-live
+        // original identity makes an observation error reportable.
         let executable_result = reader.read_executable(pid);
+        let session_result = reader.read_session_id(pid);
         let final_read = match reader.read_process(pid) {
             Ok(Some((parent_pid, start, crate::procs::ProcessState::Running))) => {
                 (parent_pid, start)
@@ -138,10 +159,18 @@ fn inventory<R: Reader>(reader: &mut R) -> Result<ProcessInventory, String> {
                 continue;
             }
         };
+        let session_id = match session_result {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                uncertainties.push(format!("pid {pid} session lookup: {error}"));
+                continue;
+            }
+        };
 
         processes.push(ExecutableProcess {
             pid,
             parent_pid: final_read.0,
+            session_id,
             start_time: snapshot_start,
             executable,
         });
@@ -173,6 +202,7 @@ mod tests {
         soft_errors: Vec<String>,
         process_reads: HashMap<u32, VecDeque<IdentityRead>>,
         executable_reads: HashMap<u32, Result<PathBuf, String>>,
+        session_reads: HashMap<u32, Result<u32, String>>,
     }
 
     impl Reader for FakeReader {
@@ -198,6 +228,12 @@ mod tests {
                 .remove(&pid)
                 .unwrap_or_else(|| Err(format!("missing fake executable read for pid {pid}")))
         }
+
+        fn read_session_id(&mut self, pid: u32) -> Result<u32, String> {
+            self.session_reads
+                .remove(&pid)
+                .unwrap_or_else(|| Err(format!("missing fake session read for pid {pid}")))
+        }
     }
 
     /// Build one successful process identity response for the fake reader.
@@ -211,6 +247,7 @@ mod tests {
         let mut reader = FakeReader::default();
         for &(pid, parent, start) in table {
             reader.table.insert(pid, (parent, start));
+            reader.session_reads.insert(pid, Ok(parent));
             reader.process_reads.insert(
                 pid,
                 VecDeque::from([Ok(running(parent, start)), Ok(running(parent, start))]),
@@ -239,12 +276,14 @@ mod tests {
                 ExecutableProcess {
                     pid: 4,
                     parent_pid: 2,
+                    session_id: 2,
                     start_time: 40,
                     executable: PathBuf::from("/bin/helper"),
                 },
                 ExecutableProcess {
                     pid: 9,
                     parent_pid: 3,
+                    session_id: 3,
                     start_time: 90,
                     executable: PathBuf::from("/opt/agent (deleted)"),
                 },
@@ -359,6 +398,32 @@ mod tests {
         assert_eq!(result.uncertainties[..2], ["alpha", "zeta"]);
     }
 
+    /// A failed SID lookup cannot hide surviving descendants of a live pane.
+    /// If the process disappears during the same observation, however, its
+    /// failed lookup must not leave a stale blocker behind.
+    #[farhelm_testtrace::test]
+    fn session_lookup_failure_is_uncertainty_only_for_stable_live_identity() {
+        let mut reader = fake(&[(9, 3, 90)], &[(9, "/bin/agent")]);
+        reader
+            .session_reads
+            .insert(9, Err("getsid(9): permission denied".into()));
+        let result = inventory(&mut reader).unwrap();
+        assert!(result.processes.is_empty());
+        assert_eq!(
+            result.uncertainties,
+            ["pid 9 session lookup: getsid(9): permission denied"]
+        );
+
+        let mut reader = fake(&[(9, 3, 90)], &[(9, "/bin/agent")]);
+        reader
+            .session_reads
+            .insert(9, Err("getsid(9): no such process".into()));
+        reader.process_reads.get_mut(&9).unwrap()[1] = Ok(None);
+        let result = inventory(&mut reader).unwrap();
+        assert!(result.processes.is_empty());
+        assert!(result.uncertainties.is_empty());
+    }
+
     /// The native path API must resolve this test process itself, proving the
     /// production reader exercises the operating system rather than only the
     /// injected fake seam.
@@ -377,6 +442,8 @@ mod tests {
             .expect("inventory must include this process");
         assert_eq!(process.parent_pid, expected_identity.0);
         assert_eq!(process.start_time, expected_identity.1);
+        // SAFETY: zero asks for this process's session and has no pointer inputs.
+        assert_eq!(process.session_id, unsafe { libc::getsid(0) } as u32);
         assert_eq!(
             std::fs::canonicalize(&process.executable)
                 .unwrap_or_else(|_| process.executable.clone()),
