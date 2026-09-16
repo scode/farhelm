@@ -81,6 +81,24 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   test. Next rung: renderer-level receipts in the UI's fetch wrapper (dispatch and completion per request,
   console-carried) to catch a never-dispatched fetch in the act.
 
+  Receipts landed in #666; a 20-repetition Chromium hunt on 2026-09-16 (run `58d176c8-40d0-457a-8047-f08c0e5f1035`, 19
+  passed) caught the missing-row shape in repeat 6 with full pairing: receipts #16 and #20
+  (`GET /api/sessions?sort=activity`) dispatched from Rust and never completed, while same-batch detail, hosts, and
+  profiles reads completed in tens of milliseconds; the repeat-6 trace is preserved unpacked under `analyst-supplement/`
+  in the run record (Playwright wiped the checkout's `e2e/test-results` on a later run). Both uncompleted reads show no
+  recorded response or timing in the trace network — a missing answer, not a proven never-sent fetch: the `-1` timings
+  cannot distinguish a request the browser shelved from one the helm never answered, so the stall's location is
+  unestablished. Receipt #17 (`GET /api/hosts`) also lacks a completion, but its network entry shows the 401 arriving in
+  the same millisecond the logout unmounted the tree, so a dropped task — not a second stall — is the favored reading
+  there. The unanswered #20 holds the sessions surface past the test's 60s budget while its own 60s request timeout
+  would fire about 3s too late by the clock, so the retry ladder starves exactly as predicted. Two feed upgrades in the
+  same window likewise show no recorded response; the funnel receipts do not cover sockets, so feed-side dispatch
+  remains unobserved. What is still unknown is where these reads stall — same-batch, same-millisecond discrimination by
+  URL is observed twice but unexplained, and no cache headers differ between the endpoints. The fix fork: split
+  idempotent reads to a shorter timeout so an unanswered read fails into the retry ladder inside the budget (a product
+  policy change needing maintainer judgment — the funnel docs call 60s "deliberately generous rather than tuned"), or
+  instrument the transport to locate the stall. Do not weaken the recovery assertions meanwhile.
+
 - Investigate the remaining initial profile focus failures in `e2e/tests/profiles.spec.ts`. WebKit failed the editor
   focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus in
   `a profile edited in another browser reaches this one over the real feed`. The latter occurs before the separately
