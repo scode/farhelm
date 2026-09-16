@@ -270,16 +270,13 @@
 # ---------------------------------------------------------------------------
 # The macOS half of the gate.
 #
-# `ci.yml` runs nothing on macOS at all (deliberately — see AGENTS.md), so
-# without this the first compile of the Apple-target code would be the release
-# build itself. This does not prevent a partial publication — an artifact job
-# that runs and FAILS is already rejected by `host` — it catches Apple-only
-# breakage a few minutes earlier and reports it as a focused compile failure
-# rather than as a failure buried in a dist build.
+# Every release validates Apple compilation, desktop unit behavior and native
+# installer/uninstaller filesystem behavior here. The focused uninstall job in
+# ci.yml is also available on demand. Keeping this gate inside the artifact
+# job makes any failure block publication.
 #
-# Not the full suite: it needs a real tmux at the version floor and an ssh
-# loopback, neither of which this runner has, and the Linux leg covers the
-# behaviour. What is unique here is the compile.
+# The full session suite needs pinned tmux and SSH loopback, which this runner
+# does not provide; these native checks do not require that substrate.
 # ---------------------------------------------------------------------------
 
 - name: Compile the CLI half of the Mac release
@@ -287,6 +284,19 @@
   # nothing else.
   if: runner.os == 'macOS'
   run: cargo build -p farhelm --locked
+
+- name: Validate standalone uninstall on macOS
+  # Exercise the installed CLI headlessly; file removal needs no WebKit or tmux.
+  if: runner.os == 'macOS'
+  run: |
+    python3 scripts/record-test-run.py \
+      --runner nextest --kind release --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
+      --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
+    python3 scripts/record-test-run.py \
+      --kind release --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
+      --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+      -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
 
 - name: Compile and test the window half of the Mac release
   # The WebKit-linked code that has no Linux equivalent in CI, where the same

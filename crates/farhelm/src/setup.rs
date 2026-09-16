@@ -32,8 +32,9 @@
 
 use anyhow::{Context as _, bail};
 use farhelm_helm::units::{
-    HELM_UNIT_NAME, HelmUnitInputs, SUPERVISOR_UNIT_NAME, SupervisorUnitInputs, is_managed,
-    managed, render_helm_unit, render_supervisor_unit, user_unit_dir, user_unit_dir_for,
+    HELM_UNIT_NAME, HelmUnitInputs, SUPERVISOR_UNIT_NAME, SupervisorUnitInputs, exec_start_program,
+    is_managed, managed, render_helm_unit, render_supervisor_unit, user_unit_dir,
+    user_unit_dir_for,
 };
 use farhelm_supervisor::tmux::{
     TMUX_FLOOR, TmuxProbeError, TmuxSupport, candidates_on_path, probe_tmux,
@@ -193,6 +194,258 @@ struct PlannedUnit {
     name: &'static str,
     path: PathBuf,
     text: String,
+}
+
+/// One setup-owned service selected for standalone-installation removal.
+///
+/// The plan holds only regular files that were marked by setup and whose
+/// recorded executable belongs to the selected installation. It deliberately
+/// does not describe effective systemd configuration: an operator's drop-ins
+/// remain their integration, and file ownership is the bounded authority this
+/// removal path can honestly claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectedService {
+    name: &'static str,
+    path: PathBuf,
+}
+
+/// The service portion of a standalone-uninstall plan.
+///
+/// The caller creates this before its one confirmation prompt, so every
+/// selected service is known before removal can stop or delete anything.
+/// `retained_paths` names known service integration left to the operator;
+/// callers must not infer that it inventories arbitrary custom unit files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectedServicePlan {
+    unit_dir: PathBuf,
+    selected: Vec<SelectedService>,
+    retained_paths: Vec<PathBuf>,
+    manager_available: bool,
+}
+
+impl SelectedServicePlan {
+    /// The setup-owned unit files that removal will stop, disable, and delete.
+    pub(crate) fn selected(&self) -> &[SelectedService] {
+        &self.selected
+    }
+
+    /// Service files and drop-in directories that remain operator-owned.
+    pub(crate) fn retained_paths(&self) -> &[PathBuf] {
+        &self.retained_paths
+    }
+
+    /// Whether the preflight reached the user manager that owns reload state.
+    pub(crate) fn manager_available(&self) -> bool {
+        self.manager_available
+    }
+}
+
+impl SelectedService {
+    /// The systemd unit name used for the stop/disable command.
+    pub(crate) fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// The exact regular-file path preflight selected for deletion.
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// Preflight the known setup services belonging to one standalone install.
+///
+/// A running manager supplies the only authoritative unit directory. When it
+/// cannot answer, a clean caller-selected directory can still describe a
+/// CLI-only install; a known unit filename there makes that uncertainty unsafe
+/// and is refused before the caller can remove its executable.
+pub(crate) fn preflight_selected_services(
+    selected_executables: &[PathBuf],
+    caller_unit_dir: &Path,
+    units: &mut dyn UnitManager,
+) -> anyhow::Result<SelectedServicePlan> {
+    let selected_executables = selected_executables
+        .iter()
+        .map(|path| normalize_selected_executable(path))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let manager = units.run(&["show-environment"]);
+    let unit_dir = match manager {
+        Ok(manager) if manager.status == 0 => manager_unit_dir(&manager.stdout)?,
+        Ok(manager) => {
+            if known_service_file_exists(caller_unit_dir)? {
+                let detail = command_detail(&manager);
+                bail!(
+                    "the systemd user manager did not answer: systemctl --user show-environment exited \
+                 {}{}{detail}; cannot safely inspect known Farhelm service files under {}",
+                    manager.status,
+                    if detail.is_empty() { "" } else { ": " },
+                    caller_unit_dir.display(),
+                );
+            }
+            return unavailable_manager_service_plan(caller_unit_dir);
+        }
+        Err(error) => {
+            if known_service_file_exists(caller_unit_dir)? {
+                return Err(error).with_context(|| {
+                    format!(
+                        "running systemctl --user show-environment; cannot safely inspect known \
+                         Farhelm service files under {}",
+                        caller_unit_dir.display()
+                    )
+                });
+            }
+            return unavailable_manager_service_plan(caller_unit_dir);
+        }
+    };
+
+    let mut selected = Vec::new();
+    let mut retained_paths = Vec::new();
+    for name in [SUPERVISOR_UNIT_NAME, HELM_UNIT_NAME] {
+        let path = unit_dir.join(name);
+        match selected_service_file(&path, &selected_executables)? {
+            Some(true) => selected.push(SelectedService { name, path }),
+            Some(false) => retained_paths.push(path),
+            None => {}
+        }
+    }
+    retained_paths.extend(known_drop_in_directories(&unit_dir)?);
+    Ok(SelectedServicePlan {
+        unit_dir,
+        selected,
+        retained_paths,
+        manager_available: true,
+    })
+}
+
+/// Build the bounded CLI-only plan allowed when no user manager answers.
+fn unavailable_manager_service_plan(unit_dir: &Path) -> anyhow::Result<SelectedServicePlan> {
+    Ok(SelectedServicePlan {
+        unit_dir: unit_dir.to_path_buf(),
+        selected: Vec::new(),
+        retained_paths: known_drop_in_directories(unit_dir)?,
+        manager_available: false,
+    })
+}
+
+/// The two fixed drop-in paths that standalone uninstall can report intact.
+fn known_drop_in_directories(unit_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for name in [SUPERVISOR_UNIT_NAME, HELM_UNIT_NAME] {
+        let path = unit_dir.join(format!("{name}.d"));
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => paths.push(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("inspecting {}", path.display()));
+            }
+        }
+    }
+    Ok(paths)
+}
+
+/// Remove the service files selected by [`preflight_selected_services`].
+///
+/// The caller has already shown this plan and obtained its single
+/// confirmation. Preview avoids both the directory lock and all mutating
+/// manager commands; a real run retains the old uninstall retry behavior by
+/// reloading whenever a reachable manager was part of the plan.
+pub(crate) fn remove_selected_services(
+    plan: &SelectedServicePlan,
+    dry_run: bool,
+    units: &mut dyn UnitManager,
+    report: &mut String,
+) -> anyhow::Result<()> {
+    if !plan.manager_available {
+        return Ok(());
+    }
+    let directory_absent = plan.selected.is_empty()
+        && !plan
+            .unit_dir
+            .try_exists()
+            .with_context(|| format!("inspecting service directory {}", plan.unit_dir.display()))?;
+    let _lock = if dry_run || directory_absent {
+        None
+    } else {
+        Some(lock_unit_directory(&plan.unit_dir)?)
+    };
+    remove_service_files(&plan.unit_dir, &plan.selected, true, dry_run, units, report)
+}
+
+/// Normalize one selected executable without turning a missing retry target
+/// into an ownership failure.
+fn normalize_selected_executable(path: &Path) -> anyhow::Result<PathBuf> {
+    if !path.is_absolute() {
+        bail!(
+            "selected executable {} is not an absolute path",
+            path.display()
+        );
+    }
+    canonical_or_missing(path, "selected executable")
+}
+
+/// Normalize an executable path, retaining an absent absolute spelling for a
+/// partial uninstall whose binary was already deleted in an earlier attempt.
+fn canonical_or_missing(path: &Path, role: &str) -> anyhow::Result<PathBuf> {
+    match std::fs::canonicalize(path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(error) => Err(error).with_context(|| format!("resolving {role} {}", path.display())),
+    }
+}
+
+/// Whether either known unit filename exists without following a symlink.
+fn known_service_file_exists(unit_dir: &Path) -> anyhow::Result<bool> {
+    for name in [SUPERVISOR_UNIT_NAME, HELM_UNIT_NAME] {
+        match std::fs::symlink_metadata(unit_dir.join(name)) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("inspecting {}/{}", unit_dir.display(), name));
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Classify one known unit file for the selected standalone installation.
+///
+/// `None` means absent, `Some(false)` means a retained foreign integration,
+/// and `Some(true)` means the file is a regular marked unit whose parsed
+/// executable matches this removal's selected installation.
+fn selected_service_file(
+    path: &Path,
+    selected_executables: &[PathBuf],
+) -> anyhow::Result<Option<bool>> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("inspecting {}", path.display())),
+    };
+    if !metadata.is_file() {
+        return Ok(Some(false));
+    }
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading the existing unit file {}", path.display()))?;
+    if !is_managed(&text) {
+        return Ok(Some(false));
+    }
+    let program = exec_start_program(&text).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{} is marked as written by farhelm helm setup, but its [Service] ExecStart executable \
+             could not be parsed; refusing to guess which installation owns it",
+            path.display()
+        )
+    })?;
+    if !program.is_absolute() {
+        bail!(
+            "{} is marked as written by farhelm helm setup, but its [Service] ExecStart executable \
+             {} is not an absolute path; refusing to guess which installation owns it",
+            path.display(),
+            program.display()
+        );
+    }
+    let program = canonical_or_missing(&program, "unit ExecStart executable")?;
+    Ok(Some(selected_executables.contains(&program)))
 }
 
 /// Run the command. See the module docs for the injection contract.
@@ -504,46 +757,18 @@ fn uninstall(
         .map(|name| (name, unit_dir.join(name)))
         .map(|(name, path)| existing_managed_text(&path).map(|text| (name, path, text.is_some())));
     let targets = targets.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
-
-    let mut failure = None;
+    let mut selected = Vec::new();
     for (name, path, present) in &targets {
         if !present {
             line!(report, "absent {}", path.display());
-            continue;
-        }
-        // Disabled BEFORE the file goes away: systemd needs the unit file
-        // present to remove the symlinks that enabled it.
-        let removed =
-            require_command(units, opts, report, &["disable", "--now", name]).and_then(|()| {
-                if opts.dry_run {
-                    line!(report, "would remove {}", path.display());
-                } else {
-                    std::fs::remove_file(path)
-                        .with_context(|| format!("removing {}", path.display()))?;
-                    line!(report, "removed {}", path.display());
-                }
-                Ok(())
+        } else {
+            selected.push(SelectedService {
+                name,
+                path: path.clone(),
             });
-        if let Err(error) = removed {
-            failure = Some(error);
-            break;
         }
-        // Nothing is owed a restart once its unit is gone, and a marker
-        // left here would make the NEXT install bounce a service it had
-        // just started.
-        settle_the_restart(unit_dir, name)?;
     }
-    // UNCONDITIONAL on every real run, including one that found both files
-    // already absent. Deriving it from "did this invocation delete
-    // something" is what made uninstall non-convergent: a run that deleted
-    // both units and then failed at the reload left systemd holding
-    // definitions for files that no longer exist, and the retry — seeing
-    // nothing to delete — skipped the reload its predecessor never
-    // finished and reported success.
-    let reloaded = require_command(units, opts, report, &["daemon-reload"]);
-    if failure.is_none() {
-        failure = reloaded.err();
-    }
+    let removal = remove_service_files(unit_dir, &selected, true, opts.dry_run, units, report);
     // Drop-ins are the operator's own configuration and setup never wrote
     // them, so it never deletes them either — but leaving them silently
     // would let a stale override apply to a unit written by a later setup.
@@ -557,10 +782,94 @@ fn uninstall(
             );
         }
     }
+    removal
+}
+
+/// Stop, disable, and remove a preflighted set of unit files.
+///
+/// Both setup's legacy `--uninstall` and standalone uninstall use this loop,
+/// so their partial-failure behavior cannot drift. In particular, a reload is
+/// still attempted after a deletion or restart-marker cleanup failure: the
+/// next retry may find no files left, but systemd still needs to forget the
+/// deleted definitions.
+fn remove_service_files(
+    unit_dir: &Path,
+    selected: &[SelectedService],
+    manager_available: bool,
+    dry_run: bool,
+    units: &mut dyn UnitManager,
+    report: &mut Report,
+) -> anyhow::Result<()> {
+    let mut failure = None;
+    for service in selected {
+        // Disabled BEFORE the file goes away: systemd needs the unit file
+        // present to remove the symlinks that enabled it.
+        let removed =
+            require_service_command(units, dry_run, report, &["disable", "--now", service.name])
+                .and_then(|()| {
+                    if dry_run {
+                        line!(report, "would remove {}", service.path.display());
+                        line!(
+                            report,
+                            "would clear restart marker {}",
+                            restart_marker(unit_dir, service.name).display()
+                        );
+                    } else {
+                        // Nothing is owed a restart once its unit is gone, and a
+                        // marker left here would make the NEXT install bounce a
+                        // service it had just started. Clear it before deleting
+                        // the selected evidence, so a marker failure leaves the
+                        // service file available for a safe retry.
+                        settle_the_restart(unit_dir, service.name)?;
+                        std::fs::remove_file(&service.path)
+                            .with_context(|| format!("removing {}", service.path.display()))?;
+                        line!(report, "removed {}", service.path.display());
+                    }
+                    Ok(())
+                });
+        if let Err(error) = removed {
+            failure = Some(error);
+            break;
+        }
+    }
+    // This is unconditional for every manager-backed real run, including a
+    // retry that finds no selected files. The dry-run helper only reports the
+    // command, preserving preview's read-only promise.
+    if manager_available {
+        let reloaded = require_service_command(units, dry_run, report, &["daemon-reload"]);
+        if failure.is_none() {
+            failure = reloaded.err();
+        }
+    }
     match failure {
         Some(error) => Err(error),
         None => Ok(()),
     }
+}
+
+/// Apply setup's command-reporting contract with a standalone dry-run flag.
+fn require_service_command(
+    units: &mut dyn UnitManager,
+    dry_run: bool,
+    report: &mut Report,
+    args: &[&str],
+) -> anyhow::Result<()> {
+    if dry_run {
+        would_run(report, args);
+        return Ok(());
+    }
+    let result = run_command(units, report, args)?;
+    if result.status != 0 {
+        let detail = command_detail(&result);
+        bail!(
+            "systemctl --user {} exited {}{}{}",
+            args.join(" "),
+            result.status,
+            if detail.is_empty() { "" } else { ": " },
+            detail
+        );
+    }
+    Ok(())
 }
 
 /// An exclusive, non-blocking lock over one unit directory, held for as
@@ -626,10 +935,18 @@ fn lock_unit_directory(unit_dir: &Path) -> anyhow::Result<SetupLock> {
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             return Ok(SetupLock { _file: file });
         }
+        let error = std::io::Error::last_os_error();
+        let contention = error.raw_os_error() == Some(libc::EWOULDBLOCK);
+        if !contention {
+            return Err(error).with_context(|| {
+                format!("locking {} with flock(LOCK_EX | LOCK_NB)", path.display())
+            });
+        }
         if std::time::Instant::now() >= deadline {
             bail!(
-                "another farhelm helm setup is running for {}; wait for it to finish, then rerun",
-                unit_dir.display()
+                "could not acquire flock(LOCK_EX | LOCK_NB) on {}: {}; wait and retry",
+                path.display(),
+                error
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -952,25 +1269,7 @@ fn require_command(
     report: &mut Report,
     args: &[&str],
 ) -> anyhow::Result<()> {
-    if opts.dry_run {
-        would_run(report, args);
-        return Ok(());
-    }
-    let result = run_command(units, report, args)?;
-    if result.status != 0 {
-        // systemctl splits its diagnostics between the two streams
-        // depending on the subcommand, so a failure that said nothing on
-        // stderr still has something to show.
-        let detail = command_detail(&result);
-        bail!(
-            "systemctl --user {} exited {}{}{}",
-            args.join(" "),
-            result.status,
-            if detail.is_empty() { "" } else { ": " },
-            detail
-        );
-    }
-    Ok(())
+    require_service_command(units, opts.dry_run, report, args)
 }
 
 /// Whether this executable is one nobody should point a systemd unit at.
@@ -1145,6 +1444,10 @@ mod tests {
         known: HashSet<String>,
         /// command → (status, stdout, stderr).
         scripted: std::collections::HashMap<String, (i32, String, String)>,
+        /// Commands that fail before systemctl can return an exit status.
+        spawn_failures: std::collections::HashMap<String, String>,
+        /// A unit path whose on-disk lifecycle a removal-order test observes.
+        removal_witness: Option<PathBuf>,
     }
 
     impl FakeUnits {
@@ -1175,6 +1478,21 @@ mod tests {
             self.script("show-environment", 1, "", stderr)
         }
 
+        /// Make one command fail at the process boundary rather than with a
+        /// systemctl status, covering a machine where `systemctl` is absent.
+        fn failing_to_run(mut self, command: &str, error: &str) -> Self {
+            self.spawn_failures
+                .insert(command.to_string(), error.to_string());
+            self
+        }
+
+        /// Observe the filesystem at the manager boundaries that order unit
+        /// disablement, deletion, and reload.
+        fn witnessing_removal(mut self, path: &Path) -> Self {
+            self.removal_witness = Some(path.to_path_buf());
+            self
+        }
+
         fn script(mut self, command: &str, status: i32, stdout: &str, stderr: &str) -> Self {
             self.scripted.insert(
                 command.to_string(),
@@ -1188,6 +1506,22 @@ mod tests {
         fn run(&mut self, args: &[&str]) -> anyhow::Result<UnitCommand> {
             let command = args.join(" ");
             self.commands.push(command.clone());
+            if let Some(error) = self.spawn_failures.get(&command) {
+                return Err(anyhow::anyhow!(error.clone()));
+            }
+            if let Some(path) = &self.removal_witness {
+                match args {
+                    ["disable", "--now", _] => assert!(
+                        path.is_file(),
+                        "the unit must still exist while systemctl disables it"
+                    ),
+                    ["daemon-reload"] => assert!(
+                        !path.exists(),
+                        "the unit must be absent before systemctl reloads definitions"
+                    ),
+                    _ => {}
+                }
+            }
             if let Some((status, stdout, stderr)) = self.scripted.get(&command) {
                 return Ok(UnitCommand {
                     status: *status,
@@ -1296,6 +1630,28 @@ mod tests {
             .unwrap();
         drop(file);
         wait_until_executable(path);
+    }
+
+    /// The fixture's standalone executable, written once so preflight can
+    /// canonicalize the same concrete path setup would have pinned.
+    fn selected_executable(fixture: &Fixture) -> PathBuf {
+        fixture.root.path().join("bin/farhelm")
+    }
+
+    /// Write the smallest setup-owned unit that identifies one executable.
+    ///
+    /// The ownership API only needs the marker and the parser's `[Service]`
+    /// input. Keeping the fixture sparse makes an accidental dependency on
+    /// unrelated unit fields visible in these tests.
+    fn write_selected_service(path: &Path, executable: &Path) {
+        std::fs::write(
+            path,
+            managed(format!(
+                "[Service]\nExecStart={} helm run\n",
+                executable.display()
+            )),
+        )
+        .unwrap();
     }
 
     /// Run the freshly written script once, retrying `ETXTBSY`, so the
@@ -1814,6 +2170,429 @@ mod tests {
         assert!(fixture.unit_dir().join("farhelm-helm.service").exists());
     }
 
+    /// A standalone uninstall may remove only marked units that name the
+    /// chosen executable; another installation's marked service and arbitrary
+    /// operator integration must remain visible to the caller as retained.
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_separates_this_installation_from_other_files() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        let other = fixture.root.path().join("other/farhelm");
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let supervisor = fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
+        let helm = fixture.unit_dir().join(HELM_UNIT_NAME);
+        write_selected_service(&supervisor, &selected);
+        write_selected_service(&helm, &other);
+        let custom = fixture.unit_dir().join("operator.service");
+        std::fs::write(&custom, b"[Service]\nExecStart=/bin/true\n").unwrap();
+
+        let plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut fixture.manager())
+                .unwrap();
+        assert_eq!(plan.selected().len(), 1);
+        assert_eq!(plan.selected()[0].name(), SUPERVISOR_UNIT_NAME);
+        assert_eq!(plan.selected()[0].path(), supervisor);
+        assert_eq!(plan.retained_paths(), [helm]);
+        assert!(
+            custom.is_file(),
+            "preflight must not inventory or change custom units"
+        );
+    }
+
+    /// A unit-file symlink must stay an integration file even when its target
+    /// looks exactly like a selected setup unit, so removal never follows a
+    /// service filename into an operator-controlled location.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_retains_symlinks_without_reading_their_targets() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let target = fixture.root.path().join("operator-unit.service");
+        write_selected_service(&target, &selected);
+        let link = fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut fixture.manager())
+                .unwrap();
+        assert!(plan.selected().is_empty());
+        assert_eq!(plan.retained_paths(), std::slice::from_ref(&link));
+        assert!(link.is_symlink());
+        assert!(
+            target.is_file(),
+            "preflight must not follow or alter the symlink target"
+        );
+    }
+
+    /// An operator can reserve a known Farhelm unit name for an independent
+    /// integration. Its unmarked regular file remains a reported retention,
+    /// never a setup-uninstall-style refusal or a deletion candidate.
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_retains_an_unmarked_custom_unit() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let custom = fixture.unit_dir().join(HELM_UNIT_NAME);
+        std::fs::write(
+            &custom,
+            b"[Service]\nExecStart=/usr/local/bin/custom-helm\n",
+        )
+        .unwrap();
+
+        let plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut fixture.manager())
+                .unwrap();
+        assert!(plan.selected().is_empty());
+        assert_eq!(plan.retained_paths(), std::slice::from_ref(&custom));
+        assert_eq!(
+            std::fs::read_to_string(&custom).unwrap(),
+            "[Service]\nExecStart=/usr/local/bin/custom-helm\n"
+        );
+    }
+
+    /// A reload-only retry must not create configuration directories on a
+    /// CLI-only installation whose user manager happens to be reachable.
+    #[farhelm_testtrace::test]
+    fn selected_service_reload_does_not_create_an_absent_unit_directory() {
+        let fixture = Fixture::new();
+        assert!(!fixture.unit_dir().exists());
+        let mut manager = fixture.manager();
+        let plan = preflight_selected_services(
+            &[selected_executable(&fixture)],
+            &fixture.unit_dir(),
+            &mut manager,
+        )
+        .unwrap();
+        assert!(plan.selected().is_empty());
+        remove_selected_services(&plan, false, &mut manager, &mut String::new()).unwrap();
+        assert!(!fixture.unit_dir().exists());
+        assert_eq!(manager.commands, ["show-environment", "daemon-reload"]);
+    }
+
+    /// A setup marker alone is not enough authority: if the marked file no
+    /// longer supplies a parseable executable, preflight must refuse before a
+    /// caller can remove a different selected service.
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_refuses_a_malformed_marked_unit_before_mutation() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let malformed = fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
+        std::fs::write(&malformed, managed("[Service]\nExecStart=\n".to_string())).unwrap();
+
+        let mut units = fixture.manager();
+        let error = preflight_selected_services(&[selected], &fixture.unit_dir(), &mut units)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&malformed.display().to_string()), "{error}");
+        assert!(error.contains("could not be parsed"), "{error}");
+        assert!(
+            malformed.is_file(),
+            "refusal must leave its evidence intact"
+        );
+        assert_eq!(units.commands, ["show-environment"]);
+    }
+
+    /// Removal must leave systemd able to undo enablement: each selected file
+    /// is disabled before deletion, then the manager reloads the final state.
+    #[farhelm_testtrace::test]
+    fn selected_service_removal_stops_before_deleting_and_reloads() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        for name in [SUPERVISOR_UNIT_NAME, HELM_UNIT_NAME] {
+            write_selected_service(&fixture.unit_dir().join(name), &selected);
+        }
+        let helm = fixture.unit_dir().join(HELM_UNIT_NAME);
+        let mut units = fixture.manager().witnessing_removal(&helm);
+        let plan = preflight_selected_services(
+            std::slice::from_ref(&selected),
+            &fixture.unit_dir(),
+            &mut units,
+        )
+        .unwrap();
+        units.commands.clear();
+        let mut report = String::new();
+        remove_selected_services(&plan, false, &mut units, &mut report).unwrap();
+
+        assert_eq!(
+            units.commands,
+            [
+                "disable --now farhelm-supervisor.service",
+                "disable --now farhelm-helm.service",
+                "daemon-reload",
+            ]
+        );
+        assert!(!fixture.unit_dir().join(SUPERVISOR_UNIT_NAME).exists());
+        assert!(!fixture.unit_dir().join(HELM_UNIT_NAME).exists());
+    }
+
+    /// A failed command is a retryable partial removal, but reload still runs
+    /// so systemd does not retain the definition already deleted before the
+    /// failure; a retry then removes the remaining selected unit.
+    #[farhelm_testtrace::test]
+    fn selected_service_removal_reports_command_failure_and_retries_reload() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        for name in [SUPERVISOR_UNIT_NAME, HELM_UNIT_NAME] {
+            write_selected_service(&fixture.unit_dir().join(name), &selected);
+        }
+        let mut units = fixture.manager().script(
+            "disable --now farhelm-helm.service",
+            1,
+            "",
+            "permission denied",
+        );
+        let plan = preflight_selected_services(
+            std::slice::from_ref(&selected),
+            &fixture.unit_dir(),
+            &mut units,
+        )
+        .unwrap();
+        units.commands.clear();
+        let mut report = String::new();
+        let error = remove_selected_services(&plan, false, &mut units, &mut report)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("permission denied"), "{error}");
+        assert_eq!(
+            units.commands,
+            [
+                "disable --now farhelm-supervisor.service",
+                "disable --now farhelm-helm.service",
+                "daemon-reload",
+            ]
+        );
+        assert!(!fixture.unit_dir().join(SUPERVISOR_UNIT_NAME).exists());
+        assert!(fixture.unit_dir().join(HELM_UNIT_NAME).is_file());
+
+        let mut retry = fixture.manager();
+        let retry_plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut retry).unwrap();
+        retry.commands.clear();
+        remove_selected_services(&retry_plan, false, &mut retry, &mut String::new()).unwrap();
+        assert_eq!(
+            retry.commands,
+            ["disable --now farhelm-helm.service", "daemon-reload"]
+        );
+        assert!(!fixture.unit_dir().join(HELM_UNIT_NAME).exists());
+    }
+
+    /// A failed reload happens after unit deletion, so the retry must reload
+    /// even though fresh preflight finds no selected files to remove.
+    #[farhelm_testtrace::test]
+    fn selected_service_removal_retries_a_reload_that_failed_after_deletion() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let service = fixture.unit_dir().join(HELM_UNIT_NAME);
+        write_selected_service(&service, &selected);
+        let mut units = fixture
+            .manager()
+            .script("daemon-reload", 1, "", "reload failed");
+        let plan = preflight_selected_services(
+            std::slice::from_ref(&selected),
+            &fixture.unit_dir(),
+            &mut units,
+        )
+        .unwrap();
+        units.commands.clear();
+        let error = remove_selected_services(&plan, false, &mut units, &mut String::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("reload failed"), "{error}");
+        assert!(!service.exists());
+
+        let mut retry = fixture.manager();
+        let retry_plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut retry).unwrap();
+        assert!(retry_plan.selected().is_empty());
+        retry.commands.clear();
+        remove_selected_services(&retry_plan, false, &mut retry, &mut String::new()).unwrap();
+        assert_eq!(retry.commands, ["daemon-reload"]);
+    }
+
+    /// A restart-marker cleanup failure must preserve the selected unit's
+    /// evidence for retry, while still reloading any state a prior action may
+    /// have changed.
+    #[farhelm_testtrace::test]
+    fn selected_service_removal_preserves_the_unit_when_marker_cleanup_fails() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let service = fixture.unit_dir().join(HELM_UNIT_NAME);
+        write_selected_service(&service, &selected);
+        let marker = restart_marker(&fixture.unit_dir(), HELM_UNIT_NAME);
+        std::fs::create_dir(&marker).unwrap();
+        let mut units = fixture.manager();
+        let plan = preflight_selected_services(
+            std::slice::from_ref(&selected),
+            &fixture.unit_dir(),
+            &mut units,
+        )
+        .unwrap();
+        units.commands.clear();
+        let error = remove_selected_services(&plan, false, &mut units, &mut String::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&marker.display().to_string()), "{error}");
+        assert!(
+            service.is_file(),
+            "marker failure must preserve retry evidence"
+        );
+        assert_eq!(
+            units.commands,
+            ["disable --now farhelm-helm.service", "daemon-reload"]
+        );
+
+        std::fs::remove_dir(&marker).unwrap();
+        let mut retry = fixture.manager();
+        let retry_plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut retry).unwrap();
+        retry.commands.clear();
+        remove_selected_services(&retry_plan, false, &mut retry, &mut String::new()).unwrap();
+        assert!(!service.exists());
+    }
+
+    /// Setup's renderer quotes paths with spaces, and selected-executable
+    /// normalization resolves the stable symlink spelling it writes back to
+    /// the real standalone binary before comparing ownership.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_matches_a_quoted_symlinked_executable() {
+        let fixture = Fixture::new();
+        let selected = fixture.root.path().join("bin/selected farhelm");
+        std::fs::copy(selected_executable(&fixture), &selected).unwrap();
+        let alias = fixture.root.path().join("bin/selected link");
+        std::os::unix::fs::symlink(&selected, &alias).unwrap();
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let rendered = render_helm_unit(&HelmUnitInputs {
+            farhelm: &alias,
+            state_dir: &fixture.root.path().join("state"),
+            port: None,
+        })
+        .unwrap();
+        let service = fixture.unit_dir().join(HELM_UNIT_NAME);
+        std::fs::write(&service, managed(rendered)).unwrap();
+
+        let plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut fixture.manager())
+                .unwrap();
+        assert_eq!(plan.selected().len(), 1);
+        assert_eq!(plan.selected()[0].path(), service);
+    }
+
+    /// Dry-run is a real preview of service removal, including restart-marker
+    /// settlement, while preserving both the unit bytes and the marker that a
+    /// later non-preview retry still needs to clear.
+    #[farhelm_testtrace::test]
+    fn selected_service_dry_run_leaves_units_and_restart_markers_untouched() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let service = fixture.unit_dir().join(HELM_UNIT_NAME);
+        write_selected_service(&service, &selected);
+        let marker = restart_marker(&fixture.unit_dir(), HELM_UNIT_NAME);
+        std::fs::write(&marker, b"sentinel").unwrap();
+        let mut units = fixture.manager();
+        let plan =
+            preflight_selected_services(&[selected], &fixture.unit_dir(), &mut units).unwrap();
+        units.commands.clear();
+        let mut report = String::new();
+        remove_selected_services(&plan, true, &mut units, &mut report).unwrap();
+
+        assert!(service.is_file());
+        assert_eq!(std::fs::read(&marker).unwrap(), b"sentinel");
+        assert!(report.contains(&format!("would clear restart marker {}", marker.display())));
+        assert!(
+            units.commands.is_empty(),
+            "dry-run must not invoke a mutating manager command"
+        );
+    }
+
+    /// No user manager does not block a CLI-only uninstall, but any known
+    /// service filename in the caller-selected directory makes ownership
+    /// unknowable and therefore refuses before executable removal.
+    #[farhelm_testtrace::test]
+    fn selected_service_preflight_handles_an_unavailable_manager_by_artifact_presence() {
+        let fixture = Fixture::new();
+        let selected = selected_executable(&fixture);
+        let mut absent = FakeUnits::default().without_a_manager("manager unavailable");
+        let plan = preflight_selected_services(
+            std::slice::from_ref(&selected),
+            &fixture.unit_dir(),
+            &mut absent,
+        )
+        .unwrap();
+        assert!(!plan.manager_available());
+        assert!(plan.selected().is_empty());
+        assert_eq!(absent.commands, ["show-environment"]);
+        remove_selected_services(&plan, false, &mut absent, &mut String::new()).unwrap();
+        assert!(
+            !fixture.unit_dir().exists(),
+            "a CLI-only plan must not create a lock directory merely to do nothing"
+        );
+        assert_eq!(absent.commands, ["show-environment"]);
+
+        std::fs::create_dir_all(fixture.unit_dir()).unwrap();
+        let artifact = fixture.unit_dir().join(HELM_UNIT_NAME);
+        std::fs::write(&artifact, b"[Unit]\n").unwrap();
+        let mut present = FakeUnits::default().without_a_manager("manager unavailable");
+        let error = preflight_selected_services(&[selected], &fixture.unit_dir(), &mut present)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("manager unavailable"), "{error}");
+        assert!(
+            error.contains(&fixture.unit_dir().display().to_string()),
+            "{error}"
+        );
+        assert!(artifact.is_file());
+        assert_eq!(present.commands, ["show-environment"]);
+
+        let spawn_fixture = Fixture::new();
+        let mut spawn_absent = FakeUnits::default()
+            .failing_to_run("show-environment", "systemctl was not found on PATH");
+        let plan = preflight_selected_services(
+            &[selected_executable(&spawn_fixture)],
+            &spawn_fixture.unit_dir(),
+            &mut spawn_absent,
+        )
+        .unwrap();
+        assert!(!plan.manager_available());
+        assert_eq!(spawn_absent.commands, ["show-environment"]);
+
+        std::fs::create_dir_all(spawn_fixture.unit_dir()).unwrap();
+        let spawn_artifact = spawn_fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
+        std::fs::write(&spawn_artifact, b"[Unit]\n").unwrap();
+        let mut spawn_present = FakeUnits::default()
+            .failing_to_run("show-environment", "systemctl was not found on PATH");
+        let error = preflight_selected_services(
+            &[selected_executable(&spawn_fixture)],
+            &spawn_fixture.unit_dir(),
+            &mut spawn_present,
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("systemctl was not found on PATH"), "{error}");
+        assert!(spawn_artifact.is_file());
+
+        let drop_in_fixture = Fixture::new();
+        let drop_in = drop_in_fixture
+            .unit_dir()
+            .join(format!("{HELM_UNIT_NAME}.d"));
+        std::fs::create_dir_all(&drop_in).unwrap();
+        let mut drop_in_absent = FakeUnits::default().without_a_manager("manager unavailable");
+        let plan = preflight_selected_services(
+            &[selected_executable(&drop_in_fixture)],
+            &drop_in_fixture.unit_dir(),
+            &mut drop_in_absent,
+        )
+        .unwrap();
+        assert_eq!(plan.retained_paths(), [drop_in]);
+    }
+
     /// `XDG_CONFIG_HOME` decides which directory the user manager
     /// searches. Writing to the wrong one leaves a valid-looking unit
     /// that is never loaded, so setup has to follow the variable rather
@@ -2036,13 +2815,23 @@ mod tests {
             0
         );
 
-        let expected = format!(
-            "another farhelm helm setup is running for {}; wait for it to finish, then rerun",
-            fixture.unit_dir().display()
-        );
         let mut units = fixture.manager();
         let (_, error) = run(&ctx, &SetupOptions::default(), &mut units);
-        assert_eq!(error, expected);
+        assert!(
+            error.contains("could not acquire flock(LOCK_EX | LOCK_NB)"),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!(
+                "on {}",
+                fixture.unit_dir().join(LOCK_FILE).display()
+            )),
+            "{error}"
+        );
+        assert!(
+            error.contains(&std::io::Error::from_raw_os_error(libc::EWOULDBLOCK).to_string()),
+            "{error}"
+        );
         assert!(!fixture.unit_dir().join("farhelm-helm.service").exists());
         assert!(
             !fixture
@@ -2058,7 +2847,7 @@ mod tests {
             ..SetupOptions::default()
         };
         let (_, error) = run(&ctx, &uninstall, &mut fixture.manager());
-        assert_eq!(error, expected);
+        assert!(error.contains("flock(LOCK_EX | LOCK_NB)"), "{error}");
 
         // A dry run writes nothing to serialize and must not be refused
         // because somebody else is mid-install.

@@ -24,6 +24,14 @@ name: CI
 # one-line change rather than a rewrite.
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Validation suite
+        type: choice
+        default: baseline
+        options:
+          - baseline
+          - uninstall-macos
 
 permissions:
   contents: read
@@ -38,6 +46,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  uninstall-macos:
+    if: inputs.suite == 'uninstall-macos'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-v2-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        with:
+          cache: false
+          rustflags: ""
+      - name: Install the pinned test runner
+        run: |
+          nextest_dir=$(python3 scripts/install-pinned-nextest.py --output-root "$RUNNER_TEMP/nextest-tools") || exit 1
+          printf '%s\n' "$nextest_dir" >> "$GITHUB_PATH"
+      - run: cargo build -p farhelm --locked
+      - name: Validate installed uninstall on the native filesystem
+        run: |
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind development --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
+          python3 scripts/record-test-run.py \
+            --kind development --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
+      - name: Retain failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uninstall-macos-failure
+          path: |
+            ${{ runner.temp }}/test-run-evidence/**/manifest.json
+            ${{ runner.temp }}/test-run-evidence/**/output-head.log
+            ${{ runner.temp }}/test-run-evidence/**/output-tail-*.log
+            ${{ runner.temp }}/test-run-evidence/**/junit.xml
+            ${{ runner.temp }}/test-run-evidence/**/nextest.toml
+
   # Docs-only PRs skip the Rust jobs. Every job below except dprint (the
   # one check that actually covers markdown, and seconds long) gates on
   # this job's `code` output, so a PR that touches only the allowlist
@@ -57,7 +111,7 @@ jobs:
   changes:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -230,7 +284,7 @@ jobs:
   dprint:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       - uses: actions/checkout@v4
       - name: Check formatting with dprint
@@ -249,7 +303,7 @@ jobs:
   dist-check:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned dist

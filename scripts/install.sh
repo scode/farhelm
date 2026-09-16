@@ -1329,6 +1329,10 @@ PLIST_EOF
       printf '%s\n' "$BUNDLE_NOTE"
     fi
     echo ""
+    echo "To remove this installation, run 'farhelm uninstall' (keeps user data)."
+    echo "Stop sessions and their terminals, quit the desktop app, and stop manually"
+    echo "started Farhelm processes first. Preview removal with 'farhelm uninstall --dry-run'."
+    echo ""
     echo "If this machine should run your helm (the web UI on 127.0.0.1:7433) and host"
     echo "agent sessions itself, run 'farhelm helm setup' — it writes and starts the helm"
     echo "and supervisor user units."

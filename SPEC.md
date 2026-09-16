@@ -172,6 +172,98 @@ job (over the user's SSH access); what may legitimately require manual host-side
 pair, on hosts provisioning does not cover. Everything else — session operations, profile management, directory browsing
 — must work from the client. SSH otherwise remains an escape hatch, never a requirement.
 
+## Install and uninstall
+
+### Installation and updates
+
+The standalone installer installs Farhelm for the current user without root. It places `farhelm` in `~/.local/bin` by
+default; `FARHELM_INSTALL_DIR` selects another directory. On supported macOS releases it also installs `farhelm-desktop`
+beside the CLI and assembles `~/Applications/Farhelm.app`, including copies of both executables. The existing app-bundle
+opt-out remains supported. Installation does not create or start services: Linux service setup is a separate, explicit
+`farhelm helm setup` operation, and macOS runs through the desktop app or manually started processes as described in
+[Topology](#topology).
+
+Re-running the installer updates the installation. Its default is the latest stable release; `FARHELM_VERSION` selects a
+specific release, including a prerelease. Updating the software preserves user data. Automatic updates are outside this
+initial uninstall scope, as are package-manager installations and changes to the packaging layout.
+
+An installation must have an equally discoverable removal path. The installation instructions document
+`farhelm uninstall` alongside installation, and a successful installer run prints that command. Users of releases
+without uninstall support may need to upgrade once before using it. Supporting those older binaries directly, or
+providing a separately downloaded uninstaller, is not required initially.
+
+### Uninstall scope and interaction
+
+`farhelm uninstall` removes the selected local standalone installation for the current user. It supports the installer's
+custom installation directory as well as its default. It must identify the installation being removed rather than assume
+that whichever files happen to be in the default directory are the intended targets. Ambiguous ownership or an
+unsupported installation must produce an actionable refusal before changes begin.
+
+The command shows the files and services it intends to remove and the data it will retain, then asks for confirmation.
+`--yes` skips that confirmation, not ownership checks. Without an interactive confirmation channel, the command requires
+`--yes` rather than proceeding implicitly. `--dry-run` reports the proposed actions and any blockers without changing
+files, stopping processes, or disabling services.
+
+Removal covers the installed CLI and desktop executable where present, the recognized installer-created macOS app
+bundle, and Linux user services owned by `farhelm helm setup` for this installation. Recognize services through the
+existing setup marker and the executable recorded in their unit files, and reuse setup's service-removal behavior. Those
+services are stopped and disabled before their executables are removed. Operator-authored services and service drop-ins
+are not deleted; retained integration files are reported. The user must stop services outside Farhelm's removal
+authority. Basic uninstall does not analyze effective service overrides or inspect their processes.
+
+Persistent user data is retained, including session history, attachments, credentials, the host registry, preferences,
+logs, and cached payloads. Completion names the retained data locations; retaining data must not be presented as erasing
+all traces of Farhelm. There is no `--purge` in this first version. Project directories, agent harness installations and
+their own data, independently installed dependencies, and unrelated files are untouched. Uninstall does not remove
+shared parent directories or change their permissions.
+
+The command affects only the selected local installation. It does not contact registered hosts, uninstall remotely
+provisioned supervisors, or remove a separate provisioning-owned local installation. Removing a helm does not stop
+sessions on its remote hosts.
+
+### Operator prerequisites and failure behavior
+
+Before uninstalling, the user must stop local sessions and their additional terminals, quit the desktop app, and stop
+manually started Farhelm processes. Sessions may survive a supervisor exit, so quitting the app or supervisor alone is
+not enough. A one-time stop/restart when upgrading to the first uninstall-capable release is acceptable.
+
+Basic uninstall operates on files. It does not walk processes, discover runtime sockets, reconstruct session ownership,
+or introduce a runtime registry. It neither forcibly terminates agents nor claims to prove that all processes have
+stopped. The command explains the stopping prerequisite before removal, including with `--yes`.
+
+Refusals identify the actual filesystem check, the path and observed result or concrete error. A file's existence must
+never be described as proof that a process is running. Diagnostics appear in ordinary output without requiring verbose
+mode and contain enough evidence to investigate a suspected false positive.
+
+Ownership checks precede removal. A foreign file or bundle must not be deleted merely because its name matches an
+expected artifact, and symlinks must not redirect removal into unrelated files or directories. Missing artifacts are
+acceptable when the remaining installation can still be identified safely.
+
+Removal can fail partway through. Failures return a nonzero status, distinguish completed actions from remaining work,
+and explain how to retry. Completed removal steps need not be rolled back, but retry must tolerate them and continue
+cleanup safely. The CLI remains available until the other required removal steps succeed so an ordinary partial failure
+does not remove the user's retry command. Successful removal does not promise that the now-removed command remains
+invocable.
+
+Initial support assumes installation, updates, setup, desktop startup, and session creation do not run concurrently with
+uninstall. The user must keep those operations stopped until uninstall finishes. Coordination that closes races between
+checks and removal is deferred in TODO.md; this version does not claim safety under concurrent lifecycle operations.
+
+### Acceptance coverage
+
+Automated tests must exercise the actual installer and installed uninstall command through fresh installation and update
+followed by removal. They must verify custom paths, dry-run and confirmation behavior, retained data and unrelated
+files, foreign artifacts and symlinks, the stopping prerequisite, and partial-failure retries. Linux coverage must
+establish the service ownership and removal behavior. Concurrent lifecycle operations are outside this initial
+acceptance scope.
+
+Filesystem-refusal tests must verify the diagnostic's evidence against the fixture that caused the refusal. An assertion
+that output merely says "unsafe" or names an artifact does not establish this contract.
+
+macOS file behavior must be tested on a native macOS runner; a simulated macOS layout on Linux alone is insufficient.
+Bundle construction and removal can be tested headlessly without rendering the UI. These focused checks must pass before
+shipping uninstall support.
+
 ## Sessions
 
 ### Creation

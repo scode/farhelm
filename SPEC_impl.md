@@ -1674,6 +1674,32 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   session deleted through ANOTHER helm, or dropped from a cache because its host was removed here, can leave a row
   behind, which is accepted as garbage bounded by the number of sessions that ever existed, at a few dozen bytes each.
 
+## Standalone uninstall
+
+`farhelm uninstall` establishes ownership from the installer's adjacent NUL-separated receipts before confirmation. The
+receipts name the physical installation directory and SHA-256 digests; deletion targets come from fixed paths in the
+code, never arbitrary receipt fields. Payloads and receipts must be regular files owned by the current user, and
+receipts must not be group or world writable. App contents are checked against the fixed bundle layout. An app-local CLI
+invocation directs the operator to the flat CLI so bundle removal cannot delete the retry command prematurely.
+
+Removal is ordered to leave the flat CLI until the other required work succeeds. Already-absent payloads are accepted
+when the surviving receipt still proves ownership. During final bundle-directory removal, the validated app receipt is
+published without replacement at `~/Applications/.Farhelm.app.uninstall-receipt`. This preserves retry authority after
+the internal receipt is deleted. If both receipts survive, they must agree. The adjacent receipt is deleted after the
+bundle; flat receipt cleanup after CLI deletion is nonfatal and reports any retained metadata. No recursive deletion or
+rollback is needed.
+
+On Linux, setup's existing managed-unit parser and removal machinery select services whose recorded executable resolves
+to this installation. Custom and other-installation units, drop-ins and linger remain untouched. Services are disabled
+and stopped before their unit files or executables are removed. The operation does not examine effective overrides or
+processes. Manual shutdown and excluding concurrent install, update, setup and startup remain operator prerequisites.
+
+The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
+not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation
+errors, and ask the user to resolve the failure and retry. Tests inject failures at deletion boundaries and run the
+actual installer and compiled CLI in private homes; native macOS executes the same filesystem acceptance harness
+headlessly in on-demand CI and the release gate.
+
 ## Logging
 
 `tracing` everywhere, with `tracing-subscriber` env-filter semantics. The intended mature shape uses spans carrying

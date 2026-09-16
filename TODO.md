@@ -403,6 +403,11 @@ Real enough to keep, not established enough to act on. Each names what would set
 
 ## Maybe later
 
+- Coordinate uninstall with installation, setup, and runtime startup. Share the relevant locks and revalidate removal
+  targets under them so an update, setup, desktop launch, or new session cannot race uninstall's checks and deletion.
+  Deferred from initial standalone uninstall support; that first version assumes these operations do not run
+  concurrently.
+
 - Extend Muse beyond basic terminal launching: integrate per-launch hooks/instructions, capture the correct conversation
   identity for resume, and recognize Muse's waiting/status signals. Built-in `muse` and `muse-yolo` profiles currently
   use generic activity status without hooks or conversation resume; these are Farhelm integration gaps, not established
