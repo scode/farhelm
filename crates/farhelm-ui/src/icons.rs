@@ -1,4 +1,4 @@
-//! Inline SVG glyphs for the sidebar's locality marks.
+//! Inline SVG glyphs for compact sidebar facts.
 //!
 //! This is the app's first icon vocabulary (2026-09-03): before this
 //! module the only glyph anywhere in the UI was the "⋯" menu
@@ -46,6 +46,139 @@
 //! by association.
 
 use dioxus::prelude::*;
+
+/// The harness identity a sidebar badge can establish without trusting a
+/// profile name. `Terminal` is deliberately the fallback: it says that the
+/// stored command exists without pretending Farhelm knows what runs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HarnessGlyph {
+    Codex,
+    Claude,
+    Muse,
+    OpenCode,
+    Terminal,
+}
+
+/// The compact mark that qualifies a recognized harness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PermissionGlyph {
+    Yolo,
+    FullAuto,
+}
+
+/// An ended session's distinct sidebar silhouette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EndedGlyph {
+    Stopped,
+    Exited,
+    Interrupted,
+    Error,
+}
+
+/// A state qualifier that compact mode must preserve without adding words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QualifierGlyph {
+    Stale,
+    Archived,
+}
+
+/// Draw the one-character harness mark used in the sidebar's agent track.
+///
+/// The C/M/L paths are Farhelm's interim letter marks. The OpenCode geometry
+/// is the two-path mark from anomalyco/opencode commit
+/// `e03db9bc6908f75c9334d8aa997deeaac81c0298`, licensed MIT, Copyright (c)
+/// 2025 opencode. It stays inline so the web and desktop bundles cannot drift
+/// and so no client downloads branding at runtime.
+#[component]
+pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
+    let token = match glyph {
+        HarnessGlyph::Codex => "codex",
+        HarnessGlyph::Claude => "claude",
+        HarnessGlyph::Muse => "muse",
+        HarnessGlyph::OpenCode => "opencode",
+        HarnessGlyph::Terminal => "terminal",
+    };
+    rsx! {
+        svg {
+            class: "sidebar-glyph harness-glyph",
+            "data-glyph": "{token}",
+            view_box: "0 0 12 12",
+            "aria-hidden": "true",
+            match glyph {
+                HarnessGlyph::Codex => rsx! { path { d: "M10 2.4A4.8 4.8 0 1 0 10 9.6L8.5 8.1A2.7 2.7 0 1 1 8.5 3.9Z", fill: "currentColor" } },
+                HarnessGlyph::Claude => rsx! { path { d: "M2 2h2v6h6v2H2z", fill: "currentColor" } },
+                HarnessGlyph::Muse => rsx! { path { d: "M1.2 10V2h1.9l2.9 4.6L8.9 2h1.9v8H9V5.2L6.8 8.7H5.2L3 5.2V10z", fill: "currentColor" } },
+                HarnessGlyph::OpenCode => rsx! {
+                    // Source geometry uses a 240×300 canvas. A nested group
+                    // preserves that ratio inside this common 12px glyph box.
+                    g { transform: "scale(.05 .04)",
+                        path { d: "M180 240H60V120H180V240Z", fill: "currentColor" }
+                        path { d: "M180 60H60V240H180V60ZM240 300H0V0H240V300Z", fill: "currentColor", fill_rule: "evenodd" }
+                    }
+                },
+                HarnessGlyph::Terminal => rsx! { path { d: "M1.5 2h9v8h-9zM3.1 4l1.5 1.5L3.1 7M6 7h2.5", fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round" } },
+            }
+        }
+    }
+}
+
+/// Draw the permission mark beside a known harness without relying on color.
+#[component]
+pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
+    let (token, closed) = match glyph {
+        PermissionGlyph::Yolo => ("yolo", false),
+        PermissionGlyph::FullAuto => ("full-auto", true),
+    };
+    rsx! {
+        svg { class: "sidebar-glyph permission-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.25", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
+            path { d: "M2.5 5.2h7v4.6h-7z" }
+            if closed {
+                path { d: "M4 5.2V3.8a2 2 0 0 1 4 0v1.4" }
+            } else {
+                path { d: "M4 5.2V3.8a2 2 0 0 1 3.4-1.4" }
+            }
+        }
+    }
+}
+
+/// Draw an ended-status shape in the leading slot compact rows already own.
+#[component]
+pub(crate) fn EndedStatusIcon(glyph: EndedGlyph) -> Element {
+    let token = match glyph {
+        EndedGlyph::Stopped => "stopped",
+        EndedGlyph::Exited => "exited",
+        EndedGlyph::Interrupted => "interrupted",
+        EndedGlyph::Error => "error",
+    };
+    rsx! {
+        svg { class: "sidebar-glyph ended-status-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
+            match glyph {
+                EndedGlyph::Stopped => rsx! { rect { x: "3", y: "3", width: "6", height: "6", fill: "currentColor", stroke: "none" } },
+                EndedGlyph::Exited => rsx! { path { d: "M2 2.5h4v7H2zM6 6h4M8.5 4.2 10.3 6 8.5 7.8" } },
+                EndedGlyph::Interrupted => rsx! { path { d: "M2.2 3.2 3.2 2.2l6.6 6.6-1 1zM8.8 2.2l1 1-6.6 6.6-1-1z" } },
+                EndedGlyph::Error => rsx! { path { d: "M6 1.7 10.5 10h-9zM6 4.4v2.4M6 8.4h.01" } },
+            }
+        }
+    }
+}
+
+/// Draw a compact qualifier while keeping the qualifier's complete text next
+/// to this decorative icon in the accessibility tree.
+#[component]
+pub(crate) fn QualifierIcon(glyph: QualifierGlyph) -> Element {
+    let token = match glyph {
+        QualifierGlyph::Stale => "stale",
+        QualifierGlyph::Archived => "archived",
+    };
+    rsx! {
+        svg { class: "sidebar-glyph qualifier-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
+            match glyph {
+                QualifierGlyph::Stale => rsx! { path { d: "M6 2v4l2.5 1.5M6 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" } },
+                QualifierGlyph::Archived => rsx! { path { d: "M2 4h8v6H2zM1.5 2.3h9v1.5h-9zM4.5 6.5h3" } },
+            }
+        }
+    }
+}
 
 /// The local-session mark: a monitor on a stand.
 ///

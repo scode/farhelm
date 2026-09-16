@@ -362,17 +362,18 @@ client to hold and sort the entire fleet in memory; a fleet that outgrows the ca
 for, and the notice is the whole of the answer to it.
 
 A row's first line shows its status (drawn as described under Status), locality mark, title, agent label, and last
-activity time; live status dots and locality marks occupy aligned columns, while ended status words stay beside the
-title with the dot slot reserved. Times share a right-aligned column before the row menu. A session whose host cannot
-yet be placed either way marks neither, rather than guessing. Its second line shows the helm-supplied host name (an
-alias when set), then `:`, then its working directory; a legacy row with no host name shows only the directory, rather
-than inventing a local identity or a dangling separator. The second line is hidden when the helm-wide compact preference
-is on, which defaults off and is shared at the next preference seed across clients. The working directory and launch
-command remain abbreviated only where shown, with their full, untouched values always available on the row (a tooltip on
-the web and desktop clients); an abbreviation is never the only place a value is recorded. A row's own actions menu,
-beyond the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or by clicking the
-dot itself — that sets the session's seen state directly (see Status). Exactly how a row lays out its lines and pixels
-is an implementation choice, covered in SPEC_impl.md rather than here.
+activity time; status and locality marks occupy aligned columns. Compact ended rows replace the live dot with a distinct
+ended-state icon, preserving complete status details in accessible text and a tooltip. Noncompact rows show the complete
+ended status on a separate full-width line that wraps instead of truncating. Times share a right-aligned column before
+the row menu. A session whose host cannot yet be placed either way marks neither, rather than guessing. Its second line
+shows the helm-supplied host name (an alias when set), then `:`, then its working directory; a legacy row with no host
+name shows only the directory, rather than inventing a local identity or a dangling separator. The second line is hidden
+when the helm-wide compact preference is on, which defaults off and is shared at the next preference seed across
+clients. The working directory and launch command remain abbreviated only where shown, with their full, untouched values
+always available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value
+is recorded. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread
+toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status).
+Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather than here.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host actions
@@ -401,10 +402,12 @@ restart, archive, or delete are the ways out.
 
 How a status is DRAWN depends on how much it has to say. The three live states are a color-coded dot beside the
 session's title — running pulses, waiting and idle do not — with the status word itself always present as text for
-screen readers and anything else that reads rather than looks, never replaced by the color. Ended states keep their word
-visible, because an exit code, the stop annotation, and the reason an agent never started are facts no dot carries. The
-pulse is a claim about the present, so it stands down wherever the status is a last-known report rather than a live one:
-a session on an unreachable host shows a still dot whatever its status says.
+screen readers and anything else that reads rather than looks, never replaced by the color. Outside compact mode, ended
+states keep their complete wording visible, including exit code, stop annotation, and launch failure details. Compact
+mode uses distinct stopped, exited, interrupted, and error icons; those details remain in accessible text and tooltips
+without expanding the row. Ended icons do not have the live dot's mark-read action. The pulse is a claim about the
+present, so it stands down wherever the status is a last-known report rather than a live one: a session on an
+unreachable host shows a still dot whatever its status says.
 
 The dot's colour is one of four, not three: running pulses green; waiting is red, since it is the one live status that
 is a request directed at a human and belongs with the other attention colours rather than beside "nothing is wrong";

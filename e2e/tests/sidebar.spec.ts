@@ -976,7 +976,7 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
 
     const title = (await target.locator(".session-title").boundingBox())!;
     const cwd = (await target.locator(".session-cwd").boundingBox())!;
-    const invocation = (await target.locator(".session-invocation").boundingBox())!;
+    const invocation = (await target.locator(".session-agent").boundingBox())!;
     for (const [name, box] of [
       ["title", title],
       ["cwd", cwd],
@@ -1126,17 +1126,16 @@ test("a long profile-backed invocation badge clips inside the row", async ({ pag
     await expect(target).toBeVisible({ timeout: 20_000 });
 
     const sideBox = (await page.locator(".app-sidebar").boundingBox())!;
-    const badge = target.locator(".session-invocation");
+    const badge = target.locator(".session-agent");
     const cwd = target.locator(".session-cwd");
     const badgeBox = (await badge.boundingBox())!;
     const cwdBox = (await cwd.boundingBox())!;
 
     // The badge never forces the row wide...
     expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
-    // ...and it really is being clipped, not merely short enough to fit —
-    // proving the ellipsis rule did the constraining rather than a
-    // conveniently narrow fixture.
-    expect(await badge.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    // Its full profile provenance stays discoverable in the glyph track's
+    // tooltip, while the one-character visual mark cannot consume the cwd.
+    await expect(badge).toHaveAttribute("title", new RegExp(`profile: ${name}`));
     // The directory remains usable on its separate host/cwd line; an
     // unbounded badge cannot squeeze it because the two fields no longer
     // share a flex row.
@@ -3253,7 +3252,10 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
 test("narrow rows align fixed facts and reserve only control-sized menu gutters", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
+  const preferences = await readPreferences(request);
+  await patchPreferences(request, { compact: false });
+  try {
   const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
   const local = await localHostId(request);
   const activity = Math.floor(Date.now() / 1000) - 120;
@@ -3270,7 +3272,8 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             id: "narrow-live",
             title: "live row",
             cwd: "/srv/live",
-            invocation: "a",
+            invocation: "codex --yolo",
+            launch: { harness: "codex", model: null, effort: null, permissions: "yolo" },
             host: 999_991,
             host_name: "remote-build-host",
             status: { state: "running" },
@@ -3278,7 +3281,7 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
           },
           {
             id: "narrow-ended",
-            title: "ended row",
+            title: `ended-${"long-title-".repeat(24)}`,
             cwd: "/srv/ended",
             invocation: "/opt/tools/a-very-long-agent-program-name --flag",
             host: local,
@@ -3292,13 +3295,57 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             id: "narrow-unknown",
             title: "unknown row",
             cwd: "/srv/unknown",
-            invocation: "agent",
+            invocation: "opencode --auto",
             status: { state: "unknown" },
             last_activity_at: activity,
           },
+          {
+            id: "narrow-claude",
+            title: "claude glyph",
+            cwd: "/srv/claude",
+            invocation: "claude --dangerously-skip-permissions",
+            status: { state: "running" },
+            last_activity_at: activity,
+          },
+          {
+            id: "narrow-muse",
+            title: "muse glyph",
+            cwd: "/srv/muse",
+            invocation: "muse --yolo",
+            status: { state: "running" },
+            last_activity_at: activity,
+          },
+          {
+            id: "narrow-stopped",
+            title: "stopped glyph",
+            cwd: "/srv/stopped",
+            invocation: "claude",
+            status: { state: "exited", exit_code: null },
+            annotation: "stopped by user",
+            last_activity_at: activity,
+          },
+          {
+            id: "narrow-interrupted",
+            title: "interrupted glyph",
+            cwd: "/srv/interrupted",
+            invocation: "muse",
+            status: { state: "interrupted" },
+            last_activity_at: activity,
+          },
+          {
+            id: "narrow-error",
+            title: "error glyph",
+            cwd: "/srv/error",
+            invocation: "codex",
+            status: { state: "error", detail: `spaced detail ${"X".repeat(180)}` },
+            last_activity_at: activity,
+          },
         ],
-        total: 3,
-        matching: 3,
+        // The count is part of the controlled listing contract too: keeping
+        // it equal to the rows below prevents a pagination/count bug from
+        // being hidden behind this layout fixture.
+        total: 8,
+        matching: 8,
         truncated: false,
       },
     });
@@ -3308,7 +3355,16 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await page.locator(".app-sidebar").evaluate((element) => {
     (element as HTMLElement).style.width = "280px";
   });
-  const rows = [row(page, "narrow-live"), row(page, "narrow-ended"), row(page, "narrow-unknown")];
+  const rows = [
+    row(page, "narrow-live"),
+    row(page, "narrow-ended"),
+    row(page, "narrow-unknown"),
+    row(page, "narrow-claude"),
+    row(page, "narrow-muse"),
+    row(page, "narrow-stopped"),
+    row(page, "narrow-interrupted"),
+    row(page, "narrow-error"),
+  ];
   for (const target of rows) await expect(target).toBeVisible({ timeout: 20_000 });
 
   async function left(target: Locator, selector: string) {
@@ -3327,31 +3383,39 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
     expect(badge.x + badge.width, "an age must not overlap its agent badge").toBeLessThanOrEqual(ages[index].x);
   }
   await expect(rows[0].locator(".session-status-slot .status-dot")).toHaveCount(1);
+  await expect(rows[0].locator(".harness-glyph")).toHaveAttribute("data-glyph", "codex");
+  await expect(rows[0].locator(".permission-glyph")).toHaveAttribute("data-glyph", "yolo");
   await expect(rows[1].locator(".session-status-slot .status-badge")).toHaveCount(0);
-  await expect(rows[1].locator(".session-identity-copy .status-badge")).toContainText("exited");
+  await expect(rows[1].locator(".session-row-detail .status-badge")).toContainText("exited (code 17)");
   await expect(rows[2].locator(".session-status-slot .status-badge")).toHaveCount(0);
   await expect(rows[2].locator(".session-locality-slot .host-kind-icon")).toHaveCount(0);
   await expect(rows[2].locator(".session-row-meta")).toBeVisible();
   await expect(rows[2].locator(".session-host")).toHaveCount(0);
   await expect(rows[2].locator(".session-host-separator")).toHaveCount(0);
   await expect(rows[2].locator(".session-cwd")).toHaveText("/srv/unknown");
-  await expect(rows[1].locator(".stale-badge")).toBeVisible();
-  await expect(rows[1].locator(".archived-badge")).toBeVisible();
+  await expect(rows[2].locator(".harness-glyph")).toHaveAttribute("data-glyph", "opencode");
+  await expect(rows[2].locator(".permission-glyph")).toHaveAttribute("data-glyph", "yolo");
+  await expect(rows[3].locator(".harness-glyph")).toHaveAttribute("data-glyph", "claude");
+  await expect(rows[3].locator(".permission-glyph")).toHaveAttribute("data-glyph", "yolo");
+  await expect(rows[4].locator(".harness-glyph")).toHaveAttribute("data-glyph", "muse");
+  await expect(rows[4].locator(".permission-glyph")).toHaveAttribute("data-glyph", "yolo");
+  await expect(rows[7].locator(".session-row-detail .status-badge")).toContainText("spaced detail");
+  expect((await rows[7].boundingBox())!.width, "unbroken error detail stays contained").toBeLessThanOrEqual(
+    (await page.locator(".app-sidebar").boundingBox())!.width + 1,
+  );
+  await expect(rows[1].locator(".session-row-detail .stale-badge")).toBeVisible();
+  await expect(rows[1].locator(".session-row-detail .archived-badge")).toBeVisible();
   // Stale/archive qualifiers must not mute the confirmed-local caution cue.
   await expect(rows[1].locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
-  /** DOM visibility alone misses a badge completely clipped by its parent. */
-  async function expectPaintedQualifiers() {
-    const identity = (await rows[1].locator(".session-identity-copy").boundingBox())!;
-    for (const selector of [".status-badge", ".stale-badge", ".archived-badge"]) {
-      const badge = (await rows[1].locator(`.session-identity-copy ${selector}`).boundingBox())!;
-      expect(badge.width, `${selector} retains visible text space`).toBeGreaterThan(12);
-      expect(badge.x).toBeGreaterThanOrEqual(identity.x - 1);
-      expect(badge.x + badge.width).toBeLessThanOrEqual(identity.x + identity.width + 1);
-      expect(badge.y).toBeGreaterThanOrEqual(identity.y - 1);
-      expect(badge.y + badge.height).toBeLessThanOrEqual(identity.y + identity.height + 1);
-    }
+  /** DOM visibility alone misses a long detail clipping within its row. */
+  const detail = rows[1].locator(".session-row-detail");
+  const detailBox = (await detail.boundingBox())!;
+  for (const selector of [".status-badge", ".stale-badge", ".archived-badge"]) {
+    const detailPart = (await detail.locator(selector).boundingBox())!;
+    expect(detailPart.width, `${selector} retains visible text space`).toBeGreaterThan(12);
+    expect(detailPart.x).toBeGreaterThanOrEqual(detailBox.x - 1);
+    expect(detailPart.x + detailPart.width).toBeLessThanOrEqual(detailBox.x + detailBox.width + 1);
   }
-  await expectPaintedQualifiers();
   const liveTitle = rows[0].locator(".session-title");
   const liveTitleBox = (await liveTitle.boundingBox())!;
   const fourCharacters = await liveTitle.evaluate((node) => {
@@ -3389,6 +3453,37 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   );
   expect(hostExcess).toBeGreaterThanOrEqual(0);
   expect(hostExcess).toBeLessThanOrEqual(8.5);
+
+  // Compact mode keeps the ended row to one visual line: the complete
+  // status and retention words move into accessible names/tooltips while
+  // distinct, inspected SVGs remain in their existing fixed tracks.
+  await page.getByLabel("compact").check();
+  await expect(rows[1].locator(".session-row-detail")).toHaveCount(0);
+  await expect(rows[1].locator(".session-row-meta")).toHaveCount(0);
+  await expect(rows[1].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "exited");
+  await expect(rows[1].locator(".compact-ended-status")).toHaveAttribute("title", "exited (code 17)");
+  await expect(rows[5].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "stopped");
+  await expect(rows[5].locator(".compact-ended-status")).toHaveAttribute("title", "exited (code unknown) — stopped by user");
+  await expect(rows[6].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "interrupted");
+  await expect(rows[7].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "error");
+  await expect(rows[1].locator(".compact-qualifier .qualifier-glyph[data-glyph='stale']")).toHaveCount(1);
+  await expect(rows[1].locator(".compact-qualifier .qualifier-glyph[data-glyph='archived']")).toHaveCount(1);
+  await expect(rows[1].locator(".session-status-slot .visually-hidden")).toContainText("exited (code 17)");
+  const compactRow = (await rows[1].boundingBox())!;
+  const compactLive = (await rows[0].boundingBox())!;
+  expect(compactRow.height, "compact ended rows have no wrapped second line").toBeLessThanOrEqual(
+    compactLive.height + 1,
+  );
+
+  // The artifact accompanies the geometry assertions rather than replacing
+  // them: a reviewer can inspect exact C/M/L/terminal and status silhouettes
+  // at the narrow width after the DOM has already proved their meaning.
+  const screenshot = testInfo.outputPath("sidebar-glyphs-280px.png");
+  await page.locator(".app-sidebar").screenshot({ path: screenshot });
+  await testInfo.attach("sidebar glyphs at 280px", { path: screenshot, contentType: "image/png" });
+  } finally {
+    await patchPreferences(request, { compact: preferences.compact ?? null });
+  }
 });
 
 /** Closing the app-bar popup discards its local editor draft, so reopening
@@ -3765,13 +3860,11 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   await page.goto("/");
   const target = row(page, "bidi-invocation-session");
   await expect(target).toBeVisible({ timeout: 20_000 });
-  const basename = target.locator(".session-invocation .peer-value");
+  const badge = target.locator(".session-agent");
   // Escaped to a visible `<U+202E>` form rather than an invisible control
-  // character (`display_peer`), and the raw override still rides along on
-  // `title` unmangled — the full truth is a hover away, never on screen.
-  await expect(basename).toHaveText("<U+202E>evil-agent");
-  await expect(target.locator(".session-invocation")).toHaveAttribute("title", invocation);
-  expect(await basename.evaluate((el) => getComputedStyle(el).direction)).toBe("ltr");
+  // character (`display_peer`). The tooltip uses the same safe rendering,
+  // so its native UI cannot reinterpret a peer-controlled direction mark.
+  await expect(badge).toHaveAttribute("title", `command: <U+202E>evil-agent — /opt/bin/<U+202E>evil-agent --some-flag`);
 });
 
 /**
