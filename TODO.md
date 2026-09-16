@@ -20,6 +20,268 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Consistent replace-with composer.** "Replace with" sometimes opens the regular harness composer and sometimes a
+  different form with an agent-profile dropdown, command field, and "back to harnesses" button. Use one composer layout
+  for New, Clone, and Replace with: shared destination, folder, name, search, and launch controls. Keep
+  arbitrary-command and profile support through "other / command", showing the profile picker and command field where
+  model, effort, and permissions otherwise appear. Legacy sessions open this same layout with their profile or exact
+  command prefilled; switching to a harness changes the agent-specific controls while preserving folder and name. Share
+  the common input controls and handlers; structured and command/profile launches still need their own validation.
+  Preliminary assessment: `prefill_from` in `crates/farhelm-ui/src/list/create_form.rs` copies `Session.launch`, and the
+  prefill effect selects `CreationSurface::Structured` when that snapshot exists, `Legacy` otherwise. This explains the
+  two reported shapes; the affected sessions' stored metadata has not been inspected. The distinction preserves launch
+  intent: legacy profiles and arbitrary commands lack declarative harness settings, so do not infer those settings by
+  parsing the invocation or silently change what would launch. Preserve valid profile identity and raw-command fallback,
+  directory, title, replace-with's fixed source host, and create-then-delete behavior. Reconcile SPEC.md's explicit
+  secondary legacy surface with its shared-launcher requirement, and update SPEC_impl.md alongside the eventual fix.
+  Validate both structured and legacy prefills (including a missing/renamed profile) and switching to another harness
+  without losing shared fields or leaking legacy values into the structured request.
+
+- **Compact harness and YOLO glyphs in the sidebar.** Replace labels such as `codex-yolo` with a character-sized SVG
+  harness logo, plus one character-sized YOLO indicator when applicable: one or two glyphs instead of a text badge. Draw
+  custom letter-shaped SVG paths: **C for Codex, M for Meta's Muse Code, and L for Claude Code**. These are our own
+  interim marks until better alternatives are found, not official vendor logos; use paths rather than font-dependent SVG
+  text. Use the official OpenCode SVG mark. Proposed permission glyph: a simple open-padlock outline, recognizable at
+  the sidebar's text size, with shape rather than color alone conveying the distinction. Keep the full harness/profile
+  name, invocation, and specific permission meaning in a tooltip and accessible text. A missing YOLO glyph must not
+  claim that an arbitrary command is sandboxed. Preserve a distinct representation for Codex's sandboxed `--full-auto`;
+  it is not equivalent to YOLO. Unknown commands need a neutral terminal glyph with their exact identity still
+  available, rather than an invented harness match.
+
+  Preliminary assessment: `SessionRow` in `crates/farhelm-ui/src/list/row.rs` displays the source profile's name when
+  present, otherwise `compact_invocation`'s basename and marker. Its marker table currently covers only Codex and
+  Claude; profile names alone are not evidence of a harness or permission mode. Prefer `Session.launch` for structured
+  rows and conservative executable/argument recognition for legacy rows, including profile-backed sessions. Account for
+  Muse's `--yolo`, Claude's `--dangerously-skip-permissions`, Codex's two bypass spellings, and OpenCode's `--auto`,
+  preserving argument boundaries and the existing stop-at-`--` rule. This is display classification, not conversion of
+  legacy launch intent. Narrow the agent track in `assets/app.css`: it currently permits `8em` or 35% of the row, so
+  replacing the contents alone does not recover the title space. Reuse the inline-SVG approach in `src/icons.rs`, update
+  the sidebar description in SPEC_impl.md, and check actual glyph legibility, title space, tooltip/accessibility
+  behavior, and alignment in narrow, compact, selected, stale, and archived rows on both browser engines and themes.
+
+  Official artwork research: OpenCode publishes standalone SVG marks and square variants in its
+  [official brand asset directory](https://github.com/anomalyco/opencode/tree/dev/packages/console/app/src/asset/brand)
+  (`opencode-logo-dark.svg`, `opencode-logo-light.svg`, and their `-square` variants); the standalone and square dark
+  SVGs were fetched successfully. Official Codex, Claude, and Meta Muse Code SVG sources were not established; finding
+  them is not a prerequisite for this item now that custom letter glyphs are chosen. Retain source attribution and
+  applicable asset terms for the OpenCode mark, and package all artwork locally for web and desktop.
+
+- **Keep stopped sessions compact.** With compact mode enabled, stopped sessions still grow a second line containing
+  truncated text such as "exited — st…". Keep compact rows to one visual line: put a character-sized ended-status SVG in
+  the existing leading status slot instead of showing the ended-status badge beside the title. Proposed vocabulary: a
+  stop square for user-stopped sessions, an open door for other exits, and distinct interrupted/error symbols so a
+  failed launch or lost-track state cannot look like an ordinary exit. Live sessions retain their current dots. Keep the
+  full status, known exit code or explicit unknown, and stop/error annotation in the tooltip and accessible text; the
+  icon is presentation, not a new "stopped" status. Ended icons must not inherit the live dot's mark-read action.
+  Preserve the fuller status wording outside compact mode.
+
+  Preliminary assessment: `SessionRow` in `crates/farhelm-ui/src/list/row.rs` splits `status_badge` into a leading live
+  dot or an `ended_badge` beside the title, independently of `compact`. Compact mode only removes the host/directory
+  line. `.session-identity-copy` in `assets/app.css` permits the remaining badges to wrap, causing the reported extra
+  line. Add a compact presentation for ended states using `src/status.rs` and `src/icons.rs`; do not change the shared
+  status meaning or globally hide status details in other views. Reconcile SPEC.md's requirement that ended words stay
+  visible and SPEC_impl.md's allowance for taller compact rows with this compact-mode exception. Account for stale and
+  archived qualifiers too so they do not reintroduce wrapping or disappear without an accessible, discoverable
+  indication. Verify row height and distinct status glyphs at narrow widths with long titles and annotations, including
+  user stops, normal/nonzero exits, interrupted and error states, and compact-mode toggling on both browser engines.
+
+- **Show complete status details outside compact mode.** Ended-session messages such as "exited — stopped by user"
+  truncate to "exited — st…" even when there is unused space to the right. Give noncompact rows a dedicated
+  status-detail line beneath the title, aligned with the title and spanning the available width beneath the agent and
+  activity columns, with the host/directory line below it. Show the complete status, exit code when known, and
+  annotation/error detail. Wrap onto additional lines when needed, including long unbroken tokens; do not use ellipsis,
+  a line clamp, or a tooltip as the only way to read the message. Retain status colors and readable secondary-text
+  styling. This complements the compact-status-icon item above: compact rows remain one line, while noncompact rows
+  expose the detail.
+
+  Preliminary assessment: `SessionRow` in `crates/farhelm-ui/src/list/row.rs` puts `ended_badge` inside
+  `.session-identity-copy`, the title's grid column. Wrapping the badge onto another line does not let it use the space
+  beneath the agent/activity columns. In `assets/app.css`, the identity badge override also imposes `max-width: 100%`,
+  `overflow: hidden`, `text-overflow: ellipsis`, and `white-space: nowrap`; the shared `.status-badge` separately caps
+  width at `32ch`. Move the noncompact detail outside that narrow title container and apply wrapping rules scoped to the
+  sidebar detail rather than changing every `StatusBadgeView` caller. Preserve the existing width containment:
+  peer-supplied error text must not widen the row or push its menu out of reach. Update SPEC_impl.md's sidebar layout
+  description and affected comments. Verify full visible text and bounded row width for ordinary stops, exit codes,
+  interrupted states, long error annotations, and unbroken tokens at narrow and wide sidebar sizes on both browser
+  engines, including compact-mode toggling and the planned narrower harness-icon column.
+
+- **Keep rename open during activity reordering.** While editing a session name under "recently active" sorting,
+  activity elsewhere can reorder the list and make the rename editor disappear. Reopening may restore it, but that part
+  of the report is uncertain. A background refresh or reorder must leave an in-progress rename visible and usable,
+  preserving the exact draft, keyboard focus, caret/selection, and binding to the original session id. Continuing to
+  type and saving must rename that session, regardless of its new position. Do not freeze fleet updates or require the
+  user to reopen the editor to finish.
+
+  Preliminary assessment: `commit_listing` in `crates/farhelm-ui/src/list/view.rs` calls `menu_row_reordered` and
+  unconditionally clears `menu_open` when the open row changes index. The rename form lives inside that menu panel in
+  `list/row.rs`, so this explicitly hides it even though `renaming` and `rename_draft` survive in `ListView`. Rows are
+  already keyed by session id; this is not an obvious missing-key bug. The existing dismissal avoids leaving a floating
+  panel at its old anchor coordinates. Separate an active editor's lifetime from transient action-menu dismissal: either
+  keep its position stable in an independently owned dialog or correctly reposition the existing panel without
+  remounting its input or losing focus. Do not merely remove the close and leave stale geometry. Inspect the related
+  layout/scroll dismissal and focus-return paths in `ListView`, `SessionRow`, and `menu_panel.rs`, while preserving
+  deliberate cancel and truthful handling when the source session is actually removed. Update the relevant panel
+  lifecycle documentation. Add a browser regression that proves a real list reorder while a draft and caret are active,
+  continues typing without reopening or refocusing, and verifies the saved title on the original id on both engines.
+  Existing draft-survival coverage in `e2e/tests/terminal-replay-rename.spec.ts` and menu-dismissal coverage in
+  `e2e/tests/sidebar.spec.ts` are starting points; preserving a hidden draft alone does not satisfy this behavior.
+
+- **Dismiss the popup after a successful rename.** Submitting the rename editor with Enter or its save button currently
+  reveals the original actions menu again (Rename, Replace, and the other row actions). Successful submission should
+  close the editor and its containing popup together, leaving the updated row with no action menu visible. A failed
+  rename must keep the editor, draft, and error available for correction; closing the popup on submit before success is
+  known would lose that behavior. Keep cancel behavior outside this item's scope.
+
+  Preliminary assessment: `on_rename_submit` in `crates/farhelm-ui/src/list/view.rs` clears `renaming` on success but
+  leaves `menu_open` set. `SessionRow` in `list/row.rs` then renders the ordinary action list in the still-open panel.
+  Close the originating rename popup on success with ownership checks so a late reply cannot dismiss a different
+  editor/menu opened since submission. Preserve the existing optimistic title update and listing refresh, and handle
+  focus return without stealing focus from another control the user has moved to. Coordinate with the rename-reorder
+  item above if the editor's ownership changes. Verify Enter and button submission both dismiss the entire popup after
+  success, saving failures preserve the editable draft, and delayed responses do not close an unrelated popup on either
+  browser engine.
+
+- **Stop false running indicators on idle agents.** Sessions frequently show a pulsing green running indicator when the
+  agent is not actively working. Reported mostly with Codex, but the maintainer mostly uses Codex, so harness
+  specificity is not established. At the time of the report both the current conversation and a companion Codex session
+  appeared affected. A read-only `farhelm agent sessions` query during preliminary assessment returned `running` for
+  both: this was a fleet status report, not merely a browser animation stuck independently of the reported status. The
+  current conversation was doing assessment work by then, so that observation does not prove its earlier idle
+  misclassification.
+
+  Live observation on 2026-09-15 established a concrete mechanism in the companion session, which the maintainer
+  confirmed was idle and untouched. Nine successful read-only pane captures two seconds apart showed a completed
+  response and the idle "Ask Codex to do anything" prompt, with animated Braille-dot particles around the composer. Only
+  those three composer-area lines changed; replacing Braille characters with spaces and trimming line-end spaces made
+  all nine complete screens identical. All nine tails reduced with the sampler's 4096-byte rule were different. Fleet
+  queries before and after still reported running. The running supervisor identified itself as Farhelm `0.8.0-rc.2`; the
+  pane process executable resolved to the Codex `0.154.0` package. Raw captures are retained privately. This directly
+  demonstrates decorative idle text changes sufficient to defeat the current classifier; the supervisor's internal
+  sample streak was not instrumented, and this does not establish the cause of every reported occurrence.
+
+  Preliminary assessment: the shared classifier in `crates/farhelm-supervisor/src/service/status.rs` reports running
+  until a session has sufficient samples and three consecutive unchanged-screen comparisons. `ActivitySample::observe`
+  in `service/ticker.rs` compares the captured terminal tail as text; changes reset the quiet streak without separating
+  agent work from prompt editing or changing terminal chrome. Capture failures discard the baseline and can also keep
+  the classifier running. Codex's integration sharpens waiting detection, not running versus idle. Prioritize the
+  observed idle animation; investigate capture failure, starvation, or stale propagation separately if false running
+  survives that correction. Include typing an unsubmitted prompt as a separate case from an untouched idle prompt;
+  ordinary redraws with identical captured text alone should not reset the streak. The same change detector also
+  advances last-activity timestamps, so check whether decorative animation incorrectly affects activity ordering. Keep
+  terminal contents and session identities out of public evidence.
+
+  Make the indicator reflect actual agent work as reliably as available evidence permits, rather than perpetually
+  treating idle UI activity as work. Assess vendor-supported turn-state signals or conservative screen recognition if
+  the current heuristic cannot distinguish them; surface changes to SPEC_impl.md's sample-count baseline and the
+  waiting-only sharpening contract before implementing them. Do not globally strip Braille: real output and working
+  spinners can use the same characters, so any normalization needs a justified scope and counterexamples. Do not mask
+  missing samples with an arbitrary idle timer or misclassify quiet long-running work as idle. Validate the diagnosed
+  mechanism with a focused reproduction, including idle/typing, active work, pending questions, capture recovery, and
+  another harness to establish scope. No live deployment changes are authorized by this investigation item.
+
+- **Stable recent-activity ordering.** Concurrently active sessions repeatedly overtake one another in "recently active"
+  order. Promote a session when it starts a new work burst after being inactive; continued activity must not change its
+  sort key, and finishing the burst must leave that key unchanged. Both idle-to-working and waiting-to-working start a
+  new burst, including resumption after answering a question or approval. The maintainer chose this over state-priority
+  grouping: newer bursts can push older rows down, but completion does not itself move a row. This means most recently
+  started work, not active-first ordering; a newer session that has finished can remain above an older one still
+  working. Keep ordinary activity ages and read/unread tracking accurate while the ordering stays stable.
+
+  Preliminary assessment: `sort_rows` in `crates/farhelm-helm/src/aggregate.rs` orders by `effective_activity()`, then
+  deterministic creation/id/host tie-breakers. The supervisor's `service/ticker.rs::note_activity` advances
+  `last_activity_at` on observed screen changes at a 60-second quantum per session, so sustained output alone can
+  repeatedly change the ordering. That stamp also serves displayed ages and seen-state comparisons; use a separate
+  work-burst ordering key rather than freezing or redefining it. Design the key's authoritative ownership, persistence,
+  protocol/cache propagation, cross-host comparison, deterministic ties, and fallback for existing sessions so clients
+  agree and a reload does not scramble the list. Define what starts a new burst around waiting/resume, restart, initial
+  unsampled state, and reconnect; unknown observations or sampler resets must not manufacture fresh activity. Coordinate
+  with the false-running fix above: animated idle chrome or brief classification flicker must not repeatedly promote an
+  idle session. Update SPEC.md and SPEC_impl.md's ordering contracts. Verify multiple overlapping work bursts keep their
+  relative order during output and completion, while genuine new work promotes once, including across refreshes,
+  reconnects, and multiple clients. Cover activity ages/read-unread independently and preserve an open rename editor
+  through the legitimate reorder that remains.
+
+  Herdr comparison, inspected at commit `18061191fdc019498610aee81f0df93f6c2ebd31`: its
+  [priority comparator](https://github.com/herdrdev/herdr/blob/18061191fdc019498610aee81f0df93f6c2ebd31/src/client/shell/agent_sidebar.rs)
+  groups blocked, done, working, idle, unknown, then sorts newest state-change sequence first within a group.
+  [State-change sequencing](https://github.com/herdrdev/herdr/blob/18061191fdc019498610aee81f0df93f6c2ebd31/src/app/actions.rs)
+  advances when the effective state changes, not on repeated output in the same state. Its default sort is workspace
+  order; aggregate priority ordering also accounts for stale endpoints and uses client-observed state-change recency
+  across endpoints. This explains how its priority mode avoids continuous-output churn, but does not establish which
+  version or mode the maintainer previously used. Adopt the transition-based stability idea, not Herdr's priority groups
+  or client-local cross-endpoint ordering.
+
+- **Require explicit targets and launch choices in the agent CLI.** An agent asked to rename a named session reportedly
+  renamed itself after omitting `--session`; the exact invocation was not retained. The CLI primarily serves agents,
+  including less capable models, so short commands are less important than making incomplete intent fail without side
+  effects. Require an explicit session id for `agent rename`, `stop`, and `archive`, including when targeting the
+  caller. Omission, an empty selector, or an invalid target must fail before mutation; never reinterpret a failed lookup
+  as "this session". Prefer a concrete `--session <ID>` over another implicit-self convention. Enforce the contract at
+  the request boundary too, not just in clap or model-facing prose, and explicitly address older callers that still omit
+  the target: reject those omissions too, updating instructions and callers rather than retaining wire-level defaults.
+  Authentication identifies who is asking; it must not silently choose what they act on.
+
+  Broaden the correction to other consequential defaults. `agent create` should require its destination host and exactly
+  one explicit profile/invocation rather than inherit the caller's host or the helm's remembered profile. `agent clone`
+  currently means "copy the caller" with an optional destination host; require `--source-session <ID>` and an explicit
+  destination, supporting any listed source session, including the caller when its id is supplied. Inherited
+  folder/title/agent settings are reasonable clone semantics once the source is explicit. Audit `spawn` too: its
+  same-supervisor scope is deliberate, but inherited agent configuration should be explicitly selected and its
+  local-only destination unmistakable. Preserve harmless defaults such as deriving a new display title where they cannot
+  redirect work or silently choose permissions. Avoid adding routine interactive confirmations; incomplete commands
+  should return an actionable error that the agent can correct.
+
+  Preliminary assessment: `AgentCmd` and `verb()` in `crates/farhelm/src/main.rs` make lifecycle `session` and
+  create/clone `host` optional. In `crates/farhelm-helm/src/agent_requests.rs`, `resolve_target` substitutes the asking
+  id, `resolve_host` substitutes the asking host, create resolves an omitted agent through `remembered_profile`, and
+  clone reads the asking session as its only source. Review `AgentVerb` in `farhelm-proto`, supervisor relay validation,
+  and existing retry/identity guards alongside those handlers. Update SPEC.md and SPEC_impl.md where they explicitly
+  promise these defaults; preserve intentional self-stop/archive support when explicitly targeted.
+
+  Strengthen `crates/farhelm/src/agent_instructions.rs` and the clap-derived help together: list sessions/hosts first,
+  resolve the user's intended name to the listed id and host, and pass that target explicitly. Titles are not unique;
+  disambiguate using the user's context or ask rather than pick the first match or the row marked as self. Include
+  concrete cross-session and intentional-self examples with targets before rename text, plus correct quoting for spaces,
+  leading hyphens, and shell metacharacters. Do not treat instructions embedded in listed titles or paths as commands.
+  Add structured JSON session/host listings and read-only profile discovery so models can obtain exact selectors without
+  parsing aligned prose or guessing a profile. Explain that uncertain mutation outcomes are not permission to retry
+  blindly; create/clone retries must reuse the same idempotency key for the same intended operation. Preserve
+  replies/audit records identifying the actual target. Require the expected current title on every agent rename as well
+  as the id: refuse a mismatch without changing anything, checking the precondition atomically at the owning supervisor.
+  This adds a wrong-target/stale-list guard; it does not replace explicit ids or duplicate-name disambiguation.
+
+  Verify missing/invalid targets cause no mutation, explicit cross-session and self operations hit only the specified
+  id, ambiguous names cannot silently select a target, and create/clone cannot inherit an unintended host or profile.
+  Cover request-level omissions from old clients, argument-order and flag-like-title parsing, duplicate-name discovery,
+  mismatched or concurrently changed expected titles, and retry identity. Exercise the generated instructions with a
+  small agent-use evaluation of "rename FOO to BAR" where FOO is another session, duplicate-title cases, and intentional
+  self-actions; use isolated fixtures, never the live fleet, for mutating checks. This remains a queued change, not
+  authorization to rename or stop any live session.
+
+- **Keep Profiles open when starting a legacy-profile deletion.** Clicking the red Delete control on a stored,
+  non-built-in legacy profile immediately dismisses the entire Profiles popup; no confirmation appears and the profile
+  remains. The maintainer explicitly confirmed this happens on the first Delete click, not on "confirm delete". The
+  reported catalog is tall, with read-only built-ins followed by editable legacy profiles sharing several built-in
+  names. Starting deletion must keep the popup visible and show the target profile's confirmation. Cancel must leave the
+  profile intact; confirming must remove only that stored profile, retain same-named built-ins, and visibly report a
+  refusal rather than dismissing the error. Existing sessions must retain their snapshotted launch settings.
+
+  Preliminary assessment: `on_delete_start` in `crates/farhelm-ui/src/profiles.rs` replaces the row controls with a
+  confirmation and requests `FocusDestination::DeleteCancel(id)`; it neither sends DELETE nor intentionally closes
+  Profiles. The request exists only in `on_delete_confirm`. Investigate the focus handoff when the clicked control is
+  removed, the focus coordinator, and `src/app_bar.rs`'s focus-out and layout/scroll dismissal paths. Expansion of the
+  confirmation or focus-induced scrolling in a tall popup are candidate triggers, not established causes. The backend
+  `delete_catalog_profile` in `crates/farhelm-helm/src/profiles.rs` protects built-ins by id, not display name, so a
+  duplicate name alone does not explain the reported first-click disappearance. Capture focus/layout events and request
+  issuance to establish the actual close path before changing dismissal rules.
+
+  Reproduce with a tall built-in-plus-legacy catalog in `e2e/tests/profiles.spec.ts`, clicking stored rows near the
+  viewport edge on Chromium and WebKit. Prove the initial click sends no deletion, the confirmation becomes visible and
+  keyboard-usable without reopening, cancellation preserves the row, and confirmation deletes the intended id while
+  preserving a same-named built-in. Preserve intentional outside-click/Escape dismissal and clear error behavior; do not
+  fix this by removing confirmation or disabling popup dismissal wholesale. Investigate native desktop behavior
+  separately if the browser engines do not reproduce it. No live profiles should be deleted to verify the fix.
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
