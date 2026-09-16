@@ -30,3 +30,9 @@ curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.
 Installs `farhelm` into `~/.local/bin`. On macOS it also installs `farhelm-desktop` and a macOS app bundle
 (`~/Applications/Farhelm.app`). Does NOT auto-upgrade (yet) — re-run the same command to update. Setup and development
 instructions are still parked at [docs/old_readme.md](docs/old_readme.md) while this README is being rebuilt.
+
+To uninstall, stop local sessions and their additional terminals, quit the desktop app, and stop manually started
+Farhelm processes. Run `farhelm uninstall` and confirm once, or use `farhelm uninstall --dry-run` to preview removal.
+The command removes this installation's files and its setup-owned Linux services, preserving all user data and custom
+service configuration. Releases without the command need one installer update first. Keep installation, updates, setup
+and Farhelm startup stopped until uninstall finishes.

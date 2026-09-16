@@ -61,6 +61,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Remove this standalone installation, retaining user data.
+    Uninstall(uninstall::Options),
     /// Create a session on the supervisor that launched this one.
     Spawn {
         /// Child working directory. Relative paths resolve against this
@@ -541,6 +543,7 @@ enum InternalCmd {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Cmd::Uninstall(options) => uninstall::run(options),
         Cmd::Spawn {
             cwd,
             title,

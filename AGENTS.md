@@ -122,6 +122,12 @@ that its required systemd or SSH substrate ran.
   edge shapes), and that nothing outside `FARHELM_INSTALL_DIR` and that bundle — no `systemctl`/`launchctl` call,
   nothing else under `$HOME` — ever changes. Every invocation goes through `env -i` with an explicit environment, never
   this process's own.
+- `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
+  — after building the CLI, runs the actual installer and installed uninstaller against private fixture homes and local
+  release archives. Covers updates, confirmation, dry-run preservation, foreign files and native macOS bundles. Linux
+  children use a fixture service-manager command; actual service tests must use an owned systemd container. The focused
+  macOS CI job and macOS release gate also run `cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'`
+  through the recorder with four slots and `--tmux none`.
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
   own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
@@ -139,7 +145,8 @@ the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build
-ships; the local checks above are what validates a change before it lands. `gh workflow run ci.yml --ref <branch>` runs
+ships; the local checks above are what validates a change before it lands. The focused headless macOS uninstall suite
+runs with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`. `gh workflow run ci.yml --ref <branch>` runs
 the whole baseline for any ref when a hosted verdict is wanted. PRs are still opened as drafts and marked ready when the
 user asks to publish them, or as part of landing them, never on the agent's own initiative; `pr-base.yml` (the only
 required check) still runs on every PR and only verifies that the base is main.
@@ -149,13 +156,13 @@ cargo-dist from `dist-workspace.toml` — never hand-edit it; change the config 
 regenerate. It runs on tag pushes only (`pr-run-mode = "skip"`, D19), so a PR exercises none of it: the release path is
 validated when a tag is cut, by the gate `.github/dist-build-setup.yml` puts at the top of every build job — the
 retained Rust targets, pinned shutdown regression, JS harness, CentOS provisioning, desktop unit test, and desktop smoke
-on the x86_64 Linux one; an Apple CLI compile and desktop unit test on macOS. The tmux-driven e2e suite remains out of
-the Linux gate until its load-sensitive tests are deflaked; TODO.md lists the condition for putting it back. That gate
-lives inside the build jobs rather than in a `plan-jobs` workflow because dist 0.32 lets a failed plan job SKIP the
-build jobs, and its `host` job accepts a skip; a failure inside a build job is the only kind it refuses. What a change
-to release plumbing CAN be checked locally is `dist plan` (the config parses and the asset list is what you expect), the
-release scripts' own `--self-test` modes (`scripts/check-release-archive.py`, `scripts/check-static-elf.sh`,
-`scripts/check-desktop-assets.sh`), and `shellcheck` over the scripts the workflow calls.
+on the x86_64 Linux one; an Apple CLI compile, standalone uninstall validation and desktop unit test on macOS. The
+tmux-driven e2e suite remains out of the Linux gate until its load-sensitive tests are deflaked; TODO.md lists the
+condition for putting it back. That gate lives inside the build jobs rather than in a `plan-jobs` workflow because dist
+0.32 lets a failed plan job SKIP the build jobs, and its `host` job accepts a skip; a failure inside a build job is the
+only kind it refuses. What a change to release plumbing CAN be checked locally is `dist plan` (the config parses and the
+asset list is what you expect), the release scripts' own `--self-test` modes (`scripts/check-release-archive.py`,
+`scripts/check-static-elf.sh`, `scripts/check-desktop-assets.sh`), and `shellcheck` over the scripts the workflow calls.
 
 When a tag produces a public release that never got its `SHA256SUMS`, the recovery procedure is in
 `dist-workspace.toml`'s header ("RECOVERY: a release that exists but was never signed"). It is maintainer-run: delete

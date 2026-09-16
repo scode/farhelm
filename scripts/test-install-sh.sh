@@ -1393,6 +1393,10 @@ UNAMEEOF
   fi
 
   # The helm-setup paragraph, every line.
+  check "F20 ($label): uninstall command is discoverable" \
+    contains "$OUT" "run 'farhelm uninstall' (keeps user data)"
+  check "F20 ($label): uninstall preview is discoverable" \
+    contains "$OUT" "farhelm uninstall --dry-run"
   check "F20 ($label): helm-setup paragraph line 1" \
     contains "$OUT" "If this machine should run your helm (the web UI on 127.0.0.1:7433) and host"
   check "F20 ($label): helm-setup paragraph line 2" \

@@ -233,6 +233,17 @@ jobs:
       - name: "Compile the CLI half of the Mac release"
         if: "runner.os == 'macOS'"
         run: "cargo build -p farhelm --locked"
+      - name: "Validate standalone uninstall on macOS"
+        if: "runner.os == 'macOS'"
+        run: |
+          python3 scripts/record-test-run.py \
+            --runner nextest --kind release --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
+          python3 scripts/record-test-run.py \
+            --kind release --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
       - name: "Compile and test the window half of the Mac release"
         if: "runner.os == 'macOS'"
         run: |
