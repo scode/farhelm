@@ -34,7 +34,7 @@ version = "0.9.0-rc.1"
 description = "Farhelm desktop window (webview shell around the helm)"
 repository = "https://github.com/scode/farhelm"
 homepage = "https://github.com/scode/farhelm"
-license = "MIT"
+license = "Apache-2.0"
 # Run from THIS directory (dist sets the package root as the working
 # directory), hence the climb to the repository root.
 build-command = ["../../scripts/build-desktop-binary.sh"]

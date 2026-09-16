@@ -67,7 +67,7 @@ edition = "2024"
 # without a `homepage` because the (deferred) Homebrew formula renders one.
 # The project has no site of its own, so both point at the repository.
 homepage = "https://github.com/scode/farhelm"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/scode/farhelm"
 
 # Shared dependency versions. Pinned here so every crate agrees; SPEC_impl.md
