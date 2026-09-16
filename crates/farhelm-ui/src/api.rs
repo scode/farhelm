@@ -1035,6 +1035,115 @@ enum SendError {
     Request(String),
 }
 
+/// Next id handed to a fetch receipt pair. Starts at 1 so a zero id in a
+/// trace is always a bug in the receipt, never a real request.
+static FETCH_RECEIPT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// One line when a request leaves the funnel, one when its answer comes
+/// back — the pair that tells an unanswered read from a never-dispatched fetch.
+///
+/// A Playwright trace carries network, DOM, and console, but a read with no
+/// recorded response leaves no timing at all: when the recovery batch's
+/// `/api/sessions` and `/api/hosts` reads came back with nothing (the
+/// rotation entry in TODO.md's Deflake bucket), nothing in the trace said
+/// whether the Rust side ever dispatched them. These receipts close that
+/// gap from the inside: the dispatch line proves the funnel handed the
+/// request to the transport, and the completion line proves the transport
+/// responded. A dispatch with no completion is a read with no observed
+/// return — a hang the retry ladder will eventually own, a task dropped
+/// before the answer (navigation drops in-flight reads), or a trace that
+/// ended first; the pair alone does not say which. A request the test
+/// expected with neither line was never dispatched at all. Completion lands
+/// when the transport responds, before the body is consumed.
+///
+/// Both lines go to the console at info level, which is where the trace
+/// keeps them. Two lines per request is deliberate noise: the funnel is the
+/// one place every protected request traverses, so per-call-site logging
+/// would be the version of this that eventually misses the request that
+/// matters. The lines carry no credential today — the bearer token travels
+/// in the Authorization header, and no endpoint puts secrets in the printed
+/// method, path, or outcome — but that is a property of the current
+/// endpoints, not a sanitizer: query strings are printed, and transport
+/// error text can echo the URL.
+fn fetch_dispatch_line(
+    id: u64,
+    method: &reqwest::Method,
+    url: &reqwest::Url,
+    timeout: Option<std::time::Duration>,
+) -> String {
+    let mut path = url.path().to_string();
+    if let Some(query) = url.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    match timeout {
+        Some(budget) => format!(
+            "fetch #{id} dispatch {method} {path} (timeout {}ms)",
+            budget.as_millis()
+        ),
+        None => format!("fetch #{id} dispatch {method} {path} (no timeout)"),
+    }
+}
+
+/// The answer half of [`fetch_dispatch_line`]: status code plus elapsed on
+/// success, the transport's own error text plus elapsed on failure. A 401
+/// completes here like any other status — authentication classification
+/// happens later, in [`send_inner`], and is not this line's business.
+/// Completion precedes body consumption: the body is decoded afterwards.
+fn fetch_completion_line(
+    id: u64,
+    outcome: Result<reqwest::StatusCode, &str>,
+    elapsed: std::time::Duration,
+) -> String {
+    match outcome {
+        Ok(status) => format!("fetch #{id} complete {status} in {}ms", elapsed.as_millis()),
+        Err(detail) => format!(
+            "fetch #{id} complete error {detail} after {}ms",
+            elapsed.as_millis()
+        ),
+    }
+}
+
+/// `RequestBuilder::send` with the request's own facts observable.
+///
+/// `send` consumes the builder without ever exposing what it sends, and the
+/// rotation hunt needs exactly that: method and path at dispatch, status or
+/// error plus elapsed at completion. `build_split` hands back the same
+/// client the builder would have sent through, so executing the built
+/// request is the same operation with observable inputs — not a second
+/// client, not a re-resolved URL, and the per-request timeout rides on the
+/// built request itself. A builder that fails to build reports its error
+/// without any receipt, which is correct: nothing was dispatched.
+async fn execute_with_receipt(
+    client: &reqwest::Client,
+    request: reqwest::Request,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let id = FETCH_RECEIPT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    dioxus::logger::tracing::info!(
+        target: "farhelm_fetch",
+        "{}",
+        fetch_dispatch_line(id, request.method(), request.url(), request.timeout().copied())
+    );
+    // `web_time`, not `std::time`: the standard clock traps on
+    // wasm32-unknown-unknown, and this funnel runs there on every request.
+    let started = web_time::Instant::now();
+    let outcome = client.execute(request).await;
+    let elapsed = started.elapsed();
+    match &outcome {
+        Ok(resp) => dioxus::logger::tracing::info!(
+            target: "farhelm_fetch",
+            "{}",
+            fetch_completion_line(id, Ok(resp.status()), elapsed)
+        ),
+        Err(error) => dioxus::logger::tracing::info!(
+            target: "farhelm_fetch",
+            "{}",
+            fetch_completion_line(id, Err(&error.to_string()), elapsed)
+        ),
+    }
+    outcome
+}
+
 /// Deliberately match the typed funnel result at the point endpoint contracts
 /// flatten to display text.
 fn send_error_text(error: SendError) -> String {
@@ -1065,9 +1174,9 @@ async fn send_inner(
     let request_timeout = remaining(deadline)?;
     #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
     let request_timeout = timeout;
-    let resp = request
-        .timeout(request_timeout)
-        .send()
+    let (client, built) = request.timeout(request_timeout).build_split();
+    let built = built.map_err(|error| SendError::Request(error.to_string()))?;
+    let resp = execute_with_receipt(&client, built)
         .await
         .map_err(|error| SendError::Request(error.to_string()))?;
     // Called for its effect, in a statement of its own. Folding it into a
@@ -1139,10 +1248,10 @@ where
     if replaced {
         crate::auth::require_desktop_webview_reauth();
     }
-    let retried = retry
-        .bearer_auth(secret)
-        .timeout(remaining(deadline)?)
-        .send()
+    let allowance = remaining(deadline)?;
+    let (retry_client, built) = retry.bearer_auth(secret).timeout(allowance).build_split();
+    let built = built.map_err(|error| SendError::Request(error.to_string()))?;
+    let retried = execute_with_receipt(&retry_client, built)
         .await
         .map_err(|error| SendError::Request(error.to_string()))?;
     skew::note_build(&retried);
@@ -2994,6 +3103,59 @@ mod tests {
             r#"{"error":"spawn identity is unauthorized"}"#
         ));
         assert!(!device_auth_required("spawn identity is unauthorized"));
+    }
+
+    /// Receipt lines must pair by id and name the request: the rotation
+    /// hunt reads them out of trace console to tell an unanswered read
+    /// (dispatch without completion — hang, dropped task, or truncated
+    /// trace) from a fetch the funnel never dispatched, and that reading
+    /// works only if both halves share one id and the dispatch half says
+    /// which endpoint it left for. Exact strings, not substring checks: the
+    /// diagnostic grammar (markers, id shape, field order) is the contract,
+    /// and a substring match would let a reformatted line pass. These pin
+    /// the formatters only; execution pairing and cancellation are covered
+    /// by traced browser runs, not here.
+    #[farhelm_testtrace::test]
+    fn fetch_receipt_lines_pair_by_id_and_name_the_request() {
+        let url: reqwest::Url = "https://helm.invalid/api/sessions?sort=activity"
+            .parse()
+            .unwrap();
+        let dispatch = fetch_dispatch_line(
+            7,
+            &reqwest::Method::GET,
+            &url,
+            Some(std::time::Duration::from_secs(60)),
+        );
+        assert_eq!(
+            dispatch,
+            "fetch #7 dispatch GET /api/sessions?sort=activity (timeout 60000ms)"
+        );
+        let completed = fetch_completion_line(
+            7,
+            Ok(reqwest::StatusCode::OK),
+            std::time::Duration::from_millis(14),
+        );
+        assert_eq!(completed, "fetch #7 complete 200 OK in 14ms");
+        let failed = fetch_completion_line(
+            7,
+            Err("error sending request"),
+            std::time::Duration::from_millis(60_002),
+        );
+        assert_eq!(
+            failed,
+            "fetch #7 complete error error sending request after 60002ms"
+        );
+    }
+
+    /// A request built without a timeout must say so on its dispatch line
+    /// rather than printing a budget it does not have. Every current caller
+    /// sets one, so this pins the honest fallback for the caller that
+    /// someday does not.
+    #[farhelm_testtrace::test]
+    fn fetch_dispatch_line_names_a_missing_timeout() {
+        let url: reqwest::Url = "https://helm.invalid/api/hosts".parse().unwrap();
+        let dispatch = fetch_dispatch_line(3, &reqwest::Method::GET, &url, None);
+        assert_eq!(dispatch, "fetch #3 dispatch GET /api/hosts (no timeout)");
     }
 
     /// Time spent on the first response and serialized refresh must reduce
