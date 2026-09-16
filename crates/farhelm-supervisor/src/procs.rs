@@ -1,18 +1,18 @@
-//! The three per-platform process-table reads the kill sweep is built on,
-//! and nothing else.
+//! Native process-table reads shared by cleanup and read-only inspection.
 //!
 //! `service::sweep` owns every DECISION a stop, delete, or close makes: the
 //! PPID closure, the environment-marker union that finds reparented
 //! daemons, start-time validation against pid reuse, the
 //! SIGTERM/SIGSTOP-quiesce/SIGKILL escalation, and the confirm-gone poll.
 //! None of that is platform-specific. What is platform-specific is narrow
-//! and mechanical — how one asks the kernel three questions:
+//! and mechanical — how one asks the kernel four questions:
 //!
 //! 1. every process this user owns, with its parent and its start time
 //!    ([`snapshot`]);
 //! 2. one pid's parent, start time, and whether it has become a zombie
 //!    ([`read_process`]);
-//! 3. one pid's exec-time environment ([`read_environ`]).
+//! 3. one pid's executable path ([`read_executable`]);
+//! 4. one pid's exec-time environment ([`read_environ`]).
 //!
 //! Keeping the seam exactly that small is the whole point. Linux and macOS
 //! must run the SAME sweep rather than two sweeps that happen to agree,
@@ -113,6 +113,26 @@ pub(crate) fn snapshot() -> Result<(ProcessTable, Vec<String>), String> {
     imp::snapshot()
 }
 
+/// Inventory needs actual credentials, not Linux procfs inode ownership:
+/// disabling dumpability makes a same-user process's directory root-owned.
+pub(crate) fn inspection_snapshot() -> Result<(ProcessTable, Vec<String>), String> {
+    #[cfg(target_os = "linux")]
+    return imp::inspection_snapshot();
+    #[cfg(target_os = "macos")]
+    return imp::snapshot();
+}
+
+/// Inspection must retain read errors even when Linux has changed the procfs
+/// directory owner. Cleanup's narrower authority filter remains separate.
+pub(crate) fn inspection_read_process(
+    pid: u32,
+) -> Result<Option<(u32, u64, ProcessState)>, String> {
+    #[cfg(target_os = "linux")]
+    return imp::inspection_read_process(pid);
+    #[cfg(target_os = "macos")]
+    return imp::read_process(pid);
+}
+
 /// One process's `(ppid, start time, state)`, or `Ok(None)` when it is gone
 /// or, on Linux, when a failed read finds that the pid now belongs to another
 /// uid.
@@ -127,6 +147,16 @@ pub(crate) fn snapshot() -> Result<(ProcessTable, Vec<String>), String> {
 /// `confirm_gone` must not count an unreadable survivor as confirmed dead.
 pub(crate) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>, String> {
     imp::read_process(pid)
+}
+
+/// Read the executable path currently associated with one process.
+///
+/// The returned path is the kernel's native spelling. In particular, Linux's
+/// `" (deleted)"` suffix is retained and no canonicalization is attempted:
+/// a running process can keep executing an inode after its directory entry was
+/// unlinked, and resolving that path would lose the fact the caller observed.
+pub(crate) fn read_executable(pid: u32) -> Result<std::path::PathBuf, String> {
+    imp::read_executable(pid)
 }
 
 /// One process's exec-time environment as the kernel's own
@@ -370,6 +400,49 @@ mod imp {
     /// at a time; foreign-uid pids are skipped before either read can turn
     /// an ordinary permission restriction into a reported failure.
     pub(super) fn snapshot() -> Result<(super::ProcessTable, Vec<String>), String> {
+        snapshot_with_owner(|pid| Ok(is_own_pid_dir(pid)))
+    }
+
+    /// Parse all four credential fields so malformed status never means
+    /// "another user". The second field is the effective UID, not the real UID.
+    fn status_euid(status: &[u8]) -> Result<u32, String> {
+        let line = status
+            .split(|byte| *byte == b'\n')
+            .find_map(|line| line.strip_prefix(b"Uid:"))
+            .ok_or("missing Uid field")?;
+        let text = std::str::from_utf8(line).map_err(|e| format!("invalid Uid field: {e}"))?;
+        let ids = text
+            .split_whitespace()
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("invalid Uid field: {e}"))?;
+        if ids.len() != 4 {
+            return Err("Uid field must contain four credentials".into());
+        }
+        Ok(ids[1])
+    }
+
+    /// Read real process credentials even for non-dumpable processes. Only
+    /// confirmed disappearance or a different effective UID excludes a row;
+    /// inaccessible credentials remain an uncertainty with the exact target.
+    pub(super) fn inspection_snapshot() -> Result<(super::ProcessTable, Vec<String>), String> {
+        snapshot_with_owner(|pid| {
+            let path = format!("/proc/{pid}/status");
+            match std::fs::read(&path) {
+                Ok(bytes) => status_euid(&bytes)
+                    .map(|uid| uid == euid())
+                    .map_err(|e| format!("reading {path} effective UID: {e}")),
+                Err(e) if is_gone_errno(&e) => Ok(false),
+                Err(e) => Err(format!("reading {path} effective UID: {e}")),
+            }
+        })
+    }
+
+    /// Share the procfs walk while keeping cleanup authority and inspection
+    /// completeness distinct. A failed ownership probe must survive the scan.
+    fn snapshot_with_owner(
+        owns: impl Fn(u32) -> Result<bool, String>,
+    ) -> Result<(super::ProcessTable, Vec<String>), String> {
         let mut stats = HashMap::new();
         let mut soft_errors = Vec::new();
         let entries = std::fs::read_dir("/proc").map_err(|e| format!("reading /proc: {e}"))?;
@@ -388,8 +461,13 @@ mod imp {
             else {
                 continue;
             };
-            if !is_own_pid_dir(pid) {
-                continue;
+            match owns(pid) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => {
+                    soft_errors.push(error);
+                    continue;
+                }
             }
             match read_stat(pid) {
                 Ok(Some((ppid, starttime, _state))) => {
@@ -400,6 +478,39 @@ mod imp {
             }
         }
         Ok((stats, soft_errors))
+    }
+
+    /// Preserve stat failures for inspection even when procfs inode ownership
+    /// has changed. Only the kernel's disappearance errors mean absence.
+    pub(super) fn inspection_read_process(
+        pid: u32,
+    ) -> Result<Option<(u32, u64, ProcessState)>, String> {
+        Ok(read_stat(pid)?.map(|(parent, start, state)| {
+            (
+                parent,
+                start,
+                if state == 'Z' {
+                    ProcessState::Zombie
+                } else {
+                    ProcessState::Running
+                },
+            )
+        }))
+    }
+
+    /// Effective and real credentials can differ; malformed credentials must
+    /// fail visibly instead of excluding a potentially relevant live process.
+    #[cfg(test)]
+    #[farhelm_testtrace::test]
+    fn inspection_status_uses_effective_uid() {
+        assert_eq!(status_euid(b"Name:\ttest\nUid:\t10\t20\t30\t40\n"), Ok(20));
+        for bytes in [
+            b"Name: test\n".as_slice(),
+            b"Uid: 10 20 30\n",
+            b"Uid: 10 x 30 40\n",
+        ] {
+            assert!(status_euid(bytes).is_err());
+        }
     }
 
     /// See [`super::read_process`]. When a row read fails, re-check its uid to
@@ -434,6 +545,19 @@ mod imp {
     /// collapses to `None`.
     pub(super) fn read_environ(pid: u32) -> Option<Vec<u8>> {
         std::fs::read(format!("/proc/{pid}/environ")).ok()
+    }
+
+    /// Read `/proc/<pid>/exe` without resolving or rewriting its target.
+    pub(super) fn read_executable(pid: u32) -> Result<std::path::PathBuf, String> {
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = std::fs::read_link(format!("/proc/{pid}/exe"))
+            .map_err(|e| format!("reading /proc/{pid}/exe: {e}"))?;
+        let bytes = path.as_os_str().as_bytes();
+        if bytes.is_empty() || bytes.contains(&0) {
+            return Err(format!("reading /proc/{pid}/exe returned an invalid path"));
+        }
+        Ok(path)
     }
 
     #[cfg(test)]
@@ -950,6 +1074,39 @@ mod imp {
         }
         buf.truncate(len);
         super::parse_procargs2(&buf)
+    }
+
+    /// Ask Darwin for the executable path, checking both the returned length
+    /// and the NUL terminator before constructing a native path. A malformed
+    /// kernel response is an uncertainty for the inventory caller rather than
+    /// a truncated path that could be mistaken for a different executable.
+    pub(super) fn read_executable(pid: u32) -> Result<std::path::PathBuf, String> {
+        use std::os::unix::ffi::OsStringExt;
+
+        let native_pid = libc::pid_t::try_from(pid)
+            .map_err(|_| format!("proc_pidpath({pid}) cannot represent this pid"))?;
+        let mut buffer = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        // SAFETY: the buffer is writable for its declared length and the pid
+        // is passed as the native pid type expected by proc_pidpath.
+        let length = unsafe {
+            libc::proc_pidpath(native_pid, buffer.as_mut_ptr().cast(), buffer.len() as u32)
+        };
+        if length <= 0 {
+            return Err(format!(
+                "proc_pidpath({pid}) failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let length = usize::try_from(length)
+            .map_err(|_| format!("proc_pidpath({pid}) returned an invalid length {length}"))?;
+        if length >= buffer.len() || buffer[length] != 0 || buffer[..length].contains(&0) {
+            return Err(format!(
+                "proc_pidpath({pid}) returned an unterminated path of length {length}"
+            ));
+        }
+        Ok(std::path::PathBuf::from(std::ffi::OsString::from_vec(
+            buffer[..length].to_vec(),
+        )))
     }
 }
 

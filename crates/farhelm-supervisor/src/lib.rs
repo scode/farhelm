@@ -41,11 +41,12 @@
 pub mod agent_kind;
 pub mod attachments;
 pub mod files;
+pub mod inspection;
 pub mod launch;
 // Private, and deliberately so: `procs` is the process-table read seam
 // (`/proc` on Linux, `sysctl` on macOS) and nothing outside
-// `service::sweep` has business reading a process table at all. Its own
-// module docs carry the contract; the visibility is the part worth
+// `service::sweep` and the read-only `inspection` API has business reading a
+// process table. Its module docs carry the contract; the visibility is the part worth
 // stating here. A doc comment rather than this plain one would re-home
 // the module's docs into lib.rs's link scope and break every intra-doc
 // link inside them.
