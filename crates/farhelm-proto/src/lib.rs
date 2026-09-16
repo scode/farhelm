@@ -87,7 +87,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// clear error per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
-/// Within version 20 the additive discipline of every prior version
+/// Within version 21 the additive discipline of every prior version
 /// continues to apply, with version 9's sharper reading intact: new
 /// optional fields with decode defaults are fine WHEN ignoring one is
 /// harmless; a field whose omission changes behavior, a new tagged variant,
@@ -178,7 +178,13 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// Older peers would silently apply the defaults these fields remove, so the
 /// exact-match handshake must refuse mixed versions.
 ///
-/// `protocol_version_is_pinned_at_20` (renamed at every bump since `_at_4`)
+/// Version 21 adds Goose and Pi structured harnesses, their native effort and
+/// permission vocabulary, and their dedicated agent kinds. Those enum tags are
+/// durable launch provenance and capture policy; an older peer cannot safely
+/// decode or retain them, so mixed versions must refuse the hello rather than
+/// silently compiling another harness or dropping exact-resume behavior.
+///
+/// `protocol_version_is_pinned_at_21` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -190,7 +196,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1170,6 +1176,8 @@ pub fn validate_profile_fields(
         let kind = match agent_kind {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
+            AgentKind::Goose => "goose",
+            AgentKind::Pi => "pi",
             AgentKind::Generic => unreachable!(),
         };
         return Err(format!(
@@ -1405,6 +1413,12 @@ pub enum RestartOffer {
 pub enum AgentKind {
     Claude,
     Codex,
+    /// Goose reports its durable session identifier through a persisted,
+    /// credential-free MCP extension; Farhelm never searches Goose state.
+    Goose,
+    /// Pi reports a typed locator containing its session id and exact saved
+    /// file; Farhelm verifies that file only when a restart asks to resume.
+    Pi,
     /// Explicitly non-integrated: no status heuristics beyond the
     /// generic ones, no conversation-identity capture, regardless of
     /// what basename recognition would have concluded on its own.
@@ -3994,8 +4008,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_20() {
-        assert_eq!(PROTOCOL_VERSION, 20);
+    fn protocol_version_is_pinned_at_21() {
+        assert_eq!(PROTOCOL_VERSION, 21);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -5375,10 +5389,18 @@ mod tests {
     /// there is no separate golden list left to forget populating.
     #[farhelm_testtrace::test]
     fn agent_kind_restart_and_terminal_selector_vocabulary_json_shapes_are_pinned() {
-        for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Generic] {
+        for kind in [
+            AgentKind::Claude,
+            AgentKind::Codex,
+            AgentKind::Goose,
+            AgentKind::Pi,
+            AgentKind::Generic,
+        ] {
             let expected = match kind {
                 AgentKind::Claude => "claude",
                 AgentKind::Codex => "codex",
+                AgentKind::Goose => "goose",
+                AgentKind::Pi => "pi",
                 AgentKind::Generic => "generic",
             };
             assert_eq!(

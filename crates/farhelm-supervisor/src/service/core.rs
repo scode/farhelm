@@ -44,7 +44,9 @@ use super::ticker::{
     start_ticker,
 };
 use super::uploads::UploadHandle;
-use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot, RecordStamp};
+use crate::agent_kind::{
+    CaptureWindowBounds, IntegrationSnapshot, RecordStamp, effective_program_index,
+};
 use crate::launch::{LaunchSpec, resolve_shell, window_command};
 use crate::store::DedupScope;
 use crate::store::{
@@ -1885,6 +1887,12 @@ pub struct SessionSnapshot {
     pub kind: AgentKind,
     pub resume_template: Option<Vec<String>>,
     pub captured_conversation: Option<String>,
+    /// The launch generation that owns `captured_conversation`.
+    ///
+    /// Pi's restart-only file verification may invalidate a stale locator.
+    /// Carrying the generation read in the same row lets that update refuse
+    /// to erase a report from a newer launch.
+    pub generation: i64,
     pub restart_offer: RestartOffer,
     /// The resume template with `{conversation}` filled in, or `None` when
     /// there is no template or nothing captured to fill it with. A
@@ -2097,8 +2105,8 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 /// it needs passed in rather than read off a `Supervisor` (plan §2.3).
 ///
 /// Split out for testability, and the split is worth its keep: the
-/// interesting behaviour here is a list of REFUSALS — seven of them, five
-/// logged and two silent — and reaching them through a real supervisor would
+/// interesting behaviour here is a list of kind-specific REFUSALS, and
+/// reaching them through a real supervisor would
 /// mean constructing one per case, tmux and SQLite included, to exercise a
 /// function that touches neither. Its only effect beyond its return value
 /// is tracing.
@@ -2127,9 +2135,9 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 /// kind rather than about this launch, so logging it would repeat the
 /// identical line on every launch of that kind forever.
 ///
-/// The remaining five skips are all worth a line, because each is a case
-/// where identity capture silently degrades to the record scan and the
-/// only evidence is this log.
+/// The remaining skips are all worth a line because they silently degrade
+/// identity capture: Claude and Codex fall back to scanning, while Goose and
+/// Pi gain no new exact target. The log is the only evidence for that choice.
 ///
 /// ## The instructions pointer rides along
 ///
@@ -2147,6 +2155,7 @@ fn with_hook_argv_using(
     hooks: &crate::agent_kind::AgentHooks,
     instructions: crate::agent_kind::AgentInstructions,
     exe: Option<&str>,
+    pi_extension: Option<&str>,
     session: &str,
 ) -> (Vec<String>, bool) {
     let Some(integration) = snapshot.integration() else {
@@ -2160,6 +2169,84 @@ fn with_hook_argv_using(
             "conversation hook flags not injected"
         );
     };
+    if snapshot.kind == AgentKind::Goose {
+        let Some(shape) = goose_launch_shape(&argv) else {
+            skip("Goose invocation is a utility command or is ambiguous");
+            return (argv, false);
+        };
+        if shape.reporter_collision {
+            skip("Goose invocation already declares farhelm-reporter");
+            return (argv, false);
+        }
+        let enabled = hooks.allows(snapshot.kind) && exe.is_some();
+        if !enabled && !shape.resuming {
+            skip(if exe.is_none() {
+                "farhelm executable path is not utf-8"
+            } else {
+                "disabled by FARHELM_AGENT_HOOKS"
+            });
+            return (argv, false);
+        }
+        let Some(exe) = exe else {
+            skip("farhelm executable path is not utf-8");
+            return (argv, false);
+        };
+        if shape.needs_session_subcommand {
+            let program = effective_program_index(&argv)
+                .expect("a recognized Goose launch has an effective program");
+            argv.insert(program + 1, "session".to_string());
+        }
+        if enabled && !shape.resuming {
+            argv.extend([
+                "--with-extension".to_string(),
+                "farhelm-reporter:sh -c 'exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook'"
+                    .to_string(),
+            ]);
+        }
+        let controls = [
+            format!(
+                "{}={}",
+                crate::launch::GOOSE_REPORTER_ENABLED_ENV_VAR,
+                u8::from(enabled)
+            ),
+            format!(
+                "{}={}",
+                crate::launch::GOOSE_INSTRUCTIONS_ENV_VAR,
+                u8::from(enabled && instructions.announces())
+            ),
+            format!("{}={exe}", crate::launch::GOOSE_REPORTER_EXE_ENV_VAR),
+        ];
+        argv = with_launch_environment(argv, &controls);
+        return (argv, enabled);
+    }
+    if snapshot.kind == AgentKind::Pi {
+        if !pi_interactive_invocation(&argv) {
+            skip("Pi invocation is a utility command or is ambiguous");
+            return (argv, false);
+        }
+        if !hooks.allows(snapshot.kind) {
+            skip("disabled by FARHELM_AGENT_HOOKS");
+            return (argv, false);
+        }
+        let (Some(exe), Some(extension)) = (exe, pi_extension) else {
+            skip(if exe.is_none() {
+                "farhelm executable path is not utf-8"
+            } else {
+                "Pi extension artifact is unavailable"
+            });
+            return (argv, false);
+        };
+        argv.extend(["-e".to_string(), extension.to_string()]);
+        if instructions.announces() {
+            argv.extend([
+                "--append-system-prompt".to_string(),
+                crate::agent_kind::INSTRUCTIONS_POINTER.to_string(),
+            ]);
+        }
+        let controls = [format!("{}={exe}", crate::launch::PI_REPORTER_EXE_ENV_VAR)];
+        argv = with_launch_environment(argv, &controls);
+        return (argv, true);
+    }
     if !hooks.allows(snapshot.kind) {
         skip("disabled by FARHELM_AGENT_HOOKS");
         return (argv, false);
@@ -2206,13 +2293,13 @@ fn with_hook_argv_using(
         return (argv, false);
     }
     let tail = integration.hook_argv(exe, instructions);
-    // An integration that offers no tail cannot be hooked — the trait's
-    // default `hook_argv` returns exactly this, so a kind that grows a
-    // record layout before it grows a hook lands here. Silently, and
-    // WITHOUT the line below: claiming flags were injected when none were
-    // would arm the tripwire against a launch that never had a hook to
-    // begin with, and every reader of that log line would be chasing a
-    // vendor bug that does not exist.
+    // An integration that offers no tail does not use this hook form — the
+    // trait's default `hook_argv` returns exactly this, including for kinds
+    // with a separate exact reporter. Silently, and WITHOUT the line below:
+    // claiming flags were injected when none were would arm the tripwire
+    // against a launch that never had this hook to begin with, and every
+    // reader of that log line would be chasing a vendor bug that does not
+    // exist.
     if tail.is_empty() {
         return (argv, false);
     }
@@ -2224,6 +2311,175 @@ fn with_hook_argv_using(
         "conversation hook flags injected"
     );
     (argv, true)
+}
+
+#[derive(Clone, Copy)]
+/// Facts needed to inject once on fresh Goose launches and reuse its saved
+/// reporter on resume without overriding a user-supplied reporter of that name.
+struct GooseLaunchShape {
+    resuming: bool,
+    reporter_collision: bool,
+    needs_session_subcommand: bool,
+}
+
+/// Recognize only Goose's interactive command, including the structured
+/// launcher's leading `env NAME=value ...` prefix.
+fn goose_launch_shape(argv: &[String]) -> Option<GooseLaunchShape> {
+    let program = effective_program_index(argv)?;
+    if Path::new(&argv[program]).file_name()?.to_str()? != "goose" {
+        return None;
+    }
+    let args = &argv[program + 1..];
+    if !args.is_empty() && args.first().map(String::as_str) != Some("session") {
+        return None;
+    }
+    let mut resuming = false;
+    let mut reporter_collision = false;
+    let mut index = usize::from(args.first().map(String::as_str) == Some("session"));
+    while index < args.len() {
+        let argument = &args[index];
+        if matches!(
+            argument.as_str(),
+            "--help" | "-h" | "--version" | "-V" | "--"
+        ) {
+            return None;
+        }
+        if matches!(argument.as_str(), "--resume" | "-r" | "--fork" | "--edit") {
+            resuming = true;
+            index += 1;
+            continue;
+        }
+        let takes_value = matches!(
+            argument.as_str(),
+            "--name"
+                | "-n"
+                | "--session-id"
+                | "--id"
+                | "--path"
+                | "--provider"
+                | "--model"
+                | "--system"
+                | "--max-turns"
+                | "--with-extension"
+                | "--with-builtin"
+                | "--with-streamable-http-extension"
+                | "--mode"
+        );
+        if takes_value {
+            let value = args.get(index + 1)?;
+            if argument == "--with-extension" && value.starts_with("farhelm-reporter:") {
+                reporter_collision = true;
+            }
+            index += 2;
+            continue;
+        }
+        if argument.starts_with("--with-extension=")
+            && argument["--with-extension=".len()..].starts_with("farhelm-reporter:")
+        {
+            reporter_collision = true;
+        }
+        if !argument.starts_with('-') {
+            return None;
+        }
+        index += 1;
+    }
+    Some(GooseLaunchShape {
+        resuming,
+        reporter_collision,
+        needs_session_subcommand: args.is_empty(),
+    })
+}
+
+/// Keep Pi's utility commands untouched and treat option values as opaque.
+/// Injection is confined to recognizable interactive command shapes.
+fn pi_interactive_invocation(argv: &[String]) -> bool {
+    let Some(program) = effective_program_index(argv) else {
+        return false;
+    };
+    if Path::new(&argv[program])
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some("pi")
+    {
+        return false;
+    }
+    let args = &argv[program + 1..];
+    if args.first().is_some_and(|argument| {
+        matches!(
+            argument.as_str(),
+            "install" | "remove" | "uninstall" | "update" | "list" | "config" | "auth"
+        )
+    }) {
+        return false;
+    }
+    let mut index = 0;
+    while index < args.len() {
+        let argument = &args[index];
+        if matches!(
+            argument.as_str(),
+            "--help" | "-h" | "--version" | "-v" | "--list-models" | "--export" | "--"
+        ) {
+            return false;
+        }
+        if matches!(
+            argument.as_str(),
+            "--provider"
+                | "--model"
+                | "--api-key"
+                | "--thinking"
+                | "--append-system-prompt"
+                | "--system-prompt"
+                | "--tools"
+                | "-t"
+                | "--exclude-tools"
+                | "-xt"
+                | "--session-dir"
+                | "--session"
+                | "--session-id"
+                | "--fork"
+                | "--name"
+                | "-n"
+                | "--models"
+                | "--mode"
+                | "-e"
+                | "--extension"
+                | "--skill"
+                | "--prompt-template"
+                | "--theme"
+                | "--use-theme"
+                | "--tui-mode"
+        ) {
+            if index + 1 >= args.len() {
+                return false;
+            }
+            index += 2;
+            continue;
+        }
+        index += 1;
+    }
+    true
+}
+
+/// Add launch-local reporter controls without persisting them in vendor metadata.
+fn with_launch_environment(argv: Vec<String>, assignments: &[String]) -> Vec<String> {
+    if argv
+        .first()
+        .and_then(|program| Path::new(program).file_name())
+        .and_then(|name| name.to_str())
+        == Some("env")
+    {
+        let mut wrapped = Vec::with_capacity(argv.len() + assignments.len());
+        wrapped.push(argv[0].clone());
+        wrapped.extend(assignments.iter().cloned());
+        wrapped.extend(argv.into_iter().skip(1));
+        wrapped
+    } else {
+        let mut wrapped = Vec::with_capacity(argv.len() + assignments.len() + 1);
+        wrapped.push("env".to_string());
+        wrapped.extend(assignments.iter().cloned());
+        wrapped.extend(argv);
+        wrapped
+    }
 }
 
 /// Whether a Codex invocation is already steering Codex's hook
@@ -3530,10 +3786,10 @@ pub struct Supervisor {
     /// is no mangled-but-plausible path to accidentally hand a vendor.
     ///
     /// `None` is a real, if vanishing, state and not a should-never-happen:
-    /// a farhelm installed under a non-UTF-8 path simply never has hook
-    /// flags injected — [`Supervisor::with_hook_argv`] logs the skip and
-    /// every session falls back to the record scan. Nothing else about the
-    /// launch changes, because the shim itself is addressed by `PathBuf`
+    /// a farhelm installed under a non-UTF-8 path simply never has reporter
+    /// controls injected — [`Supervisor::with_hook_argv`] logs the skip.
+    /// Claude and Codex retain their scan fallback; Goose and Pi do not gain
+    /// a new exact target. Nothing else about the launch changes, because the shim itself is addressed by `PathBuf`
     /// (see [`crate::launch::window_command`]) and has never needed the
     /// path to be text.
     farhelm_exe_str: Option<String>,
@@ -4182,7 +4438,8 @@ impl Supervisor {
             warn!(
                 exe = %farhelm_exe.display(),
                 "this farhelm executable's path is not valid UTF-8, so no launch can carry \
-                 conversation hook flags; every session falls back to the record scan"
+                 conversation reporter controls; Claude and Codex retain record scanning, \
+                 while Goose and Pi cannot report a new exact target"
             );
         }
         // Store one absolute spelling after creation. Every injected
@@ -5159,10 +5416,66 @@ impl Supervisor {
             kind: snapshot.kind,
             resume_template: snapshot.resume_template,
             captured_conversation: captured,
+            generation: row.generation,
             first_input_at: row.first_input_at,
             capture_ambiguous: row.capture_ambiguous,
             canonical_cwd: row.canonical_cwd,
         }))
+    }
+
+    /// Verify Pi's exact session file immediately before a resume can launch.
+    ///
+    /// Pi treats a missing or malformed `--session` path as a fresh session,
+    /// so passing an unchecked locator would make a Resume request silently
+    /// lose its meaning. A failed check replaces only the exact locator and
+    /// generation read by the caller with a fileless token. The request then
+    /// conflicts, and a refresh exposes `FreshOnly`; a concurrent newer
+    /// report fails the comparison and remains the durable answer.
+    async fn verify_pi_resume(
+        &self,
+        session_id: &str,
+        snapshot: &SessionSnapshot,
+    ) -> anyhow::Result<()> {
+        let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("a Pi resume offer has no durable conversation locator")
+        })?;
+        let locator = crate::agent_kind::parse_pi_locator(stored)
+            .context("decoding the Pi resume locator")?;
+        let path = locator
+            .session_file
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("a Pi resume offer has no durable session file"))?;
+        let integration = crate::agent_kind::integration_for(AgentKind::Pi)
+            .expect("Pi has a report-only integration");
+        let verified = match crate::agent_kind::read_record(Path::new(path), integration).await {
+            Ok(Some((record, _))) => record.conversation == locator.session_id,
+            Ok(None) | Err(_) => false,
+        };
+        if verified {
+            return Ok(());
+        }
+
+        let replacement = crate::agent_kind::encode_pi_locator(crate::agent_kind::PiLocator {
+            version: locator.version,
+            session_id: locator.session_id,
+            session_file: None,
+        })?;
+        self.store
+            .replace_reported_conversation_if_current(
+                session_id,
+                snapshot.generation,
+                stored,
+                &replacement,
+            )
+            .await
+            .context("invalidating a stale Pi resume locator")?;
+        Err(RequestError::new(
+            ErrorKind::Conflict,
+            "this session's restart offer changed while the restart was being prepared; its \
+             exact Pi session file could not be verified, so nothing was relaunched — refresh \
+             the session and re-present the offer",
+        )
+        .into())
     }
 
     /// Whether this supervisor holds its state directory's claim (see
@@ -7405,6 +7718,9 @@ impl Supervisor {
             .into());
         };
         let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
+        if mode == RestartMode::Resume && snapshot.kind == AgentKind::Pi {
+            self.verify_pi_resume(session_id, &snapshot).await?;
+        }
         ensure_cwd_usable(&entry.info.cwd).await?;
         // The VERIFIED path travels with the relaunch rather than being
         // discarded once the comparison passes: `relaunch_into_terminal`
@@ -9585,16 +9901,15 @@ impl Supervisor {
         true
     }
 
-    /// Append this launch's conversation-reporting hook flags to `argv`,
-    /// or explain in the log why they were left off (plan §2.3).
+    /// Add this launch's conversation reporter to `argv`, or explain in the
+    /// log why it was left off (plan §2.3).
     ///
-    /// The hook is what makes a session's conversation identity EXACT
+    /// The reporter is what makes a session's conversation identity EXACT
     /// rather than inferred: the agent itself reports the id it is
     /// actually using, which is the only thing that survives a `/clear`.
-    /// Everything this function can refuse to do is a fallback to the
-    /// record scan, never a failed launch — the scan is the no-hook path
-    /// SPEC.md keeps promising, and a launch that cannot be hooked is
-    /// still a perfectly good launch.
+    /// Everything this function can refuse leaves the launch runnable.
+    /// Claude and Codex then use their record scans; Goose and Pi gain no
+    /// new exact target because their integrations are report-only.
     ///
     /// Returns the argv to spawn and whether it was hooked; see
     /// [`with_hook_argv_using`] for the refusal list, the order it applies
@@ -9619,6 +9934,7 @@ impl Supervisor {
         &self,
         argv: Vec<String>,
         snapshot: &IntegrationSnapshot,
+        pi_extension: Option<&str>,
         session: &str,
     ) -> (Vec<String>, bool) {
         with_hook_argv_using(
@@ -9627,6 +9943,7 @@ impl Supervisor {
             &self.seams.agent_hooks,
             self.seams.agent_instructions,
             self.farhelm_exe_str.as_deref(),
+            pi_extension,
             session,
         )
     }
@@ -9708,7 +10025,24 @@ impl Supervisor {
         // what the shim execs, so the flags have to be in it, and putting
         // the injection here is what lets the shim stay ignorant of hooks
         // entirely.
-        let (argv, hooked) = self.with_hook_argv(argv, snapshot, id);
+        let pi_extension =
+            if snapshot.kind == AgentKind::Pi && self.seams.agent_hooks.allows(AgentKind::Pi) {
+                match crate::pi_extension::materialize(&self.state_dir).await {
+                    Ok(path) => path.to_str().map(str::to_string),
+                    Err(error) => {
+                        warn!(
+                            session = %id,
+                            error = %format!("{error:#}"),
+                            "could not materialize Pi's conversation extension; launching without \
+                             identity capture or instruction injection"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+        let (argv, hooked) = self.with_hook_argv(argv, snapshot, pi_extension.as_deref(), id);
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -10060,7 +10394,9 @@ impl Supervisor {
     ///   mode validation from `captured_conversation` in SQLite, so a
     ///   restart landing inside the divergence resumes the reported
     ///   conversation regardless of what memory holds.
-    /// - **The mirror catches up on its own.** The next capture pass that
+    /// - **The mirror catches up on its own.** Goose and Pi reconcile their
+    ///   durable reported row before every capture reply because they have
+    ///   no scan. For Claude and Codex, the next capture pass that
     ///   reaches a commit has its write-once UPDATE refused by the fence
     ///   above and reads the row back; `commit_capture` then advances the
     ///   entry to the id it read — the reported one — with an empty record
@@ -10117,10 +10453,10 @@ impl Supervisor {
         // (see the docs above), and it can do so because the reservation
         // commits it before anything is spawned. Only when NEITHER exists
         // is this genuinely a report for a session that is gone.
-        let generation = match &entry {
-            Some(entry) => entry.generation,
+        let (kind, generation) = match &entry {
+            Some(entry) => (entry.snapshot.kind, entry.generation),
             None => match self.store.session(id).await {
-                Ok(Some(row)) => row.generation,
+                Ok(Some(row)) => (row.agent_kind, row.generation),
                 Ok(None) => {
                     return Err(RequestError::new(
                         ErrorKind::NotFound,
@@ -10141,6 +10477,19 @@ impl Supervisor {
                 }
             },
         };
+        if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
+            warn!(
+                session = %id,
+                kind = ?kind,
+                bytes = conversation.len(),
+                "refused a reported conversation identity that does not match this session's \
+                 durable agent kind"
+            );
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the reported conversation identity does not match this session's agent kind",
+            ));
+        }
         // The injected failure STANDS IN for the store call rather than
         // preceding it, so a test can exercise this function's own failure
         // path without a store that is genuinely broken.
@@ -10182,7 +10531,7 @@ impl Supervisor {
                     session = %id, conversation = %conversation, source = %source,
                     error = %format!("{e:#}"),
                     "could not record the conversation identity this session's agent \
-                     reported; nothing will retry it and the scan remains the fallback"
+                     reported; a later report or supported vendor scan may recover it"
                 );
                 return Err(RequestError::new(
                     ErrorKind::Internal,
@@ -10645,6 +10994,7 @@ pub(crate) mod tests {
             kind,
             resume_template,
             captured_conversation,
+            generation: 0,
             restart_offer: offer,
             resume_argv,
             first_input_at: None,
@@ -12639,6 +12989,106 @@ pub(crate) mod tests {
             scanned.committed_conversation(),
             Some(format!("conv-{scanned_id}").as_str())
         );
+    }
+
+    /// A report before publication and a later file withdrawal must both reach
+    /// the offer users see. Neither transition can rely on a vendor scan for Pi.
+    /// The fixture has no terminal: the store, capture pass, verifier, and reply
+    /// builder are the real boundaries under test, without launching a model.
+    #[farhelm_testtrace::test]
+    async fn pi_report_before_publication_and_missing_file_refresh_the_offer() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let file = state.path().join("pi session.jsonl");
+        std::fs::write(&file, "{\"type\":\"session\",\"id\":\"pi-exact\"}\n").unwrap();
+        let token = crate::agent_kind::encode_pi_locator(crate::agent_kind::PiLocator {
+            version: 1,
+            session_id: "pi-exact".into(),
+            session_file: Some(file.to_str().unwrap().to_owned()),
+        })
+        .unwrap();
+        let integration = IntegrationSnapshot::resolve(&["pi".into()], None, None).unwrap();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: id.clone(),
+                    parent: None,
+                    archived: false,
+                    title: "Pi".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: state.path().to_str().unwrap().into(),
+                    invocation: "pi".into(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: AgentKind::Pi,
+                    resume_template: integration.resume_template.clone(),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                    conversation_source: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!sup.sessions.lock().await.contains_key(&id));
+        sup.report_conversation(&id, token.clone(), "startup".into())
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        assert_eq!(entry.capture.lock().unwrap().committed_conversation(), None);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::Resume
+        );
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        sup.verify_pi_resume(&id, &snapshot)
+            .await
+            .expect("matching exact file");
+
+        std::fs::remove_file(&file).unwrap();
+        let error = sup
+            .verify_pi_resume(&id, &snapshot)
+            .await
+            .expect_err("missing file cannot resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::FreshOnly
+        );
+        let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
+        assert!(relaunch_argv(RestartMode::Fresh, &fresh, "pi").is_ok());
     }
 
     /// Deleting a session removes its conversation-hook trace, at the path
@@ -16507,6 +16957,8 @@ pub(crate) mod tests {
         let argv0 = match kind {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
+            AgentKind::Goose => "goose",
+            AgentKind::Pi => "pi",
             AgentKind::Generic => "agent",
         };
         IntegrationSnapshot::resolve(&[argv0.to_string()], Some(kind), None)
@@ -16564,6 +17016,7 @@ pub(crate) mod tests {
                     &crate::agent_kind::AgentHooks::All,
                     instructions,
                     Some("/opt/farhelm"),
+                    None,
                     "session-1",
                 );
                 assert!(hooked, "{kind:?}: an integrated kind must be hooked");
@@ -16576,6 +17029,261 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    /// A structured Goose launch keeps its literal leading environment and
+    /// receives one persisted reporter declaration. A recognized resume gets
+    /// only current-launch controls, so Goose reuses the reporter stored in
+    /// the conversation instead of registering the same name twice.
+    #[farhelm_testtrace::test]
+    fn goose_injection_is_exact_for_fresh_and_resumed_launches() {
+        let fresh = [
+            "env",
+            "GOOSE_MODE=auto",
+            "GOOSE_THINKING_EFFORT=off",
+            "goose",
+            "session",
+            "--model",
+            "model-1",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            fresh,
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(hooked);
+        assert_eq!(
+            injected,
+            [
+                "env",
+                "FARHELM_GOOSE_REPORTER_ENABLED=1",
+                "FARHELM_GOOSE_INSTRUCTIONS=1",
+                "FARHELM_GOOSE_REPORTER_EXE=/opt/farhelm",
+                "GOOSE_MODE=auto",
+                "GOOSE_THINKING_EFFORT=off",
+                "goose",
+                "session",
+                "--model",
+                "model-1",
+                "--with-extension",
+                "farhelm-reporter:sh -c 'exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook'",
+            ]
+        );
+
+        let resume = [
+            "goose",
+            "session",
+            "--resume",
+            "--session-id",
+            "conversation-1",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            resume,
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::None,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(!hooked, "hooks-off disables the persisted reporter");
+        assert_eq!(
+            injected,
+            [
+                "env",
+                "FARHELM_GOOSE_REPORTER_ENABLED=0",
+                "FARHELM_GOOSE_INSTRUCTIONS=0",
+                "FARHELM_GOOSE_REPORTER_EXE=/opt/farhelm",
+                "goose",
+                "session",
+                "--resume",
+                "--session-id",
+                "conversation-1",
+            ]
+        );
+    }
+
+    /// Bare Goose is normalized to its interactive subcommand before flags
+    /// are appended. Known option values remain opaque even when they look
+    /// like selectors, so `--system --resume` is still a fresh launch. An
+    /// option-bearing `env` prefix is never rewritten, including the
+    /// `--option=value` spelling that otherwise resembles an assignment.
+    #[farhelm_testtrace::test]
+    fn goose_parser_preserves_selector_shaped_option_values() {
+        let bare = vec!["goose".to_string()];
+        let (injected, hooked) = with_hook_argv_using(
+            bare,
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::Off,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(hooked);
+        assert_eq!(injected[4..6], ["goose", "session"]);
+
+        let shaped = ["goose", "session", "--system", "--resume"]
+            .map(str::to_string)
+            .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            shaped,
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::Off,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(hooked);
+        assert_eq!(
+            injected
+                .iter()
+                .filter(|word| word.starts_with("farhelm-reporter:"))
+                .count(),
+            1
+        );
+        assert!(
+            injected
+                .windows(2)
+                .any(|pair| pair == ["--system", "--resume"])
+        );
+
+        let env_options = ["env", "-i", "goose", "session"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            env_options.clone(),
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(!hooked);
+        assert_eq!(result, env_options);
+
+        let env_long_option = ["env", "--unset=HOME", "goose", "session"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            env_long_option.clone(),
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(!hooked);
+        assert_eq!(result, env_long_option);
+    }
+
+    /// Pi injects the static extension and pointer as one unit. Either the
+    /// hook opt-out or an unavailable verified artifact leaves the user's
+    /// argv byte-for-byte unchanged, including with instructions enabled.
+    /// Pi's non-interactive commands and export mode must also remain exact,
+    /// while selector-looking option values stay opaque.
+    #[farhelm_testtrace::test]
+    fn pi_injection_requires_both_policy_and_verified_artifact() {
+        let argv = vec![
+            "pi".to_string(),
+            "--model".to_string(),
+            "model-1".to_string(),
+        ];
+        for (hooks, extension) in [
+            (crate::agent_kind::AgentHooks::None, Some("/state/pi.ts")),
+            (crate::agent_kind::AgentHooks::All, None),
+        ] {
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Pi),
+                &hooks,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                extension,
+                "session-1",
+            );
+            assert!(!hooked);
+            assert_eq!(result, argv);
+        }
+
+        let shaped_value = ["pi", "--append-system-prompt", "--help"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            shaped_value,
+            &hook_snapshot(AgentKind::Pi),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::Off,
+            Some("/opt/farhelm"),
+            Some("/state/pi.ts"),
+            "session-1",
+        );
+        assert!(
+            hooked,
+            "a value that looks like --help is still only a value"
+        );
+        assert!(
+            result
+                .windows(2)
+                .any(|pair| pair == ["--append-system-prompt", "--help"])
+        );
+
+        for argv in [
+            vec!["pi", "install", "package"],
+            vec!["pi", "remove", "package"],
+            vec!["pi", "uninstall", "package"],
+            vec!["pi", "update"],
+            vec!["pi", "list"],
+            vec!["pi", "config"],
+            vec!["pi", "auth", "login"],
+            vec!["pi", "--export", "session.jsonl"],
+            vec!["pi", "--help"],
+            vec!["pi", "-v"],
+            vec!["pi", "--list-models"],
+        ] {
+            let argv = argv.into_iter().map(str::to_string).collect::<Vec<_>>();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Pi),
+                &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                Some("/state/pi.ts"),
+                "session-1",
+            );
+            assert!(!hooked, "Pi utility argv must remain unchanged: {argv:?}");
+            assert_eq!(result, argv);
+        }
+
+        let export_value = ["pi", "--system-prompt", "--export"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            export_value,
+            &hook_snapshot(AgentKind::Pi),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::Off,
+            Some("/opt/farhelm"),
+            Some("/state/pi.ts"),
+            "session-1",
+        );
+        assert!(hooked, "--export is data when consumed as an option value");
+        assert!(
+            result
+                .windows(2)
+                .any(|pair| pair == ["--system-prompt", "--export"])
+        );
     }
 
     /// A `Generic` session is left alone, and SILENTLY.
@@ -16602,6 +17310,7 @@ pub(crate) mod tests {
             &crate::agent_kind::AgentHooks::None,
             crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
+            None,
             "session-1",
         );
         assert!(!hooked);
@@ -16629,6 +17338,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::All,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(!hooked, "{kind:?}: a bare -- must suppress injection");
@@ -16644,6 +17354,7 @@ pub(crate) mod tests {
             &crate::agent_kind::AgentHooks::All,
             crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
+            None,
             "session-1",
         );
         assert!(hooked, "an ordinary long flag must not read as a bare --");
@@ -16676,6 +17387,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::All,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(
@@ -16690,6 +17402,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::All,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(
@@ -16749,6 +17462,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::All,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(
@@ -16766,6 +17480,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::All,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(
@@ -16788,6 +17503,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::All,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(hooked, "{unrelated:?} does not touch the hook tables");
@@ -16826,6 +17542,7 @@ pub(crate) mod tests {
                 &crate::agent_kind::AgentHooks::None,
                 crate::agent_kind::AgentInstructions::On,
                 Some("/opt/farhelm"),
+                None,
                 "session-1",
             );
             assert!(!hooked, "{kind:?}: `none` must hook nothing");
@@ -16839,6 +17556,7 @@ pub(crate) mod tests {
             &codex_only,
             crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
+            None,
             "session-1",
         );
         assert!(hooked, "a listed kind must still be hooked");
@@ -16860,6 +17578,7 @@ pub(crate) mod tests {
             &codex_only,
             crate::agent_kind::AgentInstructions::On,
             Some("/opt/farhelm"),
+            None,
             "session-1",
         );
         assert!(!hooked, "a kind absent from the list must not be hooked");
@@ -16883,6 +17602,7 @@ pub(crate) mod tests {
             &hook_snapshot(AgentKind::Claude),
             &crate::agent_kind::AgentHooks::All,
             crate::agent_kind::AgentInstructions::On,
+            None,
             None,
             "session-1",
         );
@@ -16921,8 +17641,12 @@ pub(crate) mod tests {
             Supervisor::new_for_startup(state.path(), startup(crate::agent_kind::AgentHooks::None))
                 .await
                 .expect("supervisor");
-        let (result, hooked) =
-            opted_out.with_hook_argv(argv.clone(), &hook_snapshot(AgentKind::Claude), "session-1");
+        let (result, hooked) = opted_out.with_hook_argv(
+            argv.clone(),
+            &hook_snapshot(AgentKind::Claude),
+            None,
+            "session-1",
+        );
         assert!(
             !hooked,
             "a supervisor started with `none` must hook nothing"
@@ -16940,7 +17664,7 @@ pub(crate) mod tests {
         .await
         .expect("supervisor");
         let (_, hooked) =
-            default.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), "session-1");
+            default.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), None, "session-1");
         assert!(hooked, "the default startup value must still hook");
     }
 
@@ -16977,8 +17701,12 @@ pub(crate) mod tests {
         )
         .await
         .expect("supervisor");
-        let (result, hooked) =
-            silent.with_hook_argv(argv.clone(), &hook_snapshot(AgentKind::Claude), "session-1");
+        let (result, hooked) = silent.with_hook_argv(
+            argv.clone(),
+            &hook_snapshot(AgentKind::Claude),
+            None,
+            "session-1",
+        );
         assert!(
             hooked,
             "`off` must still hook; it only silences the pointer"
@@ -16995,7 +17723,7 @@ pub(crate) mod tests {
         .await
         .expect("supervisor");
         let (result, _) =
-            announcing.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), "session-1");
+            announcing.with_hook_argv(argv, &hook_snapshot(AgentKind::Claude), None, "session-1");
         assert!(
             result.join(" ").contains("--announce"),
             "the default startup value must announce: {result:?}"

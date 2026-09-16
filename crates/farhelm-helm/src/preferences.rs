@@ -277,8 +277,8 @@ mod tests {
 
         // `remembered_permissions` is validated the same way `list_sort` is,
         // against its own smaller vocabulary: a word this helm does not
-        // serve is a 400 that leaves the row untouched, and the one word it
-        // does serve is accepted like any other field.
+        // serve is a 400 that leaves the row untouched, and every released
+        // word is accepted like any other field.
         let response = harness
             .router()
             .oneshot(put(
@@ -296,17 +296,19 @@ mod tests {
             None,
             "a refused permissions patch leaves the row unchanged"
         );
-        let response = harness
-            .router()
-            .oneshot(put(serde_json::json!({ "remembered_permissions": "yolo" })))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        assert_eq!(
-            read(&harness).await.remembered_permissions.as_deref(),
-            Some("yolo"),
-            "the one word this helm serves is accepted"
-        );
+        for word in ["approve", "smart_approve", "chat", "yolo"] {
+            let response = harness
+                .router()
+                .oneshot(put(serde_json::json!({ "remembered_permissions": word })))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{word}");
+            assert_eq!(
+                read(&harness).await.remembered_permissions.as_deref(),
+                Some(word),
+                "every released permission word is accepted"
+            );
+        }
 
         let response = harness
             .router()

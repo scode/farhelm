@@ -118,15 +118,15 @@ work="$state/work"
 # fixture below, which invokes the fake-agent binary by absolute path. The
 # supervisor deliberately launches through a login shell, so a private login
 # home is the only reliable way to put an owned fake harness binary ahead of
-# any operator installation without changing this script's own PATH. Two
-# harnesses are faked, `codex` and `claude`, because replace-with's own
+# any operator installation without changing this script's own PATH. The
+# harnesses are faked because replace-with's own
 # browser coverage (`replace.spec.ts`) exercises a harness SWITCH through the
 # real composer search box — an e2e run must never let that switch fall
 # through to a REAL vendor CLI the login shell happens to find on this
 # machine, so every structured harness a spec can select through the search
 # box needs its own owned fake ahead of PATH, not just the one the original
-# structured-clone tests used. All four harness NAMES the helm compiles
-# (codex, claude, muse, opencode — `crates/farhelm-helm/src/launches.rs`)
+# structured-clone tests used. All six harness NAMES the helm compiles
+# (codex, claude, muse, goose, pi, opencode — `crates/farhelm-helm/src/launches.rs`)
 # get one, so a future spec selecting any of them lands on a fake too.
 structured_bin="$state/structured-bin"
 structured_home="$state/structured-home"
@@ -174,7 +174,7 @@ printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 # which binary name they are installed under and in their own counter
 # file's name, so two structured sessions on different harnesses do not
 # share one generation sequence.
-for structured_name in codex claude muse opencode; do
+for structured_name in codex claude muse goose pi opencode; do
   cat >"$structured_bin/$structured_name" <<EOF || exit 1
 #!/bin/sh
 session="\${FARHELM_SESSION_ID:?missing session id}"

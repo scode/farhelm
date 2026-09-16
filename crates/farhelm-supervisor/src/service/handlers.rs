@@ -137,7 +137,7 @@ const INTENT_KEY_CAP: usize = 512;
 /// this process at least chose to open — from silently widening what an
 /// in-session peer can push over the wire. Both vendors use UUIDs (36
 /// bytes), so 128 is generous headroom either way.
-const MAX_CONVERSATION_BYTES: usize = 128;
+const MAX_CONVERSATION_BYTES: usize = crate::agent_kind::MAX_PI_LOCATOR_BYTES;
 
 /// Byte cap on `ControlMsg::ReportConversation`'s `source` — the vendor's
 /// own word for why the hook fired (`startup`, `resume`, `clear`,
@@ -274,6 +274,8 @@ fn create_mode(fields: CreateSelectorFields) -> Result<CreateSelector, String> {
             LaunchHarness::Claude => AgentKind::Claude,
             LaunchHarness::Muse => AgentKind::Generic,
             LaunchHarness::OpenCode => AgentKind::Generic,
+            LaunchHarness::Goose => AgentKind::Goose,
+            LaunchHarness::Pi => AgentKind::Pi,
         };
         if agent_kind != Some(expected_kind) {
             return Err("a structured launch's harness and agent_kind disagree".to_string());
@@ -393,6 +395,8 @@ async fn resolve_create_selector(
                     LaunchHarness::Claude => AgentKind::Claude,
                     LaunchHarness::Muse => AgentKind::Generic,
                     LaunchHarness::OpenCode => AgentKind::Generic,
+                    LaunchHarness::Goose => AgentKind::Goose,
+                    LaunchHarness::Pi => AgentKind::Pi,
                 };
                 return Ok(CreateMode::Structured {
                     invocation: parent.invocation,
@@ -3243,9 +3247,7 @@ pub(crate) async fn handle_restricted_control(
             // only by `MAX_FRAME_LEN`, and the hello-only caps in
             // `farhelm_proto::io` never applied here. Same job
             // `MAX_LEASE_BYTES` does for a lease name.
-            if conversation.len() > MAX_CONVERSATION_BYTES
-                || !crate::agent_kind::is_plausible_conversation_id(&conversation)
-            {
+            if conversation.len() > MAX_CONVERSATION_BYTES {
                 warn!(
                     session = %auth.session_id, bytes = conversation.len(),
                     "refused a reported conversation identity this build will not store"

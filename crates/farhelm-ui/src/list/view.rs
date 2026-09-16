@@ -2545,9 +2545,12 @@ pub(crate) fn ListView(
                         // the helm never stored — the rarer, reversible
                         // direction, and accepted rather than plumbed back.
                         if let Some(launch) = &session.launch {
-                            let word = launch
-                                .permissions
-                                .map(|crate::LaunchPermission::Yolo| "yolo".to_string());
+                            let word = launch.permissions.map(|permission| match permission {
+                                crate::LaunchPermission::Yolo => "yolo".to_string(),
+                                crate::LaunchPermission::Approve => "approve".to_string(),
+                                crate::LaunchPermission::SmartApprove => "smart_approve".to_string(),
+                                crate::LaunchPermission::Chat => "chat".to_string(),
+                            });
                             preferences.0.write().remembered_permissions = word;
                         }
                         show_create.set(false);

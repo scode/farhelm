@@ -126,14 +126,14 @@ under the title through activity and above host/directory. Detail wraps unbroken
 ellipsis, clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded
 ages such as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch
 metadata is authoritative, while a legacy row receives only conservative shell-word executable/flag recognition; a
-profile name is not proof of either. C/M/L are Farhelm letter paths for Codex, Muse, and Claude, OpenCode uses its
-attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that
-fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's
-host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when
-both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read
-that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale, archived
-and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local`
-verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
+profile name is not proof of either. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode
+uses its attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name
+leaves that fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the
+session's host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why),
+`Remote` when both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a
+hosts read that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale,
+archived and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed
+`Local` verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
 `session_locality` has no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality
 still never SUPPRESSES an available host label, it only ever leaves the row free to show one it already has, and the
 glyph rule adds a second promise on top rather than replacing the first. Legacy rows without a host name at all
@@ -141,10 +141,12 @@ necessarily show none regardless — locality answers whether a name would be sh
 agent track is rendered as glyphs: structured launch metadata decides the harness and permission mark when present,
 otherwise conservative recognition uses the program basename plus a permission glyph. Legacy recognition skips known
 option values and stops at unknown syntax, subcommands, or `--`, so argument data cannot earn a permission glyph. The
-full invocation and a profile's snapshotted name remain in its accessible text and tooltip. The working directory is
-tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold
-against properly. Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute
-— the row is a summary, and the full truth stays one hover away.
+closed approval glyph distinguishes Goose's `approve`, `smart approve`, and `chat` metadata from the open YOLO warning;
+an omitted Pi permission is rendered as YOLO for compatibility with older snapshots. The full invocation and a profile's
+snapshotted name remain in its accessible text and tooltip. The working directory is tilde-folded against the
+`/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of
+those abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the
+full truth stays one hover away.
 
 `status::status_badge` supplies the status wording; the row chooses its presentation according to compact mode. Live
 states keep their text for screen readers alongside the colored dot. Ended states use a distinct icon in compact mode,
@@ -1099,11 +1101,12 @@ reports a failed listing rather than a silently shortened one.
   instead of a silent wrong guess. Plain resume appends to the existing record under the same id for both agents
   (audited on current versions; a new id appears only on explicit forks — `--fork-session`, `forked_from_id`), so a
   captured identity survives restarts; the watcher treats appends as the resume signal and cheaply re-verifies identity
-  after each restart rather than baking in either behavior. Re-verification is a scan-only affair, because only a
-  scan-derived claim carries the record locator an append can confirm. A hook-reported identity carries none and is
-  never re-verified — nothing on disk can improve on the agent's own answer — so it simply stays durable, and the next
-  launch's own hook reports again from inside the new process. The scan is no longer the only identity source, though it
-  is still the only one that works without vendor cooperation — see the hook paragraph below.
+  after each restart rather than baking in either behavior. Re-verification is a scan-only affair for these two kinds,
+  because only a scan-derived claim carries the record locator an append can confirm. A Claude or Codex hook report
+  carries none and is never re-verified — nothing on disk can improve on the agent's own answer — so it simply stays
+  durable, and the next launch's own hook reports again from inside the new process. The scan is no longer their only
+  identity source, though it is still the only one that works without vendor cooperation — see the hook paragraph below.
+  Pi's typed locator has a separate exact-file verification contract described after it.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1126,11 +1129,28 @@ reports a failed listing rather than a silently shortened one.
   command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either vendor —
   an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the supervisor's
   environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read once at
-  supervisor start and carried as a seam value. The scan is untouched by all of this and remains the fallback wherever
+  supervisor start and carried as a seam value. Their scan is untouched by all of this and remains the fallback wherever
   no report has been accepted — an unhooked launch, but also a hook that failed, timed out, or was refused; it is never
   the override. A reported identity dominates every scan-derived state, the ambiguous verdict included, because it is
   not evidence about which record is ours — it is the agent's own answer. `docs/agent-hook-injection.md` is the
   user-facing account of the same mechanism.
+
+  **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
+  MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
+  reporter and only supply current-launch enablement, executable, and instruction controls. The persisted command
+  contains no credential or session identity and falls back to `farhelm` on `PATH` for a manual Goose resume. Its empty
+  MCP interface reports `AGENT_SESSION_ID` when current Farhelm credentials enable it and carries the instruction
+  pointer in the initialize result. Pi loads a versioned TypeScript artifact materialized with private permissions under
+  Farhelm's state directory. The extension serializes `session_start` and `agent_end` reports, including the exact
+  absolute session file only after Pi has persisted it. The database retains a bounded, versioned Pi locator containing
+  both ID and optional file; list/status inspect only that token. Resume alone opens the exact file through the bounded
+  no-follow regular-file reader and compares its first `type=session` record's ID. Failure compare-replaces that exact
+  locator and generation with a same-ID fileless locator, so a concurrent newer report wins and the stale request gets
+  the ordinary offer-changed conflict. Each capture pass reconciles these report-only kinds with their own durable row
+  before serving an offer, without opening vendor files. This covers reports accepted before entry publication and
+  restart-time withdrawals. The mirror updates only if it still holds the identity observed before the row read,
+  protecting a different newer mirrored identity. An identity that changes away and back during the read may briefly
+  leave a stale offer until the next pass; restart always checks the durable identity.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the

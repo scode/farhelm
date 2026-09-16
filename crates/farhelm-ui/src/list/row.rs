@@ -416,6 +416,8 @@ fn known_harness(program: &str) -> HarnessGlyph {
         "codex" => HarnessGlyph::Codex,
         "claude" => HarnessGlyph::Claude,
         "muse" => HarnessGlyph::Muse,
+        "goose" => HarnessGlyph::Goose,
+        "pi" => HarnessGlyph::Pi,
         "opencode" => HarnessGlyph::OpenCode,
         _ => HarnessGlyph::Terminal,
     }
@@ -425,6 +427,9 @@ fn permission_description(permission: PermissionGlyph) -> &'static str {
     match permission {
         PermissionGlyph::Yolo => "YOLO permission bypass",
         PermissionGlyph::FullAuto => "sandboxed full-auto",
+        PermissionGlyph::Approve => "approve permission mode",
+        PermissionGlyph::SmartApprove => "smart approve permission mode",
+        PermissionGlyph::Chat => "chat permission mode",
     }
 }
 
@@ -440,13 +445,27 @@ fn agent_badge(session: &Session) -> AgentBadge {
             LaunchHarness::Codex => HarnessGlyph::Codex,
             LaunchHarness::Claude => HarnessGlyph::Claude,
             LaunchHarness::Muse => HarnessGlyph::Muse,
+            LaunchHarness::Goose => HarnessGlyph::Goose,
+            LaunchHarness::Pi => HarnessGlyph::Pi,
             LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         };
-        let permission = launch.permissions.map(|_| PermissionGlyph::Yolo);
+        let effective_permission = if launch.harness == LaunchHarness::Pi {
+            Some(crate::LaunchPermission::Yolo)
+        } else {
+            launch.permissions
+        };
+        let permission = effective_permission.map(|permission| match permission {
+            crate::LaunchPermission::Yolo => PermissionGlyph::Yolo,
+            crate::LaunchPermission::Approve => PermissionGlyph::Approve,
+            crate::LaunchPermission::SmartApprove => PermissionGlyph::SmartApprove,
+            crate::LaunchPermission::Chat => PermissionGlyph::Chat,
+        });
         let mut description = match harness {
             HarnessGlyph::Codex => "Codex".to_string(),
             HarnessGlyph::Claude => "Claude Code".to_string(),
             HarnessGlyph::Muse => "Muse Code".to_string(),
+            HarnessGlyph::Goose => "Goose".to_string(),
+            HarnessGlyph::Pi => "Pi".to_string(),
             HarnessGlyph::OpenCode => "OpenCode".to_string(),
             HarnessGlyph::Terminal => unreachable!("structured selections always name a harness"),
         };
@@ -2872,6 +2891,8 @@ mod tests {
         assert_eq!(known_harness("codex"), HarnessGlyph::Codex);
         assert_eq!(known_harness("claude"), HarnessGlyph::Claude);
         assert_eq!(known_harness("muse"), HarnessGlyph::Muse);
+        assert_eq!(known_harness("goose"), HarnessGlyph::Goose);
+        assert_eq!(known_harness("pi"), HarnessGlyph::Pi);
         assert_eq!(known_harness("opencode"), HarnessGlyph::OpenCode);
         assert_eq!(known_harness("env"), HarnessGlyph::Terminal);
     }
@@ -2899,6 +2920,45 @@ mod tests {
                 description: "Claude Code — YOLO permission bypass — unknown-command --anything"
                     .to_string(),
             }
+        );
+    }
+
+    /// Structured permission metadata distinguishes Goose's gated modes from
+    /// YOLO, while an older omitted Pi field still describes Pi's sole
+    /// effective mode.
+    #[farhelm_testtrace::test]
+    fn structured_goose_and_pi_badges_use_effective_permission_modes() {
+        let goose = Session {
+            launch: Some(crate::LaunchSelection {
+                harness: LaunchHarness::Goose,
+                model: Some("z-ai/glm-5.3".into()),
+                effort: None,
+                permissions: Some(crate::LaunchPermission::SmartApprove),
+            }),
+            invocation: "goose session".to_string(),
+            ..row_specimen("structured-goose-badge")
+        };
+        assert_eq!(
+            agent_badge(&goose).permission,
+            Some(PermissionGlyph::SmartApprove)
+        );
+        assert!(agent_badge(&goose).description.contains("smart approve"));
+
+        let pi = Session {
+            launch: Some(crate::LaunchSelection {
+                harness: LaunchHarness::Pi,
+                model: Some("z-ai/glm-5.3".into()),
+                effort: None,
+                permissions: None,
+            }),
+            invocation: "pi --provider openrouter".to_string(),
+            ..row_specimen("structured-pi-badge")
+        };
+        assert_eq!(agent_badge(&pi).permission, Some(PermissionGlyph::Yolo));
+        assert!(
+            agent_badge(&pi)
+                .description
+                .contains("YOLO permission bypass")
         );
     }
 

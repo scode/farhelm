@@ -25,17 +25,14 @@
 //!    [`CWD_PLACEHOLDER`] at spawn time in `Supervisor::spawn_agent`,
 //!    which is the only place the launch's working directory is known on
 //!    every path.
-//! 2. **Conversation-identity capture** (item 8). Both supported agents
-//!    write discoverable on-disk records; the supervisor reads them. For a
-//!    kind that supports one, identity is ALSO reported by the agent
-//!    itself, through a per-launch command-line hook
-//!    ([`AgentIntegration::hook_argv`]) that never touches the agent's own
-//!    configuration or record directories and cannot outlive the launch
-//!    that carried it — SPEC.md's line is "no file in the agent's own
-//!    directories is ever written", not "no hooks". The record scan stays
-//!    the fallback for kinds and launches the hook cannot reach, and it
-//!    never overrides a report: a report is exact, a scan is an inference,
-//!    and the two are never allowed to disagree about which wins.
+//! 2. **Conversation-identity capture** (item 8). Claude and Codex write
+//!    discoverable on-disk records that the supervisor can scan as a
+//!    fallback, and also report exact identities through a per-launch hook.
+//!    Goose and Pi are report-only integrations: they never expose a record
+//!    root for Farhelm to scan. Reporter artifacts stay in Farhelm's state;
+//!    Goose alone retains the credential-free reporter declaration in its
+//!    conversation metadata. An exact report always wins
+//!    over a scan-derived inference for the kinds that have both.
 //! 3. **Activity interpretation** (PLAN_M6_75.md item 2). The generic
 //!    classifier can compare successive screens, but it cannot know which
 //!    redraws are vendor-owned decoration or which still screen proves a
@@ -113,9 +110,11 @@
 //! search or one sample fold and can never participate in a deadlock.
 
 use farhelm_proto::{AgentKind, RestartOffer, SessionStatus};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod capture;
+pub(crate) use capture::read_prefix as read_bounded_regular_file;
 pub use capture::{
     CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordCorrelators, RecordStamp,
@@ -151,6 +150,10 @@ pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
 /// or word-split, and never as `argv[0]` (see [`ensure_no_cwd_program`]).
 pub const CWD_PLACEHOLDER: &str = "{cwd}";
 
+/// The short model-visible pointer delivered through every supported vendor's
+/// additive instruction channel.
+pub const INSTRUCTIONS_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and follow its output.";
+
 /// How much of a record file is read while looking for its correlators.
 ///
 /// Both agents put the identifying fields in the record's first line, and
@@ -176,6 +179,67 @@ const RECORD_PREFIX_LINES: usize = 64;
 /// like every other parse failure — marks the scan incomplete rather than
 /// silently dropping a candidate that might have been the ambiguity.
 const MAX_CONVERSATION_ID_LEN: usize = 128;
+
+/// Largest absolute Pi session-file path accepted from its injected extension.
+const MAX_PI_SESSION_PATH_BYTES: usize = 4 * 1024;
+
+/// Largest encoded Pi locator accepted on the existing conversation field.
+///
+/// This bound is checked after JSON escaping as well as before decoding, so
+/// every value the encoder produces is one the decoder can accept unchanged.
+pub const MAX_PI_LOCATOR_BYTES: usize = 8 * 1024;
+
+/// Pi's exact durable resume target, carried inside the existing conversation
+/// column because the vendor needs both values to resume without a scan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PiLocator {
+    pub version: u8,
+    pub session_id: String,
+    pub session_file: Option<String>,
+}
+
+/// Encode a validated Pi locator with an unmistakable versioned prefix.
+pub fn encode_pi_locator(locator: PiLocator) -> anyhow::Result<String> {
+    validate_pi_locator(&locator)?;
+    let encoded = format!("pi:{}", serde_json::to_string(&locator)?);
+    if encoded.len() > MAX_PI_LOCATOR_BYTES {
+        anyhow::bail!("Pi locator exceeds its encoded byte bound");
+    }
+    Ok(encoded)
+}
+
+/// Decode the only conversation-token form accepted for a Pi session.
+pub fn parse_pi_locator(value: &str) -> anyhow::Result<PiLocator> {
+    if value.len() > MAX_PI_LOCATOR_BYTES {
+        anyhow::bail!("Pi locator exceeds its encoded byte bound");
+    }
+    let json = value
+        .strip_prefix("pi:")
+        .ok_or_else(|| anyhow::anyhow!("not a Pi locator"))?;
+    let locator: PiLocator = serde_json::from_str(json)?;
+    validate_pi_locator(&locator)?;
+    Ok(locator)
+}
+
+/// Enforce the parts of a Pi locator that are safe to store before touching
+/// the exact file named by it at restart time.
+fn validate_pi_locator(locator: &PiLocator) -> anyhow::Result<()> {
+    if locator.version != 1 {
+        anyhow::bail!("Pi locator version is not supported");
+    }
+    if !is_plausible_conversation_id(&locator.session_id) {
+        anyhow::bail!("Pi session id is not plausible");
+    }
+    if let Some(path) = &locator.session_file
+        && (path.len() > MAX_PI_SESSION_PATH_BYTES
+            || !Path::new(path).is_absolute()
+            || path.chars().any(char::is_control))
+    {
+        anyhow::bail!("Pi session file is not a bounded absolute text path");
+    }
+    Ok(())
+}
 
 /// One agent's knowledge of itself: where its conversation records live,
 /// how to read them, how a resume is invoked, and what its screen looks
@@ -205,7 +269,7 @@ pub trait AgentIntegration: Send + Sync {
     /// found. For Claude this is the munged-cwd project directory; for
     /// Codex it is the whole (date-nested) rollout tree, since Codex does
     /// not partition by working directory at all.
-    fn record_root(&self, home: &Path, canonical_cwd: &str) -> PathBuf;
+    fn record_root(&self, home: &Path, canonical_cwd: &str) -> Option<PathBuf>;
 
     /// How many directory levels below [`AgentIntegration::record_root`]
     /// records may be nested. Bounds the walk so a stray deep tree cannot
@@ -310,8 +374,9 @@ pub trait AgentIntegration: Send + Sync {
     /// Command-line elements that make THIS launch report its conversation
     /// identity through `farhelm internal hook`, appended verbatim after the
     /// user's argv by the caller (`Supervisor::with_hook_argv`). Empty
-    /// means "this kind cannot be hooked per launch"; the record scan
-    /// remains the only identity source for such a session.
+    /// means "this kind does not use this hook form". Some such kinds use a
+    /// different exact reporter; only integrations with a record root may
+    /// fall back to scanning.
     ///
     /// Must be PURE: no I/O, no environment reads, and in particular no
     /// consulting the `FARHELM_AGENT_HOOKS` opt-out ([`AgentHooks`]) — the
@@ -382,6 +447,8 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
     match kind {
         AgentKind::Claude => Some(&ClaudeIntegration),
         AgentKind::Codex => Some(&CodexIntegration),
+        AgentKind::Goose => Some(&GooseIntegration),
+        AgentKind::Pi => Some(&PiIntegration),
         AgentKind::Generic => None,
     }
 }
@@ -394,6 +461,200 @@ struct ClaudeIntegration;
 /// sessions tree that is NOT partitioned by working directory.
 struct CodexIntegration;
 
+/// Goose reports exact identities; it has no record tree Farhelm may scan.
+struct GooseIntegration;
+
+/// Pi reports an exact file locator; it has no record tree Farhelm may scan.
+struct PiIntegration;
+
+/// Locate the executable behind the launcher's simple `env NAME=value` prefix.
+/// Option-bearing `env` commands have different parsing rules and are deliberately
+/// left unsupported. Injection and resume must agree on this boundary.
+pub(crate) fn effective_program_index(argv: &[String]) -> Option<usize> {
+    let first = Path::new(argv.first()?).file_name()?.to_str()?;
+    if first != "env" {
+        return Some(0);
+    }
+    for (index, argument) in argv.iter().enumerate().skip(1) {
+        if argument.starts_with('-') {
+            return None;
+        }
+        if argument.contains('=') {
+            continue;
+        }
+        return Some(index);
+    }
+    None
+}
+
+impl AgentIntegration for GooseIntegration {
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
+        let mut template = strip_goose_selectors(original_argv);
+        if effective_program_index(&template).is_some_and(|index| index + 1 == template.len()) {
+            template.push("session".to_string());
+        }
+        template.extend([
+            "--resume".to_string(),
+            "--session-id".to_string(),
+            CONVERSATION_PLACEHOLDER.to_string(),
+        ]);
+        template
+    }
+
+    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        None
+    }
+
+    fn record_depth(&self) -> usize {
+        0
+    }
+
+    fn is_record_file(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        Ok(None)
+    }
+}
+
+impl AgentIntegration for PiIntegration {
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
+        let mut template = strip_pi_selectors(original_argv);
+        template.extend([
+            "--session".to_string(),
+            CONVERSATION_PLACEHOLDER.to_string(),
+        ]);
+        template
+    }
+
+    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        None
+    }
+
+    fn record_depth(&self) -> usize {
+        0
+    }
+
+    fn is_record_file(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        let first = text
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Pi session file has no header"))?;
+        let header: serde_json::Value = serde_json::from_str(first)
+            .map_err(|_| anyhow::anyhow!("Pi session header is not JSON"))?;
+        let object = header
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("Pi session header is not an object"))?;
+        if object.get("type").and_then(serde_json::Value::as_str) != Some("session") {
+            anyhow::bail!("Pi session header has the wrong record type");
+        }
+        let conversation = object
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("Pi session header has no string id"))?;
+        if !is_plausible_conversation_id(conversation) {
+            anyhow::bail!("Pi session header id is not plausible");
+        }
+        Ok(Some(RecordCorrelators {
+            conversation: conversation.to_string(),
+            cwd: String::new(),
+            created_at: 0,
+        }))
+    }
+}
+
+/// Remove only Goose's documented identity selectors and their values.
+fn strip_goose_selectors(argv: &[String]) -> Vec<String> {
+    strip_selectors(
+        argv,
+        &["--name", "-n", "--session-id", "--id", "--path"],
+        &["--resume", "-r", "--fork", "--edit"],
+        &["--name=", "--session-id=", "--id=", "--path=", "-n"],
+        &[
+            "--provider",
+            "--model",
+            "--system",
+            "--max-turns",
+            "--with-extension",
+            "--with-builtin",
+            "--with-streamable-http-extension",
+            "--mode",
+        ],
+    )
+}
+
+/// Remove Pi's session-selection flags before inserting its verified file.
+fn strip_pi_selectors(argv: &[String]) -> Vec<String> {
+    strip_selectors(
+        argv,
+        &["--session", "--session-id", "--fork"],
+        &["--continue", "-c", "--resume", "-r"],
+        &["--session=", "--session-id=", "--fork="],
+        &[
+            "--provider",
+            "--model",
+            "--thinking",
+            "--append-system-prompt",
+            "--system-prompt",
+            "--tools",
+            "--exclude-tools",
+            "--session-dir",
+            "-e",
+            "--extension",
+        ],
+    )
+}
+
+/// Preserve every unrelated argv boundary while removing selector options.
+fn strip_selectors(
+    argv: &[String],
+    valued: &[&str],
+    flags: &[&str],
+    joined_prefixes: &[&str],
+    preserved_valued: &[&str],
+) -> Vec<String> {
+    let mut kept = Vec::with_capacity(argv.len());
+    let mut index = 0;
+    while index < argv.len() {
+        let argument = &argv[index];
+        if index > 0 && argument == "--" {
+            kept.extend(argv[index..].iter().cloned());
+            break;
+        }
+        if index > 0 && valued.contains(&argument.as_str()) {
+            index += usize::from(index + 1 < argv.len()) + 1;
+            continue;
+        }
+        if index > 0 && preserved_valued.contains(&argument.as_str()) {
+            kept.push(argument.clone());
+            if let Some(value) = argv.get(index + 1) {
+                kept.push(value.clone());
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if index > 0
+            && (flags.contains(&argument.as_str())
+                || joined_prefixes
+                    .iter()
+                    .any(|prefix| argument.starts_with(prefix) && argument.len() > prefix.len()))
+        {
+            index += 1;
+            continue;
+        }
+        kept.push(argument.clone());
+        index += 1;
+    }
+    kept
+}
+
 impl AgentIntegration for ClaudeIntegration {
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
         let mut template = original_argv.to_vec();
@@ -401,10 +662,12 @@ impl AgentIntegration for ClaudeIntegration {
         template
     }
 
-    fn record_root(&self, home: &Path, canonical_cwd: &str) -> PathBuf {
-        home.join(".claude")
-            .join("projects")
-            .join(munge_cwd(canonical_cwd))
+    fn record_root(&self, home: &Path, canonical_cwd: &str) -> Option<PathBuf> {
+        Some(
+            home.join(".claude")
+                .join("projects")
+                .join(munge_cwd(canonical_cwd)),
+        )
     }
 
     fn record_depth(&self) -> usize {
@@ -513,8 +776,8 @@ impl AgentIntegration for CodexIntegration {
     /// lower bound — which is also why `service`'s scan cache is keyed on
     /// the ROOT PATH: every Codex session on a host shares this one root
     /// and must not scan it once each.
-    fn record_root(&self, home: &Path, _canonical_cwd: &str) -> PathBuf {
-        home.join(".codex").join("sessions")
+    fn record_root(&self, home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        Some(home.join(".codex").join("sessions"))
     }
 
     /// `YYYY/MM/DD` beneath the sessions root.
@@ -1650,6 +1913,8 @@ fn kind_name(kind: AgentKind) -> &'static str {
     match kind {
         AgentKind::Claude => "claude",
         AgentKind::Codex => "codex",
+        AgentKind::Goose => "goose",
+        AgentKind::Pi => "pi",
         AgentKind::Generic => "generic",
     }
 }
@@ -1723,13 +1988,23 @@ impl IntegrationSnapshot {
     /// `{conversation}` invocation unfilled, so offering it would be
     /// offering a garbled command line.
     pub fn restart_offer(&self, captured: Option<&str>) -> RestartOffer {
+        if self.kind == AgentKind::Pi {
+            return match captured
+                .and_then(|value| parse_pi_locator(value).ok())
+                .and_then(|locator| locator.session_file)
+            {
+                Some(_) if self.resume_template.is_some() => RestartOffer::Resume,
+                _ => RestartOffer::FreshOnly,
+            };
+        }
         // An identity this build would refuse to substitute
         // (`is_plausible_conversation_id` — an option-shaped id being the
         // case that matters) is not something to OFFER a resume for either:
         // the offer would be one `filled_resume_argv` then declines to
         // honor, which is a confusing refusal at the worst moment. Judged
         // here so the offer and the command it promises can never disagree.
-        let captured = captured.filter(|id| is_plausible_conversation_id(id));
+        let captured =
+            captured.filter(|id| is_plausible_conversation_id(id) && !id.starts_with("pi:"));
         match (&self.resume_template, captured) {
             (Some(_), Some(_)) if self.integration().is_some() => RestartOffer::Resume,
             (Some(template), _)
@@ -1762,18 +2037,34 @@ impl IntegrationSnapshot {
     /// tests can assert the end-to-end promise ("resume this exact
     /// conversation") rather than only the id in isolation.
     pub fn filled_resume_argv(&self, conversation: &str) -> Option<Vec<String>> {
+        let replacement = if self.kind == AgentKind::Pi {
+            parse_pi_locator(conversation).ok()?.session_file?
+        } else {
+            if conversation.starts_with("pi:") || !is_plausible_conversation_id(conversation) {
+                return None;
+            }
+            conversation.to_string()
+        };
         // Re-validated at the boundary it actually matters at, not only
         // where the value was captured: a durable column written by an
         // older build (or edited by hand) reaches this function too, and
         // this is the last point before the value becomes an argv element.
         // See `is_plausible_conversation_id` for why a leading dash is the
         // case worth being paranoid about.
-        if !is_plausible_conversation_id(conversation) {
-            return None;
-        }
         let mut filled = self.resume_template.clone()?;
-        fill_slots(&mut filled, CONVERSATION_PLACEHOLDER, conversation);
+        fill_slots(&mut filled, CONVERSATION_PLACEHOLDER, &replacement);
         Some(filled)
+    }
+}
+
+/// Validate a reported identity against the durable kind before any write.
+pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
+    match kind {
+        AgentKind::Pi => parse_pi_locator(value).is_ok(),
+        AgentKind::Claude | AgentKind::Codex | AgentKind::Goose => {
+            !value.starts_with("pi:") && is_plausible_conversation_id(value)
+        }
+        AgentKind::Generic => false,
     }
 }
 
@@ -1996,13 +2287,14 @@ pub enum AgentHooks {
     /// written `fn default()` could.
     #[default]
     All,
-    /// No kind gets the hook; every session falls back to the record scan.
+    /// No integrated kind gets its reporter. Claude and Codex fall back to
+    /// their record scans; Goose and Pi gain no new exact target.
     None,
-    /// Exactly these kinds get the hook; every other kind falls back to
-    /// the scan. [`AgentKind::Generic`] appearing in this list would be
-    /// inert rather than rejected — `allows` is never even asked about it,
-    /// since the caller (`Supervisor::with_hook_argv`) already skips
-    /// kinds with no integration before consulting this value at all.
+    /// Exactly these kinds get their reporter. A disabled Claude or Codex
+    /// falls back to scanning; a disabled Goose or Pi does not. An
+    /// [`AgentKind::Generic`] entry would be inert rather than rejected —
+    /// `allows` is never asked about it because the caller skips kinds with
+    /// no integration before consulting this value.
     Only(Vec<AgentKind>),
 }
 
@@ -2013,7 +2305,7 @@ impl AgentHooks {
     /// derives `Eq` but neither `Hash` nor `Ord` (farhelm-proto's `lib.rs`),
     /// and adding either derive to a wire-protocol enum just to back a set
     /// here would be a proto-crate change in service of a supervisor-crate
-    /// convenience. The list is short by construction — only two kinds have
+    /// convenience. The list is short by construction — only four kinds have
     /// an integration today — and it is a `Vec`, so a value like
     /// `claude,claude` holds a duplicate; `contains` answers the same
     /// either way, which is why the parser does not bother de-duplicating.
@@ -2043,7 +2335,7 @@ impl AgentHooks {
 ///   [`AgentHooks::All`].
 /// - `none` maps to [`AgentHooks::None`].
 /// - Anything else is read as a comma-separated list of kind names
-///   (`claude`, `codex` — this module's own canonical spelling, from
+///   (`claude`, `codex`, `goose`, `pi` — this module's own canonical spelling, from
 ///   [`kind_name`], rather than a spelling invented for this variable).
 ///   Whitespace around each token is trimmed, and matching is
 ///   case-insensitive throughout this grammar: this is a value a human
@@ -2059,8 +2351,8 @@ impl AgentHooks {
 ///
 /// ## Failure mode: fail open, not partially
 ///
-/// A token that is not `all`, `none`, `claude`, or `codex` invalidates the
-/// WHOLE value, not just that token: a `tracing::warn!` names the bad
+/// A token outside `all`, `none`, `claude`, `codex`, `goose`, and `pi`
+/// invalidates the WHOLE value, not just that token: a `tracing::warn!` names the bad
 /// token and the full offending value, and the result is `All`. The
 /// reasoning is that this variable is an opt-OUT — a typo in it must not
 /// silently turn into "opt out of everything" (which is what an
@@ -2081,6 +2373,8 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
         match token.to_ascii_lowercase().as_str() {
             "claude" => kinds.push(AgentKind::Claude),
             "codex" => kinds.push(AgentKind::Codex),
+            "goose" => kinds.push(AgentKind::Goose),
+            "pi" => kinds.push(AgentKind::Pi),
             _ => {
                 tracing::warn!(
                     token,
@@ -2095,9 +2389,9 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
     AgentHooks::Only(kinds)
 }
 
-/// The `FARHELM_AGENT_INSTRUCTIONS` switch: whether the per-launch
-/// identity hook also prints the one-line pointer that tells the agent
-/// `farhelm agent instructions` exists.
+/// The `FARHELM_AGENT_INSTRUCTIONS` switch: whether an injected integration
+/// also delivers the pointer that tells the agent `farhelm agent
+/// instructions` exists.
 ///
 /// A SEAM value on exactly the terms [`AgentHooks`] above is one — set
 /// once from `farhelm supervisor run`'s CLI arm, never read from the
@@ -2108,20 +2402,19 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
 ///
 /// It is deliberately NOT folded into `AgentHooks`. The two answer
 /// different questions and fail in different directions: turning hooks off
-/// costs identity capture (restart-resume degrades to the record scan),
-/// while turning instructions off costs an agent knowing the CLI exists
-/// and nothing else. Someone who wants a silent launch but working resume
-/// must be able to say so.
+/// costs identity capture (a scan fallback for Claude and Codex, no new
+/// target for Goose and Pi), while turning instructions off costs an agent
+/// knowing the CLI exists and nothing else. Someone who wants a silent
+/// launch but working resume must be able to say so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentInstructions {
-    /// The injected hook carries `--announce` and prints the pointer. The
-    /// default, and what an unset or empty variable means.
+    /// The injected integration delivers the pointer. The default, and what
+    /// an unset or empty variable means.
     #[default]
     On,
-    /// The injected hook prints nothing. Identity capture is untouched:
-    /// the flags still go on the command line, the report still happens,
-    /// and the only difference is a session whose agent was never told
-    /// about `farhelm agent`.
+    /// The injected integration omits the pointer. Identity capture is
+    /// untouched: the report still happens, and the only difference is a
+    /// session whose agent was never told about `farhelm agent`.
     Off,
 }
 
@@ -2188,6 +2481,8 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
     match basename {
         "claude" => AgentKind::Claude,
         "codex" => AgentKind::Codex,
+        "goose" => AgentKind::Goose,
+        "pi" => AgentKind::Pi,
         _ => AgentKind::Generic,
     }
 }
@@ -2809,6 +3104,89 @@ mod tests {
                 .last()
                 .map(String::as_str),
             Some(good)
+        );
+    }
+
+    /// Goose's derived restart keeps the structured launcher's literal
+    /// `env` prefix and model choices while replacing every old identity
+    /// selector with the one exact session ID Farhelm captured.
+    #[farhelm_testtrace::test]
+    fn goose_resume_template_preserves_structured_launch_arguments() {
+        let original = [
+            "env",
+            "GOOSE_MODE=auto",
+            "GOOSE_THINKING_EFFORT=off",
+            "goose",
+            "session",
+            "--provider",
+            "openrouter",
+            "--model",
+            "x-ai/grok-4.6",
+            "--name",
+            "draft",
+        ]
+        .map(str::to_string);
+        let snapshot = IntegrationSnapshot::resolve(&original, Some(AgentKind::Goose), None)
+            .expect("Goose integration");
+        assert_eq!(
+            snapshot.resume_template.unwrap(),
+            [
+                "env",
+                "GOOSE_MODE=auto",
+                "GOOSE_THINKING_EFFORT=off",
+                "goose",
+                "session",
+                "--provider",
+                "openrouter",
+                "--model",
+                "x-ai/grok-4.6",
+                "--resume",
+                "--session-id",
+                "{conversation}",
+            ]
+        );
+    }
+
+    /// Fresh bare Goose is normalized during injection, but its durable argv
+    /// remains bare. Resume must add the subcommand even behind an env prefix.
+    #[farhelm_testtrace::test]
+    fn goose_resume_template_normalizes_bare_env_launches() {
+        for original in [vec!["goose"], vec!["env", "FOO=1", "/opt/bin/goose"]] {
+            let argv: Vec<String> = original.iter().map(|s| s.to_string()).collect();
+            let snapshot = IntegrationSnapshot::resolve(&argv, Some(AgentKind::Goose), None)
+                .expect("Goose integration");
+            let mut expected = argv;
+            expected.extend(
+                ["session", "--resume", "--session-id", "{conversation}"].map(str::to_string),
+            );
+            assert_eq!(snapshot.resume_template, Some(expected));
+        }
+    }
+
+    /// Pi's durable token round-trips paths that are hostile to shell-word
+    /// parsing because the path is later substituted as one argv element.
+    /// A fileless report remains valid but deliberately removes Resume.
+    #[farhelm_testtrace::test]
+    fn pi_locator_round_trips_hostile_paths_and_controls_the_offer() {
+        let locator = PiLocator {
+            version: 1,
+            session_id: "session-1".to_string(),
+            session_file: Some("/tmp/a b/quote-\"-\\-雪.jsonl".to_string()),
+        };
+        let encoded = encode_pi_locator(locator.clone()).expect("encode");
+        assert_eq!(parse_pi_locator(&encoded).expect("decode"), locator);
+
+        let snapshot = IntegrationSnapshot::resolve(&["pi".to_string()], Some(AgentKind::Pi), None)
+            .expect("Pi integration");
+        assert_eq!(snapshot.restart_offer(Some(&encoded)), RestartOffer::Resume);
+        let fileless = encode_pi_locator(PiLocator {
+            session_file: None,
+            ..locator
+        })
+        .expect("encode fileless locator");
+        assert_eq!(
+            snapshot.restart_offer(Some(&fileless)),
+            RestartOffer::FreshOnly
         );
     }
 
@@ -3627,7 +4005,7 @@ mod tests {
             fn default_resume_template(&self, _original_argv: &[String]) -> Vec<String> {
                 unreachable!("this fixture exists only to exercise the defaulted method")
             }
-            fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> PathBuf {
+            fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
                 unreachable!("this fixture exists only to exercise the defaulted method")
             }
             fn record_depth(&self) -> usize {
