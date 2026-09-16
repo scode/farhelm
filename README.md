@@ -21,5 +21,12 @@ open](https://raw.githubusercontent.com/scode/farhelm/9eb69b37fd9dd7dea97871f664
 
 <!-- /readme-hero-url -->
 
-The previous README, with install, setup, and development instructions, is parked at
-[docs/old_readme.md](docs/old_readme.md) while this one is rebuilt.
+## Install
+
+```
+curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/install.sh | sh
+```
+
+Installs `farhelm` into `~/.local/bin` (`farhelm-desktop` too, on macOS). Does NOT auto-upgrade (yet) — re-run the same
+command to update. Setup and development instructions are still parked at [docs/old_readme.md](docs/old_readme.md) while
+this README is being rebuilt.
