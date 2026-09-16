@@ -29,6 +29,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the replacement design is deliberately undecided. Keep compact rows compact and make the stopped state recognizable at
   the sidebar's actual icon size.
 
+- Improve the messaging provided by the installer script (`scripts/install.sh`). Review the user-facing messages and
+  make them clearer and more consistent; choose the final wording when implementing this item.
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
