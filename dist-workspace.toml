@@ -21,9 +21,8 @@
 # - `installers = []` (skill: `["homebrew"]`) — D7. The install path is
 #   `scripts/install.sh`, curled from `main`, reading the same asset names the
 #   helm does; dist's own shell/powershell installers would be a second,
-#   divergent description of the release. Homebrew is DEFERRED, not rejected:
-#   turning it on is `publish-jobs += "homebrew"` plus a `tap`, which is why
-#   this file otherwise keeps the skill's shape.
+#   divergent description of the release. Homebrew distribution is deferred;
+#   no publishing model or tap contract has been selected.
 # - `install-updater = false` (skill: true) — there is no self-update command
 #   (D11); re-running `install.sh` is the update path, so an updater binary
 #   would ship with nothing to do.
@@ -51,10 +50,8 @@
 #   the desktop archive also `Farhelm.icns` (declared under `binaries` in
 #   `packaging/farhelm-desktop/dist.toml`; the comment there says why).
 #   LICENSE stays because the binaries are Apache-2.0-licensed copies of this
-#   software. NOTE: if Homebrew publishing is ever flipped on (see
-#   `publish-jobs` below), the generated formula would install everything in
-#   `binaries` — the icon included — into `bin/`; that flip has to revisit
-#   the icon's `binaries` placement first.
+#   software. Any future package-manager integration that consumes the generic
+#   package's `binaries` list must keep the icon out of the executable directory.
 # - `precise-builds = true` (dist default: false) — NOT a preference. dist
 #   otherwise runs `cargo build --workspace`, and this workspace has a member
 #   that cannot be built for two of the three targets: `farhelm-desktop` pulls
