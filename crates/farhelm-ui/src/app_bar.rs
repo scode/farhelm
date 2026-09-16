@@ -176,6 +176,12 @@ fn install_profiles_outside_intent_tracking() {
              document.addEventListener('keydown', (event) => { \
                  const popup = document.querySelector('.profiles-popover'); \
                  const active = document.activeElement; \
+                 if (event.isTrusted && !event.isComposing && event.key === 'Escape' && popup && \
+                     (!active || active === document.body)) { \
+                     event.preventDefault(); \
+                     popup.querySelector('.profiles-escape-relay')?.click(); \
+                     return; \
+                 } \
                  if (!event.isTrusted || event.key !== 'Tab' || !popup || !active || !popup.contains(active)) return; \
                  if (tabIntent) cancelTab(tabIntent); \
                  const intent = { popup, focusout: false }; \
@@ -505,18 +511,33 @@ pub(crate) fn AppBar(
                         profiles_open.set(false);
                         focus_coordinator.invalidate();
                     }
+                    ProfileFocus::Transit => {
+                        // Replacing Delete with confirmation removes its
+                        // focused node. If the bounded Cancel placement
+                        // misses, body focus is still no outside choice.
+                        // Trusted outside intent was handled above; retain
+                        // the popup so confirmation remains reachable. Keep
+                        // this obligation dormant: a later body-to-outside
+                        // focus move has no popup focusout of its own.
+                        if recheck {
+                            pending_focus_check.set(Some(FocusObligation {
+                                observation: obligation.observation + 1,
+                                ..obligation
+                            }));
+                        }
+                    }
                     ProfileFocus::Inside => {
                         pending_focus_check.set(None);
                         focus_coordinator.clear_outside_obligation(obligation.sequence);
                     }
-                    ProfileFocus::Outside | ProfileFocus::Transit if ops.busy_now() => {
+                    ProfileFocus::Outside if ops.busy_now() => {
                         // Programmatic focus is not user intent. A busy popup
                         // keeps its in-flight destination mounted and lets the
                         // completion request preserve any outside active control.
                         pending_focus_check.set(None);
                         focus_coordinator.clear_outside_obligation(obligation.sequence);
                     }
-                    ProfileFocus::Outside | ProfileFocus::Transit => {
+                    ProfileFocus::Outside => {
                         pending_focus_check.set(None);
                         focus_coordinator.clear_outside_obligation(obligation.sequence);
                         profiles_open.set(false);
@@ -572,6 +593,17 @@ pub(crate) fn AppBar(
             }
             obligation.observation += 1;
             pending_focus_check.set(Some(obligation));
+        } else {
+            // WebKit may remove the focused control without reporting a
+            // popup focusout. A later body-to-outside focusin is then the
+            // first evidence of departure, not a recheck of an old token.
+            focus_sequence += 1;
+            pending_focus_check.set(Some(FocusObligation {
+                opening: open_generation(),
+                sequence: *focus_sequence.peek(),
+                trusted_outside: false,
+                observation: 0,
+            }));
         }
     };
 
@@ -598,6 +630,17 @@ pub(crate) fn AppBar(
         pending_focus_check.set(Some(obligation));
         focus_coordinator.set_outside_obligation(Some(obligation.sequence));
     };
+
+    // Both a popup key event and Escape during failed-placement body focus
+    // dismiss this exact opening through the same synchronous operation gate.
+    let dismiss_profiles = Callback::new(move |()| {
+        if !ops.busy_now() {
+            profiles_open.set(false);
+            pending_focus_check.set(None);
+            focus_coordinator.invalidate();
+            focus_profiles_toggle();
+        }
+    });
 
     rsx! {
         div {
@@ -642,14 +685,18 @@ pub(crate) fn AppBar(
                 class: "profiles-popover",
                 style: profiles_popover_placement_style(placement()),
                 onkeydown: move |evt| {
-                    if evt.key() == Key::Escape && !ops.busy_now() {
+                    if evt.key() == Key::Escape && !evt.is_composing() && !ops.busy_now() {
                         evt.prevent_default();
-                        profiles_open.set(false);
-                        pending_focus_check.set(None);
-                        focus_coordinator.invalidate();
-                        focus_profiles_toggle();
+                        dismiss_profiles.call(());
                     }
                 },
+                button {
+                    r#type: "button",
+                    class: "profiles-escape-relay",
+                    hidden: true,
+                    tabindex: "-1",
+                    onclick: move |_| dismiss_profiles.call(()),
+                }
                 button {
                     r#type: "button",
                     class: "profiles-focusout-relay",

@@ -1942,7 +1942,7 @@ fn ProfileRow(
 
     rsx! {
         div { class: "profile-row", "data-profile-id": "{profile.id}",
-            div { class: "profile-row-main",
+            div { class: if confirming { "profile-row-main profile-row-confirming" } else { "profile-row-main" },
                 span { class: "profile-name peer-value", dir: "ltr", "{shown_name}" }
                 span { class: "profile-kind", "{profile.agent_kind}" }
                 // The remembered default is marked rather than sorted to the
