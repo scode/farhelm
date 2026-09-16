@@ -156,6 +156,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the closing half's own receipt (detach reason, queue depth) still needs a supervisor-side log from a reproduction —
   preserve the stack's supervisor logs past teardown when hunting again.
 
+  A 20-repetition WebKit island-cap hunt on 2026-09-16 (run `4f6d89c8-2911-4672-877d-751b517a6be0`, stopped after 2
+  failures in 15 runs) reproduced with supervisor logs preserved, and both failures share one signature that supersedes
+  the "established socket died" reading: the agent island shows M5's "never finished connecting" banner — the 5s replay
+  idle timer expired with the socket still CONNECTING, bannered, closed it, and (first-mount rule) never retried; the
+  20s is the readiness budget polling that dead island, not a second mechanism. Each trace carries exactly one agent
+  network entry (101 received) and one console "closed before established" error; both traces plus the tailed supervisor
+  log are preserved unpacked under `analyst-supplement/` in the run record (Playwright wiped the checkout's
+  `e2e/test-results` on a later run). No retained helm line identifies the agent socket, and the supervisor logged only
+  session create/teardown — though the helm's generic "no such session" lines alongside the phantom refusals cannot all
+  be attributed elsewhere either. So the established chain is: handshake accepted, `open` never fired, bannered and
+  closed at 5s, never retried. Why the browser held that one handshake while 32 phantom upgrades churned beside it is a
+  hypothesis (burst churn starving one completion, possibly the same family as the rotation unanswered reads), not a
+  measured cause. The island code already anticipates the shape and deliberately does not recover it (`terminal.js`:
+  "only a socket that worked and then stopped is something to recover"), because its model is "helm not there", not
+  "helm there but one handshake stalled". The fix fork therefore needs the maintainer: retry a never-connected first
+  mount on the ladder (a product change against the M5 comment's letter), accept the burst as test-only pathology the
+  design need not survive (but staggering the mounts weakens the oversized-at-once fixture), or keep digging
+  browser-internally. The stall test was not re-hunted; its 24 consecutive passes stand.
+
 ### Difficult deflake
 
 The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
