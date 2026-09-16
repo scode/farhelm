@@ -66,11 +66,13 @@ function shellQuote(value: string): string {
 
 /**
  * Write the per-session replay script into the session's scratch working
- * directory. The session's invocation is the bare wrapper name (`claude`
- * or `codex`, on PATH through the stack's private HOME), and that wrapper
+ * directory. The session's invocation uses the wrapper name (`claude`
+ * or `codex`, on PATH through the stack's private HOME) with optional
+ * permission flags, and that wrapper
  * execs this file from `$PWD`, which is how sessions with identical
  * invocations replay different transcripts. The `"$@"` tail is where the
- * supervisor's per-launch vendor flags land; the fixture tolerates them.
+ * scenario's permission flags and supervisor's per-launch vendor flags
+ * land; the fixture tolerates them.
  */
 function writeAgentScript(info: StackInfo, cwd: string, session: ScenarioSession): void {
   const argv = [info.farhelm, "internal", "fake-agent", "--script", "replay"];
@@ -212,17 +214,19 @@ test("capture the README hero", async ({ page, request }) => {
   const size = await measureTerminal(page, request, info, localHost);
 
   // Sessions, in scenario order, each in its own scratch directory and at
-  // the terminal's measured size. The invocation is the bare wrapper name;
-  // see start-stack.sh for how that resolves.
+  // the terminal's measured size. Permission flags reach the stored invocation
+  // so the UI derives its own glyph; no listing rewrite manufactures badges.
+  // start-stack.sh resolves these names to isolated transcript wrappers.
   const ids = new Map<string, string>();
   for (const [index, session] of scenario.sessions.entries()) {
     const cwd = path.join(info.work, String(index));
     mkdirSync(cwd, { recursive: true });
     writeAgentScript(info, cwd, session);
+    const permissionFlag = session.wrapper === "claude" ? "--dangerously-skip-permissions" : "--yolo";
     const response = await request.post("/api/sessions", {
       data: {
         cwd,
-        invocation: session.wrapper,
+        invocation: session.yolo ? `${session.wrapper} ${permissionFlag}` : session.wrapper,
         title: session.title,
         host: hostIds.get(session.host),
         agent_kind: session.wrapper,
@@ -268,7 +272,11 @@ test("capture the README hero", async ({ page, request }) => {
   await attachSession(page, openId);
   if (open.transcript) await waitForTermText(page, lastTranscriptLine(open.transcript), 30_000);
   for (const session of scenario.sessions) {
-    await expect(page.locator(`[data-session-id="${ids.get(session.title)}"]`)).toBeVisible();
+    const row = page.locator(`[data-session-id="${ids.get(session.title)}"]`);
+    await expect(row).toBeVisible();
+    // Verify both marked and ordinary rows before photographing them. Otherwise
+    // a broken flag-to-glyph mapping could silently publish the wrong design.
+    await expect(row.locator('[data-glyph="yolo"]')).toHaveCount(session.yolo ? 1 : 0);
   }
   // Park the pointer where nothing has a hover state.
   await page.mouse.move(0, 0);
