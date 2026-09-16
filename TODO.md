@@ -59,12 +59,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- Reassess the remaining `sidebar-scroll-teardown-timeout` exclusion for
-  `the sidebar app bar stays pinned while the session list scrolls` in `e2e/tests/sidebar.spec.ts`. `FLAKES.md` records
-  the fixture teardown timeout as fixed in #548, but its `deflake/known-flakes.txt` line survived removal of the TODO
-  entry. Check the recorded fix and current teardown before retiring the exclusion; remove this entry and the exclusion
-  together. No new recurrence is established.
-
 - Investigate intermittent recovery assertions in
   `rotation logs out an open client and drops its feed and terminal
   sockets`, in `e2e/tests/auth.spec.ts`. Chromium
