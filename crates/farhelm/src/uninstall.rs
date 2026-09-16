@@ -6,4 +6,8 @@
 //! to an installation.
 
 #[allow(dead_code)] // The CLI is wired in the following uninstall change.
+pub(crate) mod origin;
+#[allow(dead_code)] // The CLI is wired in the following uninstall change.
 pub(crate) mod ownership;
+#[allow(dead_code)] // The CLI is wired in the following uninstall change.
+pub(crate) mod probe;
