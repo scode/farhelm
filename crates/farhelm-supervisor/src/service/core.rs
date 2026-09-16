@@ -1390,7 +1390,7 @@ pub(crate) fn create_fingerprint(
             crate::store::agent_kind_column(*agent_kind),
             selection,
         )),
-        // A selectorless structured spawn preserves the parent's stored
+        // An explicitly inherited structured spawn preserves the parent's stored
         // resume bundle. It is a distinct fingerprint because the same
         // explicit selection with a different durable resume argv is a
         // different create intent.
@@ -1811,7 +1811,7 @@ pub(crate) struct CreateInputs<'a> {
 /// shape has been validated.
 ///
 /// Profile selectors are resolved by the helm before this value is built.
-/// A selectorless spawn is resolved from the authenticated parent session
+/// An explicitly inherited spawn is resolved from the authenticated parent session
 /// before fingerprinting. The supervisor therefore needs only one variant:
 /// every launch is an invocation plus its optional integration and profile
 /// provenance.
@@ -3657,7 +3657,7 @@ pub struct Supervisor {
     /// way (by session id) though the two are never the same lock for the
     /// same id. The obvious-looking alternative — reuse `lifecycle_locks`
     /// for this fence too — deadlocks the common case: a self-targeting
-    /// verb (no `--session`, the asking session acting on itself) would
+    /// verb (an explicit `--session` naming the asking session itself) would
     /// hold `lifecycle_locks(id)` on the way up while the mutation's OWN
     /// execution, reached moments later through `StopSession`/
     /// `RenameSession`/`ArchiveSession`, tries to claim the identical key
@@ -8508,12 +8508,12 @@ impl Supervisor {
     /// cannot be made atomic by either mutex: the `sessions` guard is
     /// released the moment the entry is cloned out of it, and the store
     /// write is an await that must happen between the two. Held under the
-    /// session's claim ([`Supervisor::lifecycle_locks`]) the three
-    /// interleavings that matter all resolve: two concurrent renames become
-    /// last-write-wins with the store and the map agreeing on the SAME
-    /// winner (rather than each ending up with a different one), and
-    /// neither a delete nor a restart can slip between the row update and
-    /// the map install.
+    /// session's claim ([`Supervisor::lifecycle_locks`]) the interleavings
+    /// that matter all resolve: two conditional renames from the same
+    /// observed title serialize, so one commits and the other sees a
+    /// conflict, while neither a delete nor a restart can slip between the
+    /// row update and the map install. Browser rename passes no expected
+    /// title and retains its unconditional last-write-wins behavior.
     ///
     /// The claim ends WITH THE COMMIT, before any reply is built. A claim
     /// is exclusive against stop, delete and restart, so holding one across
@@ -8585,6 +8585,7 @@ impl Supervisor {
         self: &Arc<Self>,
         session_id: &str,
         title: String,
+        expected_title: Option<String>,
         permit: tokio::sync::OwnedSemaphorePermit,
     ) -> (
         Result<Arc<SessionEntry>, RequestError>,
@@ -8610,6 +8611,17 @@ impl Supervisor {
                 let Some(entry) = sup.sessions.lock().await.get(&id).cloned() else {
                     return Err(not_found());
                 };
+                if let Some(expected) = expected_title.as_deref()
+                    && entry.info.title != expected
+                {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        format!(
+                            "session {} has changed title since discovery; list sessions again before retrying",
+                            truncate_for_error(&id)
+                        ),
+                    ));
+                }
                 // Durable first, in-memory second — the same crash ordering
                 // every other write in this file takes: a crash between the
                 // two leaves a renamed row that the next reload reads, while
@@ -11373,6 +11385,167 @@ pub(crate) mod tests {
         }
     }
 
+    /// Seed the two representations rename must update together without
+    /// launching tmux.
+    ///
+    /// Rename is metadata-only, so a live process would add no signal to
+    /// these tests. Keeping the durable row and published entry explicit
+    /// makes a mismatch test capable of proving neither representation was
+    /// changed.
+    async fn seed_rename_session(sup: &Arc<Supervisor>, title: &str) {
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.title = title.to_string();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: entry.info.id.clone(),
+                    parent: None,
+                    archived: false,
+                    title: title.to_string(),
+                    created_at: entry.info.created_at,
+                    last_activity_at: entry.info.last_activity_at,
+                    creation_seq: 0,
+                    cwd: entry.info.cwd.clone(),
+                    invocation: entry.info.invocation.clone(),
+                    launch: None,
+                    tmux_name: "fh-rename-fixture".to_string(),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed durable rename row");
+        sup.sessions
+            .lock()
+            .await
+            .insert(entry.info.id.clone(), Arc::new(entry));
+    }
+
+    /// Conditional rename accepts exact string equality, including an empty
+    /// observed title, and a mismatch changes neither durable nor live state.
+    #[farhelm_testtrace::test]
+    async fn conditional_rename_compares_and_mutates_atomically() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        seed_rename_session(&sup, "").await;
+
+        let permit = Arc::clone(&sup.admission)
+            .acquire_owned()
+            .await
+            .expect("admission remains open");
+        let (renamed, permit) = sup
+            .rename_session("s1", "-new-title".to_string(), Some(String::new()), permit)
+            .await;
+        let renamed = renamed.expect("the exact empty title must match");
+        assert!(permit.is_some(), "the commit returns its admission slot");
+        assert_eq!(renamed.info.title, "-new-title");
+
+        let permit = Arc::clone(&sup.admission)
+            .acquire_owned()
+            .await
+            .expect("admission remains open");
+        let (refused, permit) = sup
+            .rename_session(
+                "s1",
+                "must-not-land".to_string(),
+                Some(String::new()),
+                permit,
+            )
+            .await;
+        let error = match refused {
+            Ok(_) => panic!("the stale empty title must conflict"),
+            Err(error) => error,
+        };
+        assert!(permit.is_some(), "a conflict returns its admission slot");
+        assert_eq!(error.kind, ErrorKind::Conflict);
+        assert_eq!(
+            sup.sessions
+                .lock()
+                .await
+                .get("s1")
+                .expect("published row")
+                .info
+                .title,
+            "-new-title"
+        );
+        assert_eq!(
+            sup.store.load_all().await.expect("load durable row")[0].title,
+            "-new-title"
+        );
+    }
+
+    /// Two agents acting on one observation cannot both overwrite it: the
+    /// lifecycle claim admits one exact match and turns the other into a
+    /// conflict after it sees the winner's title.
+    #[farhelm_testtrace::test]
+    async fn concurrent_conditional_renames_have_one_winner() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        seed_rename_session(&sup, "observed").await;
+
+        let rename = |title: &'static str| {
+            let sup = Arc::clone(&sup);
+            async move {
+                let permit = Arc::clone(&sup.admission)
+                    .acquire_owned()
+                    .await
+                    .expect("admission remains open");
+                sup.rename_session(
+                    "s1",
+                    title.to_string(),
+                    Some("observed".to_string()),
+                    permit,
+                )
+                .await
+                .0
+            }
+        };
+        let (first, second) = tokio::join!(rename("first"), rename("second"));
+        let outcomes = [&first, &second];
+        assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|result| {
+                    result
+                        .as_ref()
+                        .is_err_and(|error| error.kind == ErrorKind::Conflict)
+                })
+                .count(),
+            1
+        );
+        let winner = sup
+            .sessions
+            .lock()
+            .await
+            .get("s1")
+            .expect("published row")
+            .info
+            .title
+            .clone();
+        assert!(winner == "first" || winner == "second");
+        assert_eq!(
+            sup.store.load_all().await.expect("load durable row")[0].title,
+            winner
+        );
+    }
+
     /// A title-only replacement SHARES the run's mutable cells with the
     /// entry it replaces, rather than copying their values.
     ///
@@ -13002,6 +13175,8 @@ pub(crate) mod tests {
                 req_id: 1,
                 parent: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
@@ -14027,6 +14202,8 @@ pub(crate) mod tests {
             req_id,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
             source_profile: None,
@@ -14631,6 +14808,8 @@ pub(crate) mod tests {
                     req_id,
                     parent: None,
                     profile_name: None,
+                    profile_id: None,
+                    inherit_agent: false,
                     cwd: "/".to_string(),
                     invocation: Some("agent".to_string()),
                     source_profile: None,
@@ -14680,6 +14859,8 @@ pub(crate) mod tests {
                 req_id: 6,
                 parent: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 cwd: "/".to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
@@ -14740,6 +14921,8 @@ pub(crate) mod tests {
                 req_id: 1,
                 parent: None,
                 profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
                 cwd: evil.to_str().expect("tempdir paths are UTF-8").to_string(),
                 invocation: Some("agent".to_string()),
                 source_profile: None,
@@ -14816,6 +14999,8 @@ pub(crate) mod tests {
             req_id,
             parent: None,
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             cwd: "/".to_string(),
             invocation: Some("agent".to_string()),
             source_profile: None,

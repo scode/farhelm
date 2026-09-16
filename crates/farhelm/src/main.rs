@@ -70,10 +70,15 @@ enum Cmd {
         /// Optional display title; omitted derives from the directory.
         #[arg(long)]
         title: Option<String>,
-        /// Agent profile name; omitted reuses the asking session's stored
-        /// agent bundle, including its profile snapshot when present.
-        #[arg(long)]
+        /// Exact agent profile name, resolved by the attached helm.
+        #[arg(long, conflicts_with_all = ["profile_id", "inherit_agent"], required_unless_present_any = ["profile_id", "inherit_agent"])]
         agent: Option<String>,
+        /// Exact profile id from `farhelm agent profiles`.
+        #[arg(long, conflicts_with_all = ["agent", "inherit_agent"], required_unless_present_any = ["agent", "inherit_agent"])]
+        profile_id: Option<String>,
+        /// Deliberately copy this session's stored agent bundle.
+        #[arg(long, conflicts_with_all = ["agent", "profile_id"], required_unless_present_any = ["agent", "profile_id"])]
+        inherit_agent: bool,
         /// Organizational parent id. Never defaults to this session.
         #[arg(long)]
         parent: Option<String>,
@@ -152,10 +157,24 @@ enum Cmd {
 #[derive(Subcommand)]
 enum AgentCmd {
     /// List the hosts the helm knows, marking this session's own.
-    Hosts,
+    Hosts {
+        /// Print the versioned machine-readable discovery envelope.
+        #[arg(long)]
+        json: bool,
+    },
     /// List the sessions the helm knows, marking this one.
-    Sessions,
-    /// Rename a session — the asking one by default.
+    Sessions {
+        /// Print the versioned machine-readable discovery envelope.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the helm-wide profile catalog without private launch data.
+    Profiles {
+        /// Print the versioned machine-readable discovery envelope.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rename an explicitly named session if its title is unchanged.
     Rename {
         /// The new title, forwarded to the helm verbatim.
         ///
@@ -172,27 +191,24 @@ enum AgentCmd {
         /// wire.
         #[arg(allow_hyphen_values = true)]
         title: String,
-        /// Act on this session instead of the one asking — any session id
-        /// the helm knows, on any host, not only ones this session could
-        /// otherwise name.
-        #[arg(long = "session")]
-        session: Option<String>,
+        /// Exact session id from `farhelm agent sessions`.
+        #[arg(long = "session", allow_hyphen_values = true)]
+        session: String,
+        /// Exact title observed in the discovery result, including empty.
+        #[arg(long = "expected-title", allow_hyphen_values = true)]
+        expected_title: String,
     },
-    /// Stop a session's agent process tree — the asking one by default.
+    /// Stop an explicitly named session's agent process tree.
     Stop {
-        /// Act on this session instead of the one asking — any session id
-        /// the helm knows, on any host, not only ones this session could
-        /// otherwise name.
-        #[arg(long = "session")]
-        session: Option<String>,
+        /// Exact session id from `farhelm agent sessions`.
+        #[arg(long = "session", allow_hyphen_values = true)]
+        session: String,
     },
-    /// Archive a session — the asking one by default.
+    /// Archive an explicitly named session.
     Archive {
-        /// Act on this session instead of the one asking — any session id
-        /// the helm knows, on any host, not only ones this session could
-        /// otherwise name.
-        #[arg(long = "session")]
-        session: Option<String>,
+        /// Exact session id from `farhelm agent sessions`.
+        #[arg(long = "session", allow_hyphen_values = true)]
+        session: String,
     },
     /// Create a session on any host; prints its id.
     Create {
@@ -211,17 +227,21 @@ enum AgentCmd {
         cwd: String,
         /// Host to create on, by the name `farhelm agent hosts` shows.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
-        host: Option<String>,
+        host: String,
         /// Agent profile name, resolved in the helm-wide catalog.
         #[arg(
             long,
             value_name = "NAME",
-            conflicts_with = "invocation",
+            conflicts_with_all = ["profile_id", "invocation"],
+            required_unless_present_any = ["profile_id", "invocation"],
             allow_hyphen_values = true
         )]
         profile: Option<String>,
+        /// Exact profile id from `farhelm agent profiles`.
+        #[arg(long, value_name = "ID", conflicts_with_all = ["profile", "invocation"], required_unless_present_any = ["profile", "invocation"], allow_hyphen_values = true)]
+        profile_id: Option<String>,
         /// Command line to run instead of a profile.
-        #[arg(long, value_name = "CMD", allow_hyphen_values = true)]
+        #[arg(long, value_name = "CMD", conflicts_with_all = ["profile", "profile_id"], required_unless_present_any = ["profile", "profile_id"], allow_hyphen_values = true)]
         invocation: Option<String>,
         /// Display title; omitted derives one from the directory.
         #[arg(long, value_name = "TITLE", allow_hyphen_values = true)]
@@ -230,11 +250,14 @@ enum AgentCmd {
         #[arg(long, value_name = "KEY", allow_hyphen_values = true)]
         idempotency_key: Option<String>,
     },
-    /// Copy this session onto any host; prints the new id.
+    /// Copy an explicitly named session onto any host; prints the new id.
     Clone {
+        /// Exact source id from `farhelm agent sessions`.
+        #[arg(long = "source-session", allow_hyphen_values = true)]
+        source_session: String,
         /// Host to create on, by the name `farhelm agent hosts` shows.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
-        host: Option<String>,
+        host: String,
         /// Working directory; omitted copies this session's.
         #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
         cwd: Option<String>,
@@ -264,44 +287,54 @@ impl AgentCmd {
     /// fails.
     fn verb(&self) -> Option<farhelm_proto::AgentVerb> {
         match self {
-            AgentCmd::Hosts => Some(farhelm_proto::AgentVerb::Hosts {}),
-            AgentCmd::Sessions => Some(farhelm_proto::AgentVerb::Sessions {}),
-            AgentCmd::Rename { title, session } => Some(farhelm_proto::AgentVerb::Rename {
-                session_id: session.clone(),
+            AgentCmd::Hosts { .. } => Some(farhelm_proto::AgentVerb::Hosts {}),
+            AgentCmd::Sessions { .. } => Some(farhelm_proto::AgentVerb::Sessions {}),
+            AgentCmd::Profiles { .. } => Some(farhelm_proto::AgentVerb::Profiles {}),
+            AgentCmd::Rename {
+                title,
+                session,
+                expected_title,
+            } => Some(farhelm_proto::AgentVerb::Rename {
+                session_id: Some(session.clone()),
+                expected_title: Some(expected_title.clone()),
                 title: title.clone(),
             }),
             AgentCmd::Stop { session } => Some(farhelm_proto::AgentVerb::Stop {
-                session_id: session.clone(),
+                session_id: Some(session.clone()),
             }),
             AgentCmd::Archive { session } => Some(farhelm_proto::AgentVerb::Archive {
-                session_id: session.clone(),
+                session_id: Some(session.clone()),
             }),
             AgentCmd::Create {
                 cwd,
                 host,
                 profile,
+                profile_id,
                 invocation,
                 title,
                 idempotency_key,
             } => Some(farhelm_proto::AgentVerb::Create {
-                host: host.clone(),
+                host: Some(host.clone()),
                 cwd: cwd.clone(),
                 // `--profile` on the command line, `profile_name` on the
                 // wire: the flag is what a user types and the field says
                 // what it IS: the helm resolves this human-facing selector
                 // into the bundle sent to the target supervisor.
                 profile_name: profile.clone(),
+                profile_id: profile_id.clone(),
                 invocation: invocation.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
             }),
             AgentCmd::Clone {
+                source_session,
                 host,
                 cwd,
                 title,
                 idempotency_key,
             } => Some(farhelm_proto::AgentVerb::Clone {
-                host: host.clone(),
+                source_session_id: Some(source_session.clone()),
+                host: Some(host.clone()),
                 cwd: cwd.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
@@ -508,6 +541,8 @@ fn main() -> anyhow::Result<()> {
             cwd,
             title,
             agent,
+            profile_id,
+            inherit_agent,
             parent,
             idempotency_key,
         } => {
@@ -515,6 +550,8 @@ fn main() -> anyhow::Result<()> {
                 cwd,
                 title,
                 agent,
+                profile_id,
+                inherit_agent,
                 parent,
                 idempotency_key,
             }))?;
@@ -534,30 +571,27 @@ fn main() -> anyhow::Result<()> {
             // which makes its own `agent_request` call and returns — there
             // is nothing left for this arm to do with their reply, unlike
             // the three lifecycle verbs below.
-            if matches!(command, AgentCmd::Hosts | AgentCmd::Sessions) {
-                return print_agent_listing(verb);
+            if let AgentCmd::Hosts { json }
+            | AgentCmd::Sessions { json }
+            | AgentCmd::Profiles { json } = &command
+            {
+                return print_agent_listing(verb, *json);
             }
             // The lifecycle and creating verbs share one `agent_request`
             // round trip here, rather than each making its own the way the
-            // listings do, because `Stop`'s reply carries no id — the
-            // confirmation it prints needs the ASKING session, which only
-            // this shared call reports back (see `agent_request`'s docs).
-            let (asking, reply) = runtime()?.block_on(agent_request(verb))?;
+            // listings do. The authenticated caller returned alongside the
+            // reply is retained for attribution even though every
+            // consequential target is now explicit.
+            let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
             match command {
                 // The three lifecycle verbs print one confirmation line
                 // rather than a table — there is exactly one row to
                 // report, and a script capturing stdout wants the plain
                 // sentence SPEC.md's CLI contract promises, not a one-row
-                // table with headers. That promise has one carve-out this
-                // match cannot enforce: a bare `stop`/`archive` (no
-                // `--session`) targets the ASKING session itself, and
-                // stopping or archiving oneself ends the whole process
-                // tree the sweep reaches by environment marker — this CLI
-                // process included — which can SIGTERM it before the
-                // `println!` below ever runs. See
-                // `tests/e2e/agent_listing_real_stack.rs`'s lifecycle test
-                // for where that race was confirmed and why it is routed
-                // around there rather than fixed here.
+                // table with headers. A deliberate self-stop or self-archive
+                // can still terminate this CLI before it prints, because the
+                // explicit target ID names the same process tree carrying
+                // the credential.
                 AgentCmd::Rename { .. } => {
                     let AgentReply::Session { session } = reply else {
                         // `agent_request` already checked the reply's tag
@@ -580,21 +614,16 @@ fn main() -> anyhow::Result<()> {
                 AgentCmd::Stop { session } => {
                     // The reply carries no id (`AgentReply::Stopped` is
                     // empty — see its own docs), so the confirmation's
-                    // target comes from whatever this process itself
-                    // resolved: the `--session` the caller gave, or else
-                    // the ASKING session `agent_request` reports back,
-                    // exactly the substitution rule the helm applies on
-                    // its own side. Named for what it is used FOR — the
-                    // printed confirmation — rather than merely restating
-                    // that it is the caller's `--session`.
+                    // target comes from the required `--session` selector.
+                    // Named for what it is used FOR — the printed
+                    // confirmation — rather than merely restating the flag.
                     let target_for_reply = session;
                     let AgentReply::Stopped {} = reply else {
                         anyhow::bail!(
                             "the helm answered stop with something other than confirmation"
                         );
                     };
-                    let target = target_for_reply.unwrap_or(asking);
-                    println!("stopped {}", safe_cell(&target));
+                    println!("stopped {}", safe_cell(&target_for_reply));
                 }
                 AgentCmd::Archive { .. } => {
                     let AgentReply::Session { session } = reply else {
@@ -659,7 +688,11 @@ fn main() -> anyhow::Result<()> {
                 // always fires first for those. This arm exists only to
                 // keep the match exhaustive against a future `AgentCmd`
                 // variant.
-                AgentCmd::Hosts | AgentCmd::Sessions | AgentCmd::Instructions | AgentCmd::Help => {
+                AgentCmd::Hosts { .. }
+                | AgentCmd::Sessions { .. }
+                | AgentCmd::Profiles { .. }
+                | AgentCmd::Instructions
+                | AgentCmd::Help => {
                     unreachable!("handled above before this match is reached")
                 }
             }
@@ -976,6 +1009,8 @@ struct SpawnArgs {
     cwd: PathBuf,
     title: Option<String>,
     agent: Option<String>,
+    profile_id: Option<String>,
+    inherit_agent: bool,
     parent: Option<String>,
     idempotency_key: Option<String>,
 }
@@ -1077,6 +1112,8 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             cwd,
             invocation: None,
             profile_name: args.agent,
+            profile_id: args.profile_id,
+            inherit_agent: args.inherit_agent,
             title: args.title,
             cols: 80,
             rows: 24,
@@ -1084,9 +1121,9 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             agent_kind: None,
             resume_template: None,
             source_profile: None,
-            // Spawn has no structured selector. A selectorless spawn inherits
-            // the authenticated parent's stored launch bundle in the
-            // supervisor, which is the only safe source of that provenance.
+            // Explicit inheritance has no structured selector. The
+            // supervisor copies the authenticated parent's stored launch
+            // bundle, which is the only safe source of that provenance.
             launch: None,
         })
         .await
@@ -1114,17 +1151,32 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
     }
 }
 
-/// Ask `verb` (`Hosts` or `Sessions`) and print the answer exactly the way
-/// both of `farhelm agent`'s read-only listings are printed: the table on
-/// stdout, then a truncation warning on stderr if the fleet did not fit.
+/// Print discovery as a human table or a versioned JSON envelope.
 ///
-/// Separate from the lifecycle verbs' path because a listing is finished
-/// the moment it is printed: the asking session's own id has no use here
-/// (`_asking`), so this makes its own round trip and returns, while the
-/// lifecycle verbs share one call in `main` because each needs that id or
-/// the reply's own row.
-fn print_agent_listing(verb: farhelm_proto::AgentVerb) -> anyhow::Result<()> {
-    let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
+/// JSON retains exact caller identity and the reply's completeness fields
+/// so agents can resolve explicit targets. Table truncation warnings go to
+/// stderr to preserve the existing stdout table contract. A listing ends
+/// after printing and never enters the lifecycle mutation path.
+fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Result<()> {
+    let (asking, reply) = runtime()?.block_on(agent_request(verb))?;
+    if json {
+        let caller_host_id = match &reply {
+            AgentReply::Hosts { caller_host_id, .. }
+            | AgentReply::Sessions { caller_host_id, .. }
+            | AgentReply::Profiles { caller_host_id, .. } => caller_host_id,
+            _ => anyhow::bail!("only discovery replies can be printed as JSON"),
+        };
+        let envelope = serde_json::json!({
+            "schema_version": 1,
+            "caller": {
+                "session_id": asking,
+                "host_id": caller_host_id,
+            },
+            "reply": reply,
+        });
+        println!("{}", serde_json::to_string(&envelope)?);
+        return Ok(());
+    }
     print!("{}", render_agent_reply(&reply)?);
     // On stderr, so a script capturing stdout still gets nothing but the
     // table — the notice is about the ANSWER, not part of it.
@@ -1383,6 +1435,7 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 enum ReplyKind {
     Hosts,
     Sessions,
+    Profiles,
     Session,
     Stopped,
     Created,
@@ -1394,6 +1447,7 @@ impl ReplyKind {
         match verb {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
+            farhelm_proto::AgentVerb::Profiles {} => ReplyKind::Profiles,
             farhelm_proto::AgentVerb::Rename { .. } | farhelm_proto::AgentVerb::Archive { .. } => {
                 ReplyKind::Session
             }
@@ -1418,6 +1472,7 @@ impl ReplyKind {
         match reply {
             AgentReply::Hosts { .. } => ReplyKind::Hosts,
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
+            AgentReply::Profiles { .. } => ReplyKind::Profiles,
             AgentReply::Session { .. } => ReplyKind::Session,
             AgentReply::Stopped {} => ReplyKind::Stopped,
             AgentReply::Created { .. } => ReplyKind::Created,
@@ -1435,6 +1490,7 @@ impl ReplyKind {
         match self {
             ReplyKind::Hosts => "hosts listing",
             ReplyKind::Sessions => "sessions listing",
+            ReplyKind::Profiles => "profiles listing",
             ReplyKind::Session => "session row",
             ReplyKind::Stopped => "stop confirmation",
             // "created", not "new": the whole point of this noun is to
@@ -1460,6 +1516,7 @@ fn truncation_notice(reply: &AgentReply) -> Option<String> {
         AgentReply::Sessions {
             sessions,
             truncated: true,
+            ..
         } => Some(format!(
             "warning: this is not the whole fleet; the listing was cut at {} sessions",
             sessions.len()
@@ -1497,9 +1554,10 @@ fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// without a process.
 fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
     match reply {
-        AgentReply::Hosts { hosts } => {
+        AgentReply::Hosts { hosts, .. } => {
             let mut rows = vec![vec![
                 String::new(),
+                "ID".to_string(),
                 "NAME".to_string(),
                 "KIND".to_string(),
                 "STATE".to_string(),
@@ -1507,6 +1565,7 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             rows.extend(hosts.iter().map(|host| {
                 vec![
                     marker(host.current),
+                    host.id.clone(),
                     host.name.clone(),
                     host.kind.clone(),
                     host.state.clone(),
@@ -1524,7 +1583,7 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             // `MAX_CELL_WIDTH` was written for. The sessions table below
             // keeps the clamp on every one of its columns for exactly that
             // reason.
-            Ok(aligned(&rows, &[1]))
+            Ok(aligned(&rows, &[1, 2]))
         }
         AgentReply::Sessions { sessions, .. } => {
             let mut rows = vec![vec![
@@ -1549,6 +1608,21 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             }));
             Ok(aligned(&rows, &[]))
         }
+        AgentReply::Profiles { profiles, .. } => {
+            let mut rows = vec![vec![
+                "ID".to_string(),
+                "NAME".to_string(),
+                "BUILTIN".to_string(),
+            ]];
+            rows.extend(profiles.iter().map(|profile| {
+                vec![
+                    profile.id.clone(),
+                    profile.name.clone(),
+                    profile.builtin.to_string(),
+                ]
+            }));
+            Ok(aligned(&rows, &[0, 1]))
+        }
         // Refused rather than rendered: a lifecycle or creating reply has
         // one row and no table to be, and printing an empty one would read
         // as an empty fleet. `main` never routes one here — see this
@@ -1558,7 +1632,7 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         | AgentReply::Stopped {}
         | AgentReply::Created { .. }
         | AgentReply::ResolvedProfile { .. } => {
-            anyhow::bail!("only hosts and sessions listings are rendered as a table")
+            anyhow::bail!("only discovery listings are rendered as a table")
         }
     }
 }
@@ -2210,6 +2284,7 @@ mod tests {
     fn agent_session(id: &str, title: &str) -> farhelm_proto::AgentSession {
         farhelm_proto::AgentSession {
             id: id.to_string(),
+            host_id: "1".to_string(),
             host: Some("h".to_string()),
             title: title.to_string(),
             cwd: "/w".to_string(),
@@ -2223,6 +2298,7 @@ mod tests {
 
     fn sessions(rows: Vec<farhelm_proto::AgentSession>) -> AgentReply {
         AgentReply::Sessions {
+            caller_host_id: "host-local".to_string(),
             sessions: rows,
             truncated: false,
         }
@@ -2237,12 +2313,14 @@ mod tests {
             host: None,
             cwd: "/w".to_string(),
             profile_name: None,
+            profile_id: None,
             invocation: Some("claude".to_string()),
             title: None,
             intent_key: None,
         });
         let resolve = ReplyKind::of_verb(&farhelm_proto::AgentVerb::ResolveProfile {
-            name: "claude".to_string(),
+            name: Some("claude".to_string()),
+            id: None,
         });
         assert_ne!(create, resolve);
         assert_eq!(resolve.noun(), "resolved profile");
@@ -2387,6 +2465,7 @@ mod tests {
     fn a_truncated_listing_warns_and_a_complete_one_does_not() {
         assert!(truncation_notice(&sessions(vec![agent_session("s1", "t")])).is_none());
         let notice = truncation_notice(&AgentReply::Sessions {
+            caller_host_id: "host-local".to_string(),
             sessions: vec![agent_session("s1", "t")],
             truncated: true,
         })

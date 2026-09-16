@@ -31,6 +31,8 @@ async fn create_profile_child(
             cwd: cwd.to_string(),
             invocation: Some(profile.invocation.clone()),
             profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
             title: Some("archive contract".to_string()),
             cols: 80,
             rows: 24,

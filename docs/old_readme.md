@@ -296,40 +296,36 @@ than left to be mistaken for the whole answer.
 The same relay also carries three lifecycle verbs, on the same credential:
 
 ```
-farhelm agent rename <title> [--session <id>]
-farhelm agent stop [--session <id>]
-farhelm agent archive [--session <id>]
+farhelm agent rename --session <id> --expected-title=<old-title> -- <new-title>
+farhelm agent stop --session <id>
+farhelm agent archive --session <id>
 ```
 
-Omitting `--session` acts on the asking session itself; naming one acts on ANY session the helm knows, on any host — the
-same wider-than-`spawn` authority the read-only verbs already have, since the feature's mental model is an agent talking
-to the helm itself, which already has fleet-wide authority. Success prints one plain confirmation line on stdout
-(`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), escaped the same way the listing tables are. One case
-never prints that line: a bare `stop`/`archive` (no `--session`) ends the ASKING session's own process tree, and the
-host-wide sweep that reaches every process carrying that session's marker can SIGTERM the `farhelm agent` process itself
-before it gets to print — stopping or archiving yourself is supposed to end the whole tree, calling CLI included, so a
-script relying on that confirmation should target a session other than its own.
+Every lifecycle command requires an exact session ID from the listing. Acting on the asking session is allowed, but it
+must be deliberate. Rename also requires the title the caller observed; a mismatch refuses without changing anything,
+which prevents one agent from overwriting a concurrent rename. Success prints one plain confirmation line on stdout
+(`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), escaped the same way the listing tables are.
 
 And it carries two verbs that CREATE, which is where going through the helm buys something `farhelm spawn` cannot do at
 all:
 
 ```
-farhelm agent create --cwd <dir> [--host <name>] [--profile <name> | --invocation <cmd>] [--title <t>] [--idempotency-key <key>]
-farhelm agent clone [--host <name>] [--cwd <dir>] [--title <t>] [--idempotency-key <key>]
+farhelm agent create --host <name> --cwd <dir> (--profile <name> | --profile-id <id> | --invocation <cmd>) [--title <t>] [--idempotency-key <key>]
+farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title <t>] [--idempotency-key <key>]
 ```
 
-`create` makes a session on any host; `clone` copies the asking session onto any host — same directory, same title, same
-agent — which is the "start another one of these over on the build box" that used to mean walking to the UI. `--host`
-takes a name straight out of `farhelm agent hosts`; leave it off and you get the host you are already on. Both print the
-new session's id on stdout and nothing else, with the confirmation on stderr, so
-`id=$(farhelm agent clone --host builder)` works. `--idempotency-key` binds a retry to the resolved launch bundle:
-re-running with the same key returns the session the first attempt made, while editing the selected profile can make the
-same textual selector conflict because it now resolves to different settings.
+`create` makes a session on the named host; `clone` copies the named source onto the named host — same directory, same
+title, same agent unless an override says otherwise. `--host` takes an exact name from `farhelm agent hosts`; duplicate
+names are refused. Both print the new session's id on stdout and nothing else, with the confirmation on stderr, so
+`id=$(farhelm agent clone --source-session "$source" --host builder)` works. `--idempotency-key` binds a retry to the
+resolved launch bundle: re-running with the same key returns the session the first attempt made, while editing the
+selected profile can make the same textual selector conflict because it now resolves to different settings.
 
-The helm resolves profile names from its one catalog, which applies to every host it manages. A clone follows its source
-session's snapshotted profile when that profile still exists in the helm catalog; it otherwise refuses rather than
-guessing. A session created from a raw command line has no profile to resolve and clones as that invocation. A `create`
-naming neither `--profile` nor `--invocation` uses the helm-wide last-used profile.
+The helm resolves exact profile names from its one catalog, which applies to every host it manages; duplicate names are
+refused. `--profile-id` selects an exact row without treating the ID as a name. A clone follows its source session's
+snapshotted profile when that profile still exists in the helm catalog; it otherwise refuses rather than guessing. A
+session created from a raw command line has no profile to resolve and clones as that invocation. `create` requires
+exactly one selector and never falls back to the last-used profile.
 
 The failure worth knowing about is `no helm is attached to this session`. The relay reaches the helm that currently
 holds the session open, so a session no client is looking at has no route to ask: open the session in the Farhelm UI and

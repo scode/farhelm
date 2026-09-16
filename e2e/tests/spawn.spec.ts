@@ -125,13 +125,13 @@ test("a fake agent spawns children that appear without refreshing the observer",
       readyMarker: "FAKE-AGENT READY",
     });
 
-    // This is the acceptance command: --cwd is the only supplied option.
+    // This is the acceptance command: inheritance is an explicit choice.
     await submitPrompt(driver, `spawn ${unparentedDir}`, 100);
     await waitForReplyMarker(driver, "SPAWNED:");
     unparented = await childByTitle(request, path.basename(unparentedDir));
     expect(
       unparented.source_profile?.id,
-      "selectorless spawn must derive the newest surviving profile-backed session",
+      "explicit inheritance must preserve the parent's profile-backed bundle",
     ).toBe(profile.id);
     await expect(row(page, unparented.id)).toBeVisible({ timeout: 20_000 });
     expect(page.url(), "the observer must not navigate to discover the child").toBe(observerUrl);
