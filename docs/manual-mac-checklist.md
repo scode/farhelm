@@ -22,7 +22,43 @@ The initial implementation deliberately leaves these observations for the mainta
 - Check startup/error messages and any build-mismatch notice: all text remains below native controls. In a short
   authentication window, scroll to the last form control and confirm the native-button reservation stays fixed.
 
+Double-click maximize/restore on the same spacer:
+
+- Double-click the empty space between Profiles and the version: the window zooms; double-click again and it restores
+  the prior frame exactly. Repeat with a mouse and with a trackpad, and again after moving and resizing the window.
+- Single-click the spacer without moving: nothing zooms. Press and drag: the window moves immediately, with no
+  double-click-detection pause before the drag starts.
+- Exercise the awkward sequences: two slow separate clicks (no zoom), a triple click (zoom on press 2, restore on press
+  3, no drag on either repeat), rapid repeated pairs, and a double-click with small accidental movement between the
+  presses.
+- Probe the spacer's edges: press just beside Profiles and just beside the version; click Profiles (or header text) and
+  then the spacer quickly, and the reverse — a cross-target pair must not zoom or move the window. With the Profiles
+  popup open, double-click the spacer and confirm the popup neither zooms the window nor breaks. Select header or
+  terminal text, use session actions, and switch and create terminal tabs: none of those may move or zoom the window.
+- Repeat the zoom/restore cycle at narrow widths (including the fixed top-band layout), after scrolling the sidebar and
+  horizontally scrolling a narrow window, and on a display with different scaling if one is available. Confirm
+  traffic-light placement, resize edges, corners, and shadow are unchanged.
+- In fullscreen, try dragging and double-clicking the spacer, reveal the fullscreen toolbar, then exit fullscreen:
+  neither action may have changed the restored frame. Recheck close, minimize, and the green button afterward.
+- Check startup, authentication, error, and build-mismatch surfaces, plus remounts (sign out and back in, reload the
+  session list): pages without the spacer gain no drag target or zoom, and navigation leaves no duplicate or stale
+  native action behind.
+
+Native external links from the terminal (the U6 plain-text URL work):
+
+- Print a plain-text `http://` and an `https://` URL in a terminal (live output and scrolled-back output). Hover each:
+  it highlights as a link. Click each: the URL opens in the macOS system browser, not inside the app window, with no
+  confirmation prompt.
+- Confirm an OSC 8 hyperlink still opens the same way, and that ordinary text selection and copy in the terminal are
+  unaffected by the link detector.
+
 Observed: not run; native macOS verification is deferred to the maintainer.
+
+Candidate revision: not recorded
+
+macOS version and Mac model: not recorded
+
+Input device (mouse/trackpad): not recorded
 
 ## Native-app release close-out
 

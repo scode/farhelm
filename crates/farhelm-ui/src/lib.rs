@@ -1268,6 +1268,13 @@ declare_assets! {
     // The cost is a few unused kilobytes in the browser bundle, which no page
     // ever requests.
     static CLIENT_LOG_SHIM_JS: Asset = asset!("/assets/client-log-shim.js");
+    // The desktop window's click-count bridge (window_chrome.rs): a
+    // capture-phase listener that POSTs each spacer press's DOM `detail`
+    // ahead of the interpreter's event send. Declared unconditionally for
+    // the same parity reason as the shim above — the desktop window must
+    // find it in the embedded web dist — but rendered only in the desktop
+    // branch below. The web build bundles it and never requests it.
+    static CLICK_DETAIL_JS: Asset = asset!("/assets/click-detail.js");
 }
 
 /// Root component: the sidebar's session list beside the selected
@@ -1311,6 +1318,11 @@ pub fn App() -> Element {
             // ordering.
             window_chrome::WindowFrame {
                 document::Script { src: CLIENT_LOG_SHIM_JS }
+                // Beside the shim, for the same earliest-chance reason but
+                // with no ordering claim: the bridge reads
+                // `window.interpreter` lazily at press time, so it attaches
+                // correctly whenever its own script finishes loading.
+                document::Script { src: CLICK_DETAIL_JS }
                 auth::DesktopBootstrapGate {}
             }
         };
