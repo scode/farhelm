@@ -105,10 +105,11 @@
 //!   by checking known prefixes itself; this module is only the ordered
 //!   search, kept free of any filesystem or platform check so it is tested
 //!   on Linux CI rather than only on a Mac nobody runs in CI.
-//! - `rename`: `RenameForm`, the row menu's rename field (PLAN_M5.md item
-//!   6; the ONE rename surface since the sidebar redesign) — a single-line
-//!   field that sends what the user typed verbatim, with the request and
-//!   the refusal text left to the list, which mounts it.
+//! - `rename`: `RenameDialog` around `RenameForm` — the list-owned modal
+//!   rename editor (PLAN_M5.md item 6's rename field, moved into the
+//!   dialog SPEC.md specifies; the ONE rename surface since the sidebar
+//!   redesign). It sends what the user typed verbatim, with the request
+//!   and the refusal text left to the list, which mounts it.
 //! - `attachments`: the attachment domain of paste/drop interception
 //!   (PLAN_M4.md item 7) — the classification rule, the naming rule, the
 //!   upload endpoint, and the wording of every message a transfer can put

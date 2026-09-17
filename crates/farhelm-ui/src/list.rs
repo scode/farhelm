@@ -1,13 +1,14 @@
 //! The session list: `ListView` (the flat listing, its filter and search
 //! surface, and its stop/delete/archive/create/rename actions), `SessionRow`
-//! (one row, including the inline lifecycle confirmations and the inline
-//! rename field), and
+//! (one row, including the inline lifecycle confirmations), and
 //! `CreateSessionForm` (the "new session" inline form). All three are
 //! `ListView`'s own concern — none of them is meaningful mounted outside
 //! it — so only `ListView` itself is `pub(crate)`; `SessionRow` and
-//! `CreateSessionForm` stay private to this module. The rename FIELD is
-//! the one exception: `rename::RenameForm` is shared with the session
-//! view, since SPEC.md puts the same operation on both surfaces.
+//! `CreateSessionForm` stay private to this module. The rename editor is
+//! the one visibility exception: `rename::RenameDialog` is the list-owned
+//! modal the sidebar's rename contract lives in (the edit survives the
+//! menu, the row, and listing churn, which the popup's geometry could
+//! never guarantee), and the list view submodule is what mounts it.
 //!
 //! ## The list is multi-host (PLAN_M6.md item 6)
 //!
