@@ -54,6 +54,54 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   looks and its drag handling lost the native double-click zoom. Double-clicking the top of the window should maximize
   again.
 
+- Launch an agent into a fresh clone of a GitHub repo by typing `gh:owner/repo` in the launch composer. Today that takes
+  a detour through a terminal to clone the repo under a new local name before the session can be created. Farhelm stays
+  repo-optional: `gh:` is only a second way to fill the composer's existing optional folder choice ("a fresh clone of X"
+  instead of an existing path), with no repository requirement for ordinary sessions. The decisions below are made; the
+  remaining details are for implementation. The
+  [original idea brainstorm](lore/2026-09-17-github-clone-launch-brainstorm.md) records the conversation verbatim.
+
+  - Labeled search scopes in the composer search. A `label:` prefix restricts the search to one kind of result. Kinds
+    that rarely overlap and resolve deterministically (harnesses, models, effort words) stay searchable unlabeled, and
+    accept their label as well (`model:` works, it is never required). Kinds that collide with each other (folders vs.
+    repos) should match only under their label, so muscle memory never lands on the wrong kind. `gh:` is a label known
+    to the Rust code, not a user-scriptable one. Folders match unlabeled today; whether they move behind a label is part
+    of this work.
+  - The clone runs in the session's own terminal, ahead of the agent: clone, `cd`, the post-clone command if one is
+    configured, then `exec` the agent. Progress, credential prompts, and failures are visible there with no new
+    "preparing" session state, and a failed step leaves a session showing the error. The clone happens on the target
+    host with that host's git credentials. The helm validates `owner/repo` strictly and the supervisor builds the
+    command; the browser never produces an argv fragment. The clone URL is `https://github.com/owner/repo.git` with no
+    transport setting (git's `url.<base>.insteadOf` already rewrites that to ssh for whoever wants it).
+  - Directory naming under the configured root, for repo `bar`: with no session name, the lowest free `bar-N`, and the
+    session is named the same; with a session name, `bar-<slug of name>`, except that a name already starting with
+    `bar-` is used as is (`bar-fix` gives `bar-fix`, `fix` gives `bar-fix`). Allocate with an atomic `mkdir` on the
+    target host rather than check-then-create, since several sessions and agents race here. An explicit name that
+    collides with an existing directory refuses to launch rather than reusing it. The composer shows the resolved path
+    and host before launch. A later session rename does not move the directory; that divergence is intended.
+  - Configuration is two helm-owned settings, each with a global value and an optional per-host override, sent along
+    with the launch request so the supervisor needs no config reader: the working-copy root (`~` expands on the target
+    host; no shipped default, since this is a personal layout choice) and the optional post-clone shell command (for
+    example `jj git init --colocate`; a failing command stops the launch). Cloning itself is built in and is not a hook;
+    post-clone is the only one. Both are set through the `farhelm` CLI and get no GUI: persistent, rarely touched
+    configuration belongs to the CLI (and to agents driving it), and the GUI is for what is constantly in use or needs
+    muscle memory. With no root configured, `gh:` does not launch and says which CLI command sets it.
+  - Track working-copy ownership explicitly in session metadata: a session launched into a fresh clone owns that working
+    copy; a session launched into an existing directory does not. Deleting an owning session moves its working copy into
+    the archive directory by default. Archiving a session does not move its working copy, and deleting a non-owning
+    session leaves its directory alone. The working-copy move is a single `rename` into
+    `<root>/farhelm-archived-working-copies/<original name>-<date and time of archiving>`, with a random suffix on the
+    unlikely collision. It sits under the root so the move stays on one filesystem. No working-copy contents are deleted
+    and no disk space is freed; the user empties that directory by hand. This is deliberately a trial run for real
+    deletion: if nothing archived ever turns out to have been wanted, deletion can follow. The allocator reserves that
+    directory name and the `gh:` completion scan skips it. Implementation must settle ownership transfer for
+    Replace/Replace with, which currently create a session in the same directory and then delete the source, so
+    replacing a session does not move the replacement's working directory out from under it.
+  - `gh:` completion comes from recently used repos and the remotes of existing clones under the root, with no GitHub
+    API call. Recent setups remember the repo, so reusing one makes a fresh clone, not the old folder.
+  - Out of scope for the first version: real deletion, `gh:owner/repo@branch`, faster clones from a local reference
+    mirror, a clone URL template, and user-defined labels.
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
@@ -410,6 +458,10 @@ Real enough to keep, not established enough to act on. Each names what would set
   wanted; no blanket power-loss guarantee and no remote-branch change.
 
 ## Maybe later
+
+- Reconsider the first-use configuration experience for `gh:` launches when no working-copy root is configured. The
+  first version refuses the launch and points to the CLI command; consider an inline GUI flow on initial use or another
+  improvement that makes setup easier. Keep the general preference for CLI configuration of rarely changed settings.
 
 - Coordinate uninstall with installation, setup, and runtime startup. Share the relevant locks and revalidate removal
   targets under them so an update, setup, desktop launch, or new session cannot race uninstall's checks and deletion.
