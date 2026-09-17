@@ -237,20 +237,6 @@ is a clean gate.
   `transition_many` commits; removal is best-effort and logs non-NotFound errors. It is not an unawaited deletion race.
   On recurrence capture unlink path/errno, planted versus derived generation paths, and the committed session ID. If the
   paths match and no removal warning exists, inspect the actual directory entry before changing cleanup semantics.
-- Fix the forced-pause helper's client-list parsing in `crates/farhelm/tests/e2e/terminal_backpressure.rs`. The combined
-  `aa333815` run failed four cases with "no output control client found among tmux clients":
-  `replay_marker::a_tmux_pause_catch_up_replays_without_a_marker`,
-  `terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment`,
-  `terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane`, and
-  `terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state`. The listing visibly contained the output
-  client's `pause-after=5` flag, but an underscore separated its name from the flags where the helper expects a tab. The
-  exact replay-marker case also failed on untouched `d71a87fb` with one test thread in 0.47 seconds, on a second worker
-  with the same reported 3.7c pin and no extra load. Both the helper and these test bodies are unchanged across the
-  comparison, but the worker's executable identity is unverified. CI run 34006471792 at `2069e0c8` passed all four cases
-  on its built pin with four threads. The 2026-09-06 FLAKES.md caveat records that counterevidence; the observed
-  delimiter failure remains open, without a claim of deterministic failure on the exact pin. Retain a recorder run,
-  check the formatter's delimiter bytes, and use an unambiguous supported separator if the mismatch is reproduced while
-  keeping the positive `pause-after` discriminator. Then validate all four callers against the pinned substrate.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
   viewer RSS, degenerate-size READY, replacement claim, malformed-sentinel, and forced-pause helper cases still block
@@ -276,6 +262,17 @@ Single sightings with unsuccessful targeted hunts and no actionable investigativ
 reproduction since, no suspected mechanism to chase. What parks an entry here is the absence of a live lead, not a claim
 about any other bucket. On recurrence, move the entry back to the regular bucket with the new evidence rather than
 hunting blind from here.
+
+- Investigate the forced-pause helper's "no output control client found among tmux clients" sighting (four cases in the
+  combined `aa333815` run; the exact replay-marker case failed again on untouched `d71a87fb` in 0.47s on a second
+  worker): the listing visibly contained the output client's `pause-after=5` flag, but an underscore appeared where
+  `force_tmux_pause` (`crates/farhelm/tests/e2e/terminal_backpressure.rs`) expects a tab between `#{client_name}` and
+  `#{client_flags}`. Moved here from "Difficult deflake" on 2026-09-17: the formatter's delimiter bytes were hexdumped
+  from a verified pinned tmux 3.7c with a control client carrying the supervisor's exact `!no-output,pause-after=5`
+  cutover flags — a real 0x09 tab, exactly what the helper parses — so the mismatch is not reproducible on the supported
+  substrate and the condition for an unambiguous separator was never met. Both failing workers reported a 3.7c pin but
+  kept no executable hash; CI run 34006471792 at `2069e0c8` passed all four cases on its built pin. Recorder runs now
+  retain substrate identity: on recurrence, keep the run directory and hexdump the listing before touching the helper.
 
 - Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
   `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find

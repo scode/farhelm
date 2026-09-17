@@ -434,7 +434,12 @@ pin/build assertion rather than an executable digest or a dirty-tree fingerprint
 names were not retained in these receipts either. Those inputs cannot be reconstructed from a reported version alone.
 Disposition: the delimiter failure remains open in TODO.md, but the worker substrate and underlying cause are
 unverified; obtain a retained command, raw delimiter bytes, and executable identity before treating the worker failure
-as a same-substrate baseline. This bookkeeping correction does not claim a new reproduction or a fix.
+as a same-substrate baseline. Disposition (2026-09-17): closed as not reproducible on the supported substrate —
+hexdumping `list-clients -F "#{client_name}\t#{client_flags}"` from the checkout's verified pinned tmux 3.7c build, with
+a control client carrying the supervisor's exact `!no-output,pause-after=5` cutover flags, shows a real 0x09 tab between
+name and flags — exactly what `force_tmux_pause`'s `split_once('\t')` parses — so the entry's own condition for an
+unambiguous separator was never met. The failing workers' tmux identities were never hashed and cannot be reconstructed;
+a recurrence under a recorder run would retain them. No fix claimed.
 
 Class: substrate
 
