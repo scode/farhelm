@@ -956,24 +956,28 @@ fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
-/// How long any one request may take before it is abandoned.
+/// How long a request that works on ANOTHER machine may take before it is
+/// abandoned: the host mutations, plus the two GETs that drain or browse a
+/// remote supervisor live (`fetch_session`, `browse_directory`). Helm-local
+/// idempotent reads have their own deadline — [`READ_TIMEOUT`], and the
+/// preference seed its shorter one — since the single-flight reader argument
+/// below is what makes ANY deadline load-bearing for them.
 ///
-/// It exists because of `reader`, not because of the network. A surface now
-/// runs ONE read at a time: a request that never completes and never fails
-/// would hold that reader forever, and the surface would sit stale with no
-/// retry ever scheduled — the previous arrangement, which spawned a read per
-/// notification, at least kept trying (while accumulating tasks against a
-/// helm that had stopped answering, which is the problem the reader solves).
-/// Bounding the request is what makes the single-flight reader safe: a hung
-/// connection becomes an ordinary failed read, and the retry ladder takes
-/// over.
+/// The reader argument: a surface runs ONE read at a time; a request that
+/// never completes and never fails would hold that reader forever, and the
+/// surface would sit stale with no retry ever scheduled — the previous
+/// arrangement, which spawned a read per notification, at least kept trying
+/// (while accumulating tasks against a helm that had stopped answering,
+/// which is the problem the reader solves). Bounding the request is what
+/// makes the single-flight reader safe: a hung connection becomes an
+/// ordinary failed read, and the retry ladder takes over.
 ///
-/// Sixty seconds is deliberately generous rather than tuned. A read is
-/// expected to take milliseconds, but this door is shared with the host
-/// mutations, and those do real work on another machine — an add or an adopt
-/// opens an SSH connection and inspects an install. The number matches the
-/// helm's own stall bounds (`uploads.rs`'s sixty-second deadlines) so the
-/// two sides give up on roughly the same scale. Nothing here streams a large
+/// Sixty seconds is deliberately generous rather than tuned. This door is
+/// the one shared with the host mutations, and those do real work on
+/// another machine — an add or an adopt opens an SSH connection and
+/// inspects an install. The number matches the helm's own stall bounds
+/// (`uploads.rs`'s sixty-second deadlines) so the two sides give up on
+/// roughly the same scale. Nothing here streams a large
 /// body: uploads never pass through this module (terminal.js owns them, see
 /// `attachments`), so a total-request deadline cannot cut a transfer short.
 ///
@@ -981,14 +985,43 @@ fn client() -> reqwest::Client {
 /// request by construction — the same argument the funnel itself makes.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long a helm-local idempotent read (`send_read`'s callers) may take.
+///
+/// The 60s of [`REQUEST_TIMEOUT`] exists for the host mutations that do real
+/// work on another machine, and reads inherit it only because they shared
+/// the funnel — but an inherited deadline still binds. The rotation-recovery
+/// flake (TODO.md's Deflake bucket; lore/2026-09-16-rotation-recovery-
+/// unanswered-reads.md) is exactly that binding biting: an unanswered
+/// `/api/sessions` read held its surface for the full 60 seconds, which is
+/// also the test's whole budget, so the retry ladder never got a turn. The
+/// maintainer's call (2026-09-17) was to split idempotent reads to a shorter
+/// timeout rather than keep instrumenting the stall.
+///
+/// Ten seconds is still a hundred times what these reads take (every one is
+/// answered from the helm's own store or process memory in milliseconds),
+/// while a hung read now fails into the retry ladder with ~50s of a 60s
+/// test budget intact — enough for the whole 30s active ladder plus change.
+/// Two cross-machine requests deliberately stay on [`REQUEST_TIMEOUT`]:
+/// `browse_directory` (a POST, but the same reasoning) and `fetch_session`
+/// both work on ANOTHER machine, which is what the generous number was
+/// chosen for.
+///
+/// On the desktop build, a 401 on one of these reads runs the native
+/// credential refresh and the retry inside this same absolute deadline;
+/// a refresh slower than the deadline cancels the exchange and the next
+/// reader starts another. The five-second preference seed shares that
+/// accepted shape at half the budget.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Send one protected request and read the helm's build stamp off its reply
 /// (PLAN_M6.md item 6's client↔helm skew edge).
 ///
-/// Every protected request uses this function, and that is the point rather
-/// than tidiness: the skew and authentication checks only mean anything if
-/// no protected path skips them. The sole bypass is [`exchange_token`],
-/// which cannot carry the credential it exists to mint and performs its own
-/// build-stamp observation.
+/// Every protected request uses this function or [`send_read`] — the same
+/// funnel either way, differing only in the deadline — and that is the point
+/// rather than tidiness: the skew and authentication checks only mean
+/// anything if no protected path skips them. The sole bypass is
+/// [`exchange_token`], which cannot carry the credential it exists to mint
+/// and performs its own build-stamp observation.
 ///
 /// Successful and non-401 refusal replies are handed back for their endpoint
 /// to decode. Every 401 is consumed here: the authentication middleware's
@@ -997,10 +1030,12 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 ///
 /// The [`REQUEST_TIMEOUT`] is applied here for the same funnel reason: a
 /// per-call-site deadline is a deadline someone eventually forgets, and the
-/// one request left unbounded is the one that wedges a surface. It is the
-/// only deadline there is — the paged listing once divided a budget of its
-/// own across pages, and with it went the last caller that wanted anything
-/// but the default. In the desktop build, a recognized 401 refreshes the
+/// one request left unbounded is the one that wedges a surface. This is the
+/// generous deadline — the one the host mutations, which do real work on
+/// another machine, are the reason for; helm-local idempotent GETs get
+/// [`send_read`]'s [`READ_TIMEOUT`] instead, and the paged listing once had
+/// a budget of its own before it went and returned with the preference
+/// seed. In the desktop build, a recognized 401 refreshes the
 /// native credential, remounts the independently authenticated webview
 /// gate, and retries once, all inside one absolute deadline — recovery
 /// cannot turn one request's remaining budget into two fresh ones; browser
@@ -1017,13 +1052,24 @@ async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, Str
 /// which holds the whole authenticated tree and must give up in seconds
 /// rather than let a stalled best-effort read cost a minute of blank page
 /// (see [`PREFERENCE_SEED_TIMEOUT`]). Everything else goes through
-/// [`send`]; a deadline chosen per call site is a deadline someone
-/// eventually forgets.
+/// [`send`] or [`send_read`]; a deadline chosen per call site is a deadline
+/// someone eventually forgets.
 async fn send_within(
     request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
 ) -> Result<reqwest::Response, String> {
     send_inner(request, timeout).await.map_err(send_error_text)
+}
+
+/// [`send`] at [`READ_TIMEOUT`] — the deadline every helm-local idempotent
+/// GET shares.
+///
+/// A fixed constant here rather than a per-call-site argument for the same
+/// reason [`send`] fixes one: a deadline chosen per call site is a deadline
+/// someone eventually forgets. A read that legitimately needs longer is not
+/// a read — it is `browse_directory`, and it goes through [`send`].
+async fn send_read(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+    send_within(request, READ_TIMEOUT).await
 }
 
 /// Failure at the one response-classification point every Rust-side API
@@ -1158,11 +1204,11 @@ fn send_error_text(error: SendError) -> String {
 }
 
 /// [`send`]'s typed body — split only so `send` can flatten the typed
-/// error at one seam; every caller but one goes through `send` and its
-/// [`REQUEST_TIMEOUT`]. (A deadline parameter left when the paged listing
-/// went and returned with the preference seed: [`send_within`] is the one
-/// caller-chosen deadline, and `PreferencesGate`'s docs say why it earns
-/// the exception the paged listing lost.)
+/// error at one seam; every caller but one goes through `send` or
+/// `send_read` at a fixed constant. (A deadline parameter left when the
+/// paged listing went and returned with the preference seed: [`send_within`]
+/// is the one caller-chosen deadline, and `PreferencesGate`'s docs say why
+/// it earns the exception the paged listing lost.)
 async fn send_inner(
     mut request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
@@ -1472,7 +1518,7 @@ pub(crate) async fn fetch_sessions(
     // No empty-query case: `list_query` always carries the order, so every
     // request this UI makes has at least one parameter.
     let url = format!("{base}/api/sessions?{query}");
-    let resp = send(client().get(&url)).await?;
+    let resp = send_read(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
@@ -1891,6 +1937,17 @@ pub(crate) async fn stop_session(base: &str, id: &str) -> Result<(), String> {
 ///
 /// A transport failure stays an `Err`, because "the helm did not answer"
 /// and "the helm answered 404" must not be confused either.
+///
+/// This is the one GET that deliberately does NOT go through
+/// [`send_read`], despite looking like a read: the helm's detail route
+/// drains the OWNING supervisor live (`drain_sessions`, over SSH when the
+/// owner is remote), which is exactly the "real work on another machine"
+/// case [`REQUEST_TIMEOUT`]'s generous deadline exists for. A 10s cap
+/// here would time out a slow-but-honest remote drain and — through
+/// `list/view`'s remembered-selection handling — make the UI forget the
+/// user's selection over a slow host. A hung detail read still starves
+/// its own surface for up to sixty seconds; that is the accepted price of
+/// the honest cross-machine deadline, revisited only if it recurs.
 pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session>, String> {
     let url = format!("{base}/api/sessions/{}", encode_path_segment(id));
     let resp = send(client().get(&url)).await?;
@@ -2532,7 +2589,7 @@ pub(crate) struct ProvisioningView {
 /// host count needed paging is not one a person manages by hand.
 pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
     let url = format!("{base}/api/hosts");
-    let resp = send(client().get(&url)).await?;
+    let resp = send_read(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
@@ -2545,7 +2602,7 @@ pub(crate) async fn fetch_hosts(base: &str) -> Result<Vec<Host>, String> {
 /// stays declarative until the helm validates and compiles the create.
 pub(crate) async fn fetch_launch_catalog(base: &str) -> Result<Vec<LaunchCatalogModel>, String> {
     let url = format!("{base}/api/launch-catalog");
-    let resp = send(client().get(&url)).await?;
+    let resp = send_read(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
@@ -2566,7 +2623,7 @@ pub(crate) async fn fetch_launch_history(
     host: HostId,
 ) -> Result<LaunchHistory, String> {
     let url = format!("{base}/api/launch-history?host={host}");
-    let resp = send(client().get(&url)).await?;
+    let resp = send_read(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
@@ -2807,7 +2864,7 @@ pub(crate) async fn fetch_provisioning(
     host: HostId,
 ) -> Result<ProvisioningView, String> {
     let url = format!("{base}/api/hosts/{host}/provisioning");
-    let resp = send(client().get(&url)).await?;
+    let resp = send_read(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
@@ -3005,7 +3062,7 @@ pub(crate) struct ProfileSpec {
 /// profile. Every host uses this same catalog.
 pub(crate) async fn fetch_profiles(base: &str) -> Result<ProfileCatalog, String> {
     let url = format!("{base}/api/profiles");
-    let resp = send(client().get(&url)).await?;
+    let resp = send_read(client().get(&url)).await?;
     if !resp.status().is_success() {
         return Err(read_failure("GET", &url, resp).await);
     }
