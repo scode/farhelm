@@ -1102,10 +1102,12 @@ EOF
       # section): records carry this, never $dest or $backup.
       if [ "$name" = farhelm ]; then
         binary_id=cli
-        fail_msg="install failed while replacing farhelm; the previous farhelm (if any) was restored"
+        fail_prefix="install/update failed while replacing farhelm"
+        restored_suffix="the previous farhelm (if any) was restored"
       else
         binary_id=desktop
-        fail_msg="update failed while replacing farhelm-desktop; the previous farhelm was restored"
+        fail_prefix="install/update failed while replacing farhelm-desktop"
+        restored_suffix="the previous installation (if any) was restored"
       fi
 
       dest="$INSTALL_DIR/$name"
@@ -1117,9 +1119,9 @@ EOF
         if ! mv "$dest" "$backup"; then
           if rollback_from_journal; then
             rm -f "$JOURNAL"
-            printf '%s\n' "$fail_msg" >&2
+            printf '%s; %s\n' "$fail_prefix" "$restored_suffix" >&2
           else
-            printf '%s -- but automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_msg" "$LOCK_DIR" "$JOURNAL" >&2
+            printf '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL" >&2
           fi
           exit 1
         fi
@@ -1129,9 +1131,9 @@ EOF
       if ! mv "$STAGING_DIR/$name" "$dest"; then
         if rollback_from_journal; then
           rm -f "$JOURNAL"
-          printf '%s\n' "$fail_msg" >&2
+          printf '%s; %s\n' "$fail_prefix" "$restored_suffix" >&2
         else
-          printf '%s -- but automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_msg" "$LOCK_DIR" "$JOURNAL" >&2
+          printf '%s; automatic rollback could not fully complete; %s and %s are LEFT IN PLACE for inspection, see the lines above for what could not be restored\n' "$fail_prefix" "$LOCK_DIR" "$JOURNAL" >&2
         fi
         exit 1
       fi
@@ -1184,11 +1186,11 @@ EOF
     BUNDLE_NOTE=""
     if [ "$HAS_DESKTOP" -eq 1 ]; then
       if [ -n "${FARHELM_NO_APP_BUNDLE:-}" ]; then
-        BUNDLE_NOTE="Skipped the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
+        BUNDLE_NOTE="Skipped assembling the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
       elif [ "$ICNS_STATE" != staged ]; then
-        BUNDLE_NOTE="This release's desktop archive carries no Farhelm.icns (releases before the bundle existed); skipped assembling the Farhelm.app bundle."
+        BUNDLE_NOTE="Skipped assembling the Farhelm.app bundle — this release's desktop archive carries no Farhelm.icns (releases before the bundle existed)."
       elif [ -z "${HOME:-}" ]; then
-        BUNDLE_NOTE="HOME is not set; skipped assembling the Farhelm.app bundle."
+        BUNDLE_NOTE="Skipped assembling the Farhelm.app bundle (HOME is not set)."
       else
         app_parent="$HOME/Applications"
         app_path="$app_parent/Farhelm.app"
@@ -1276,8 +1278,40 @@ PLIST_EOF
       fi
     fi
 
-    # 8. Report. PATH warning and restart reminder first (only when they
-    # apply), then the standing closing message every run prints.
+    # 8. Report. What happened first (the install summary and bundle
+    # note), then the update restart reminder and PATH repair, then the
+    # standing uninstall/setup guidance, then the tmux hint. Each block
+    # leads with its own blank line; a block whose condition does not
+    # apply prints nothing.
+    echo ""
+    if [ "$replaced_something" -eq 1 ]; then
+      if [ "$HAS_DESKTOP" -eq 1 ]; then
+        printf 'Updated farhelm %s (and farhelm-desktop) in %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
+      else
+        printf 'Updated farhelm %s in %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
+      fi
+    else
+      if [ "$HAS_DESKTOP" -eq 1 ]; then
+        printf 'Installed farhelm %s (and farhelm-desktop) to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
+      else
+        printf 'Installed farhelm %s to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
+      fi
+    fi
+    if [ -n "$BUNDLE_NOTE" ]; then
+      printf '%s\n' "$BUNDLE_NOTE"
+    fi
+
+    if [ "$replaced_something" -eq 1 ]; then
+      echo ""
+      echo "Updated. Restart what is running:"
+      echo "  Linux: systemctl --user restart farhelm-supervisor farhelm-helm"
+      echo "  macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
+      echo "  any supervisor it started as child processes; a supervisor you started by"
+      echo "  hand with 'farhelm supervisor run' is reused as-is — restart it yourself)."
+      echo "  Running sessions survive either way — they live in tmux, which neither"
+      echo "  restart touches."
+    fi
+
     case "$INSTALL_DIR" in
       *:*)
         # A colon can never be represented as one PATH entry (POSIX PATH
@@ -1307,31 +1341,11 @@ PLIST_EOF
         ;;
     esac
 
-    if [ "$replaced_something" -eq 1 ]; then
-      echo ""
-      echo "Updated. Restart what is running:"
-      echo "  Linux: systemctl --user restart farhelm-supervisor farhelm-helm"
-      echo "  macOS: quit and reopen Farhelm (the desktop app owns the embedded helm and"
-      echo "  any supervisor it started as child processes; a supervisor you started by"
-      echo "  hand with 'farhelm supervisor run' is reused as-is and needs restarting"
-      echo "  yourself)."
-      echo "  Running sessions survive either way — they live in tmux, which neither"
-      echo "  restart touches."
-    fi
-
     echo ""
-    if [ "$HAS_DESKTOP" -eq 1 ]; then
-      printf 'Installed farhelm %s (and farhelm-desktop) to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-    else
-      printf 'Installed farhelm %s to %s.\n' "$VERSION_NUM" "$INSTALL_DIR"
-    fi
-    if [ -n "$BUNDLE_NOTE" ]; then
-      printf '%s\n' "$BUNDLE_NOTE"
-    fi
-    echo ""
-    echo "To remove this installation, run 'farhelm uninstall' (keeps user data)."
     echo "Stop sessions and their terminals, quit the desktop app, and stop manually"
-    echo "started Farhelm processes first. Preview removal with 'farhelm uninstall --dry-run'."
+    echo "started Farhelm processes first: uninstall does not stop them for you."
+    echo "To remove this installation, run 'farhelm uninstall' (keeps user data)."
+    echo "Preview removal with 'farhelm uninstall --dry-run'."
     echo ""
     echo "If this machine should run your helm (the web UI on 127.0.0.1:7433) and host"
     echo "agent sessions itself, run 'farhelm helm setup' — it writes and starts the helm"

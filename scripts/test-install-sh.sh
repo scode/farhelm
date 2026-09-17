@@ -765,7 +765,7 @@ chmod 755 "$MAC_TOOLS_FAILDESKTOP/mv"
 run_install "$MAC_TOOLS_FAILDESKTOP" "$HOME_MAC" "$INSTALL_MAC" "$BASE/good-v2" 1.2.4
 check "forced desktop-replace failure exits 1" [ "$RC" -ne 0 ]
 check "forced desktop-replace failure prints the exact required message" \
-  contains "$ERR" "update failed while replacing farhelm-desktop; the previous farhelm was restored"
+  contains "$ERR" "install/update failed while replacing farhelm-desktop; the previous installation (if any) was restored"
 check "forced desktop-replace failure restores the OLD (1.2.3) farhelm byte-for-byte" \
   [ "$(cat "$INSTALL_MAC/farhelm")" = "$OLD_FARHELM_CONTENT" ]
 check "forced desktop-replace failure leaves the OLD (1.2.3) farhelm-desktop untouched" \
@@ -848,7 +848,7 @@ run_install "$MAC_TOOLS" "$HOME_OPTOUT" "$HOME_OPTOUT/.local/bin" "$BASE/good" 1
   FARHELM_NO_APP_BUNDLE=1
 check "FARHELM_NO_APP_BUNDLE install exits 0" [ "$RC" -eq 0 ]
 check "FARHELM_NO_APP_BUNDLE reports the opt-out" \
-  contains "$OUT" "Skipped the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
+  contains "$OUT" "Skipped assembling the Farhelm.app bundle (FARHELM_NO_APP_BUNDLE is set)."
 check "FARHELM_NO_APP_BUNDLE creates no bundle" [ ! -e "$HOME_OPTOUT/Applications/Farhelm.app" ]
 
 # A Farhelm.app that is NOT a farhelm bundle belongs to the user: refuse to
@@ -936,7 +936,7 @@ chmod 755 "$TOOLS_FAILFIRST/mv"
 run_install "$TOOLS_FAILFIRST" "$HOMEFIRSTFAIL" "$INSTALLFIRSTFAIL" "$BASE/good" 1.2.3
 check "F3: forced first-replacement failure exits 1" [ "$RC" -ne 0 ]
 check "F3: forced first-replacement failure prints the exact required message" \
-  contains "$ERR" "install failed while replacing farhelm; the previous farhelm (if any) was restored"
+  contains "$ERR" "install/update failed while replacing farhelm; the previous farhelm (if any) was restored"
 check "F3: forced first-replacement failure restores the OLD farhelm byte-for-byte" \
   [ "$(cat "$INSTALLFIRSTFAIL/farhelm")" = "$OLD_FIRSTFAIL_CONTENT" ]
 check "F3: forced first-replacement failure leaves no leftover staging/lock/backup dot-files" \
@@ -1381,13 +1381,21 @@ UNAMEEOF
   run_install "$install:$tools" "$home" "$install" "$BASE/good" "$version"
   check "F20 ($label): install exits 0" [ "$RC" -eq 0 ]
 
-  # The install summary line, exactly (single or dual binary).
+  # The install summary line, exactly (single or dual binary; Updated on
+  # an update, Installed on a fresh install).
+  if [ "$is_update" = yes ]; then
+    summary_verb="Updated"
+    summary_prep="in"
+  else
+    summary_verb="Installed"
+    summary_prep="to"
+  fi
   if [ "$has_desktop" = yes ]; then
     check "F20 ($label): install summary names both binaries" \
-      contains "$OUT" "Installed farhelm $version (and farhelm-desktop) to $install."
+      contains "$OUT" "$summary_verb farhelm $version (and farhelm-desktop) $summary_prep $install."
   else
     check "F20 ($label): install summary names farhelm only" \
-      contains "$OUT" "Installed farhelm $version to $install."
+      contains "$OUT" "$summary_verb farhelm $version $summary_prep $install."
     check "F20 ($label): install summary does not also claim farhelm-desktop" \
       not_contains "$OUT" "(and farhelm-desktop)"
   fi
@@ -1427,8 +1435,9 @@ UNAMEEOF
     check "F20 ($label): restart-reminder macOS line 2" \
       contains "$OUT" "any supervisor it started as child processes; a supervisor you started by"
     check "F20 ($label): restart-reminder macOS line 3" \
-      contains "$OUT" "hand with 'farhelm supervisor run' is reused as-is and needs restarting"
-    check "F20 ($label): restart-reminder macOS line 4" contains "$OUT" "yourself)."
+      contains "$OUT" "hand with 'farhelm supervisor run' is reused as-is — restart it yourself)."
+    check "F20 ($label): restart-reminder sentence ends with the operator's own restart" \
+      contains "$OUT" "restart it yourself)."
     check "F20 ($label): restart-reminder sessions-survive line 1" \
       contains "$OUT" "Running sessions survive either way — they live in tmux, which neither"
     check "F20 ($label): restart-reminder sessions-survive line 2" contains "$OUT" "restart touches."
@@ -2243,6 +2252,10 @@ run_install "$TOOLS_R3F2A" "$HOME_R3F2A" "$INSTALL_R3F2A" "$BASE/good-v2" 1.2.4
 check "R3 F2a: the run exits 1" [ "$RC" -ne 0 ]
 check "R3 F2a: the explicit rollback reports it could not finish" \
   contains "$ERR" "automatic rollback could not fully complete"
+check "R3 F2a: the explicit rollback names the failed replacement" \
+  contains "$ERR" "install/update failed while replacing farhelm-desktop"
+check "R3 F2a: the failed rollback does not claim restoration" \
+  not_contains "$ERR" "was restored"
 check "R3 F2a: the EXIT handler replayed and reported the same" \
   contains "$ERR" "interrupted while updating"
 check "R3 F2a: the restored farhelm-desktop survives the replay byte-for-byte" \
