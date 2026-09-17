@@ -5437,7 +5437,10 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
   for (let index = 0; index < 3; index += 1) {
     const row = slots.getByRole("button").nth(index);
     const entry = launches[index];
-    const permission = entry.selection.permissions === "yolo" ? "Yolo" : "default";
+    // The row's title spells the permission the way the summary does:
+    // "yolo" — the colorable warning word — or "default" when the
+    // selection carries none.
+    const permission = entry.selection.permissions ?? "default";
     const harness = entry.selection.harness === "claude" ? "Claude" : "Codex";
     const expected = `${entry.cwd} · this machine · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
     await expect(row).toHaveAttribute("title", expected);
