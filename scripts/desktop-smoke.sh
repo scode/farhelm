@@ -794,6 +794,17 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ -n "$RESTORED_ATTACHMENT" ] || fail "the relaunched page did not attach the remembered non-newest session"
+# The plain-text link asset reached the same relaunched page whose
+# terminal attachment the oracle above just proved: parity
+# (`scripts/check-desktop-assets.sh`) holds the requested and bundled
+# sets equal but cannot prove the window ever asked for this file, and
+# the first-boot "something was served" check is satisfied by any
+# single lucky file. The hashed name keeps its `addon-web-links-` stem
+# (`addon-web-links-dxh<hash>.js`, like the clipboard addon's), so a
+# stem prefix match names this asset without pinning the content hash.
+# The restart log is the one that pairs with a proven terminal mount.
+grep -q 'desktop asset handler: served /assets/addon-web-links-' "$X/desktop-restart.log" ||
+  fail "the relaunched page never requested the vendored plain-text link asset (see $X/desktop-restart.log)"
 SESSION_REDISCOVERED=""
 for _ in $(seq 1 30); do
   if curl_auth -sf --max-time 5 "$API/api/sessions/$SID" >/dev/null; then

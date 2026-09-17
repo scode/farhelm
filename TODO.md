@@ -20,10 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Make plain-text `http://` and `https://` URLs clickable in the terminal. Links a program emits itself already work;
-  bare URLs printed as plain text do not. Cover at least those two schemes; choose the linkifier when implementing this
-  item.
-
 - Restore double-click to maximize on the desktop window's top edge. The custom chrome replaced the native title bar for
   looks and its drag handling lost the native double-click zoom. Double-clicking the top of the window should maximize
   again.
