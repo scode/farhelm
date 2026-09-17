@@ -716,10 +716,13 @@ pub(crate) fn ListView(
     let mut poll_sequence = use_signal(|| 0_u64);
     let mut show_create = use_signal(|| false);
     let provisioning_trace_shapes = use_signal(HashMap::<HostId, ProvisioningTraceShape>::new);
+    let provisioning_auto_details = use_signal(HashSet::<HostId>::new);
     // A shape signature for the always-mounted host list. A memo prevents
     // ordinary phase-only polls and progress-step churn from closing fixed
-    // surfaces while still catching every rendered trace transition and the
-    // count or read-state changes that move rows below the host list.
+    // surfaces while still catching every rendered trace transition, every
+    // automatic-disclosure transition (an update expanding or collapsing
+    // its own row moves the rows below it exactly like a trace does), and
+    // the count or read-state changes that move rows below the host list.
     let hosts_list_shape = use_memo(move || {
         let read = hosts.read();
         let mut traces = provisioning_trace_shapes
@@ -728,11 +731,18 @@ pub(crate) fn ListView(
             .map(|(host, shape)| (*host, shape.operation, shape.status))
             .collect::<Vec<_>>();
         traces.sort_by_key(|(host, _, _)| *host);
+        let mut auto = provisioning_auto_details
+            .read()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        auto.sort();
         (
             read.hosts().map(<[_]>::len).unwrap_or(0),
             read.is_loading(),
             read.refresh_error().is_some(),
             traces,
+            auto,
         )
     });
     // Closes any open actions-menu panel — a SESSION row's or a HOST row's,
@@ -759,9 +769,9 @@ pub(crate) fn ListView(
     //
     // The three dependencies are deliberate: `layout_epoch` aggregates
     // ancestor scroll and resize events, `show_create` covers the create
-    // form, and `hosts_list_shape` covers host count/read-state and collapsed
-    // provisioning-trace transitions. The initial run is a no-op because
-    // both row-menu signals start empty.
+    // form, and `hosts_list_shape` covers host count/read-state, collapsed
+    // provisioning-trace transitions, and automatic-disclosure transitions.
+    // The initial run is a no-op because both row-menu signals start empty.
     //
     // NOT exhaustive — a same-INDEX height change on a row already above
     // the open one (a per-row error line appearing, say) moves the open
@@ -2391,6 +2401,7 @@ pub(crate) fn ListView(
             mutation_busy_hosts,
             provisioning_busy_hosts,
             provisioning_trace_shapes,
+            provisioning_auto_details,
             host_menu_open,
             session_menu_open: menu_open,
             on_changed: refresh_hosts,

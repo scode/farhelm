@@ -48,7 +48,7 @@
 //! control anyway would be a lie about what is on the table. [`adoptable`]
 //! is where that rule is enforced once instead of at each render.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -66,7 +66,8 @@ use crate::menu_panel::{
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::provisioning::{
-    PlanConfirmation, ProvisioningMenuState, ProvisioningPanel, ProvisioningTraceShape,
+    ActionRequest, HostBinding, PlanConfirmation, ProvisioningMenuState, ProvisioningPanel,
+    ProvisioningTraceShape,
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
@@ -700,6 +701,10 @@ pub(crate) fn HostsPanel(
     mut provisioning_busy_hosts: Signal<std::collections::HashSet<HostId>>,
     /// The collapsed provisioning traces that currently contribute row height.
     mut provisioning_trace_shapes: Signal<HashMap<HostId, ProvisioningTraceShape>>,
+    /// Rows held open by automatic update disclosure. Each provisioning
+    /// panel publishes its own row from its update lifecycle; the parent
+    /// ORs this with the global checkbox per row and never writes it.
+    mut provisioning_auto_details: Signal<HashSet<HostId>>,
     /// Which host row's "⋯" menu is open, if any — `ListView`'s signal, kept
     /// in step with `session_menu_open` below so at most one row menu is
     /// ever open across the whole sidebar (see this component's own doc).
@@ -726,16 +731,18 @@ pub(crate) fn HostsPanel(
     let mut editing = use_signal(|| None::<(HostId, EditField)>);
     let mut destination_draft = use_signal(String::new);
     let mut adding = use_signal(|| false);
-    // One disclosure controls every row. It stays client-local and resets on
-    // page mount; a host refresh changes facts, not the user's chosen level
-    // of detail.
+    // The global disclosure is the user's preference: one checkbox for every
+    // row. It stays client-local and resets on page mount; a host refresh
+    // changes facts, not the user's chosen level of detail. Each row's
+    // EFFECTIVE disclosure ORs this with its automatic update disclosure,
+    // which the provisioning panels publish per row and which never writes
+    // this checkbox.
     let mut details_open = use_signal(|| false);
     // Provisioning stays mounted in each row, while its commands render in
     // the row-owned floating menu. These maps are the narrow bridge between
     // those two render locations: summaries flow out, one-shot requests in.
     let provisioning_menu_states = use_signal(HashMap::<HostId, ProvisioningMenuState>::new);
-    let mut provisioning_action_requests =
-        use_signal(HashMap::<HostId, ProvisioningOperation>::new);
+    let mut provisioning_action_requests = use_signal(HashMap::<HostId, ActionRequest>::new);
     // An add that committed with an unreadable reply, which has no row to
     // sit on — see the form's `on_added`.
     let mut add_warning = use_signal(|| None::<String>);
@@ -1050,7 +1057,8 @@ pub(crate) fn HostsPanel(
                                 error: errors.read().get(&host.id).cloned(),
                                 warning: warnings.read().get(&host.id).cloned(),
                             },
-                            details_open: details_open(),
+                            details_open: details_open()
+                                || provisioning_auto_details.read().contains(&host.id),
                             provisioning_menu: provisioning_menu_states
                                 .read()
                                 .get(&host.id)
@@ -1061,12 +1069,14 @@ pub(crate) fn HostsPanel(
                                 ProvisioningPanel {
                                     host: host.clone(),
                                     ops,
-                                    details_open: details_open(),
+                                    details_open: details_open()
+                                        || provisioning_auto_details.read().contains(&host.id),
                                     local_setup,
                                     manual_remedy: state_remedy(&host.state),
                                     action_requests: provisioning_action_requests,
                                     menu_states: provisioning_menu_states,
                                     trace_shapes: provisioning_trace_shapes,
+                                    auto_details: provisioning_auto_details,
                                     on_reveal_details: move |_| {
                                                                         details_open.set(true);
                                         host_menu_open.set(None);
@@ -1126,15 +1136,26 @@ pub(crate) fn HostsPanel(
                             },
                             on_remove_confirm: on_remove_confirm.clone(),
                             on_remove_cancel: move |_| confirming_remove.set(None),
-                            on_provisioning: move |(id, operation): (HostId, ProvisioningOperation)| {
-                                if ops.busy_now()
-                                    || provisioning_busy_hosts.peek().contains(&id)
-                                {
+                            on_provisioning: move |(id, request): (HostId, ActionRequest)| {
+                                if provisioning_busy_hosts.peek().contains(&id) {
                                     return;
                                 }
-                                details_open.set(true);
+                                // Setup still confirms explicitly, and its
+                                // confirmation must be visible: reveal the
+                                // global disclosure past the page lock, as
+                                // before. An update expands only its own row
+                                // through automatic disclosure at acceptance,
+                                // and its planning never consults the lock —
+                                // so neither the reveal nor the lock check
+                                // applies to it here.
+                                if request.operation == ProvisioningOperation::Add {
+                                    if ops.busy_now() {
+                                        return;
+                                    }
+                                    details_open.set(true);
+                                }
                                 host_menu_open.set(None);
-                                provisioning_action_requests.write().insert(id, operation);
+                                provisioning_action_requests.write().insert(id, request);
                             },
                             on_menu_toggle: move |id: HostId| {
                                 let currently = *host_menu_open.peek() == Some(id);
@@ -1544,7 +1565,8 @@ fn HostRow(
     controls: HostRowControls,
     /// What the management verbs are doing to this row (grouped state).
     activity: HostRowActivity,
-    /// The global details disclosure, shared by every host row.
+    /// This row's effective details disclosure: the global checkbox OR the
+    /// row's automatic update disclosure, ORed by the parent.
     details_open: bool,
     /// Provisioning commands currently offered in this row's menu.
     provisioning_menu: ProvisioningMenuState,
@@ -1560,8 +1582,9 @@ fn HostRow(
     on_remove_confirm: EventHandler<HostId>,
     on_remove_cancel: EventHandler<()>,
     /// Route a provisioning menu command back to this row's permanently
-    /// mounted provisioning component.
-    on_provisioning: EventHandler<(HostId, ProvisioningOperation)>,
+    /// mounted provisioning component. The request carries the binding this
+    /// row rendered with, captured at click time.
+    on_provisioning: EventHandler<(HostId, ActionRequest)>,
     /// Open or close THIS row's "⋯" menu — `HostsPanel`'s toggle callback,
     /// built the same way the session row's `on_menu_toggle` is (see
     /// `HostsPanel`'s own doc for the single-open discipline it keeps).
@@ -1580,6 +1603,11 @@ fn HostRow(
     #[cfg(test)]
     HOST_ROW_RENDERS.with(|renders| *renders.borrow_mut().entry(host.id).or_insert(0) += 1);
     let id = host.id;
+    // The binding this row rendered with, captured for provisioning clicks:
+    // a request queued behind a retarget must not become work against the
+    // retargeted row, so each click site below clones this into its own
+    // request rather than sharing one.
+    let click_binding = HostBinding::from(&host);
     // The local row is not management surface: SPEC.md has it always
     // present, never registered, never removed. An unrecognized kind is not
     // management surface either — see this component's docs.
@@ -1626,7 +1654,20 @@ fn HostRow(
         alias_supported,
         provisioning_menu,
     );
-    let provisioning_disabled = busy || provisioning_menu.planning;
+    // Setup still refuses behind the page lock, so its items stay disabled
+    // while another operation holds it. Update planning mutates nothing and
+    // its submission claim retries reactively, so the update item answers
+    // while busy and only a live provisioning lifecycle disables it.
+    let setup_disabled = busy || provisioning_menu.planning;
+    let update_disabled = provisioning_menu.planning;
+    // A failed UPDATE reruns down the automatic path, so it answers while
+    // busy like a fresh update; a failed ADD keeps setup's lock discipline.
+    let rerun_disabled = provisioning_menu
+        .rerun
+        .is_some_and(|operation| match operation {
+            ProvisioningOperation::Update => update_disabled,
+            ProvisioningOperation::Add => setup_disabled,
+        });
 
     // ===== This row's own "⋯" menu state ================================
     //
@@ -1968,7 +2009,7 @@ fn HostRow(
                                         r#type: "button",
                                         class: "btn host-row-menu-item provisioning-rerun",
                                         role: "menuitem",
-                                        aria_disabled: if provisioning_disabled { "true" },
+                                        aria_disabled: if rerun_disabled { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::Rerun) { "0" } else { "-1" },
                                         onmounted: move |element| {
                                             remember_menu_item(menu_wiring, HostMenuAction::Rerun, element.data())
@@ -1985,11 +2026,17 @@ fn HostRow(
                                                 &id,
                                             );
                                         },
-                                        onclick: move |_| {
-                                            if provisioning_disabled {
-                                                return;
+                                        onclick: {
+                                            let binding = click_binding.clone();
+                                            move |_| {
+                                                if rerun_disabled {
+                                                    return;
+                                                }
+                                                on_provisioning.call((id, ActionRequest {
+                                                    operation,
+                                                    binding: binding.clone(),
+                                                }));
                                             }
-                                            on_provisioning.call((id, operation));
                                         },
                                         if provisioning_menu.planning { "planning…" } else { "re-run" }
                                     }
@@ -1999,7 +2046,7 @@ fn HostRow(
                                         r#type: "button",
                                         class: "btn host-row-menu-item provisioning-auto-setup",
                                         role: "menuitem",
-                                        aria_disabled: if provisioning_disabled { "true" },
+                                        aria_disabled: if setup_disabled { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::AutomaticSetup) { "0" } else { "-1" },
                                         onmounted: move |element| {
                                             remember_menu_item(
@@ -2020,11 +2067,17 @@ fn HostRow(
                                                 &id,
                                             );
                                         },
-                                        onclick: move |_| {
-                                            if provisioning_disabled {
-                                                return;
+                                        onclick: {
+                                            let binding = click_binding.clone();
+                                            move |_| {
+                                                if setup_disabled {
+                                                    return;
+                                                }
+                                                on_provisioning.call((id, ActionRequest {
+                                                    operation: ProvisioningOperation::Add,
+                                                    binding: binding.clone(),
+                                                }));
                                             }
-                                            on_provisioning.call((id, ProvisioningOperation::Add));
                                         },
                                         "set up automatically"
                                     }
@@ -2034,7 +2087,7 @@ fn HostRow(
                                         r#type: "button",
                                         class: "btn host-row-menu-item provisioning-update",
                                         role: "menuitem",
-                                        aria_disabled: if provisioning_disabled { "true" },
+                                        aria_disabled: if update_disabled { "true" },
                                         tabindex: if menu_tab_stop == Some(HostMenuAction::Update) { "0" } else { "-1" },
                                         onmounted: move |element| {
                                             remember_menu_item(menu_wiring, HostMenuAction::Update, element.data())
@@ -2051,11 +2104,17 @@ fn HostRow(
                                                 &id,
                                             );
                                         },
-                                        onclick: move |_| {
-                                            if provisioning_disabled {
-                                                return;
+                                        onclick: {
+                                            let binding = click_binding.clone();
+                                            move |_| {
+                                                if update_disabled {
+                                                    return;
+                                                }
+                                                on_provisioning.call((id, ActionRequest {
+                                                    operation: ProvisioningOperation::Update,
+                                                    binding: binding.clone(),
+                                                }));
                                             }
-                                            on_provisioning.call((id, ProvisioningOperation::Update));
                                         },
                                         if provisioning_menu.planning { "planning…" } else { "update" }
                                     }
@@ -2428,8 +2487,9 @@ fn destination_detail_parts(destination: &str) -> Vec<DetailPart> {
 /// Discovery claims no page token because its network wait must not freeze
 /// unrelated page work. It can still mutate the registry when a supervisor
 /// answers, so its local re-entry guard and authoritative refresh are part of
-/// the contract. Only explicit confirmation starts a provisioning run and
-/// claims `OpLock` around its POST.
+/// the contract. Only this form's explicit confirmation starts its
+/// provisioning run and claims `OpLock` around its POST; remote updates on
+/// existing rows submit automatically from the row's own lifecycle instead.
 #[component]
 fn AddHostForm(
     mut ops: OpLock,
@@ -2478,7 +2538,7 @@ fn AddHostForm(
                 Ok(ProvisioningSubmission::Accepted(_)) => on_added.call(None),
                 Ok(ProvisioningSubmission::Unvalidated(warning)) => on_added.call(Some(warning)),
                 Err(problem) => {
-                    error.set(Some(problem));
+                    error.set(Some(problem.into_text()));
                     on_refresh.call(());
                 }
             }
@@ -3521,7 +3581,7 @@ mod tests {
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: ()| {});
-            let on_provisioning = use_callback(|_: (HostId, ProvisioningOperation)| {});
+            let on_provisioning = use_callback(|_: (HostId, ActionRequest)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             rsx! {
                 HostRow {
@@ -3604,7 +3664,7 @@ mod tests {
             let on_remove_start = use_callback(|_: HostId| {});
             let on_remove_confirm = use_callback(|_: HostId| {});
             let on_remove_cancel = use_callback(|_: ()| {});
-            let on_provisioning = use_callback(|_: (HostId, ProvisioningOperation)| {});
+            let on_provisioning = use_callback(|_: (HostId, ActionRequest)| {});
             let on_menu_toggle = use_callback(|_: HostId| {});
             let confirming = CONFIRMING.with(std::cell::Cell::get);
             let refused = REFUSED.with(std::cell::Cell::get);

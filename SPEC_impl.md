@@ -273,10 +273,13 @@ Hosts use one permanently mounted list beside the session list, not a compact su
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
 Every row always shows its name, phase dot, and muted actions toggle in the same narrow trailing gutter as the
 session-row actions toggle; connected spends no visible word, while other phases use humanized prose and retain the
-stable wire token in their data attribute. The disclosure reveals every row's evidence and diagnostics together.
-Provisioning commands live in the row menu, but their confirmation and active or retained progress stay under the row
-because that lifecycle owns more context than a floating menu can safely hold. Starting one of those commands opens
-details before planning, while a running or failed retained run leaves one short trace when details are closed.
+stable wire token in their data attribute. Each row's effective disclosure is the global checkbox OR that row's
+automatic update disclosure: the checkbox is the user's preference and no update writes it, while an update expands only
+its own row at click acceptance, follows the accepted or observed running run under it, and collapses that automatic
+half only on authoritative success for the exact tracked run. Provisioning commands live in the row menu, but setup's
+confirmation and active or retained progress stay under the row because that lifecycle owns more context than a floating
+menu can safely hold. Starting setup opens details before planning, while a running or failed retained run leaves one
+short trace when details are closed.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
@@ -1910,13 +1913,15 @@ Implemented in the helm over the same system-ssh access: sftp the cross-compiled
 tmux build when the host has no tmux) into `~/.local/lib/farhelm/`, write user-level systemd units,
 `systemctl --user enable --now`, `loginctl enable-linger` as the optional-step (proceed-without-if-privileged per
 SPEC.md). Discovery-first: probe for a running supervisor via `farhelm internal stdio` before proposing any of this, and
-show the full concrete action list before touching the host.
+show the full concrete action list before touching the host for initial setup.
 
 ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
-confirmation consumes the id, revalidates the host and registry facts the plan relied on, and only then admits the
-host-scoped run. Discovery records the resolved supervisor binary, state directory, and identity together so a later
-helm dials the same installation that answered the probe. UPDATE starts from those recorded coordinates rather than
-assuming the standard layout.
+consuming the id revalidates the host and registry facts the plan relied on, and only then admits the host-scoped run.
+Setup shows the rendered plan and consumes the id on explicit confirmation; a remote update consumes it automatically
+after the user's Update click, which is the authorization — the wire keeps the same single-consumption authority either
+way, and the UI never replays a spent token. Discovery records the resolved supervisor binary, state directory, and
+identity together so a later helm dials the same installation that answered the probe. UPDATE starts from those recorded
+coordinates rather than assuming the standard layout.
 
 A supervisor that answers the hello but speaks a DIFFERENT protocol version is a distinct discovery outcome, not a probe
 failure: presence is proven (only a live supervisor sends a hello) and the skew payload names its build, but nothing

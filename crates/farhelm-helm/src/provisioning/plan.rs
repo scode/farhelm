@@ -46,7 +46,7 @@ pub enum PayloadArch {
 /// The bare architecture spelling (`x86_64`, `aarch64`) used in the
 /// confirmation plan's host line — distinct from the full target triples
 /// `assets.rs` uses for release filenames, which nobody wants to read in
-/// a confirmation prompt.
+/// the confirmation text.
 impl std::fmt::Display for PayloadArch {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
@@ -67,8 +67,9 @@ pub(crate) struct DirectorySpec {
 ///
 /// Paths, unit contents, linger's conditional boot promise, and the
 /// persistent-run statement live here rather than in a parallel confirmation
-/// template. Adding executor behavior therefore requires adding something the
-/// user will see before confirmation.
+/// template. Adding executor behavior therefore requires adding a line to
+/// the plan text the same request authorizes — setup confirmation shows it,
+/// and remote updates consume it sight unseen from the same rendering.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "step", rename_all = "kebab-case")]
 pub(crate) enum ProvisioningAction {
@@ -179,7 +180,7 @@ impl ProvisioningAction {
     }
 }
 
-/// The exact value shown for confirmation and later consumed by execution.
+/// The exact value the confirmation text renders and execution later consumes.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct ProvisioningPlan {
     pub(super) operation: ProvisioningOperation,
@@ -200,8 +201,8 @@ pub(crate) struct ProvisioningPlan {
 impl ProvisioningPlan {
     /// Render the plan without maintaining a second list of promises.
     ///
-    /// The host line right after the header exists so a confirming user
-    /// can see, in the one place SPEC.md's "states exactly what it is
+    /// The host line right after the header exists so setup confirmation
+    /// shows, in the one place SPEC.md's "states exactly what it is
     /// about to do" promise puts everything else, which distribution and
     /// architecture the reach probe actually found — without that line,
     /// distro-agnostic provisioning would still work but would give the
