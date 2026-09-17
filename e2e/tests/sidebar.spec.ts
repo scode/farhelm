@@ -1830,18 +1830,14 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await page.locator(".rename-dialog .rename-cancel").click();
 
     // And so does Space, on a different command, so that neither key is
-    // proven only through the other. Focus is re-established from the
-    // TOGGLE rather than assumed: cancelling the rename above unmounted
-    // the button that held it, and the panel never closed, so there was
-    // no fresh open to place focus anywhere. Same retry as above and for
+    // proven only through the other. Since #651 the rename editor is the
+    // list-owned dialog: OPENING it closes this menu, and cancelling the
+    // dialog does not bring the menu back with it, so the walk below
+    // re-enters through a fresh open. Same retry posture as above and for
     // the same reason — the reconnect ladder is still running this whole
     // test, not just at its start.
-    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
-    await expect(async () => {
-      await toggle.focus();
-      await expect(toggle).toBeFocused();
-    }).toPass({ timeout: 10_000 });
-    await page.keyboard.press("ArrowDown");
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await openRowMenu(target);
     await expect(rename).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(clone).toBeFocused();
