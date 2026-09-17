@@ -117,8 +117,8 @@ pub(super) struct Reach {
     /// on it, because it predicts none of the capabilities provisioning
     /// actually needs (a payload architecture, a usable systemd user
     /// manager, a resolvable unit directory, an acceptable tmux). It is
-    /// carried through purely so the plan the user confirms can name the
-    /// host it inspected — see `ProvisioningPlan::confirmation`.
+    /// carried through purely so the plan text can name the host it
+    /// inspected — see `ProvisioningPlan::confirmation`.
     pub(super) distro_id: String,
     pub(super) needs_tmux: bool,
     /// The host's OWN tmux executable, absolute, when it cleared the

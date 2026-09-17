@@ -1268,12 +1268,20 @@ test.describe("multi-host", () => {
   // busy on its OWN. Existing tests check only the disabled APPEARANCE.
   // This holds one operation open on the (always-present) local host, then
   // arrows through every item of an UNRELATED, fully adoptable host's menu
-  // and activates each one, proving that no request any of them could have
-  // caused reaches that other host (the row's own background provisioning
-  // read is named and excluded below) and that nothing opens — while also
-  // proving keyboard navigation still REACHES every item, so a fix that
-  // swapped `aria-disabled` for native `disabled` (which would also satisfy
-  // "no request, nothing opens") fails this test too.
+  // and activates each DISABLED one, proving that no request any of them
+  // could have caused reaches that other host (the row's own background
+  // provisioning read is named and excluded below) and that nothing opens —
+  // while also proving keyboard navigation still REACHES every item, so a
+  // fix that swapped `aria-disabled` for native `disabled` (which would
+  // also satisfy "no request, nothing opens") fails this test too.
+  //
+  // Remote update answers while busy by design (auto-submit: planning
+  // mutates nothing and the submission claim waits visibly for the page
+  // token — see provisioning.spec.ts "a plan held under a held OpLock").
+  // So `rerun` for a failed UPDATE and `update` stay ENABLED here while
+  // `retry`, `adopt`, `edit`, and `remove` go `aria-disabled`. This test
+  // pins both halves: the disabled four refuse forced activation, and the
+  // enabled two are reachable without the attribute.
   test("host-menu-busy-guards: aria-disabled items refuse activation but stay reachable", async ({
     page,
     request,
@@ -1304,7 +1312,7 @@ test.describe("multi-host", () => {
     // run (`provisioning.rs`) on mount, on every feed notice, and on a
     // fallback poll. It is background traffic with no relationship to the
     // menu, it arrives at times this test does not control, and none of
-    // the six item handlers would ever issue it — so it is named and
+    // the menu handlers would ever issue it — so it is named and
     // excluded here rather than allowed to stand in for the guards this
     // test is actually about.
     const backgroundProvisioningRead = "GET /api/hosts/9013/provisioning";
@@ -1361,8 +1369,9 @@ test.describe("multi-host", () => {
       const target = hostRowByName(page, "user@busy-target");
 
       // Hold ONE operation open on an unrelated row — the page's single
-      // shared operation token, so every OTHER row's items go
-      // `aria-disabled` too.
+      // shared operation token, so every OTHER row's lock-guarded items go
+      // `aria-disabled` too. Remote update is the exception: it plans
+      // without the token and waits visibly for the claim.
       await openHostMenu(source);
       await source.locator(".host-retry").click();
 
@@ -1373,12 +1382,20 @@ test.describe("multi-host", () => {
       const update = target.locator(".provisioning-update");
       const edit = target.locator(".host-edit");
       const remove = target.locator(".host-remove");
+      const disabled = [retry, adopt, edit, remove];
+      const enabled = [rerun, update];
       const items = [retry, adopt, rerun, update, edit, remove];
-      for (const item of items) {
+      for (const item of disabled) {
         await expect(item).toHaveAttribute("aria-disabled", "true");
       }
+      // The update path answers while busy: no disabled attribute, and the
+      // absence is pinned so a regression that re-disables it fails here
+      // rather than hiding behind the activation assertions below.
+      for (const item of enabled) {
+        await expect(item).not.toHaveAttribute("aria-disabled", "true");
+      }
 
-      // Reachable despite being disabled: arrow navigation still lands on
+      // Reachable whether disabled or not: arrow navigation still lands on
       // every one of them, in the declared order.
       const toggle = target.locator(".host-row-menu");
       await toggle.focus();
@@ -1405,9 +1422,12 @@ test.describe("multi-host", () => {
       // actionability checks entirely and fires the event directly on the
       // element — exactly the activation a native `<button>` still answers
       // to despite `aria-disabled`, which is the real hazard this test
-      // exists to catch: each handler's OWN guard has to refuse, because the
-      // DOM will not refuse it first.
-      for (const item of items) {
+      // exists to catch: each disabled handler's OWN guard has to refuse,
+      // because the DOM will not refuse it first. The enabled update items
+      // are not activated here: against this fixture host their planning
+      // would reach undefined backend state, and their wait-for-claim
+      // behavior is already pinned by provisioning.spec.ts.
+      for (const item of disabled) {
         await item.dispatchEvent("click");
       }
 

@@ -86,13 +86,16 @@ neither GitHub nor a configured mirror is a relay or rendezvous service for Farh
 no-relay guarantee below still holds. Nothing the supervisor does requires root: install, updates, and operation all
 happen as the SSH user (user-level systemd, files in user-owned directories). If some optional step cannot be done
 without privileges on a given host, provisioning says so and continues without it rather than escalating. Before
-touching the host, the helm states exactly what it is about to do in concrete terms — the files it will place and where,
-the systemd units it will create, and that the supervisor will run persistently and start at boot — and proceeds only on
-confirmation. The same transparency applies to updates, which use the same mechanism. V1 provisioning targets any Linux
-host with a usable systemd user manager, on the two architectures cross-compiled supervisor binaries exist for. The
-distribution is not a requirement — nothing provisioning does is distribution-specific — so the plan names whichever one
-it found rather than refusing; CI exercises Ubuntu. Everything else — no usable systemd user manager, or an architecture
-with no payload — falls back to the manual path (run the binary yourself), which always remains available.
+touching the host for initial setup, the helm states exactly what it is about to do in concrete terms — the files it
+will place and where, the systemd units it will create, and that the supervisor will run persistently and start at boot
+— and proceeds only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but
+the user's Update click is the authorization: no plan is shown for confirmation. While a host is updating, that host's
+row alone expands to follow the run's progress; success folds it back unless global details are on, while failure or an
+uncertain outcome stays expanded. V1 provisioning targets any Linux host with a usable systemd user manager, on the two
+architectures cross-compiled supervisor binaries exist for. The distribution is not a requirement — nothing provisioning
+does is distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu.
+Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path
+(run the binary yourself), which always remains available.
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions

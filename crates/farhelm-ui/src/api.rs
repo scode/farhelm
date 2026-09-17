@@ -2403,11 +2403,13 @@ pub(crate) enum ProbeResponse {
     Unvalidated(String),
 }
 
-/// The one-use plan returned by the first explicit UPDATE request.
+/// The one-use plan returned by the first UPDATE request.
 ///
-/// UPDATE uses the same inspect-then-confirm discipline as ADD. Posting
-/// `probe_id` back to the host route consumes exactly the plan whose
-/// `confirmation` the user saw.
+/// UPDATE keeps the wire's inspect-then-consume discipline — planning is
+/// inspection-only, and posting `probe_id` back consumes exactly that
+/// retained plan — but the user's Update click is the authorization: unlike
+/// ADD, no confirmation screen shows the `confirmation` text before the
+/// second request consumes it.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct UpdatePlan {
     /// Opaque, one-use confirmation id bound to this host and plan.
@@ -2421,7 +2423,9 @@ pub(crate) struct UpdatePlan {
 pub(crate) struct ProvisioningAccepted {
     /// The row whose host-scoped progress route now owns the run.
     pub(crate) host_id: HostId,
-    /// Opaque diagnostic identity; displayed only if the host id is wrong.
+    /// Opaque run identity. The panel tracks it to follow the run and to
+    /// recognize its authoritative success; a wrong-host reply keeps it in
+    /// the source row's warning instead.
     pub(crate) run_id: String,
 }
 
@@ -2437,6 +2441,40 @@ pub(crate) enum ProvisioningSubmission {
     Accepted(ProvisioningAccepted),
     /// The 202 committed, but this build could not decode its identity.
     Unvalidated(String),
+}
+
+/// How a provisioning submission (ADD confirm or UPDATE) failed.
+///
+/// The two variants answer different questions, and sharing one `String`
+/// channel for them cost the Update panel its uncertainty: a request can
+/// commit while its response is lost, so no answer is not a refusal. A
+/// [`Refused`](Self::Refused) reply is the helm's own answer — the route
+/// admits the run before answering 202, so anything else means no run was
+/// admitted for this plan — and the next attempt replaces it. An
+/// [`Ambiguous`](Self::Ambiguous) failure means no usable answer arrived, so
+/// the submission may have committed unseen and the uncertainty stands until
+/// a correlated success or removal settles it.
+///
+/// This does NOT split the send funnel itself: every `send` failure —
+/// transport, timeout, build, auth — arrives here as `Ambiguous`. A request
+/// that never left is over-retained rather than distinguished, deliberately:
+/// the unknown-outcome direction is the safe one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SubmissionError {
+    /// The helm answered with a non-success status; the text is its own words.
+    Refused(String),
+    /// No answer arrived; the submission may have committed unseen.
+    Ambiguous(String),
+}
+
+impl SubmissionError {
+    /// The display text, whatever the variant. Callers that keep no
+    /// uncertainty state render this; callers that do match first.
+    pub(crate) fn into_text(self) -> String {
+        match self {
+            SubmissionError::Refused(text) | SubmissionError::Ambiguous(text) => text,
+        }
+    }
 }
 
 /// Whether a retained run was an ADD convergence or an explicit UPDATE.
@@ -2700,16 +2738,19 @@ pub(crate) async fn probe_local_host(base: &str) -> Result<ProbeResponse, String
 pub(crate) async fn provision_host(
     base: &str,
     probe_id: &str,
-) -> Result<ProvisioningSubmission, String> {
+) -> Result<ProvisioningSubmission, SubmissionError> {
     let url = format!("{base}/api/hosts/provision");
     let resp = send(
         client()
             .post(&url)
             .json(&serde_json::json!({ "probe_id": probe_id })),
     )
-    .await?;
+    .await
+    .map_err(SubmissionError::Ambiguous)?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        return Err(SubmissionError::Refused(
+            refusal_text("POST", &url, resp).await,
+        ));
     }
     Ok(match resp.json::<ProvisioningAccepted>().await {
         Ok(accepted) => ProvisioningSubmission::Accepted(accepted),
@@ -2737,16 +2778,19 @@ pub(crate) async fn update_host(
     base: &str,
     host: HostId,
     probe_id: &str,
-) -> Result<ProvisioningSubmission, String> {
+) -> Result<ProvisioningSubmission, SubmissionError> {
     let url = format!("{base}/api/hosts/{host}/update");
     let resp = send(
         client()
             .post(&url)
             .json(&serde_json::json!({ "probe_id": probe_id })),
     )
-    .await?;
+    .await
+    .map_err(SubmissionError::Ambiguous)?;
     if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
+        return Err(SubmissionError::Refused(
+            refusal_text("POST", &url, resp).await,
+        ));
     }
     Ok(match resp.json::<ProvisioningAccepted>().await {
         Ok(accepted) => ProvisioningSubmission::Accepted(accepted),

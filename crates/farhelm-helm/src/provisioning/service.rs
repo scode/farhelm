@@ -1040,7 +1040,7 @@ impl ProvisioningService {
         })?;
         if &current != expected {
             return Err(BackendFailure::new(
-                "the host configuration changed after the plan was shown",
+                "the host configuration changed after the plan was made",
                 "discard this plan and plan again",
             ));
         }
