@@ -1263,6 +1263,12 @@ pub(crate) mod tests {
         let mut record = parts;
         record.push(0);
         Fixture::write(&odd.join(FLAT_RECORD), &record);
+        // The receipt verifier refuses group- and world-writable records, and
+        // a bare write inherits the umask. Under a 0o002 umask that leaves the
+        // record group-writable and inspect() would refuse it, so give the
+        // record the producer's private mode like `flat` does.
+        fs::set_permissions(odd.join(FLAT_RECORD), fs::Permissions::from_mode(0o600))
+            .expect("private record");
         let sentinel = fixture.root.path().join("sentinel");
         Fixture::write(&sentinel, b"unchanged");
         let inputs = InspectionInputs {
