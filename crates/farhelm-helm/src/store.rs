@@ -699,12 +699,16 @@ pub enum ListSort {
     /// list keeps its exact behavior.
     #[default]
     Created,
-    /// Effective activity descending, then the creation-order tail.
+    /// Connected Running and Waiting rows first, then everything else, with
+    /// the work-start key ordering inside both groups.
     ///
-    /// "Effective" is `SessionInfo::effective_activity`: a session whose
-    /// sender predates `last_activity_at` (or that has produced no observed
-    /// output) sorts by its creation time rather than piling up at the
-    /// epoch.
+    /// "Active" is a connected host's Running or Waiting report — not a
+    /// verdict that work is happening right now, and not output recency:
+    /// Idle, Unknown, ended, and stale rows all sort in the second group.
+    /// Inside each group the key is
+    /// `SessionInfo::effective_work_started_at`: a session whose sender
+    /// predates `last_work_started_at` (or that has no observed burst)
+    /// sorts by its creation time rather than piling up at the epoch.
     Activity,
     /// Lowercased title ascending, then the creation-order tail. The
     /// collation is Rust's `str::to_lowercase` compared as code points —

@@ -7313,9 +7313,31 @@ fn sortable(
     work_start_seconds: i64,
     title: &str,
 ) -> farhelm_proto::SessionInfo {
+    sortable_as(
+        id,
+        created_at,
+        work_start_seconds,
+        title,
+        farhelm_proto::SessionStatus::Running,
+    )
+}
+
+/// [`sortable`], with the reported status the activity grouping reads.
+///
+/// Statuses are explicit per row rather than inherited from the harness
+/// default, because a mixed-status sort test that left them implicit would
+/// be a same-status test wearing a comment.
+fn sortable_as(
+    id: &str,
+    created_at: i64,
+    work_start_seconds: i64,
+    title: &str,
+    status: farhelm_proto::SessionStatus,
+) -> farhelm_proto::SessionInfo {
     farhelm_proto::SessionInfo {
         last_work_started_at: work_start_seconds * 1000,
         title: title.to_string(),
+        status,
         ..rest_harness::session(id, created_at)
     }
 }
@@ -7424,6 +7446,188 @@ async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
     assert!(
         text.contains("created") && text.contains("activity") && text.contains("title"),
         "the refusal must name the vocabulary it accepts, got {text:?}"
+    );
+}
+
+/// `?sort=activity` serves connected Running and Waiting rows first even
+/// when idle and ended rows hold newer burst keys, while the other two
+/// orders and both counts ignore the grouping entirely.
+///
+/// Spec: SPEC.md's most-recent-activity order groups by reported liveness
+/// before comparing burst keys. The fixture inverts the keys on purpose —
+/// the active rows are the oldest bursts — so a key-only order would come
+/// out backwards. The `status=running` leg pins that a filter still matches
+/// the REPORTED status: sorting and filtering are independent dimensions,
+/// and grouping changes only the sequence.
+#[farhelm_testtrace::test]
+async fn activity_groups_by_reported_status_while_other_orders_and_counts_ignore_it() {
+    use farhelm_proto::SessionStatus;
+
+    let (builder, alpha) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            sessions: vec![
+                sortable_as("local-idle", 400, 900, "Delta", SessionStatus::Idle),
+                sortable_as("local-running", 300, 100, "Charlie", SessionStatus::Running),
+            ],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@alpha",
+            rest_harness::HostScript {
+                identity: Some("identity-alpha".to_string()),
+                sessions: vec![
+                    sortable_as("alpha-waiting", 200, 500, "Bravo", SessionStatus::Waiting),
+                    sortable_as(
+                        "alpha-exited",
+                        100,
+                        950,
+                        "Alpha",
+                        SessionStatus::Exited { exit_code: Some(0) },
+                    ),
+                ],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    for host in [local, alpha] {
+        harness.await_refreshed(host).await;
+    }
+
+    let (status, value) = get_json(&harness, "/api/sessions?sort=activity").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            "alpha-waiting",
+            "local-running",
+            "alpha-exited",
+            "local-idle"
+        ],
+        "Waiting sorts with Running on its older key; the ended and idle rows follow in key \
+         order despite holding the newest bursts"
+    );
+
+    let (_, value) = get_json(&harness, "/api/sessions").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            "local-idle",
+            "local-running",
+            "alpha-waiting",
+            "alpha-exited"
+        ],
+        "creation order follows creation time across the mixed statuses"
+    );
+    let (_, value) = get_json(&harness, "/api/sessions?sort=title").await;
+    assert_eq!(
+        row_ids(&value),
+        vec![
+            "alpha-exited",
+            "alpha-waiting",
+            "local-running",
+            "local-idle"
+        ],
+        "title order follows titles across the mixed statuses"
+    );
+
+    for uri in [
+        "/api/sessions",
+        "/api/sessions?sort=activity",
+        "/api/sessions?sort=title",
+    ] {
+        let (_, value) = get_json(&harness, uri).await;
+        assert_eq!(value["total"], 4, "{uri} changed the fleet total");
+        assert_eq!(value["matching"], 4, "{uri} changed the matching count");
+    }
+
+    let (_, value) = get_json(&harness, "/api/sessions?sort=activity&status=running").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["local-running"],
+        "a status filter matches the reported status, not the group"
+    );
+    assert_eq!(value["matching"], 1);
+    assert_eq!(
+        value["total"], 4,
+        "the denominator still describes the whole view"
+    );
+}
+
+/// Taking a host down demotes its Running rows to the inactive group —
+/// through the real connection state, not a hand-built flag.
+///
+/// The rows keep their cached burst keys and their reported Running status
+/// (a `status=running` filter still matches them); what changes is the
+/// `stale` bit the grouping reads, set from the host actually leaving the
+/// connected state. That is the whole stale plumbing under test: scripted
+/// disconnect, awaited non-connected state, cached rows re-served marked.
+#[farhelm_testtrace::test]
+async fn disconnecting_a_host_demotes_its_running_rows_through_real_stale_plumbing() {
+    let (builder, alpha) = rest_harness::FleetBuilder::new()
+        .await
+        .local(rest_harness::HostScript {
+            identity: Some("identity-local".to_string()),
+            sessions: vec![sortable("local-running", 300, 100, "Local")],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .ssh(
+            "user@alpha",
+            rest_harness::HostScript {
+                identity: Some("identity-alpha".to_string()),
+                sessions: vec![sortable("alpha-running", 200, 900, "Alpha")],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    let local = rest_harness::local_id(&harness.store).await;
+    for host in [local, alpha] {
+        harness.await_refreshed(host).await;
+    }
+
+    let (_, value) = get_json(&harness, "/api/sessions?sort=activity").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["alpha-running", "local-running"],
+        "while both hosts are connected, the newer burst leads"
+    );
+
+    harness.fleet.take_down(alpha);
+    harness
+        .await_state(alpha, |state| state.phase() == "unreachable-reprobing")
+        .await;
+
+    let (status, value) = get_json(&harness, "/api/sessions?sort=activity").await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(
+        row_ids(&value),
+        vec!["local-running", "alpha-running"],
+        "the disconnected host's newer burst drops below the connected row"
+    );
+    let rows = value["sessions"].as_array().expect("sessions is an array");
+    assert_eq!(rows[0]["stale"], false);
+    assert_eq!(
+        rows[1]["stale"], true,
+        "the demoted row is last-known knowledge and says so"
+    );
+    assert_eq!(
+        rows[1]["last_work_started_at"], 900_000,
+        "the demotion moved the row without touching its cached key"
+    );
+    assert_eq!(value["total"], 2);
+    assert_eq!(value["matching"], 2);
+
+    let (_, value) = get_json(&harness, "/api/sessions?sort=activity&status=running").await;
+    assert_eq!(
+        row_ids(&value),
+        vec!["local-running", "alpha-running"],
+        "a stale Running row still matches a Running filter — it sorts second, it is not filtered out"
     );
 }
 

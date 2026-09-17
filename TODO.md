@@ -20,11 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Keep fully idle sessions below actually active ones in the session list's "recently active" order. The
-  promote-on-work-start change (#655) stopped the constant reordering, but a working session can now sit below live
-  sessions that have since gone idle. When a session becomes fully idle it should drop below anything still actually
-  active; choose the exact idle signal and placement when implementing this item.
-
 - Land keyboard focus in the launch composer's search field for clone and "replace with" too. Opening the composer with
   "new" focuses the search field so typing starts at once; the clone and "replace with" paths leave focus elsewhere.
   Every composer opening should behave the same way; choose the exact focus point when implementing this item.
