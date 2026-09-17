@@ -154,6 +154,18 @@ pub(crate) fn PermissionIcon(glyph: PermissionGlyph) -> Element {
 }
 
 /// Draw an ended-status shape in the leading slot compact rows already own.
+///
+/// Stopped is a filled square inside a rounded-square outline — a bare
+/// filled square at this size reads as an undifferentiated light mark, and
+/// the dark gap between the 3-CSS-px center and the 1-CSS-px ring is what
+/// keeps the two separable. Do not enlarge the center or thicken the ring:
+/// either would consume the gap the symbol depends on. Keep the center
+/// square, without rounded corners, to preserve the chosen stop silhouette.
+/// The closed rectilinear silhouette is also what separates
+/// stopped from the exited arrow, interrupted X, and error triangle; the
+/// caller's tooltip and accessible "stopped by user" wording stay
+/// authoritative either way, since the glyph alone can also read as a
+/// small button.
 #[component]
 pub(crate) fn EndedStatusIcon(glyph: EndedGlyph) -> Element {
     let token = match glyph {
@@ -165,7 +177,10 @@ pub(crate) fn EndedStatusIcon(glyph: EndedGlyph) -> Element {
     rsx! {
         svg { class: "sidebar-glyph ended-status-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
             match glyph {
-                EndedGlyph::Stopped => rsx! { rect { x: "3", y: "3", width: "6", height: "6", fill: "currentColor", stroke: "none" } },
+                EndedGlyph::Stopped => rsx! {
+                    rect { x: "2", y: "2", width: "8", height: "8", rx: "2" }
+                    rect { x: "4.2", y: "4.2", width: "3.6", height: "3.6", fill: "currentColor", stroke: "none" }
+                },
                 EndedGlyph::Exited => rsx! { path { d: "M2 2.5h4v7H2zM6 6h4M8.5 4.2 10.3 6 8.5 7.8" } },
                 EndedGlyph::Interrupted => rsx! { path { d: "M2.2 3.2 3.2 2.2l6.6 6.6-1 1zM8.8 2.2l1 1-6.6 6.6-1-1z" } },
                 EndedGlyph::Error => rsx! { path { d: "M6 1.7 10.5 10h-9zM6 4.4v2.4M6 8.4h.01" } },
@@ -192,14 +207,14 @@ pub(crate) fn QualifierIcon(glyph: QualifierGlyph) -> Element {
     }
 }
 
-/// The local-session mark: a monitor on a stand.
+/// The local-session mark: a laptop silhouette.
 ///
-/// Drawn as a single screen rather than the server shape below so the two
-/// read as different OBJECTS at a glance, not just different arrangements of
-/// the same lines — legibility at 12-14px depends on silhouette, not on a
-/// reader parsing detail. `fill="none"` with a `currentColor` stroke keeps
-/// the glyph a pure outline, which stays crisp at this size in both themes
-/// without a fill weight to tune per background.
+/// An open screen over a wider base reads as a different OBJECT from the
+/// remote cloud at a glance, not just a different arrangement of the same
+/// lines — legibility at 12px depends on silhouette, not on a reader
+/// parsing detail. The outline stays quiet beside the status dot, lock,
+/// and title, and it carries the red local caution color without becoming
+/// a solid red patch the way a filled screen would.
 #[component]
 pub(crate) fn LocalHostIcon() -> Element {
     rsx! {
@@ -213,22 +228,22 @@ pub(crate) fn LocalHostIcon() -> Element {
             stroke_linecap: "round",
             stroke_linejoin: "round",
             "aria-hidden": "true",
-            rect { x: "2", y: "2", width: "12", height: "8", rx: "1" }
-            line { x1: "8", y1: "10", x2: "8", y2: "12.5" }
-            line { x1: "5", y1: "13", x2: "11", y2: "13" }
+            rect { x: "3", y: "3", width: "10", height: "6.5", rx: "1" }
+            line { x1: "1.8", y1: "12", x2: "14.2", y2: "12", stroke_width: "2" }
         }
     }
 }
 
-/// The remote-session mark: two stacked server units with activity lights.
+/// The remote-session mark: a lobed cloud outline.
 ///
-/// Deliberately a HORIZONTAL, stacked silhouette against the local glyph's
-/// single upright rectangle — the two shapes differ in outline, not only in
-/// the fill-vs-stroke detail that gets lost first as glyphs shrink. The
-/// lights are filled dots (`fill: currentColor`) rather than more outline,
-/// which is what keeps the shape readable as "server rack" instead of
-/// collapsing into two bars indistinguishable from the local glyph's screen
-/// at 12px.
+/// Deliberately a different silhouette family from the laptop's straight
+/// lines — the two shapes differ in outline, not only in detail that gets
+/// lost first as glyphs shrink. The stroke stays at the shared 1.3 weight
+/// rather than a bolder one: a cloud is a secondary identity cue, and a
+/// heavier or filled mark would compete with the live status dot. A cloud
+/// can suggest internet hosting rather than an ordinary remote machine, so
+/// the caller's locality label stays authoritative and the glyph never
+/// stands alone.
 #[component]
 pub(crate) fn RemoteHostIcon() -> Element {
     rsx! {
@@ -242,10 +257,7 @@ pub(crate) fn RemoteHostIcon() -> Element {
             stroke_linecap: "round",
             stroke_linejoin: "round",
             "aria-hidden": "true",
-            rect { x: "2", y: "2", width: "12", height: "5", rx: "1" }
-            rect { x: "2", y: "9", width: "12", height: "5", rx: "1" }
-            circle { cx: "5", cy: "4.5", r: "0.6", fill: "currentColor", stroke: "none" }
-            circle { cx: "5", cy: "11.5", r: "0.6", fill: "currentColor", stroke: "none" }
+            path { d: "M4 12.5a2.5 2.5 0 0 1-0.3-4.98A3.7 3.7 0 0 1 11 6.3a2.6 2.6 0 0 1 1.2 4.9V12.5Z" }
         }
     }
 }
