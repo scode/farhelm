@@ -20,15 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Replace the sidebar's local/remote host icons with more recognizable designs at their actual display size. Consider a
-  clearly recognizable laptop for local sessions, if it can be rendered with enough detail, and a cloud for remote
-  sessions. These are candidate directions; choose the final icons when implementing this item.
-
-- Make the stopped-session status icon easier to recognize. The current small filled square reads as a white square
-  rather than an obvious stopped-state indicator. Choose a clearer stop symbol or another icon during implementation;
-  the replacement design is deliberately undecided. Keep compact rows compact and make the stopped state recognizable at
-  the sidebar's actual icon size.
-
 - Improve the messaging provided by the installer script (`scripts/install.sh`). Review the user-facing messages and
   make them clearer and more consistent; choose the final wording when implementing this item.
 
