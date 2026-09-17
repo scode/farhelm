@@ -658,8 +658,12 @@ sidebar-row assertion after a successful detail read. A prior composer build and
 immutable source assembly, local Linux substrate, actual tmux hash, locale and scrubbed-variable policy recorded in the
 profile-focus entry above. Each exact command selected only this Chromium test, one worker and zero retries, alongside
 isolated validation jobs. This establishes intermittent observations, not the cause of recovery failure or pre-composer
-provenance. Disposition: open in TODO.md; retain the original failure separately from the stale-credential cleanup
-consequence.
+provenance. Disposition: closed by the read-timeout split (`send_read`/`READ_TIMEOUT` in
+`crates/farhelm-ui/src/api.rs`); the recovery assertions were never weakened, and the stall's location remains
+unestablished, but an unanswered read now fails into the retry ladder inside the budget instead of starving it. The
+mechanism being unproven, a recurrence under the new deadline reopens this — the `fetch_session` detail read
+deliberately keeps the sixty-second deadline (it drains a remote supervisor live), so only the sessions and hosts
+reads are covered by the split.
 
 Class: unknown
 
@@ -779,7 +783,8 @@ unconditionally, the default view's reads are not authoritative for absence, and
 prompt — so no mechanism is claimed. What did land: the shared suite credential refresh moved from the test's end to
 right after the exchange, so a post-exchange failure (both observed shapes) no longer leaves later tests
 unauthenticated; the TODO.md entry is narrowed to the recovery provenance itself. The next failure's retained trace
-carries network, DOM, and console. Disposition: still open in TODO.md.
+carries network, DOM, and console. Disposition: closed by the read-timeout split (`send_read`/`READ_TIMEOUT` in
+`crates/farhelm-ui/src/api.rs`), the maintainer's fork choice of 2026-09-17; see the 2026-09-10 entry above.
 
 Class: unknown
 
