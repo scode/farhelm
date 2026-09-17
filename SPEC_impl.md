@@ -163,12 +163,13 @@ a precision they do not have, so the code instead refuses to print nonsense (a s
 than a negative age) and keeps the raw stamp one hover away. The `Session` mirror decodes `last_activity_at` for this
 and applies the proto's own fallback rule, `last_activity_at` when positive and `created_at` otherwise, copied into
 `Session::effective_activity` rather than shared: this crate mirrors the HTTP contract rather than depending on proto
-internals, but the helm ORDERS an activity-sorted list by its copy of that rule, so a client rendering ages by a
-different one would print a column contradicting the order it was printed in. A zero means "this helm predates the
-field" and renders no age at all rather than an age counted from 1970. The viewer's end of the subtraction can go
-missing too — a platform clock that will not answer, or one sitting at or before the epoch — and that is carried as an
-absent value rather than as a zero, because subtracting a good host stamp from a zero "now" would clamp every session in
-the fleet to `now` and paint a dormant fleet as a busy one.
+internals. That rule governs the displayed age and the seen/unseen comparison only — the helm orders an activity-sorted
+list by reported status first and the work-start key inside each group, so the age column is deliberately not a rank
+column: a row above another can show an older age, and that is the contract rather than a contradiction. A zero means
+"this helm predates the field" and renders no age at all rather than an age counted from 1970. The viewer's end of the
+subtraction can go missing too — a platform clock that will not answer, or one sitting at or before the epoch — and that
+is carried as an absent value rather than as a zero, because subtracting a good host stamp from a zero "now" would clamp
+every session in the fleet to `now` and paint a dormant fleet as a busy one.
 
 Ages advance on a dedicated 30-second tick — one page-wide signal, written by a component mounted beside the
 invalidation feed and read by the list and the open session's header. The listing's fallback poll was the obvious thing
@@ -1474,9 +1475,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   every client written before there was a choice keeps its behavior; an unrecognized word is a 400, like an unknown
   status). `created` is `created_at` DESCENDING, then session id ascending, then HOST ID ascending — the first two are
   the order supervisors have always listed in and the third is what keeps the merged order total across hosts.
-  `activity` leads with the session's effective work-start key descending, and `title` with its collated title
-  ascending; both then fall into that same creation-order tail, so every order is total and a stable sort of the same
-  rows always yields the same sequence. The effective work-start key is `last_work_started_at` when positive and
+  `activity` leads with an active-first grouping — rows from connected hosts reported Running or Waiting sort above
+  every other row — then the session's effective work-start key descending, and `title` with its collated title
+  ascending; all three then fall into that same creation-order tail, so every order is total and a stable sort of the
+  same rows always yields the same sequence. The effective work-start key is `last_work_started_at` when positive and
   `created_at * 1000` otherwise, so an older sender or a session with no observed burst keeps a stable creation position
   rather than moving with ordinary activity or piling up at the epoch. The title collation is Rust's `str::to_lowercase`
   compared as code points: Unicode's locale-independent FULL lowercase mapping (it can lengthen a string, as `İ` does),
@@ -1485,7 +1487,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   setting this product does not have). The sort happens in Rust, in memory, over the whole merged fleet, on every
   request; nothing about the order is stored, indexed, or cut.
 - Ordering is not filtering, and the two are kept apart: a sort changes the sequence, never the membership, so neither
-  `total` nor `matching` moves with it.
+  `total` nor `matching` moves with it. Past the cap the sequence does decide which rows the reply reaches — the counts
+  describe the whole filtered view, while the array is what fits — so "membership unchanged" is about the underlying
+  view rather than identical returned rows under truncation.
 - One host does not fit the cache rule and cannot be made to: a supervisor reporting NO identity, against a registry row
   that has none on record either, has nothing for the identity-bound cache write to bind to. Its refreshes are kept in
   the connection manager's memory and merged into the list and the owner lookup from there; they serve while it is

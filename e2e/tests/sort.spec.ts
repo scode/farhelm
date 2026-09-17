@@ -234,13 +234,40 @@ test.describe("session list ordering", () => {
   });
 
   /**
+   * Wait until the helm reports every owned session idle.
+   *
+   * `sleep 300` sessions start Running — an unsampled live pane reads as the
+   * baseline live status — and idle once the sampler has seen enough
+   * unchanged screens. Between those moments the activity order mixes
+   * groups, so an assertion about activity order needs this wait first.
+   * Creation-second spacing gives distinct keys, not status readiness; title
+   * and creation orders never consult status and need no such wait.
+   */
+  async function awaitObservedIdle(request: APIRequestContext, ids: string[]): Promise<void> {
+    await expect.poll(async () => {
+      const response = await request.get("/api/sessions");
+      expect(response.ok(), `listing failed: ${response.status()}`).toBe(true);
+      const body = await response.json();
+      const states = new Map(
+        body.sessions.map((row: { id: string; status: { state: string } }) => [row.id, row.status.state]),
+      );
+      return ids.map((id) => states.get(id));
+    }, {
+      timeout: 60_000,
+      message: "the fixture sessions must all reach observed idle for a stable activity group",
+    }).toEqual(ids.map(() => "idle"));
+  }
+
+  /**
    * Three sessions whose creation order is the exact reverse of their title
    * order, so either ordering is visibly wrong for the other.
    *
    * `sleep 300` rather than the fake agent: it produces no output at all, so
-   * every row's work-start key stays its creation time for the life of the
-   * test and the activity order cannot drift under an assertion mid-run.
-   * Real output transitions are covered in work-start-order.spec.ts. The waits between creates are what
+   * every row's work-start key stays its creation fallback for the life of
+   * the test. That alone does not stabilize activity order — the rows still
+   * transition Running to Idle — so tests asserting activity order wait for
+   * {@link awaitObservedIdle} first. Real output transitions are covered in
+   * work-start-order.spec.ts. The waits between creates are what
    * make the creation order deterministic in the first place — `created_at`
    * has one-second granularity and the helm tiebreaks equal stamps by
    * session id, which is a UUID.
@@ -297,6 +324,7 @@ test.describe("session list ordering", () => {
   }) => {
     const stamp = Date.now();
     const ids = await threeOrderedSessions(request, stamp);
+    await awaitObservedIdle(request, [ids.a, ids.m, ids.z]);
 
     const asked = await watchSortParameters(page);
     await listWithStubbedFeed(page);
@@ -328,6 +356,7 @@ test.describe("session list ordering", () => {
   }) => {
     const stamp = Date.now();
     const ids = await threeOrderedSessions(request, stamp);
+    await awaitObservedIdle(request, [ids.a, ids.m, ids.z]);
 
     await listWithStubbedFeed(page);
     await expect(row(page, ids.a)).toBeVisible({ timeout: 20_000 });

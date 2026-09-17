@@ -51,11 +51,14 @@
 //! concatenated per-host ones. A caller may ask for recent activity or for
 //! title instead ([`store::ListSort`]); each of those leads with its own
 //! component and ends in that creation-order tail, so every order is total
-//! and two reads of an unchanged fleet come back identical. What changes
-//! with the sort is the sequence; nothing about WHICH rows the view holds,
-//! so neither count moves. Hosts go on reporting their sessions in
-//! whatever order they like: the sort is a property of this merged view
-//! and of nothing underneath it.
+//! and two reads of an unchanged fleet come back identical. The activity
+//! order's leading component is itself two parts: connected Running and
+//! Waiting rows first, everything else after, with the work-start key
+//! ordering inside both groups. What changes with the sort is the sequence;
+//! nothing about WHICH rows the view holds, so neither count moves —
+//! although past the cap the sequence decides which rows survive at all.
+//! Hosts go on reporting their sessions in whatever order they like: the
+//! sort is a property of this merged view and of nothing underneath it.
 //!
 //! The title order compares `str::to_lowercase` of the whole title:
 //! Unicode's locale-independent full lowercase mapping, case-insensitive
@@ -99,7 +102,7 @@
 
 use crate::manager::{ConnectionManager, HostSnapshot};
 use crate::store::{self, HelmStore, HostId, HostKind};
-use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
+use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo, SessionStatus};
 use serde::Serialize;
 
 /// How a host is NAMED on a session row.
@@ -151,11 +154,14 @@ pub(crate) fn host_display_name(
 /// sibling fields without a second request or a row shape of their own.
 ///
 /// What travels is exactly what the supervisor reported, zeroes included.
-/// `?sort=activity` applies `effective_work_started_at`, whose zero fallback
-/// is creation in milliseconds; row age applies `effective_activity`, whose
-/// zero fallback is creation in seconds. Neither derived value is written
-/// back, because a synthesized timestamp would be indistinguishable from an
-/// authoritative observation at the next monotonic cache merge.
+/// `?sort=activity` groups by connected Running/Waiting first and then
+/// applies `effective_work_started_at`, whose zero fallback is creation in
+/// milliseconds; row age applies `effective_activity`, whose zero fallback
+/// is creation in seconds. Neither derived value is written back, because a
+/// synthesized timestamp would be indistinguishable from an authoritative
+/// observation at the next monotonic cache merge. The displayed age and the
+/// seen/unseen comparison play no part in the grouping or the work-start
+/// order — they describe output recency, a separate fact.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct SessionRow {
     #[serde(flatten)]
@@ -298,6 +304,23 @@ fn creation_tail(row: &SessionRow) -> (std::cmp::Reverse<i64>, &str, HostId) {
     )
 }
 
+/// Whether a row belongs to the Activity order's first group: a connected
+/// host's report that the session is Running or Waiting.
+///
+/// "Connected" is the whole of the freshness claim — `stale` is set from
+/// `HostState::is_connected` alone, so a connected host's old cached Running
+/// report sorts here too, before any new observation has landed. That is the
+/// approved contract, not a verdict that work is happening right now. Idle,
+/// Unknown, every ended state, and any stale row sort in the second group,
+/// however new their work-start key is.
+fn is_active(row: &SessionRow) -> bool {
+    !row.stale
+        && matches!(
+            row.info.status,
+            SessionStatus::Running | SessionStatus::Waiting
+        )
+}
+
 /// Sort `rows` into `sort`'s order, in place.
 ///
 /// One function for all three orders so the tail is shared by
@@ -305,12 +328,26 @@ fn creation_tail(row: &SessionRow) -> (std::cmp::Reverse<i64>, &str, HostId) {
 /// computed once per row (`sort_by_cached_key`) because lowercasing a title
 /// per comparison would allocate `n log n` strings for a sort that runs on
 /// every refresh.
+///
+/// The Activity order leads with the active-first grouping ([`is_active`])
+/// and keeps the work-start comparison inside both groups, so a status or
+/// connectivity change can move a row without touching its key: a connected
+/// Running report after a restart restores first-group membership on the
+/// preserved key, while completion into an ended state leaves that group
+/// without advancing the key.
 pub(crate) fn sort_rows(rows: &mut [SessionRow], sort: store::ListSort) {
     match sort {
         store::ListSort::Created => rows.sort_by(|a, b| creation_tail(a).cmp(&creation_tail(b))),
         store::ListSort::Activity => rows.sort_by(|a, b| {
-            std::cmp::Reverse(a.info.effective_work_started_at())
-                .cmp(&std::cmp::Reverse(b.info.effective_work_started_at()))
+            // `false < true`, so the grouping comparison is reversed to put
+            // the active rows first. Everything after it is the order the
+            // Activity sort has always used, unchanged inside both groups.
+            is_active(b)
+                .cmp(&is_active(a))
+                .then_with(|| {
+                    std::cmp::Reverse(a.info.effective_work_started_at())
+                        .cmp(&std::cmp::Reverse(b.info.effective_work_started_at()))
+                })
                 .then_with(|| creation_tail(a).cmp(&creation_tail(b)))
         }),
         store::ListSort::Title => rows.sort_by_cached_key(|row| {
@@ -337,10 +374,12 @@ pub(crate) fn sort_rows(rows: &mut [SessionRow], sort: store::ListSort) {
 ///
 /// Order of operations is a contract, not an accident: the filter is
 /// applied before the cap, so `matching` describes the whole view and the
-/// cap cuts a SORTED array — a fleet past the cap loses the rows that sort
-/// last in the requested order, which under `created` is the oldest and
-/// under `title` is the end of the alphabet. That is what "could not read
-/// to the end" means to the client that sees the flag.
+/// cap cuts a SORTED array — a fleet past the cap loses the suffix of the
+/// complete order, which under `created` is the oldest rows and under
+/// `title` is the end of the alphabet. Under `activity` the inactive rows
+/// go first, but the cut is not confined to them: when the active group
+/// alone exceeds the cap, active rows are omitted too. That is what "could
+/// not read to the end" means to the client that sees the flag.
 fn assemble(
     view: Vec<SessionRow>,
     filter: &store::SessionFilter,
@@ -673,47 +712,364 @@ mod tests {
         );
     }
 
-    /// Activity age and completion continue to move independently of the
-    /// stable work-start order. Only a later confirmed burst promotes a row.
+    /// The activity order moves for two reasons only: a later burst key, or a
+    /// crossing between the active and inactive groups. Ordinary output
+    /// advances age without moving anything; completion and restart move a
+    /// row by changing its group while leaving its key alone.
+    ///
+    /// Every step below sets the status it means rather than inheriting the
+    /// fixture's: the grouping predicate reads status and staleness, so a
+    /// test that left those implicit would pin nothing about it.
     #[farhelm_testtrace::test]
-    fn recent_activity_order_moves_only_when_a_new_work_burst_starts() {
+    fn activity_order_moves_for_a_new_burst_or_a_group_change_only() {
         let mut a = row("a", 100, 1);
-        a.info.last_work_started_at = 1_000;
-        a.info.last_activity_at = 10;
+        a.info.status = SessionStatus::Running;
+        a.info.last_work_started_at = 3_000;
+        a.info.last_activity_at = 30;
         let mut b = row("b", 200, 1);
+        b.info.status = SessionStatus::Running;
         b.info.last_work_started_at = 2_000;
         b.info.last_activity_at = 20;
 
         let mut rows = vec![a.clone(), b.clone()];
         sort_rows(&mut rows, store::ListSort::Activity);
-        assert_eq!(ids(&rows), ["b", "a"], "B's later burst begins above A");
+        assert_eq!(ids(&rows), ["a", "b"], "A's later burst begins above B");
 
+        // Continued output inside A's burst: age advances, status and key do
+        // not, and the order stands.
         a.info.last_activity_at = 9_999;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "more output inside a burst leaves the established order stable"
+        );
+
+        // Completion demotes WITHOUT advancing the key: A still holds the
+        // newer burst, but an ended row is not active.
         a.info.status = SessionStatus::Exited { exit_code: Some(0) };
         let mut rows = vec![a.clone(), b.clone()];
         sort_rows(&mut rows, store::ListSort::Activity);
         assert_eq!(
             ids(&rows),
             ["b", "a"],
-            "continued output and completion advance age/status without reordering the burst"
+            "completing drops A below a still-running B despite A's newer key"
+        );
+        assert_eq!(
+            a.info.last_work_started_at, 3_000,
+            "the demotion changed position, not the key"
         );
 
-        a.info.last_work_started_at = 3_000;
+        // B completing too puts both rows in the inactive group, where the
+        // keys decide again — the earlier order restored, with no new
+        // observation behind it.
+        b.info.status = SessionStatus::Exited { exit_code: Some(0) };
         let mut rows = vec![a.clone(), b.clone()];
         sort_rows(&mut rows, store::ListSort::Activity);
         assert_eq!(
             ids(&rows),
             ["a", "b"],
-            "A promotes only when later work begins"
+            "with both rows inactive, the newer key is back on top"
         );
 
-        a.info.last_activity_at = 20_000;
+        // A fresh Running report promotes A onto that same unchanged key: a
+        // restart restores first-group membership without allocating a burst.
+        a.info.status = SessionStatus::Running;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "returning to Running promotes on the preserved key"
+        );
+
+        // And a genuine later burst still promotes within the group.
+        b.info.status = SessionStatus::Running;
+        b.info.last_work_started_at = 4_000;
+        let mut rows = vec![a, b];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["b", "a"],
+            "B promotes when its later work actually begins"
+        );
+    }
+
+    /// One row with every field the activity grouping and its within-group
+    /// order read: explicit status, staleness, and host, since all three
+    /// enter the comparison.
+    fn grouped(
+        id: &str,
+        created_at: i64,
+        work_start: i64,
+        status: SessionStatus,
+        stale: bool,
+        host: HostId,
+    ) -> SessionRow {
+        let mut row = row(id, created_at, host);
+        row.info.last_work_started_at = work_start;
+        row.info.status = status;
+        row.stale = stale;
+        row
+    }
+
+    /// The activity order is active-first: a connected Running or Waiting
+    /// row sorts above every other row no matter what the keys say.
+    ///
+    /// The fixture inverts the keys deliberately — the first group's rows
+    /// carry the OLDEST keys and the second group's the NEWEST — so an
+    /// implementation that compared keys before groups would come out
+    /// backwards. The Idle row also carries brand-new output age and no seen
+    /// stamp (an unread row by the client's rule) to pin that output recency
+    /// neither promotes nor matters to the comparator at all.
+    #[farhelm_testtrace::test]
+    fn activity_sorts_connected_running_and_waiting_first_regardless_of_key() {
+        let mut unread_idle = grouped("idle", 500, 9_000_000, SessionStatus::Idle, false, 1);
+        unread_idle.info.last_activity_at = 99_999_999;
+        unread_idle.seen_activity_at = None;
+        let mut rows = vec![
+            unread_idle,
+            grouped("unknown", 400, 8_000_000, SessionStatus::Unknown, false, 1),
+            grouped(
+                "exited",
+                300,
+                7_000_000,
+                SessionStatus::Exited { exit_code: Some(0) },
+                false,
+                1,
+            ),
+            grouped(
+                "error",
+                250,
+                6_000_000,
+                SessionStatus::Error {
+                    detail: "exec failed".to_string(),
+                },
+                false,
+                1,
+            ),
+            grouped(
+                "interrupted",
+                200,
+                5_000_000,
+                SessionStatus::Interrupted,
+                false,
+                1,
+            ),
+            grouped(
+                "stale-running",
+                150,
+                4_000_000,
+                SessionStatus::Running,
+                true,
+                1,
+            ),
+            grouped(
+                "stale-waiting",
+                120,
+                3_000_000,
+                SessionStatus::Waiting,
+                true,
+                1,
+            ),
+            grouped("running", 100, 2_000_000, SessionStatus::Running, false, 1),
+            grouped("waiting", 90, 1_000_000, SessionStatus::Waiting, false, 1),
+        ];
+        // The exited row's stop annotation must not change its group either:
+        // ended is ended, however it got there.
+        rows[2].info.annotation = Some("stopped by user".to_string());
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            [
+                "running",
+                "waiting",
+                "idle",
+                "unknown",
+                "exited",
+                "error",
+                "interrupted",
+                "stale-running",
+                "stale-waiting",
+            ],
+            "the two connected live rows lead on their older keys, in key order; every other \
+             row follows in ITS key order, including unread, unknown, every ended state, and \
+             stale live reports"
+        );
+    }
+
+    /// Inside each activity group the old order survives whole: work-start
+    /// descending, creation descending, session id ascending, host id
+    /// ascending — with the legacy zero key falling back to creation time.
+    ///
+    /// Both groups carry the same tie chain so a within-group regression
+    /// cannot hide in one of them: a legacy row, a shared-key pair split by
+    /// creation, an id split, and a cross-host id collision split by host.
+    /// The input is deliberately scrambled across groups and tie orders —
+    /// an already-sorted input would pass under a stable sort even with the
+    /// creation tail missing, proving nothing about it.
+    #[farhelm_testtrace::test]
+    fn activity_keeps_the_work_start_order_and_tiebreaks_inside_each_group() {
+        let mut rows = vec![
+            grouped("g2-legacy", 50, 0, SessionStatus::Idle, false, 1),
+            grouped("g1-mid", 100, 500_000, SessionStatus::Running, false, 2),
+            grouped("g2-mid", 100, 500_000, SessionStatus::Running, true, 2),
+            grouped("g1-aaa", 100, 500_000, SessionStatus::Waiting, false, 1),
+            grouped("g2-new", 300, 500_000, SessionStatus::Idle, false, 1),
+            grouped("g1-legacy", 900, 0, SessionStatus::Running, false, 1),
+            grouped("g2-aaa", 100, 500_000, SessionStatus::Idle, false, 1),
+            grouped("g1-mid", 100, 500_000, SessionStatus::Running, false, 1),
+            grouped("g1-new", 300, 500_000, SessionStatus::Running, false, 1),
+            grouped("g2-mid", 100, 500_000, SessionStatus::Idle, false, 1),
+        ];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        let keyed: Vec<(&str, HostId)> = rows
+            .iter()
+            .map(|row| (row.info.id.as_str(), row.host))
+            .collect();
+        assert_eq!(
+            keyed,
+            [
+                ("g1-legacy", 1),
+                ("g1-new", 1),
+                ("g1-aaa", 1),
+                ("g1-mid", 1),
+                ("g1-mid", 2),
+                ("g2-new", 1),
+                ("g2-aaa", 1),
+                ("g2-mid", 1),
+                ("g2-mid", 2),
+                ("g2-legacy", 1),
+            ],
+            "a zero key sorts by creation time inside its group (first in group one, last in \
+             group two); equal keys fall through to creation, then id, then host in BOTH groups \
+             — and the second group's stale Running row ties with its Idle twin on the tail \
+             rather than joining the first group"
+        );
+    }
+
+    /// A status or connectivity change moves a row between the activity
+    /// groups with its key untouched. Grouping reads the row's current
+    /// report, not a timestamp — so a stale flip and an idle flip both
+    /// demote, Waiting promotes like Running, and idling the other row
+    /// restores key order without any new observation.
+    #[farhelm_testtrace::test]
+    fn status_and_staleness_flips_move_rows_between_groups_with_unchanged_keys() {
+        let mut a = grouped("a", 100, 1_000, SessionStatus::Running, false, 1);
+        let mut b = grouped("b", 200, 2_000, SessionStatus::Idle, false, 1);
+
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "the active row leads on its older key"
+        );
+
+        a.stale = true;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["b", "a"],
+            "a stale Running report is not proof of present work"
+        );
+
+        a.stale = false;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "reconnection restores membership on the same key"
+        );
+
+        a.info.status = SessionStatus::Idle;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["b", "a"],
+            "idling demotes; within the shared group the newer key leads"
+        );
+
+        a.info.status = SessionStatus::Waiting;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["a", "b"],
+            "Waiting needs attention, so it sorts with Running"
+        );
+
+        b.info.status = SessionStatus::Running;
+        let mut rows = vec![a.clone(), b.clone()];
+        sort_rows(&mut rows, store::ListSort::Activity);
+        assert_eq!(
+            ids(&rows),
+            ["b", "a"],
+            "with both rows active, the newer key leads again"
+        );
+
+        b.info.status = SessionStatus::Idle;
         let mut rows = vec![a, b];
         sort_rows(&mut rows, store::ListSort::Activity);
         assert_eq!(
             ids(&rows),
             ["a", "b"],
-            "more output inside A's burst leaves the established order stable"
+            "idling B leaves A active and ahead — the position follows the groups, never the keys alone"
+        );
+        for row in &rows {
+            assert!(
+                row.info.last_work_started_at == 1_000 || row.info.last_work_started_at == 2_000,
+                "no step above may have touched a key: {}",
+                row.info.id
+            );
+        }
+    }
+
+    /// Creation and title orders never consult status or staleness: the
+    /// grouping predicate belongs to the activity order alone.
+    #[farhelm_testtrace::test]
+    fn creation_and_title_ignore_status_and_staleness() {
+        let mut rows = vec![
+            grouped(
+                "old-running",
+                100,
+                9_000_000,
+                SessionStatus::Running,
+                false,
+                1,
+            ),
+            grouped("mid-idle", 200, 1_000, SessionStatus::Idle, false, 1),
+            grouped(
+                "new-stale-exited",
+                300,
+                5_000_000,
+                SessionStatus::Exited { exit_code: None },
+                true,
+                2,
+            ),
+        ];
+        rows[0].info.title = "zzz".to_string();
+        rows[1].info.title = "mmm".to_string();
+        rows[2].info.title = "aaa".to_string();
+
+        let mut created = rows.clone();
+        sort_rows(&mut created, store::ListSort::Created);
+        assert_eq!(
+            ids(&created),
+            ["new-stale-exited", "mid-idle", "old-running"],
+            "creation order follows creation time across statuses, staleness, and hosts"
+        );
+
+        let mut titled = rows.clone();
+        sort_rows(&mut titled, store::ListSort::Title);
+        assert_eq!(
+            ids(&titled),
+            ["new-stale-exited", "mid-idle", "old-running"],
+            "title order follows titles across statuses, staleness, and keys"
         );
     }
 
@@ -848,22 +1204,29 @@ mod tests {
     /// The fixture makes every wrong rule visible: the survivor is the
     /// OLDEST-created row in the view, so an implementation that first kept
     /// the newest-created cap's worth and only then re-sorted the survivors
-    /// would drop it and pass every creation-order test.
+    /// would drop it and pass every creation-order test. Under `activity`
+    /// the survivor wins on its group alone — it is the one active row, with
+    /// the oldest key in the view — so grouping, not key order, decides
+    /// which rows a capped reply reaches.
     #[farhelm_testtrace::test]
     fn the_cap_selects_membership_in_the_requested_order() {
         // `LIST_SESSIONS_CAP` filler rows created after the special row,
-        // with titles and work-start keys that sort AFTER it.
+        // with titles that sort AFTER it — and, for the activity leg,
+        // newer keys but inactive statuses, so only the grouping saves the
+        // survivor.
         let mut view: Vec<SessionRow> = (0..LIST_SESSIONS_CAP)
             .map(|i| {
                 let mut row = row(&format!("m{i:04}"), 1_000 + i as i64, 1);
                 row.info.title = format!("mmm-{i:04}");
                 row.info.last_work_started_at = 1_000_000 + i as i64;
+                row.info.status = SessionStatus::Idle;
                 row
             })
             .collect();
         let mut special = row("survivor", 1, 1);
         special.info.title = "aaa-first".to_string();
-        special.info.last_work_started_at = 9_999_999;
+        special.info.status = SessionStatus::Running;
+        special.info.last_work_started_at = 0;
         view.push(special);
 
         for sort in [store::ListSort::Title, store::ListSort::Activity] {
@@ -881,6 +1244,21 @@ mod tests {
                 "{sort:?} must keep the row it sorts first, not the newest-created one"
             );
         }
+
+        // And under `created` the same survivor is the row the cap cuts: it
+        // is the oldest-created row in the view, and neither its title nor
+        // its group counts there.
+        let created = assemble(
+            view,
+            &store::SessionFilter::default().include_archived(true),
+            store::ListSort::Created,
+            false,
+        );
+        assert!(created.truncated);
+        assert!(
+            created.sessions.iter().all(|row| row.info.id != "survivor"),
+            "creation order cuts the oldest row even when it is the active one"
+        );
     }
 
     /// A supervisor deliberately reports profile existence as unresolved;

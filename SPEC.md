@@ -469,13 +469,16 @@ particular order gets creation time. No mandatory hierarchy. Sessions may carry 
 the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
 `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
-The option labelled most recent activity orders by the most recent observed START of a work burst, not by every line of
-continued output and not by whether the burst later finished. A session promotes when it moves from known idle or
-waiting into running with changed output; both idle-to-running and waiting-to-running count. Its later output and
-completion keep that position. This is deliberately not active-first grouping: a newer finished session can remain above
-older work. Creation time is the stable fallback where an older supervisor has no work-start observation. The
-last-activity time shown in the row and the seen/unseen comparison remain independent and continue to advance with
-output. The key is authoritative supervisor data, so every client agrees without keeping a private rank.
+The option labelled most recent activity sorts connected running and waiting sessions first, then every other session —
+idle, unclassified, ended, and anything on an unreachable host. Inside each group the order is the most recent observed
+START of a work burst: a session promotes when it moves from known idle or waiting into running with changed output
+(both idle-to-running and waiting-to-running count), and later output inside that burst leaves the position alone.
+Moving between the groups is what idling and completion do — a finished session drops below still-running work without
+its burst key moving, and a session returning to running rejoins the first group on that same key. Creation time is the
+stable fallback where an older supervisor has no work-start observation. The last-activity time shown in the row and the
+seen/unseen comparison stay independent: they describe output recency and keep advancing with output, and neither moves
+a row. The grouping and the key are authoritative helm and supervisor data, so every client agrees without keeping a
+private rank.
 
 The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
 view, so they are outside its count. The host selector is a narrowing query, so its count says how many matched
@@ -559,14 +562,15 @@ list-order/last-selection preference gets (see Errors and diagnostics); a failed
 any other operation.
 
 Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
-timestamp available on the row; that is what makes the list's recently-active order legible instead of implicit. The age
-is a difference between two machines' clocks and is only as good as they are, so it is never the only place the
+timestamp available on the row. The age describes output recency, not list position: the recently-active order groups by
+reported status first and compares burst starts inside each group, so a row can sit above another whose age is newer.
+The age is a difference between two machines' clocks and is only as good as they are, so it is never the only place the
 underlying time is recorded. It is also independent of the status beside it: a session nothing has classified yet shows
 no status and still shows its age.
 
 Two cases have no age to show, and both show nothing rather than a guess. A helm predating the last-activity field sends
-no stamp, and the session's creation time stands in — the same fallback that orders the list, so the column and the
-order agree. A session with neither stamp gets no age at all, never one counted from 1970.
+no stamp, and the session's creation time stands in as the displayed age. A session with neither stamp gets no age at
+all, never one counted from 1970.
 
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
 The bar: best-effort observation-based heuristics (output activity, terminal state), optionally sharpened per agent

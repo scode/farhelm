@@ -302,10 +302,14 @@ impl SessionFilter {
 /// either being wrong.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ListSort {
-    /// Effective activity descending: the session last observed producing
-    /// output first, with one that has produced none sorting by its creation
-    /// time rather than piling up at the epoch (the helm's
-    /// `SessionInfo::effective_activity`).
+    /// Connected running and waiting sessions first, then everything else,
+    /// with the helm's work-start key ordering inside both groups.
+    ///
+    /// The grouping reads the helm's `stale` flag and reported status; the
+    /// key is the helm's `SessionInfo::effective_work_started_at`, so a
+    /// session with no observed burst sorts by its creation time rather
+    /// than piling up at the epoch. Displayed age and seen/unseen state
+    /// describe output recency and play no part in this order.
     #[default]
     Activity,
     /// Creation time descending — the order this list had before there was a

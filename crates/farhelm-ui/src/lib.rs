@@ -2439,11 +2439,12 @@ mod tests {
     /// `farhelm_proto::SessionInfo::effective_activity` — this crate mirrors
     /// the HTTP contract rather than depending on proto internals — and a
     /// duplicate with no test of its own is a rule that can drift silently.
-    /// What drift would cost is specific: the helm ORDERS an activity-sorted
-    /// page by its copy, so a client that resolved `0` differently would
-    /// print an age column contradicting the order the rows arrived in, with
-    /// nothing failing anywhere. The proto's own test pins the same table on
-    /// the other side; both have to hold for the two to stay one rule.
+    /// What drift would cost is specific: this copy feeds the displayed age
+    /// and the seen/unseen comparison, so a client that resolved `0`
+    /// differently would print ages disagreeing with the dots beside them,
+    /// with nothing failing anywhere. The proto's own test pins the same
+    /// table on the other side; both have to hold for the two to stay one
+    /// rule.
     ///
     /// The `0` row is the compatibility case the whole method exists for: a
     /// helm predating `last_activity_at` sends nothing, `#[serde(default)]`

@@ -741,8 +741,10 @@ pub struct SessionInfo {
     #[serde(default)]
     pub created_at: i64,
     /// Seconds since the Unix epoch when the supervisor last saw this
-    /// session's agent pane CHANGE — the ordering key a "most recently
-    /// active" session sort needs, and nothing more.
+    /// session's agent pane CHANGE — the stamp behind the displayed age and
+    /// the seen/unseen comparison, and nothing more. It is deliberately not
+    /// the activity sort's key: that order groups by reported status first
+    /// and compares work-start keys inside each group.
     ///
     /// The observation behind it is the same screen comparison that drives
     /// `status` (the supervisor's activity sampler), so it inherits that
@@ -758,8 +760,8 @@ pub struct SessionInfo {
     /// a session that has exited.
     ///
     /// A session that has never produced observed output carries its own
-    /// `created_at`, so a sort over this field degrades to creation order
-    /// rather than to a pile of sessions at the epoch. That is what a
+    /// `created_at`, so its displayed age reads as the session's age rather
+    /// than as a count from the epoch. That is what a
     /// CURRENT sender always sends — including for rows that predate the
     /// field, which the supervisor's schema-13 migration normalized at
     /// upgrade time — so 0 on the wire says one thing only: the sender is
@@ -772,9 +774,9 @@ pub struct SessionInfo {
     /// indistinguishable, and harmless for the same reason.
     ///
     /// [`SessionInfo::effective_activity`] is that fallback, written once so
-    /// that every reader ordering or rendering by activity applies the same
-    /// rule; read this field raw only when the distinction between "unknown"
-    /// and a real stamp is the point.
+    /// that every reader rendering an age or deciding seen/unseen applies
+    /// the same rule; read this field raw only when the distinction between
+    /// "unknown" and a real stamp is the point.
     #[serde(default)]
     pub last_activity_at: i64,
     /// Milliseconds when this supervisor last observed a new burst of work.
@@ -911,17 +913,17 @@ pub struct SessionInfo {
 }
 
 impl SessionInfo {
-    /// The activity stamp to SORT and DISPLAY by: [`Self::last_activity_at`]
-    /// when the sender supplied one, and [`Self::created_at`] when it did
-    /// not.
+    /// The activity stamp to DISPLAY by and to compare seen state against:
+    /// [`Self::last_activity_at`] when the sender supplied one, and
+    /// [`Self::created_at`] when it did not.
     ///
     /// One spelling of the compatibility rule `last_activity_at`'s own docs
-    /// state, so every reader that has to order or render sessions by recent
-    /// activity applies it identically. Two readers disagreeing about what a
-    /// `0` means would not merely look different: the helm sorts every
-    /// host's rows into one activity order and the browser renders the age
-    /// from the same stamp, so a second, subtly different fallback would
-    /// show a list whose ages disagree with its order.
+    /// state, so every reader that renders an age or decides seen/unseen
+    /// applies it identically. This stamp deliberately does not order the
+    /// activity-sorted list — that order groups by reported status first
+    /// and compares work-start keys inside each group — so a list whose ages
+    /// disagree with its rank is the contract, not a second fallback
+    /// disagreeing with the first.
     ///
     /// Deliberately NOT written back into the field it falls back from:
     /// storing the synthesized value would make a guess indistinguishable
@@ -936,8 +938,13 @@ impl SessionInfo {
         }
     }
 
-    /// The stable ordering key for recent work, with a legacy creation-time
-    /// fallback that never follows later output.
+    /// The within-group ordering key for recent work, with a legacy
+    /// creation-time fallback that never follows later output.
+    ///
+    /// The activity sort groups connected Running and Waiting rows first
+    /// and compares this key inside both groups; the grouping moves rows
+    /// without touching this key, and this key never moves a row across the
+    /// groups.
     pub fn effective_work_started_at(&self) -> i64 {
         if self.last_work_started_at > 0 {
             self.last_work_started_at
@@ -5012,11 +5019,12 @@ mod tests {
     /// one rule rather than left to each of them.
     ///
     /// It matters because two readers disagreeing about what `0` means do not
-    /// merely render differently: the helm orders the merged session list by
-    /// this value and the browser renders each row's age from it, so a
-    /// second, subtly different fallback would show ages that disagree with
-    /// the order. The `0` case is the whole point — a sender that
-    /// predates the field must sort by its creation time, not at the epoch.
+    /// merely render differently: the browser renders each row's age from
+    /// this value and compares it against the seen stamp, so a second,
+    /// subtly different fallback would show ages that disagree with the
+    /// seen/unseen dots beside them. The `0` case is the whole point — a
+    /// sender that predates the field must read as its creation time, not
+    /// at the epoch.
     #[farhelm_testtrace::test]
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {

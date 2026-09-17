@@ -258,11 +258,11 @@ const SAMPLE_TAIL_BUDGET: usize = 16;
 /// settled fleet goes back to waking on real changes.
 ///
 /// A minute is also all the resolution the consumer needs: this exists to
-/// order a session list by "most recently active", and no user
-/// distinguishes two sessions whose last output was 20 seconds apart. The
-/// visible cost is that a session's reported activity can lag reality by
-/// up to this long, which is the right trade for a sort key and would not
-/// be for a status.
+/// feed the displayed "last active" age and the seen/unseen comparison,
+/// and no user distinguishes two sessions whose last output was 20 seconds
+/// apart. The visible cost is that a session's reported activity can lag
+/// reality by up to this long, which is the right trade for a rendered age
+/// and would not be for a status.
 pub(crate) const ACTIVITY_STAMP_QUANTUM: Duration = Duration::from_secs(60);
 
 /// Decide whether an observed change may move `stored` to `now`.
@@ -277,8 +277,8 @@ pub(crate) const ACTIVITY_STAMP_QUANTUM: Duration = Duration::from_secs(60);
 /// case a host clock stepped backwards produces. Refusing to move
 /// backwards here (and again, durably, in
 /// `SessionStore::record_activity`'s SQL predicate) keeps a visibly busy
-/// session from sliding down a recency sort because NTP corrected the
-/// clock.
+/// session's displayed age from sliding backwards because NTP corrected
+/// the clock.
 fn advanced_activity_stamp(stored: i64, now: i64, quantum: i64) -> Option<i64> {
     (now.saturating_sub(stored) >= quantum).then_some(now)
 }

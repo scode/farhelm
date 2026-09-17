@@ -1,10 +1,17 @@
 /**
- * Exercise stable work ordering through real terminal output and two clients.
+ * Exercise active-first work ordering through real terminal output and two clients.
  *
  * Each owned shell reads a private mode file. Changing that file starts or
  * finishes output without focusing a browser terminal, so a rename editor can
- * remain genuinely focused while the supervisor observes the next work burst.
- * No listing or notification is fabricated: both clients consume the real helm.
+ * remain genuinely focused while the supervisor observes the next status
+ * transition. No listing or notification is fabricated: both clients consume
+ * the real helm.
+ *
+ * The decisive shape is a MIXED fleet: B holds the newest burst key while A
+ * is the one still running, so only the active-first grouping puts A above
+ * B. Every phase asserts per-session keys alongside the order, because a
+ * group move must never advance a key and an unchanged key array must never
+ * be confused with an unchanged order.
  */
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import type { APIRequestContext, Page } from "@playwright/test";
@@ -28,6 +35,7 @@ async function ownedRows(request: APIRequestContext, ids: string[]) {
     title: string;
     status: { state: string };
     last_work_started_at: number;
+    stale: boolean;
   }[];
 }
 
@@ -35,6 +43,15 @@ async function ownedRows(request: APIRequestContext, ids: string[]) {
 async function renderedOrder(page: Page, ids: string[]): Promise<string[]> {
   return page.locator(".session-row").evaluateAll((rows, owned) =>
     rows.map((row) => row.getAttribute("data-session-id")!).filter((id) => owned.includes(id)), ids);
+}
+
+/**
+ * Per-session burst keys, keyed by id rather than listed in order: a group
+ * move reorders the rows while leaving every key alone, so comparing
+ * positional pairs would mistake a reorder for a key change.
+ */
+function keysById(rows: { id: string; last_work_started_at: number }[]): Map<string, number> {
+  return new Map(rows.map((row) => [row.id, row.last_work_started_at]));
 }
 
 /**
@@ -59,14 +76,19 @@ async function startProducer(request: APIRequestContext, directory: string, name
 }
 
 /**
- * Observe both overlapping work and a later genuine restart of output. The
- * latter must move a row while its exact rename textarea, draft and selection
- * remain intact; finishing output must not move either client backwards.
+ * Observe active-first ordering across bursts, idle demotion, reload and rename.
+ *
+ * A starts first and B second, so B holds the newer burst key; both running
+ * reads B,A. Stopping B while A continues must demote B below A on unchanged
+ * keys — in the API and in both clients — while B's open rename editor keeps
+ * its exact DOM node, draft, selection and focus. A genuine new burst for B
+ * promotes it again, and idling both leaves work-start order within the one
+ * inactive group.
  */
-test("real work bursts stay ordered across output, completion, reload and rename", async ({
+test("active sessions lead across bursts, idle demotion, reload and rename", async ({
   page, browser, request, timeline,
 }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(240_000);
   const directory = await mkdtemp(join(tmpdir(), "farhelm-work-order-"));
   const ids: string[] = [];
   const otherContext = await newObservedContext(browser, timeline);
@@ -102,24 +124,29 @@ test("real work bursts stay ordered across output, completion, reload and rename
     const overlapping = await ownedRows(request, ids);
     expect(overlapping.map((row) => row.status.state)).toEqual(["running", "running"]);
     expect(overlapping.map((row) => row.id)).toEqual([b.id, a.id]);
-    const keys = overlapping.map((row) => [row.id, row.last_work_started_at]);
+    const keys = keysById(overlapping);
     for (const client of [page, other]) {
       await expect.poll(() => renderedOrder(client, ids)).toEqual([b.id, a.id]);
     }
 
-    const before = Number(await readFile(a.progress, "utf8"));
+    const beforeA = Number(await readFile(a.progress, "utf8"));
+    const beforeB = Number(await readFile(b.progress, "utf8"));
     await expect.poll(async () => Number(await readFile(a.progress, "utf8")), {
       timeout: 10_000,
       message: "the older producer must actually emit more output during the overlapping burst",
-    }).toBeGreaterThan(before + 30);
-    expect((await ownedRows(request, ids)).map((row) => [row.id, row.last_work_started_at])).toEqual(keys);
-    await writeFile(a.mode, "idle");
-    await expect.poll(async () => (await ownedRows(request, ids)).find((row) => row.id === a.id)?.status.state, {
-      timeout: 30_000,
-    }).toBe("idle");
-    expect((await ownedRows(request, ids)).map((row) => [row.id, row.last_work_started_at])).toEqual(keys);
+    }).toBeGreaterThan(beforeA + 30);
+    await expect.poll(async () => Number(await readFile(b.progress, "utf8")), {
+      timeout: 10_000,
+      message: "the newer producer must actually emit more output during the overlapping burst",
+    }).toBeGreaterThan(beforeB + 30);
+    expect(keysById(await ownedRows(request, ids))).toEqual(keys);
+    for (const client of [page, other]) {
+      await expect.poll(() => renderedOrder(client, ids)).toEqual([b.id, a.id]);
+    }
 
-    const source = page.locator(`[data-session-id="${a.id}"]`);
+    // B's rename editor opens while B still leads; stopping B then demotes
+    // the row UNDER the editor, which is the preservation case.
+    const source = page.locator(`[data-session-id="${b.id}"]`);
     await openRowMenu(source);
     await source.locator(".session-row-rename").click();
     const field = page.locator(".rename-dialog .rename-input");
@@ -129,15 +156,35 @@ test("real work bursts stay ordered across output, completion, reload and rename
       (window as any).__workOrderRename = node;
       (node as HTMLTextAreaElement).setSelectionRange(0, 5);
     });
-    await writeFile(a.mode, "run");
-    await expect.poll(async () => (await ownedRows(request, ids)).find((row) => row.id === a.id)?.last_work_started_at, {
-      timeout: 20_000,
-    }).toBeGreaterThan(overlapping[0].last_work_started_at);
+
+    await writeFile(b.mode, "idle");
+    await expect.poll(async () => {
+      const rows = await ownedRows(request, ids);
+      return [rows.find((row) => row.id === a.id)?.status.state, rows.find((row) => row.id === b.id)?.status.state];
+    }, {
+      timeout: 30_000,
+      message: "B must reach observed idle while A is still observed running",
+    }).toEqual(["running", "idle"]);
+    // A genuinely still working, not merely unsampled: its producer must
+    // advance past the mixed-state observation.
+    const mixedProgress = Number(await readFile(a.progress, "utf8"));
+    await expect.poll(async () => Number(await readFile(a.progress, "utf8")), {
+      timeout: 10_000,
+      message: "A's producer must keep emitting while B sits idle",
+    }).toBeGreaterThan(mixedProgress);
+    const mixed = await ownedRows(request, ids);
+    expect(mixed.map((row) => row.id)).toEqual([a.id, b.id]);
+    expect(keysById(mixed)).toEqual(keys);
+    expect(mixed.every((row) => row.stale === false), "both rows are connected reports").toBe(true);
     for (const client of [page, other]) {
       await expect.poll(() => renderedOrder(client, ids)).toEqual([a.id, b.id]);
     }
+
+    // The demoted row's editor survives the reorder intact: same node, same
+    // draft, same selection, still focused — and still functional.
     expect(await field.evaluate((node) => node === (window as any).__workOrderRename)).toBe(true);
     await expect(field).toBeFocused();
+    await expect(field).toHaveValue("draft-name");
     expect(await field.evaluate((node) => [
       (node as HTMLTextAreaElement).selectionStart, (node as HTMLTextAreaElement).selectionEnd,
     ])).toEqual([0, 5]);
@@ -146,17 +193,38 @@ test("real work bursts stay ordered across output, completion, reload and rename
     await field.press("Enter");
     await expect(page.locator(".rename-dialog")).toHaveCount(0);
     await expect(source.locator(".session-row-menu-panel")).toHaveCount(0);
-    await expect.poll(async () => (await ownedRows(request, ids)).find((row) => row.id === a.id)?.title).toBe("saved-name");
+    await expect.poll(async () => (await ownedRows(request, ids)).find((row) => row.id === b.id)?.title).toBe("saved-name");
 
-    const finalKeys = (await ownedRows(request, ids)).map((row) => [row.id, row.last_work_started_at]);
+    // A reload in the mixed state reconstructs the same grouped order from
+    // the server alone — no client keeps a private rank.
+    await other.reload();
+    await expect.poll(() => renderedOrder(other, ids)).toEqual([a.id, b.id]);
+    await expect.poll(() => renderedOrder(page, ids)).toEqual([a.id, b.id]);
+    expect(keysById(await ownedRows(request, ids))).toEqual(keys);
+
+    // A genuine new burst for B promotes it within the shared active group.
+    await writeFile(b.mode, "run");
+    await expect.poll(async () => (await ownedRows(request, ids)).find((row) => row.id === b.id)?.last_work_started_at, {
+      timeout: 20_000,
+    }).toBeGreaterThan(keys.get(b.id)!);
+    await expect.poll(async () => (await ownedRows(request, ids)).map((row) => row.status.state), {
+      timeout: 30_000,
+    }).toEqual(["running", "running"]);
+    const promoted = await ownedRows(request, ids);
+    expect(promoted.map((row) => row.id)).toEqual([b.id, a.id]);
+    for (const client of [page, other]) {
+      await expect.poll(() => renderedOrder(client, ids)).toEqual([b.id, a.id]);
+    }
+
+    const finalKeys = keysById(await ownedRows(request, ids));
     await Promise.all([writeFile(a.mode, "idle"), writeFile(b.mode, "idle")]);
     await expect.poll(async () => (await ownedRows(request, ids)).map((row) => row.status.state), {
       timeout: 30_000,
     }).toEqual(["idle", "idle"]);
-    expect((await ownedRows(request, ids)).map((row) => [row.id, row.last_work_started_at])).toEqual(finalKeys);
-    await other.reload();
-    await expect.poll(() => renderedOrder(other, ids)).toEqual([a.id, b.id]);
-    await expect.poll(() => renderedOrder(page, ids)).toEqual([a.id, b.id]);
+    expect(keysById(await ownedRows(request, ids))).toEqual(finalKeys);
+    for (const client of [page, other]) {
+      await expect.poll(() => renderedOrder(client, ids)).toEqual([b.id, a.id]);
+    }
   } finally {
     await otherContext.close();
     for (const id of ids) await cleanupSession(request, id);
