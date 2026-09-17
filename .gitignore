@@ -42,6 +42,10 @@ e2e/.auth/storage-state.json
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Delegation run directories (scode-agent-delegation): prompts, checkpoint
+# files, and review reports private to the session that created them.
+.agent-delegation/
+
 # What the README hero capture's stack script publishes about the fleet it
 # booted (e2e/readme-hero/start-stack.sh); per run, removed by its trap.
 e2e/readme-hero/.stack-info.json
