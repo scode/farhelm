@@ -3052,7 +3052,8 @@ test("a local session's host line is provisional until the registry confirms it"
 
 /**
  * Hostile title and host lengths stay contained at 280px while simultaneous
- * stale/archive qualifiers remain on the identity line. Two opposing content
+ * stale/archive qualifiers render on their own full-width detail line
+ * between the identity and the host metadata. Two opposing content
  * shapes prove the second-line host floor and cap without coupling them to
  * the first-line title, agent, or activity columns.
  *
@@ -3142,6 +3143,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
       lineContentWidth,
       title: (await target.locator(".session-title").boundingBox())!,
       identity: (await target.locator(".session-identity-copy").boundingBox())!,
+      detail: (await target.locator(".session-row-detail").boundingBox())!,
       host: (await target.locator(".session-host").boundingBox())!,
       stale: (await target.locator(".stale-badge").boundingBox())!,
       archived: (await target.locator(".archived-badge").boundingBox())!,
@@ -3167,10 +3169,14 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
     dominant.host.width,
     "the host must still respect its 40% cap",
   ).toBeLessThanOrEqual(dominant.lineContentWidth * 0.4 + TOL);
+  // #648 moved the qualifiers onto a full-width detail line between the
+  // identity and the host metadata, so "contained" means inside that line's
+  // box; the identity copy no longer holds them.
   for (const qualifier of [dominant.stale, dominant.archived]) {
-    expect(qualifier.x).toBeGreaterThanOrEqual(dominant.identity.x - TOL);
-    expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(dominant.identity.x + dominant.identity.width + TOL);
-    expect(qualifier.y + qualifier.height).toBeLessThanOrEqual(dominant.identity.y + dominant.identity.height + TOL);
+    expect(qualifier.x).toBeGreaterThanOrEqual(dominant.detail.x - TOL);
+    expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(dominant.detail.x + dominant.detail.width + TOL);
+    expect(qualifier.y).toBeGreaterThanOrEqual(dominant.detail.y - TOL);
+    expect(qualifier.y + qualifier.height).toBeLessThanOrEqual(dominant.detail.y + dominant.detail.height + TOL);
   }
 
   // ===== Host-dominant: BOTH title and host are individually long (unlike
@@ -3227,9 +3233,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   }
 
   // Qualifiers and activity retain stable geometry when only peer-controlled
-  // title and host lengths change. This also catches a qualifier escaping its
-  // identity group into an automatic grid row. Wrapping inside that group
-  // is deliberate when several state words cannot fit on one line.
+  // title and host lengths change.
   for (const [name, a, b] of [
     ["stale badge", dominant.stale, underdog.stale],
     ["archived badge", dominant.archived, underdog.archived],
