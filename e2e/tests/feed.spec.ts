@@ -367,9 +367,11 @@ test.describe("the invalidation feed", () => {
 
       const renamed = `${session.title}-renamed`;
       await openRowMenu(row(author, session.id));
+      // The rename editor is the list-owned modal dialog (#651); its field
+      // and submit live outside the row element, so locate them from the page.
       await row(author, session.id).locator(".session-row-rename").click();
-      await row(author, session.id).locator(".rename-input").fill(renamed);
-      await row(author, session.id).locator(".rename-submit").click();
+      await author.locator(".rename-dialog .rename-input").fill(renamed);
+      await author.locator(".rename-dialog .rename-submit").click();
 
       // The observer never reloaded and never polled: the only thing that
       // can put this title on its screen is a revision notification followed
