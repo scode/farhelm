@@ -61,6 +61,20 @@
 // disables that collapsing. All four flags were confirmed against a real
 // pty pair (a Python `pty.openpty()` harness) before writing this file.
 //
+// `od -w1` streaming straight off the pty has a THIRD trap this fixture
+// eventually hit: it only works on an `od` that emits each one-byte line as
+// the byte arrives. GNU od does; Ubuntu 26.04's uutils od buffers its input
+// and withheld the sentinel byte indefinitely on a pty that never hits EOF
+// (the raw-byte cases sat waiting for ` 7a` until their timeouts). So the
+// dump no longer streams into one long-lived `od`: each byte is read by its
+// own `dd bs=1 count=1` and piped through its own `od` invocation, whose
+// input ENDS after that one byte — and an `od` at EOF emits what it has on
+// any implementation, GNU or uutils. The per-byte row shape is unchanged
+// (`od -An -tx1`'s one leading space plus two hex digits, exactly what
+// `bytesIn` and the ` 7a` waits below match), and the tests send only a
+// handful of bytes each, so a process fork per byte costs nothing that
+// matters.
+//
 // ## Reading GROWTH, not a text SLICE
 //
 // An early version of this file computed a "before" snapshot as the
@@ -96,11 +110,14 @@ import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, termText, waitForTermText } from "./helpers/term";
 
 /**
- * Every hex byte VALUE `od -v -An -tx1 -w1` has printed so far, in order,
- * read off the CURRENT full terminal buffer.
+ * Every hex byte VALUE the raw dumper has printed so far, in order, read
+ * off the CURRENT full terminal buffer.
  *
- * Each of `od`'s lines is matched WHOLE — `/^ ?[0-9a-f]{2}$/` against the
- * complete (already right-trimmed) row text — rather than searching for a
+ * Each dumper row is matched WHOLE — `/^ ?[0-9a-f]{2}$/` against the
+ * complete (already right-trimmed) row text; the optional leading space is
+ * od's addressless-line indentation, which GNU od emits and a
+ * format-divergent od may not, so the parser tolerates both rather than
+ * pinning one implementation's whitespace — rather than searching for a
  * hex-shaped substring anywhere in the buffer: a substring match would
  * treat any OTHER line that happened to end in two hex-looking characters
  * as one of this fixture's bytes, which a line-anchored match cannot do by
@@ -129,7 +146,10 @@ function hasEscCrPair(bytes: string[]): boolean {
 /**
  * The fixture invocation: a noncanonical, no-echo, byte-exact hex dump of
  * everything the pty receives — see this file's header for why each `stty`
- * and `od` flag is there.
+ * and `od` flag is there, and why the dump is a per-byte `dd`/`od` pipeline
+ * rather than one long-lived `od -w1` (a uutils `od` withholds bytes on a
+ * pty that never hits EOF; a per-byte pipeline ends its `od`'s input once
+ * per byte, which forces a live row out of any implementation).
  *
  * Gated behind `read _gate`, the same idiom terminal-clipboard.spec.ts's
  * OSC 52 test uses and for the analogous reason, but for a DIFFERENT race:
@@ -148,7 +168,8 @@ function hasEscCrPair(bytes: string[]): boolean {
  */
 const RAW_DUMP_INVOCATION =
   "sh -c 'read _gate && stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0 && " +
-  "printf \"RAWREADY\\n\" && od -v -An -tx1 -w1'";
+  "printf \"RAWREADY\\n\" && while :; do dd bs=1 count=1 2>/dev/null | " +
+  "od -v -An -tx1 | tr -d \"\\\\n\"; printf \"\\\\n\"; done'";
 
 /**
  * The read-boundary variant of [`RAW_DUMP_INVOCATION`]: same gate and
@@ -217,7 +238,7 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
       // down the same path as ordinary input. This test pins the byte
       // VALUES; the read-boundary test below pins the one-write shape.
       await page.keyboard.press("z");
-      await waitForTermText(page, " 7a");
+      await waitForTermText(page, "7a");
 
       // The COMPLETE delta through the sentinel, not merely its prefix —
       // see this file's header on sentinel fencing for why that closes the
@@ -247,7 +268,7 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
       // so nothing here should ever send a leading ESC; only xterm's own
       // ordinary `\r` should land.
       await page.keyboard.press("z");
-      await waitForTermText(page, " 7a");
+      await waitForTermText(page, "7a");
 
       const delta = bytesIn(await termText(page)).slice(before.length);
       expect(delta).toEqual(["0d", "7a"]);
@@ -284,7 +305,7 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
       // this checks for that adjacent PAIR specifically rather than the
       // mere presence of `1b` anywhere.
       await page.keyboard.press("z");
-      await waitForTermText(page, " 7a");
+      await waitForTermText(page, "7a");
 
       const delta = bytesIn(await termText(page)).slice(before.length);
       // Checked before the sentinel, not the whole delta: the sentinel
@@ -390,7 +411,7 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
       await page.keyboard.press("Shift+Enter");
       await page.keyboard.press("Enter");
       await page.keyboard.press("z");
-      await waitForTermText(page, " 7a");
+      await waitForTermText(page, "7a");
 
       const delta = bytesIn(await termText(page)).slice(before.length);
       expect(
