@@ -20,10 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Restore double-click to maximize on the desktop window's top edge. The custom chrome replaced the native title bar for
-  looks and its drag handling lost the native double-click zoom. Double-clicking the top of the window should maximize
-  again.
-
 - Launch an agent into a fresh clone of a GitHub repo by typing `gh:owner/repo` in the launch composer. Today that takes
   a detour through a terminal to clone the repo under a new local name before the session can be created. Farhelm stays
   repo-optional: `gh:` is only a second way to fill the composer's existing optional folder choice ("a fresh clone of X"

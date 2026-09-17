@@ -697,9 +697,10 @@ Upload failures must be visible; an attachment must never disappear silently.
 
 The macOS desktop window integrates its native title bar with the app header: native traffic-light controls sit in the
 sidebar's top row beside Profiles and the version readout, with no separate visible app-title strip. The session header
-and terminal tabs continue the app's surface to the top edge. Empty header space provides window dragging; controls and
-terminal text retain their own interactions. This treatment changes only header appearance and spacing. Browser and
-Linux window layouts retain their existing appearance. In narrow macOS windows, the app-level row stays fixed above both
+and terminal tabs continue the app's surface to the top edge. Empty header space provides window dragging, and
+double-clicking it zooms the window (repeating the gesture restores the prior frame); a single click without movement
+never zooms. Controls and terminal text retain their own interactions. Browser and Linux window layouts retain their
+existing appearance and gain no drag or zoom behavior. In narrow macOS windows, the app-level row stays fixed above both
 scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
 authentication errors, and build-mismatch notices also keep their content clear of native controls.
 
