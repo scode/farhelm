@@ -1234,25 +1234,81 @@ test("replay-idle-ignores-empty-frames: a stream of empty frames still counts as
 // typed into it with nothing on screen to say why — the silent failure
 // SPEC.md requires be reported instead of left to be inferred.
 //
-// So the watchdog's two expiries are two outcomes, and this pins the one
-// that is NOT the ordinary degradation: the banner explains the terminal
-// cannot carry input, and focus is deliberately left where the user put
-// it rather than being placed into a dead pane.
+// Since the 2026-09-17 decision, the watchdog's never-connected expiry on a
+// FIRST mount is a failed attempt like any other: where auto-reconnect can
+// run, the ladder surface takes over and a later attempt reattaches —
+// banner-and-stop had no answer for a helm that is up but stalls one
+// handshake (the island-cap burst). Two contracts, two tests:
 //
-// It also pins the watchdog's ARMING: a version that armed at `onopen`
-// would never start a timer here at all — the open never comes — and this
-// test would time out waiting for a banner that never appears.
-test("replay-unconnected: a socket stuck connecting reports it instead of revealing a dead terminal", async ({
+// - With recovery available: the reconnect surface appears, and the
+//   attempt counter ADVANCES — the retry itself is the behavior being
+//   pinned. The caret is deliberately left where the user put it; nothing
+//   of a terminal that cannot carry input is ever focused.
+// - With recovery switched off: the M5 banner remains the remedy of last
+//   resort, and the ending is still its own outcome ("unconnected"), not
+//   the idle degradation.
+
+test("replay-unconnected: a stalled first mount retries on the reconnect ladder", async ({
   page,
   request,
 }) => {
   test.setTimeout(120_000);
-  const title = `replay-unconnected-${Date.now()}`;
+  const title = `replay-unconnected-retry-${Date.now()}`;
   let id: string | undefined;
   try {
     const session = await createTabSession(request, title);
     id = session.id;
 
+    await stuckWebSocketFromNextLoad(page);
+    await holdCatchUpFromNextLoad(page, { idleMs: 1_500 });
+    await page.goto("/");
+    await page.locator(`[data-session-id="${id}"]`).click();
+    await waitForSessionMounted(page, id);
+
+    // The watchdog expires 1.5s in, the first rung waits 500ms, and each
+    // retry remounts onto the same stuck socket — so the second expiry,
+    // and with it attempt 2's surface, lands a few seconds later.
+    await expect(page.locator("#term-connecting .terminal-reconnect-status")).toBeVisible({
+      timeout: 20_000,
+    });
+    // The never-connected banner must NOT paint when the ladder took over —
+    // the two surfaces contradict each other.
+    await expect(page.locator("#term-banner")).toBeHidden();
+    await expect
+      .poll(
+        () =>
+          page
+            .locator("#term-connecting")
+            .getAttribute("data-reconnect-attempt")
+            .then((v) => Number(v)),
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThanOrEqual(2);
+    expect(
+      await page.evaluate(() => {
+        const active = document.activeElement;
+        const terminal = document.getElementById("terminal");
+        return !!active && !!terminal && terminal.contains(active);
+      }),
+      "focus must not be placed into a terminal that cannot carry input",
+    ).toBe(false);
+  } finally {
+    if (id) await cleanupSession(request, id);
+  }
+});
+
+test("replay-unconnected: without recovery the banner reports it instead of revealing a dead terminal", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const title = `replay-unconnected-banner-${Date.now()}`;
+  let id: string | undefined;
+  try {
+    const session = await createTabSession(request, title);
+    id = session.id;
+
+    await disableReconnectFromNextLoad(page);
     await stuckWebSocketFromNextLoad(page);
     await holdCatchUpFromNextLoad(page, { idleMs: 1_500 });
     await page.goto("/");
