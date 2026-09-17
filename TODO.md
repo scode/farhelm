@@ -20,9 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Improve the messaging provided by the installer script (`scripts/install.sh`). Review the user-facing messages and
-  make them clearer and more consistent; choose the final wording when implementing this item.
-
 - Keep fully idle sessions below actually active ones in the session list's "recently active" order. The
   promote-on-work-start change (#655) stopped the constant reordering, but a working session can now sit below live
   sessions that have since gone idle. When a session becomes fully idle it should drop below anything still actually
