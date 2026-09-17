@@ -215,15 +215,6 @@ is a clean gate.
   producer as the explanation for a pass. On recurrence, retain every RSS/progress sample, active sibling identities,
   and a bounded allocator breakdown to attribute growth before changing a queue or bound. The four-thread full binary
   supplies the co-resident allocations an isolated loop omits.
-- Deflake `session_rename::a_renamed_title_survives_a_supervisor_restart` in
-  `crates/farhelm/tests/e2e/session_rename.rs`. Twenty exact baseline runs passed. The historical loaded four-thread
-  failure was the replacement supervisor ownership assertion in the shared `create_idempotency.rs` handoff helper,
-  before the rename reload assertion. Its successful temporary probe takes a flock and closes the file before creating
-  the replacement. A concurrent fork can retain that open file description until exec, the mechanism demonstrated for
-  the separate sweep fixture fixed in #384. This is a concrete hypothesis here, not a reproduced cause. Trace probe
-  acquisition/release and the replacement claim result during concurrent process creation. If inherited probe ownership
-  is confirmed, explicitly unlocking that probe is a scoped fixture correction. Retain the ownership assertion: a
-  read-only reload could otherwise make the rename test pass without exercising a real successor.
 - Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
   isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
   worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus

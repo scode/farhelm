@@ -209,7 +209,14 @@ Chromium, so it was not shipped. Disposition: open (TODO.md, with the attempt's 
 Loaded 4-vCPU sandbox, full binary at `--test-threads=4` beside a looping `cargo build`: 1 of 3 runs panicked in the
 restart helper's own setup assertion in `create_idempotency.rs`, "the replacement must hold the state directory's claim,
 or it reconciles nothing and this test would pass for the wrong reason". The replacement supervisor did not hold the
-claim when the helper checked, under load. Never seen alone; nothing else known. Disposition: open (TODO.md).
+claim when the helper checked, under load. Never seen alone; nothing else known. Disposition (2026-09-17): fixed by the
+scoped correction the TODO entry prescribed — the helper's claim probe now releases with an explicit unlock instead of a
+close. The inherited-description mechanism was re-confirmed for THIS probe with a bare-fork probe (parent holds the
+flock, forks without exec, closes its descriptor: the lock stays held until the child's copy closes; an explicit LOCK_UN
+releases immediately despite the child's copy) — the same close-waits-for-inherited-copies defect demonstrated for the
+teststate sweep fixture in #384. The ownership assertion is retained. Twenty recorded exact repetitions of the rename
+test passed after the fix; the original loaded failure was never reproduced, so the fix rests on the confirmed
+mechanism, not on a reproduced cure.
 
 ## 2026-09-03 — two more profiles cases (e2e/tests/profiles.spec.ts)
 

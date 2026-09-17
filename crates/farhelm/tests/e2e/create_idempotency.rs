@@ -90,11 +90,27 @@ async fn stored_sessions(state: &std::path::Path) -> Vec<StoredSession> {
 ///
 /// `Arc::strong_count` is useful below for diagnosing a connection task that
 /// never drains, but it is not a completion barrier for the kernel lock's
-/// final release. A sibling test can fork while the claim file is open and
-/// keep that open file description alive until its child execs, even after the
-/// last `Supervisor` drops here. Poll the actual `flock` from a blocking thread
+/// final release. This test's own process spawns children while the claim
+/// file is open (the runtime that runs tmux, fake agents, and the
+/// supervisor binary), and a fork landing in that window keeps the open
+/// file description alive until its child execs, even after the last
+/// `Supervisor` drops here. Poll the actual `flock` from a blocking thread
 /// so the replacement cannot race that inherited descriptor and silently
 /// start read-only.
+///
+/// The poll itself would reintroduce a smaller version of the same hazard if
+/// it released by closing: the process spawns children constantly
+/// (tmux, agents, the supervisor binary), and a fork landing
+/// between the probe's acquisition and its drop inherits the open file
+/// description — after which the flock survives the probe's own close until
+/// that child execs, and the replacement supervisor started in that window
+/// fails its own claim. So the probe releases with an explicit UNLOCK, which
+/// is a property of the open file description itself and takes effect
+/// immediately no matter who holds inherited copies. The mechanism (close
+/// waits for the forked copy, unlock does not) was pipe-probed when the same
+/// defect was fixed in the teststate sweep fixture (#384); the ownership
+/// assertion below is retained deliberately — a read-only reload would make
+/// the rename test pass without exercising a real successor.
 async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tokio::time::Instant) {
     let lock_path = state.join("supervisor.lock");
     tokio::task::spawn_blocking(move || {
@@ -112,6 +128,8 @@ async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tok
             // sleep-ok: retry the actual kernel claim until acquired or the shared deadline expires.
             std::thread::sleep(Duration::from_millis(20));
         }
+        lock.unlock()
+            .expect("explicitly release the state-directory claim probe");
     })
     .await
     .expect("the state-directory claim waiter must not panic");
