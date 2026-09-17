@@ -352,6 +352,13 @@ paths the plan names, and the specs it relies on), re-plan whatever that movemen
 answer changed, and only then execute or write the goal. Never feed a plan to execution or goal creation unread against
 the current tree, however recent it looks.
 
+# review_feedback_queue/
+
+`review_feedback_queue/` holds review feedback that outlived its review: one file per finding, indexed by
+`review_feedback_queue/INDEX.md`. When asked to record review feedback, write it there per
+`review_feedback_queue/AGENTS.md`; when asked to address a queued item, remove the item (or narrow it, if partially
+addressed) in the same commit, change, or PR as the fix.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
