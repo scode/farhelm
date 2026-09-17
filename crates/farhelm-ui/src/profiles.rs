@@ -780,7 +780,26 @@ enum FocusDestination {
 /// [`FOCUS_TRANSIT_GRACE_MS`]. These constants describe one handoff and must
 /// be tuned together: dismissal may not conclude that `body` is the user's
 /// destination while the popup still owns a live placement request.
-pub(crate) const FOCUS_SETTLE_MS: u64 = 250;
+///
+/// The budget's real load is four bridge evaluations plus the worker's
+/// inter-attempt sleep: the clock sample, two consecutive observations
+/// (`found` then `ready`), and the commit. At 250ms that demanded ~56ms per
+/// round trip, and a loaded WebKit could not promise it — the request was
+/// then consumed as `Unknown` with nothing left to re-issue it, and the
+/// popup sat mounted but never focused (the initial-focus flake in TODO.md's
+/// Deflake bucket; the 2026-09-12 hunt reproduced the focus-premise miss
+/// 1/20). 1000ms keeps the identical machine — same evaluations, same
+/// order, same expiry semantics — while covering round trips six times
+/// slower, and it delays nothing on a healthy renderer, where focus lands
+/// in a round trip or two and the ceiling is never reached. The costs are
+/// both bounded by the budget itself: a focus-out classification on a
+/// crawling renderer can take up to SETTLE+GRACE before concluding, and a
+/// request whose renderer faults then recovers can commit focus that much
+/// later — even into a focus transition already in flight, whose
+/// mid-transition active element the commit's replaceability check can
+/// misread. Tests that stage renderer faults must keep them persistent for
+/// as long as the request under test should stay alive.
+pub(crate) const FOCUS_SETTLE_MS: u64 = 1_000;
 
 /// Extra time reserved for the final focus-out classification after placement.
 pub(crate) const FOCUS_TRANSIT_GRACE_MS: u64 = 120;
