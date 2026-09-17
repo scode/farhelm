@@ -522,8 +522,11 @@ plain Enter after the chord all reached `RAWREADY` but missed the final sentinel
 in the isolated runner made all ten key cases pass in `25c38eeb-c7f5-4e6e-af1b-50d6934f8db6`, which selected
 `terminal-keys.spec.ts profiles.spec.ts -g 'Shift.Enter|plain Enter|Ctrl.Shift.Enter|outside click overrides a delayed|profile edited in another browser'`
 on the same clean revision, both engines, one worker and zero retries. No product or fixture source changed. The
-full-run failures therefore do not establish lost Farhelm input. Disposition: open fixture portability follow-up in
-TODO.md; require a live-output dumper without weakening the complete byte-sequence oracle.
+full-run failures therefore do not establish lost Farhelm input. Disposition: closed by the per-byte `dd`/`od` pipeline
+(`RAW_DUMP_INVOCATION` in `e2e/tests/terminal-keys.spec.ts`): each byte's od input ends at EOF, which forces a live row
+out of uutils od as well as GNU od; the sentinel waits and `bytesIn` were made tolerant of od's leading-space variance.
+Verified against a real pty pair on GNU od 9.4; uutils od remains verified only by the EOF argument, not by execution.
+The TODO entry this disposition pointed at is removed with the fix.
 
 Class: substrate
 
@@ -662,8 +665,8 @@ provenance. Disposition: closed by the read-timeout split (`send_read`/`READ_TIM
 `crates/farhelm-ui/src/api.rs`); the recovery assertions were never weakened, and the stall's location remains
 unestablished, but an unanswered read now fails into the retry ladder inside the budget instead of starving it. The
 mechanism being unproven, a recurrence under the new deadline reopens this — the `fetch_session` detail read
-deliberately keeps the sixty-second deadline (it drains a remote supervisor live), so only the sessions and hosts
-reads are covered by the split.
+deliberately keeps the sixty-second deadline (it drains a remote supervisor live), so only the sessions and hosts reads
+are covered by the split.
 
 Class: unknown
 
