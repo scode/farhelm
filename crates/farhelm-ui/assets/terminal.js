@@ -88,8 +88,8 @@
 //   `REPLAY_IDLE_TIMEOUT_MS`), which fall back to today's
 //   batched-but-visible catch-up rather than to an error — with ONE
 //   exception, the socket that never finished connecting, which ends the
-//   phase into the detach banner instead of into a terminal that cannot
-//   carry what the user types (see `armIdleTimer`).
+//   phase into the reconnect ladder when recovery can run and into the
+//   detach banner only when it cannot (see `armIdleTimer`).
 //
 // The bounds are also a TRUST boundary, not only a robustness one. Under
 // `--ssh` the supervisor is a different machine, and this phase is the one
@@ -165,10 +165,18 @@
 //   the unload that races it — reset again on a bfcache restore, which is
 //   the one way a page comes BACK from that state.
 //
-// An attach that never CONNECTED is also not transport loss — see
-// `openedOnce`. A first mount against a helm that is not there keeps M5's
-// "never finished connecting" banner rather than silently retrying behind
-// it; only a socket that worked and then stopped is something to recover.
+// An attach that never CONNECTED used to be excluded too (`openedOnce`):
+// M5's model knew two states — helm there, helm not there — and a first
+// mount against a helm that was not there kept the "never finished
+// connecting" banner rather than retrying behind it. That model has no
+// answer for a helm that IS there but stalls one handshake (observed in
+// the island-cap attach-refusal burst,
+// lore/2026-09-16-island-cap-never-connected-first-mount.md), and the
+// maintainer's call (2026-09-17) was to put those on the ladder like any
+// other failed attempt. The retry is deliberately not silent — the ladder
+// surface says what is running and offers the manual control — and the
+// banner survives only where recovery cannot run (no matching helm, the
+// suite's opt-out), where "reopen the session" is still the remedy.
 //
 // ### An unattended attach must not steal the session
 //
@@ -735,7 +743,10 @@
   const CONNECTING_TEXT = "connecting — catching up on this terminal's history…";
 
   // What the banner says when the watchdog expires on a socket that never
-  // finished connecting.
+  // finished connecting AND recovery cannot run — no matching helm, the
+  // suite's opt-out, a page on its way out. Where the ladder can run, the
+  // stall is just a failed attempt and this banner never paints (see
+  // `armIdleTimer`).
   //
   // It names the CONSEQUENCE, not the mechanism: what matters to the user
   // is that this terminal cannot carry input, which they would otherwise
@@ -1308,10 +1319,12 @@
   /**
    * Begin (or continue) recovering one island after transport loss.
    *
-   * Called only from a socket that had OPENED and then died without a
-   * DECISION detach — a takeover or a stall (see `decisionDetach`). Every
-   * other detach notice is infrastructure failing, which recovers like any
-   * other transport loss; this file's header carries the three-way split. The first call builds the
+   * Called from a socket that died without a DECISION detach — a takeover
+   * or a stall (see `decisionDetach`). Since the never-connected decision
+   * this includes a FIRST mount whose handshake never completed (see
+   * `recoverable`); every other detach notice is infrastructure failing,
+   * which recovers like any other transport loss; this file's header
+   * carries the three-way split. The first call builds the
    * controller; later ones (a reconnect attempt that itself failed) only
    * advance the failure count, which is what makes the ladder climb rather
    * than restart.
@@ -3368,12 +3381,15 @@
         // history, and a fresh mount starts that history over.
         // ------------------------------------------------------------
         //
-        // `openedOnce` is what separates transport LOSS from an attach that
-        // never happened. A socket that never reached OPEN has nothing to
-        // have lost, and M5's never-connected banner already explains it
-        // with a remedy — retrying silently behind that banner would be a
-        // ladder the user cannot see running under a sentence saying to
-        // reopen the session.
+        // The transport-loss model, after the 2026-09-17 decision: a
+        // socket that never reached OPEN recovers on the ladder like one
+        // that opened and then died. The old line between the two —
+        // M5's never-connected banner for a first mount that never
+        // connected, recovery only for a socket that worked and stopped —
+        // had no answer for a helm that is up but stalls one handshake
+        // (the island-cap burst; lore/2026-09-16-island-cap-never-
+        // connected-first-mount.md). The banner survives only where
+        // recovery cannot run (see `recoverable` and `socketEnded`).
         //
         // `decisionDetach` is the structural half of both carve-outs, and
         // it is set for exactly THREE reasons out of the open-ended set the
@@ -3407,7 +3423,6 @@
         // either (see the handler): each failed attempt gets its own fresh
         // notice, and treating those as vetoes would stop the ladder on its
         // first rung — the exact opposite of the behavior above.
-        let openedOnce = false;
         let decisionDetach = false;
         // A detach whose whole point is that the terminal is GOING AWAY
         // silently (a closed or reaped tab — see TAB_CLOSED_DETACH_REASON).
@@ -3479,12 +3494,12 @@
         //   keystrokes on a socket that is not OPEN — so revealing a
         //   normal-looking terminal would leave the user typing into a
         //   void with nothing on screen to explain it, which is precisely
-        //   the silent failure SPEC.md forbids. The catch-up ends into the
-        //   detach banner instead, and the socket is CLOSED: an attach
-        //   abandoned this way must not silently resurrect if its
-        //   handshake completes minutes later, behind a banner saying it
-        //   never connected. Reattaching is the user's move, through the
-        //   same path any other detached terminal takes.
+        //   the silent failure SPEC.md forbids. The catch-up ends here and
+        //   the socket is CLOSED, and since the never-connected decision
+        //   the ending goes to the reconnect ladder when recovery can run
+        //   and to the banner only when it cannot (see the branch below);
+        //   either way an attach abandoned this way must not silently
+        //   resurrect if its handshake completes minutes later.
         function armIdleTimer() {
           if (!catchingUp || !alive) return;
           clearIdleTimer();
@@ -3513,9 +3528,19 @@
               return;
             }
             if (stillConnecting) {
+              // A FIRST mount stalled in its handshake is a failed attempt
+              // like any other now (see `recoverable`): when recovery can
+              // run, the ladder surface takes over from here and a later
+              // attempt reattaches — the burst shape this file once
+              // banner-and-stopped is exactly what a retry fixes. The
+              // transition is taken directly (and the socket closed after)
+              // for the reason the heartbeat takes it directly: a dead
+              // transport's close can stall in CLOSING and never come back
+              // as an event. `socketEnded` carries the never-connected
+              // reason so the banner, when recovery cannot run, is the
+              // unconnected sentence rather than a generic close.
               focusOnReveal = false;
-              endCatchUp("unconnected");
-              showBanner(UNCONNECTED_TEXT);
+              socketEnded("unconnected");
               ws.close();
               return;
             }
@@ -4050,18 +4075,29 @@
          * transport loss one layer up and recovers exactly like the rest
          * (see `decisionDetach`).
          *
-         * What remains is the positive test, and it is two cases rather
-         * than one. A socket that reached OPEN and then died is transport
-         * loss by definition. A socket on an EXISTING ladder counts even
-         * though it never opened: the ladder's premise is a connection that
-         * did work, and an attempt failing to connect is exactly what it is
-         * there to count — treating it as "never connected" would strand
-         * the recovery on its first failed attempt.
+         * What remains is the positive test, and since the 2026-09-17
+         * decision it is no longer a test at all: a socket that reached
+         * OPEN and died is transport loss by definition, and — the
+         * decision — so is a first mount whose handshake never completed.
+         * The island-cap burst (lore/2026-09-16-island-cap-never-connected-
+         * first-mount.md) showed a helm that is up can stall one handshake
+         * amid churn, and banner-and-stop was exactly the wrong answer for
+         * it. Every ending that passes the vetoes above therefore recovers;
+         * the never-connected banner survives only where recovery cannot
+         * run at all (see `socketEnded`).
+         *
+         * One nuance of that decision worth stating rather than burying: a
+         * USER-initiated first mount is a press, which would ordinarily
+         * displace — but once it is on the ladder, its unattended attempts
+         * carry `if_unowned` like every other automatic attempt, so a
+         * client that took the lease while the handshake stalled is
+         * YIELDED to (the take-control state) rather than fought. The safe
+         * direction, and a real behavior change from banner-and-stop,
+         * which yielded to nobody and left a dead pane.
          */
         function recoverable() {
           if (!reconnectControls() || !alive || navigating || takeover) return false;
-          if (decisionDetach) return false;
-          return openedOnce || reconnecting(spec.el);
+          return !decisionDetach;
         }
 
         /**
@@ -4086,6 +4122,14 @@
           if (ended) return;
           ended = true;
           if (recoverable()) {
+            // A mount that never PROVED its attach has nothing usable to
+            // reveal; if its ending is about to hand off to the ladder, do
+            // not let the reveal below (or a racing one) pull focus into a
+            // dead terminal first — the same reason the never-connected
+            // watchdog branch clears `focusOnReveal`. Opened-and-died
+            // mounts already revealed their replay, so this is inert for
+            // them.
+            if (!attachProved) focusOnReveal = false;
             noteTransportLoss(spec, baseUrl, attach);
             return;
           }
@@ -4094,7 +4138,13 @@
           // banner here would be the flash of alarm the silence exists to
           // prevent.
           if (silentDetach) return;
-          showBanner(reason === "error" ? "Connection error" : "Connection closed");
+          showBanner(
+            reason === "error"
+              ? "Connection error"
+              : reason === "unconnected"
+              ? UNCONNECTED_TEXT
+              : "Connection closed",
+          );
         }
 
         // A detach notice is immediately followed by the server closing
@@ -4584,11 +4634,6 @@
             banner.style.display = "";
             banner.textContent = "";
           }
-          // Recorded here and nowhere else: this is the only moment that
-          // separates "the connection worked and then stopped" from "there
-          // was never a connection", which is the line PLAN_M6.md item 7's
-          // recovery is drawn along (see `recoverable`).
-          openedOnce = true;
           // The heartbeat starts with the socket, not with the mount: a
           // window armed before the upgrade completed would spend itself on
           // the handshake, which the catch-up watchdog already covers.

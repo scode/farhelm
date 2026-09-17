@@ -104,20 +104,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `focusSettled` and `focusAttempts` receipts before hunting anything else. Preserve both tests' focus and feed
   assertions; the new observation does not establish a regression in saving profiles or delivering their updates.
 
-- Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
-  `7fd44a19-ce3f-42fb-a3df-410da327634a`.
-  `stalling one tab's writes pauses only that tab; the agent and a sibling stay
-  live` never established a HIGH_WATER
-  pause within its observation window (reproduced once, then 24 consecutive passes; not re-hunted).
-  `a tab list past
-  the island cap is listed in full but only partly attached` had the expected path and
-  mounted/revealed state but a closed socket at readiness. Hunts through 2026-09-16 replaced the "established socket
-  died" reading with a first-mount chain — handshake accepted, `open` never fired, bannered and closed at 5s, never
-  retried — with the stalled handshake itself still hypothesis. Full evidence trail:
-  `lore/2026-09-16-island-cap-never-connected-first-mount.md`. The fix fork needs the maintainer: retry never-connected
-  first mounts on the ladder (against the M5 comment's letter), accept the burst as test-only pathology (but staggering
-  the mounts weakens the oversized-at-once fixture), or keep digging browser-internally. Keep these failures distinct
-  from the existing single-client stall entry, and do not weaken liveness assertions based on a later passing run.
+- Watch the stall-test shape in `e2e/tests/terminal-tabs.spec.ts`:
+  `stalling one tab's writes pauses only that tab;
+  the agent and a sibling stay live` never established a HIGH_WATER
+  pause within its observation window (reproduced once in browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`, then 24
+  consecutive passes; not re-hunted). The island-cap sibling from the same run —
+  `a tab list past the island cap is listed in full but only partly attached`, whose first-mount handshake stalled, was
+  bannered and closed at 5s, and never retried — was fixed by the maintainer's 2026-09-17 decision to retry
+  never-connected first mounts on the ladder (`crates/farhelm-ui/assets/terminal.js`; evidence trail:
+  `lore/2026-09-16-island-cap-never-connected-first-mount.md`). That chain does NOT explain the stall test's own shape —
+  a socket that closed 1.2s after the flood started, before any HIGH_WATER crossing — so if it recurs it re-enters with
+  its own evidence (detach-reason and queue receipts alongside gate send, received bytes, pending writes, pauses, replay
+  state, and FLOOD-DONE). Keep it distinct from the existing single-client stall entry, and do not weaken liveness
+  assertions based on a later passing run.
 
 ### Difficult deflake
 
