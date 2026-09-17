@@ -4,12 +4,13 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Seven buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
+Eight buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
 — the decision is made, only the work remains; "near term" is what should be picked up next; "tricky bugs" retains
 unresolved bug reports and their investigation findings; "deflake" gathers test and harness reliability work, including
-CI execution and restoring gates; "code review" is the residue of the September 2026 review swarms after the policy
-pass, ordered by confidence and risk; "maybe later" is wanted but not soon, and may never happen; "unbucketized" is
-everything not yet sorted, which carries no implication either way. Within a bucket, no order unless the bucket
+CI execution and restoring gates; "broken tests" records tests that fail deterministically, with the failure and the
+evidence that it predates any in-flight work; "code review" is the residue of the September 2026 review swarms after the
+policy pass, ordered by confidence and risk; "maybe later" is wanted but not soon, and may never happen; "unbucketized"
+is everything not yet sorted, which carries no implication either way. Within a bucket, no order unless the bucket
 explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
@@ -323,6 +324,8 @@ Deferred work, with its original triggers:
 - Running the tag gate's suite away from the release build, after "Restore the release integration gate" lands. The
   release gate still excludes the e2e target; evaluate any concurrency experiment using the then-current runner budget
   rather than reviving the old libtest thread setting.
+
+## Broken tests
 
 ## Code review
 
