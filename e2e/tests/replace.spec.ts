@@ -27,7 +27,8 @@
 
 import { expect, test } from "./helpers/evidence";
 import { Page } from "@playwright/test";
-import { cleanupSession, createSession, FAKE_AGENT, localHostId, openRowMenu, type SessionRow } from "./helpers/fleet";
+import { cleanupSession, createSession, FAKE_AGENT, hideSeenState, localHostId, openRowMenu, type SessionRow } from "./helpers/fleet";
+import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText } from "./helpers/term";
 
@@ -222,6 +223,148 @@ async function listedSessionsWithLaunch(
   expect(response.ok(), "the session listing must be readable").toBe(true);
   return (await response.json() as { sessions: ListedSessionWithLaunch[] }).sessions;
 }
+
+/**
+ * A "replace with" opening must land focus in search by itself — the same
+ * handoff clone's own opening-focus test pins, through the sibling menu
+ * item that shares its teardown. The focus assertions run BEFORE any fill,
+ * mode-button click, or result selection: the full replace-with test below
+ * checks focus only after its mode buttons have explicitly refocused
+ * search, which would pass even with the opening handoff broken. Both
+ * mutation endpoints are counted, since a replace-with composer can reach
+ * either `POST /api/sessions` or the replace endpoint on submit.
+ */
+test("opening replace-with focuses search before any typing or mode click", async ({
+  page,
+  request,
+}, testInfo) => {
+  const title = `replace-with-opening-focus-${Date.now()}`;
+  const cwd = stackScratchDir("replace-with-opening-focus-");
+  const source = await createSession(request, { title, cwd });
+  try {
+    await page.goto("/");
+    const sourceRow = row(page, source.id);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+    await attachSession(page, source.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(
+      page.locator(".hosts-status", { hasText: "loading hosts" }),
+    ).toHaveCount(0, { timeout: 20_000 });
+    await installFocusTrace(page);
+    const posts: string[] = [];
+    const countPosts = (issued: import("@playwright/test").Request) => {
+      if (issued.method() !== "POST") return;
+      const pathname = new URL(issued.url()).pathname;
+      if (pathname === "/api/sessions" || pathname === `/api/sessions/${source.id}/replace`) {
+        posts.push(pathname);
+      }
+    };
+    page.on("request", countPosts);
+    try {
+      await openRowMenu(sourceRow);
+      await sourceRow.locator(".session-row-replace-with").click();
+      const form = page.locator('.create-session-form[role="dialog"]');
+      await expect(form).toBeVisible();
+      const search = form.locator('.launch-composer-search input[role="combobox"]');
+      await expect(search).toBeEnabled();
+      await expect(page.locator(".session-row-menu-panel")).toHaveCount(0);
+      await expect(search).toBeFocused();
+      const query = `replace-with-focus-probe-${Date.now()}`;
+      await page.keyboard.type(query);
+      await expect(search).toHaveValue(query);
+      expect(posts, "opening and typing into a replace-with must not submit it").toEqual([]);
+    } finally {
+      page.off("request", countPosts);
+      await attachFocusTrace(page, testInfo, "replace-with-opening-focus-trace.json");
+    }
+  } finally {
+    await cleanupSession(request, source.id);
+  }
+});
+
+/**
+ * A keyboard-opened "replace with" must land focus in search by itself.
+ *
+ * The trusted-keyboard twin of the pointer test above: open the row menu
+ * from its focused toggle with ArrowDown, step down the real menu order
+ * (rename, clone, replace with) to the item, and activate with Enter —
+ * then again with Space. The source here is structured (the pointer
+ * test's is legacy) so the opening-focus contract covers both shapes.
+ */
+test("opening replace-with from the keyboard focuses search before any typing", async ({
+  page,
+  request,
+}, testInfo) => {
+  const local = await localHostId(request);
+  const cwd = stackScratchDir("replace-with-keyboard-focus-");
+  const title = `replace-with-keyboard-focus-${Date.now()}`;
+  const created = await request.post("/api/sessions", {
+    data: {
+      cwd,
+      title,
+      host: local,
+      launch: { harness: "codex", model: "gpt-6-astra", effort: "high", permissions: "yolo" },
+    },
+  });
+  expect(created.ok(), `creating structured source: ${await created.text()}`).toBe(true);
+  const sourceId = (await created.json()).id as string;
+  try {
+    // Fixed menu order (rename, clone, replace with, …), not the
+    // seen-state feature — see the keyboard clone test's own comment.
+    await hideSeenState(page);
+    await page.goto("/");
+    const sourceRow = row(page, sourceId);
+    await expect(sourceRow).toBeVisible({ timeout: 20_000 });
+    await attachSession(page, sourceId);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(
+      page.locator(".hosts-status", { hasText: "loading hosts" }),
+    ).toHaveCount(0, { timeout: 20_000 });
+    await installFocusTrace(page);
+    const posts: string[] = [];
+    const countPosts = (issued: import("@playwright/test").Request) => {
+      if (issued.method() !== "POST") return;
+      const pathname = new URL(issued.url()).pathname;
+      if (pathname === "/api/sessions" || pathname === `/api/sessions/${sourceId}/replace`) {
+        posts.push(pathname);
+      }
+    };
+    page.on("request", countPosts);
+    try {
+      for (const key of ["Enter", " "]) {
+        const toggle = sourceRow.locator(".session-row-menu");
+        await toggle.focus();
+        await expect(toggle).toBeFocused();
+        await page.keyboard.press("ArrowDown");
+        await expect(sourceRow.locator(".session-row-menu-panel")).toBeVisible();
+        await expect(sourceRow.locator(".session-row-rename")).toBeFocused();
+        await page.keyboard.press("ArrowDown");
+        await expect(sourceRow.locator(".session-row-clone")).toBeFocused();
+        await page.keyboard.press("ArrowDown");
+        await expect(sourceRow.locator(".session-row-replace-with")).toBeFocused();
+        await page.keyboard.press(key);
+        const form = page.locator('.create-session-form[role="dialog"]');
+        await expect(form).toBeVisible();
+        const search = form.locator('.launch-composer-search input[role="combobox"]');
+        await expect(search).toBeEnabled();
+        await expect(page.locator(".session-row-menu-panel")).toHaveCount(0);
+        await expect(search).toBeFocused();
+        const query = `replace-with-kb-${key === " " ? "space" : "enter"}-${Date.now()}`;
+        await page.keyboard.type(query);
+        await expect(search).toHaveValue(query);
+        await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
+        await expect(form).toHaveCount(0);
+      }
+      expect(posts, "opening and typing into keyboard replace-withs must not submit them").toEqual([]);
+    } finally {
+      page.off("request", countPosts);
+      await attachFocusTrace(page, testInfo, "replace-with-keyboard-focus-trace.json");
+    }
+  } finally {
+    await cleanupSession(request, sourceId);
+  }
+});
 
 test("replace with pre-fills clone's form from the source, and editing the harness and effort through search then launching creates the edited session in the source's place", async ({
   page,

@@ -44,6 +44,21 @@ pub(super) struct RowState {
     /// Whether this row's actions menu is the at-most-one open row menu,
     /// derived from `ListView`'s `menu_open` signal.
     pub(super) menu_open: bool,
+    /// Whether a clone/replace-with composer is open, holding the focus
+    /// the originating row menu handed it — derived from `ListView`'s
+    /// `show_create` together with its `clone_prefill`, and true for
+    /// EVERY row while that dialog stands, not just the originator.
+    ///
+    /// The row-menu dismissal reads this, not a per-row flag, because
+    /// only the originating row can have focus inside its menu at close
+    /// time (`menu_focus` is row-local): the flag only ever gates that
+    /// one row's toggle return. While the composer is a modal dialog no
+    /// other row's menu can open behind it, so no second close can
+    /// observe this flag mid-transfer. `clone_prefill`'s own generation
+    /// is NOT the identity here — it resets whenever the prefill is
+    /// cleared — the dialog's open state is, which is exactly the
+    /// lifetime the transfer needs.
+    pub(super) composer_transfer_open: bool,
     /// Whether this row's session is the one the right pane currently
     /// shows — derived from `ListView`'s `selected` signal, same shape as
     /// `menu_open`, and grouped here because it is row display state,

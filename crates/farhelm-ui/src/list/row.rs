@@ -812,9 +812,11 @@ std::thread_local! {
 ///   promises not to make anyone do. See `menu_panel::MenuKeyAction::Exit`
 ///   for why the browser's own focus move is suppressed rather than ridden.
 /// - Escape closes and hands focus back to the "⋯". So does every
-///   automatic dismissal that took the menu away from a focused item; see
-///   the dismissal effect in the body for why that teardown is
-///   centralized rather than written per key.
+///   automatic dismissal that took the menu away from a focused item —
+///   except the two transfers, Rename and a clone/replace-with composer
+///   acceptance, which hand focus to their own newly mounted dialog
+///   instead; see the dismissal effect in the body for why that teardown
+///   is centralized rather than written per key.
 ///
 /// The decisions are pure functions in `menu_panel` (`menu_key_action`,
 /// `next_menu_focus`, `closed_toggle_key_intent`); `menu_panel`'s
@@ -898,6 +900,7 @@ pub(super) fn SessionRow(
         renaming,
         nav_disabled,
         menu_open,
+        composer_transfer_open,
         selected,
         locality,
         activity,
@@ -1105,12 +1108,18 @@ pub(super) fn SessionRow(
     // else and the menu closed behind them" (leave their focus alone):
     // clicking the hosts toggle or the create form moves
     // focus first and closes the menu second, so `focusout` has already
-    // cleared this by the time the teardown runs. An item UNMOUNTING
-    // cannot fire `focusout` here — a removed node's events never reach
-    // the delegated listener — so a scroll or resize dismissal correctly
-    // keeps its position and gets the handback.
+    // cleared this by the time the teardown runs. An item UNMOUNTING,
+    // by contrast, leaves this populated: the teardown reclaims the
+    // removed item's element identity in the same pass, and Dioxus
+    // dispatches events only through surviving element records, so the
+    // item's own `onfocusout` never runs to clear this. The browser may
+    // still fire the removal `focusout` observably at document level —
+    // Chromium does — but that event is not what clears this signal;
+    // only the item's handler does, and teardown has removed it. A
+    // scroll or resize dismissal therefore correctly keeps its position
+    // and gets the handback.
     //
-    // That same unmount blindness is why the TOGGLE clears this too (its
+    // That same unmount gap is why the TOGGLE clears this too (its
     // `onfocusin` below, through `forget_menu_focus`): a confirmation can
     // replace the whole item list without closing the panel, so the item
     // holding focus can vanish silently and leave this signal — and
@@ -1347,6 +1356,13 @@ pub(super) fn SessionRow(
     // unconditionally would yank focus away from whatever control the
     // user had just moved to, which is exactly what dismissed the menu in
     // the hosts-panel and filter-bar cases.
+    //
+    // `composer_transfer_open` is deliberately NOT an effect dependency:
+    // the teardown still runs exactly when the menu closes, and the
+    // closure it runs with is the closing render's own — which already
+    // carries the composer's open state as of that same pass. Depending
+    // on it would only add teardown passes on composer open and close,
+    // when there is no menu transition to resolve.
     use_effect(use_reactive(
         (&menu_open, &renaming),
         move |(menu_open, renaming)| {
@@ -1368,7 +1384,26 @@ pub(super) fn SessionRow(
             item_handles.write().clear();
             // Rename transfers focus to its independently mounted dialog.
             // The ordinary menu teardown must not reclaim it for the toggle.
-            if was_inside && !renaming {
+            //
+            // A clone/replace-with acceptance is the same transfer through
+            // the composer. Removing the activated item can leave the
+            // row's inside-focus bookkeeping populated: the teardown
+            // reclaims the removed item's element identity in the same
+            // pass, and Dioxus dispatches events only through surviving
+            // element records, so the item's own `onfocusout` never runs
+            // to clear `menu_focus`. That is a framework-teardown fact,
+            // not a claim about the browser: Chromium fires the removal
+            // `focusout` observably at document level, and still the
+            // bookkeeping stays set — what clears this signal is the
+            // item's handler, and teardown has removed it. Without this
+            // exception the dismissal reads a stale "inside" and its
+            // toggle eval lands AFTER the composer's own search focus,
+            // stealing it back. Retiring the return here removes the
+            // losing claimant instead of racing it; the composer's mount
+            // focus is then the only operation left to win. A refused
+            // clone never reaches this flag (its handler returns before
+            // opening anything), so the menu keeps its focus there.
+            if was_inside && !renaming && !composer_transfer_open {
                 focus_menu_toggle("data-session-id", &dismiss_id, ".session-row-menu");
             }
         },
@@ -2529,6 +2564,7 @@ mod tests {
                         renaming: false,
                         nav_disabled: false,
                         menu_open: false,
+                        composer_transfer_open: false,
                         selected: false,
                         locality: HostLocality::Unknown,
                         activity: None,
@@ -2622,6 +2658,7 @@ mod tests {
                             renaming: false,
                             nav_disabled: false,
                             menu_open: false,
+                            composer_transfer_open: false,
                             selected: selected == id,
                             locality: HostLocality::Unknown,
                             activity: None,

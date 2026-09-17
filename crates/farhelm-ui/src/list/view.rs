@@ -2709,6 +2709,14 @@ pub(crate) fn ListView(
                                     nav_disabled: nav_locked,
                                     menu_open: menu_open.read().as_deref()
                                         == Some(session.id.as_str()),
+                                    // A prefill WITHOUT its dialog (or a
+                                    // blank New) is not a transfer: only
+                                    // the two together mean this row's
+                                    // menu close handed focus to a
+                                    // composer that now owns it. See
+                                    // `RowState::composer_transfer_open`.
+                                    composer_transfer_open: *show_create.read()
+                                        && clone_prefill.read().is_some(),
                                     selected: selected.read().as_deref()
                                         == Some(session.id.as_str()),
                                     locality: session_locality(session.host, local_host),
