@@ -59,6 +59,9 @@ import {
   stubFeed,
 } from "./helpers/fleet";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
+import { stackScratchDir } from "./helpers/scratch";
+import { attachSession, waitForTermText } from "./helpers/term";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -4323,6 +4326,82 @@ test("the launch composer autofocuses search and returns focus to New after Esca
   await page.keyboard.press("Escape");
   await expect(form).toHaveCount(0);
   await expect(opener).toBeFocused();
+});
+
+/**
+ * Every New opening lands focus in search with typed text following it.
+ *
+ * The control for clone's and replace-with's own opening-focus tests: New
+ * is the path the report says already works, so this pins its handoff with
+ * the same page-level typing (never `search.fill`, which focuses its
+ * target first and would mask a broken handoff) across four openings — a
+ * plain pointer click, a pointer click while a row menu stands open (the
+ * menu's teardown must not reclaim what the composer just took), and
+ * trusted Enter/Space activation of the focused New button. The selected
+ * fixture session also proves the terminal reveal settled before any of
+ * it, so a passing control cannot be an unsettled terminal quietly
+ * holding focus still.
+ */
+test("opening New focuses search and immediate typing lands there, with or without a prior menu", async ({
+  page,
+  request,
+}, testInfo) => {
+  const session = await createSession(request, {
+    title: `new-opening-focus-${Date.now()}`,
+    cwd: stackScratchDir("new-opening-focus-"),
+  });
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await attachSession(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await waitForHostsListSettled(page);
+    await installFocusTrace(page);
+    try {
+      const opener = page.locator(".new-session-button");
+      const form = page.locator('.create-session-form[role="dialog"]');
+      const search = form.locator('.launch-composer-search input[role="combobox"]');
+      const dismiss = async () => {
+        // A no-result query still owns the first Escape; only the
+        // second dismisses the dialog.
+        await page.keyboard.press("Escape");
+        await page.keyboard.press("Escape");
+        await expect(form).toHaveCount(0);
+      };
+      const expectFreshSearchHandoff = async (query: string) => {
+        await expect(form).toBeVisible();
+        await expect(search).toBeEnabled();
+        await expect(search).toBeFocused();
+        await page.keyboard.type(query);
+        await expect(search).toHaveValue(query);
+      };
+      // A plain pointer open.
+      await opener.click();
+      await expectFreshSearchHandoff(`new-focus-plain-${Date.now()}`);
+      await dismiss();
+      // A pointer open while a row menu stands open: clicking New moves
+      // focus onto New first, so the menu's teardown must see focus
+      // already outside and leave the composer's handoff alone.
+      await openRowMenu(target);
+      await opener.click();
+      await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+      await expectFreshSearchHandoff(`new-focus-after-menu-${Date.now()}`);
+      await dismiss();
+      // Trusted keyboard activation, both keys.
+      for (const key of ["Enter", " "]) {
+        await opener.focus();
+        await expect(opener).toBeFocused();
+        await page.keyboard.press(key);
+        await expectFreshSearchHandoff(`new-focus-kb-${key === " " ? "space" : "enter"}-${Date.now()}`);
+        await dismiss();
+      }
+    } finally {
+      await attachFocusTrace(page, testInfo, "new-opening-focus-trace.json");
+    }
+  } finally {
+    await cleanupSession(request, session.id);
+  }
 });
 
 /**

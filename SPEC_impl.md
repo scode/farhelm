@@ -291,13 +291,14 @@ changing, the create form opening, the row reordering under a refresh), because 
 snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown)
 lands focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is
 a single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
-that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body.
-An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather than
-going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the user
-would otherwise swallow every navigation key. **Confirm in place:** a destructive item swaps the panel's own contents
-for the consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that
-sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it
-deliberately does not answer Escape.
+that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body
+— except the two transfers, Rename and a clone/replace-with acceptance, whose newly mounted dialogs own focus instead,
+so the teardown retires its return rather than racing their mount handoff. An item made inert by an in-flight operation
+stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser
+cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every navigation key.
+**Confirm in place:** a destructive item swaps the panel's own contents for the consequence line and a confirm/cancel
+pair with focus on cancel, rather than opening a second surface; that sub-state is a `role="dialog"` inside the same
+positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place
@@ -327,7 +328,10 @@ without the retained structured harness or model, so it can expose globally owne
 would edit only a hidden draft. A harness, known model, or recent setup explicitly returns to structured mode; a folder
 changes the shared destination and leaves the active mode alone. The focus handoff runs only at dialog mount, explicit
 mode buttons, and accepted search results. Catalog, history, and operation rerenders cannot take focus back from another
-field.
+field. A clone or replace-with acceptance transfers that initial handoff from the originating row menu: removing the
+activated item can leave the row's inside-focus bookkeeping populated — the teardown reclaims the item's element
+identity in the same pass, so its `onfocusout` never runs to clear it — and the dismissal must retire its toggle return
+for the transfer instead of issuing it after the composer's own search focus and stealing it back.
 
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this

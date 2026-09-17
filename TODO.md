@@ -20,10 +20,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Land keyboard focus in the launch composer's search field for clone and "replace with" too. Opening the composer with
-  "new" focuses the search field so typing starts at once; the clone and "replace with" paths leave focus elsewhere.
-  Every composer opening should behave the same way; choose the exact focus point when implementing this item.
-
 - Make remote host updates start without a confirmation step and follow their progress per host. Clicking update should
   just start the run instead of showing the plan confirmation text. While a host is updating, automatically expand the
   detail view for that host alone, without toggling the listing's overall detail mode; when the update succeeds, fold
