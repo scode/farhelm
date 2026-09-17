@@ -14,7 +14,6 @@ playwright profiles.spec.ts a profile edited in another browser reaches this one
 playwright profiles.spec.ts the profiles popup border box stays inside a constrained viewport  # profiles-webkit-initial-focus
 playwright terminal-multihost.spec.ts a failed removal stays visible with details collapsed  # host-removal-details-toggle
 playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
-nextest farhelm::e2e session_rename::a_renamed_title_survives_a_supervisor_restart  # rename-supervisor-ownership-race
 playwright terminal-flood.spec.ts real backspace erases; real ctrl-c kills the fake agent  # backspace-ctrlc-session-deletion
 playwright profiles.spec.ts an outside click overrides a delayed opening focus commit  # profiles-outside-click-deadline
 playwright profiles.spec.ts stale focus-out classifiers cannot clear newer obligations  # profiles-stubfeed-socket-missing
