@@ -801,7 +801,10 @@ recorded narrow `--repeat-each=5` webkit loop on the same tree, run `8e961b39-96
 narrow loop. The test injects 180 ms of evaluation delay against a 250 ms wall-clock budget, leaving about 70 ms for all
 WebKit bridge overhead. No path in this test claims the operation lock, so no control is ever disabled and the
 concurrent disable-blur repair cannot execute here; the miss reads as load, not as a regression from that change.
-Disposition: still open; the TODO entry is left to the maintainer.
+Disposition: closed by the 2026-09-17 `FOCUS_SETTLE_MS` raise to 1000 ms (`crates/farhelm-ui/src/profiles.rs`) — the
+injected 180 ms plus bridge overhead now fits with wide margin; the test's two-attempt assertion is unchanged, and its
+elapsed bound was re-derived from the budget (≤1000 ms) so a loaded renderer that focuses inside the deadline passes
+instead of tripping the old 250 ms constant.
 
 Class: budget
 

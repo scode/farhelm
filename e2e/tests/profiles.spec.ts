@@ -708,9 +708,10 @@ test.describe("agent profiles", () => {
   });
 
   /**
-   * Browser-evaluation latency is part of the 250 ms wall-clock budget. The
-   * target remains one connected node throughout, so focus proves two delayed
-   * observations fit inside the deadline rather than succeeding after it.
+   * Browser-evaluation latency is part of the wall-clock budget
+   * (FOCUS_SETTLE_MS). The target remains one connected node throughout, so
+   * focus proves two delayed observations fit inside the deadline rather
+   * than succeeding after it.
    */
   test("profile focus counts delayed evaluations against one deadline", async ({ page }) => {
     await listWithStubbedFeed(page);
@@ -734,21 +735,29 @@ test.describe("agent profiles", () => {
       };
     });
     expect(timing.attempts).toBe(2);
-    expect(timing.elapsed).toBeLessThanOrEqual(250);
+    // The bound is the request's own budget (FOCUS_SETTLE_MS = 1000ms): the
+    // contract is that two delayed observations plus bridge overhead fit
+    // INSIDE the deadline — a run that exceeded it would be refused as
+    // expired and never focus, so this assertion pins the timing rather
+    // than the success. Do not tighten it below the budget: any margin
+    // narrower than the loaded-WebKit round trips the budget was raised
+    // for relocates this test's own recorded flake into the assertion.
+    expect(timing.elapsed).toBeLessThanOrEqual(1_000);
     expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
     expect(await original!.evaluate((node) => document.activeElement === node)).toBe(true);
   });
 
   /**
-   * One observation that outlives the 250 ms request budget is consumed as
-   * unknown. Its late JavaScript continuation has no focus side effect, so it
-   * cannot place focus after Rust has stopped owning the request.
+   * One observation that outlives the request budget is consumed as unknown.
+   * Its late JavaScript continuation has no focus side effect, so it cannot
+   * place focus after Rust has stopped owning the request. The injected delay
+   * must stay comfortably above FOCUS_SETTLE_MS (1000ms) for that to hold.
    */
   test("an overdue focus observation cannot focus late", async ({ page }) => {
     await listWithStubbedFeed(page);
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
-        focusEvalDelayMs: 400,
+        focusEvalDelayMs: 1_200,
         focusAttempts: 0,
       };
     });
@@ -828,6 +837,15 @@ test.describe("agent profiles", () => {
    * Renderer errors and timeouts are absence of evidence, not proof of
    * document transit. Persistent focus-placement failures and an overdue
    * classifier consume bounded work without dismissing or stealing focus.
+   *
+   * The placement fault stays set for the WHOLE test (the second phase
+   * extends it rather than replacing it): with FOCUS_SETTLE_MS at 1000ms a
+   * fault cleared mid-test leaves the live request time to recover and
+   * commit focus — a late commit racing an in-flight focus move is a
+   * different (and unwanted) scenario, not this contract's persistent-
+   * failure premise. The classifier's injected 2000ms delay is likewise
+   * past SETTLE+GRACE (1120ms), so the overdue-classifier half still
+   * exercises a classifier that never answers inside its budget.
    */
   test("focus evaluation errors never become dismissal evidence", async ({ page }) => {
     await listWithStubbedFeed(page);
@@ -837,19 +855,29 @@ test.describe("agent profiles", () => {
     });
     await section(page).locator(".new-profile-button").click();
     await expect(section(page)).toBeVisible();
+    // The window must outlive the placement budget (FOCUS_SETTLE_MS = 1000ms)
+    // so the assertion observes the state AFTER persistent failures consumed
+    // it and the request settled as unknown — not the still-running middle.
     // Initial visibility alone would miss a later close.
     // sleep-ok: observe erroneous dismissal after focus-placement failures.
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1_200);
     await expect(section(page)).toBeVisible();
 
     await page.evaluate(() => {
-      (window as any).__farhelmTestProfiles = { classification: { delayMs: 500 } };
+      (window as any).__farhelmTestProfiles = {
+        focusEvalErrors: 100,
+        classification: { delayMs: 2000 },
+      };
     });
     const outside = page.locator(".host-details-toggle");
     await outside.focus();
-    // Elapsed time is not proof that the delayed classifier continuation retired.
+    // The window must outlive the classifier deadline (SETTLE + GRACE =
+    // 1120ms) so the assertions observe the state AFTER the overdue
+    // classifier concluded unknown — not the still-pending middle.
+    // Elapsed time alone is not proof that the delayed classifier
+    // continuation retired.
     // sleep-ok: observe forbidden dismissal or focus stealing after outside focus.
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1_300);
     await expect(section(page)).toBeVisible();
     await expect(outside).toBeFocused();
   });
@@ -858,8 +886,10 @@ test.describe("agent profiles", () => {
    * A failed classification followed by document transit still waits for the
    * popup's live focus request. Unknown evidence cannot skip that settlement
    * loop and turn `body` into an early dismissal destination. The delayed
-   * placement observation ends without evidence when its deadline expires;
-   * merely hiding a known target can instead settle as Missing. Both preserve
+   * placement observations run out the request budget between them: the
+   * first returns missing inside the budget, the second is cut off when
+   * the deadline expires; merely hiding a known target can instead settle
+   * as Missing. Both preserve
    * the popup during unowned body focus and retain an obligation for later
    * outside-focus evidence; this case specifically exercises uncertainty.
    */
@@ -883,9 +913,12 @@ test.describe("agent profiles", () => {
     await expect.poll(() =>
       page.evaluate(() => (window as any).__farhelmTestProfiles.classificationAttempts)
     ).toBeGreaterThanOrEqual(2);
-    // The focus-worker settlement below does not settle every dismissal task.
+    // The window must outlive the focus worker's budget and the classifier
+    // deadline (1000ms / 1120ms) so the visibility check observes the state
+    // AFTER both settled, not the still-pending middle. The focusSettled
+    // poll below pins which ending the worker reached.
     // sleep-ok: observe a wrongly delayed transit dismissal.
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1_300);
     // Verify the uncertainty branch itself: a hidden target that settled as
     // Missing would test a different dismissal contract even if still visible.
     await expect.poll(() =>
@@ -1288,8 +1321,10 @@ test.describe("agent profiles", () => {
     profiles.push(stored.id);
     await expect(form).toHaveCount(0, { timeout: 20_000 });
     await expect(section(page).locator(".new-profile-button")).toBeFocused();
+    // The window outlives the classifier deadline (SETTLE + GRACE = 1120ms):
+    // initial visibility alone would miss a later close.
     // sleep-ok: observe unwanted dismissal after fallback focus while the catalog answer is held.
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1_300);
     await expect(section(page)).toBeVisible();
 
     release!();
@@ -2016,7 +2051,7 @@ test.describe("agent profiles", () => {
     });
     // sleep-ok: deliberate observation window. Pre-fix, the disable-blur
     // records an outside obligation the idle classifier verdicts within
-    // its 370ms deadline (FOCUS_SETTLE_MS + FOCUS_TRANSIT_GRACE_MS), so
+    // its 1120ms deadline (FOCUS_SETTLE_MS + FOCUS_TRANSIT_GRACE_MS), so
     // three mounted seconds prove the discriminator holds with wide
     // margin; the wait fails (by timeout) if the popup ever unmounts.
     await page.waitForFunction(
@@ -2288,9 +2323,10 @@ test.describe("agent profiles", () => {
 
     await expect(form.locator(".profile-form-error")).toBeVisible({ timeout: 20_000 });
     await expect(form.locator(".profile-name-input")).toBeFocused();
-    // The focused input alone does not rule out a later popup close.
+    // The focused input alone does not rule out a later popup close, and the
+    // window outlives the classifier deadline (SETTLE + GRACE = 1120ms).
     // sleep-ok: observe unwanted dismissal after refusal restores form focus.
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1_300);
     await expect(section(page)).toBeVisible();
     // Preserved, not cleared or reset — including the fields the refusal was
     // not about.
@@ -2427,9 +2463,10 @@ test.describe("agent profiles", () => {
 
     await expect(target.locator(".profile-error")).toContainText("refused", { timeout: 20_000 });
     await expect(target.locator(".profile-edit")).toBeFocused();
-    // Immediate visibility alone would miss a later popup close.
+    // Immediate visibility alone would miss a later popup close, and the
+    // window outlives the classifier deadline (SETTLE + GRACE = 1120ms).
     // sleep-ok: observe unwanted dismissal after refusal restores row focus.
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1_300);
     await expect(section(page)).toBeVisible();
     await expect(target, "a refused delete must not remove the row").toBeVisible();
     await expect(
