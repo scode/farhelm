@@ -1,0 +1,47 @@
+This file carries the license notice for addon-web-links.js — the vendored
+@xterm/addon-web-links UMD bundle (see the provenance comment on
+VENDOR_WEB_LINKS_JS in ../../src/lib.rs for its exact version and source).
+Unlike addon-clipboard.js, which compiles js-base64 in as a webpack module,
+this bundle has no bundled third-party code at all: its source map names
+only the addon's own two sources plus webpack's bootstrap, and the bundle
+contains no `require` calls — so the single MIT text below is the whole of
+what its distribution requires. Copied verbatim from the package's own
+LICENSE file as published to npm.
+
+Certification digests (see the U6 worker report for the full audit):
+- registry tarball @xterm/addon-web-links 0.12.0:
+  sha512-4Smom3RPyVp7ZMYOYDoC/9eGJJJqYhnPLGGqJ6wOBfB8VxPViJNSKdgRYb8NpaM6YSelEKbA2SStD7lGyqaobw==
+  (matches the registry's published integrity; shasum bc34ae46f4c12012256d451ac2b9be791c0b6bfa)
+- retained addon-web-links.js (3100 bytes, byte-identical to the tarball's
+  lib/addon-web-links.js):
+  sha256:b74864125ef3889753b94e61eb4dabb99b2a27f920f0c9a7bd53cbe6d10f032a
+
+This notice ships inside the distributed bundles, not just beside the
+source: WEB_LINKS_LICENSES in ../../src/lib.rs declares this file as an
+asset, so the web bundle and the desktop release's embedded UI tree both
+carry it (see that declaration for why a source-side text file alone would
+prove nothing).
+
+================================================================================
+@xterm/addon-web-links — MIT
+================================================================================
+
+Copyright (c) 2017, The xterm.js authors (https://github.com/xtermjs/xterm.js)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

@@ -1101,6 +1101,58 @@ declare_assets! {
     // `assets/vendor/addon-clipboard-LICENSES.txt`, alongside this asset the
     // same way `assets/fonts/OFL.txt` sits alongside the vendored font files.
     const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
+    // Plain-text URL links: the unmodified `lib/addon-web-links.js` UMD
+    // bundle from `@xterm/addon-web-links` version 0.12.0
+    // (https://registry.npmjs.org/@xterm/addon-web-links/-/addon-web-links-0.12.0.tgz,
+    // dist-tag `latest` at vendoring time), whose README declares xterm.js
+    // v4+ compatibility and which shipped the same day as the vendored
+    // xterm 6.0.0 above. Certified before wiring (see the U6 worker
+    // report): registry integrity and shasum match, the retained 3100
+    // bytes are byte-identical to the tarball, and the bundle exposes
+    // the `window.WebLinksAddon.WebLinksAddon` global constructed with an
+    // activation callback plus optional options. Its `activate` registers
+    // through the `registerLinkProvider` generation — never the removed
+    // matcher API, never undocumented core internals, just the public
+    // buffer/wrap/cell surface — and its `dispose` drops that
+    // registration, so xterm's own addon disposal owns its lifetime (see
+    // terminal.js's `mount()` for why nothing else may dispose it). The
+    // default matcher recognizes explicit `http://`/`https://` text only —
+    // lowercase or UPPERCASE scheme spellings, never mixed case (the
+    // upstream regex is `(https?|HTTPS?)` with no `i` flag, so e.g.
+    // `Https://` never matches: an upstream matching limitation, not a
+    // reason to replace the certified matcher) — validates each candidate
+    // as an absolute URL with a host, and reconstructs wrapped logical
+    // lines through `isWrapped` traversal (whole wrapped rows accumulate
+    // while the running length tests below 2048, so discovery reaches
+    // roughly that far plus up to one row per direction — an approximate
+    // bound, not a strict cap); terminal.js keeps that default rather than
+    // substituting a custom regex, and adds its own activation-time
+    // allowlist as a second boundary.
+    //
+    // License notice: MIT only (the addon itself) — verified to bundle no
+    // third-party code, unlike the clipboard addon above, so the
+    // clipboard's js-base64 notice does not apply here. The verbatim text
+    // plus certification digests live in
+    // `assets/vendor/addon-web-links-LICENSES.txt`, declared as
+    // `WEB_LINKS_LICENSES` below so the notice ships inside the bundles
+    // rather than sitting beside the source.
+    const VENDOR_WEB_LINKS_JS: Asset = asset!("/assets/vendor/addon-web-links.js");
+    // The MIT notice for `VENDOR_WEB_LINKS_JS` above, as a shippable file.
+    // A source-side text file alone proves nothing about distributed
+    // copies, so this is declared like the fonts: an unrendered asset the
+    // web bundle and the desktop release's embedded UI tree both carry,
+    // held equal by `scripts/check-desktop-assets.sh` (a declared file the
+    // bundler ever dropped would fail parity as a requested-but-unbundled
+    // `+` line). `#[used]` plus the generated `all_assets` reference keep
+    // the linker from dropping it before the bundler's manifest scan, and
+    // the unhashed name keeps the notice at a stable, citable path — the
+    // same cache-busting tradeoff the fonts document, acceptable for the
+    // same reason (these bytes change only on a deliberate re-vendoring).
+    #[used]
+    static WEB_LINKS_LICENSES: Asset = asset!(
+        "/assets/vendor/addon-web-links-LICENSES.txt",
+        AssetOptions::builder().with_hash_suffix(false)
+    );
     // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
     // item 1) — a separate asset, registered ahead of terminal.js, purely so
     // `node --test` can load this exact file rather than a copy of its logic.
@@ -1180,6 +1232,13 @@ declare_assets! {
     // the three helpers above: `node --test` must run the exact shipped
     // function, and terminal.js treats this global as a mount precondition.
     const COPY_ON_SELECT_JS: Asset = asset!("/assets/copy-on-select.js");
+    // The shared link opener plus the plain-text URL allowlist terminal.js's
+    // two link adapters call — OSC 8's `linkHandler` and the WebLinks
+    // addon's activation callback. Its own asset for the same reason as the
+    // four helpers above: `node --test` must run the exact shipped
+    // functions, and terminal.js treats this global as a mount
+    // precondition so no link can activate half-loaded.
+    const TERMINAL_LINKS_JS: Asset = asset!("/assets/terminal-links.js");
     const TERMINAL_JS: Asset = asset!("/assets/terminal.js");
     // The invalidation feed's socket (PLAN_M6_75.md item 6) — its own asset
     // rather than a corner of terminal.js, because it has nothing to do with a
@@ -1307,11 +1366,13 @@ fn AppBody() -> Element {
         document::Script { src: VENDOR_XTERM_JS }
         document::Script { src: VENDOR_FIT_JS }
         document::Script { src: VENDOR_CLIPBOARD_JS }
+        document::Script { src: VENDOR_WEB_LINKS_JS }
         document::Script { src: TERM_BYTES_JS }
         document::Script { src: TERMINAL_THEME_JS }
         document::Script { src: CLIPBOARD_NAME_JS }
         document::Script { src: SHIFT_ENTER_KEY_JS }
         document::Script { src: COPY_ON_SELECT_JS }
+        document::Script { src: TERMINAL_LINKS_JS }
         document::Script { src: TERMINAL_JS }
         document::Script { src: EVENTS_JS }
         // Above both views and outside the match, deliberately: a build

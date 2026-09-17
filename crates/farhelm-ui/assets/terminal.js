@@ -2589,16 +2589,18 @@
     },
 
     /**
-     * Wait for xterm's globals (`Terminal`, `FitAddon`, and the vendored
-     * OSC 52 addon's `ClipboardAddon`), the term-bytes helper
+     * Wait for xterm's globals (`Terminal`, `FitAddon`, the vendored
+     * OSC 52 addon's `ClipboardAddon`, and the vendored plain-text link
+     * addon's `WebLinksAddon`), the term-bytes helper
      * (`window.farhelmTermBytes`), the clipboard-naming helper
      * (`window.farhelmClipboardNames`), the Shift+Enter key decision
      * (`window.farhelmShiftEnterKey`), the copy-on-select decision
-     * (`window.farhelmCopyOnSelect`), `fontSettled`, and `spec.el` to
+     * (`window.farhelmCopyOnSelect`), the terminal-links helper
+     * (`window.farhelmTerminalLinks`), `fontSettled`, and `spec.el` to
      * exist, then mount — owning the ENTIRE retry loop that used to live
      * in the `document::eval` snippet calling this (lib.rs).
      *
-     * `fontSettled` is NOT the same kind of condition as the seven globals
+     * `fontSettled` is NOT the same kind of condition as the ten globals
      * beside it, and reads that way on purpose (this file's own "## Font
      * settling before mount" header has the full design). Every global
      * above names a same-origin bundled file this app shipped itself, so
@@ -2641,7 +2643,13 @@
      * either landed would silently drop OSC 52 writes or leave the mouseup
      * listener calling into an undefined decision function, rather than
      * failing the mount outright the way every other precondition here
-     * does.
+     * does. `WebLinksAddon` and `farhelmTerminalLinks` join it for the
+     * same reason one final time, as a pair: mounting before either
+     * landed would construct a terminal whose plain-text links either
+     * throw at `loadAddon` time or activate into an undefined opener —
+     * and there is deliberately no mount-without-links fallback, because
+     * a terminal that silently drops a whole link class is worse than a
+     * mount that waits for its own deployment to finish arriving.
      *
      * That move closes a real bug (the "stale mount retry" finding): the
      * old loop was a bare `setTimeout` chain with no handle anything
@@ -2686,11 +2694,13 @@
           window.Terminal &&
           window.FitAddon &&
           window.ClipboardAddon &&
+          window.WebLinksAddon &&
           window.farhelmTermBytes &&
           window.farhelmTerminalTheme &&
           window.farhelmClipboardNames &&
           window.farhelmShiftEnterKey &&
           window.farhelmCopyOnSelect &&
+          window.farhelmTerminalLinks &&
           fontSettled &&
           document.getElementById(spec.el)
         ) {
@@ -2912,14 +2922,19 @@
           // the app. The page origin is `dioxus://` only in the desktop
           // webview, which is what the protocol check keys on; in a real
           // browser `location.assign` would leave Farhelm, so the web
-          // keeps `window.open`.
+          // keeps `window.open`. That branch lives in the shared
+          // `farhelmTerminalLinks.openTerminalUrl` rather than inline
+          // here, because the plain-text WebLinks adapter below opens
+          // through the identical call — one opener, two adapters, no
+          // divergent copy. OSC 8 behavior itself is unchanged by the
+          // sharing: xterm's `OscLinkProvider` still owns this path's
+          // input boundary (it rejects non-HTTP(S) URIs; Farhelm does not
+          // set `allowNonHttpProtocols`), and it still registers first,
+          // so an OSC 8 span keeps precedence over any plain-text match
+          // under it.
           linkHandler: {
             activate(_event, uri) {
-              if (window.location.protocol === 'dioxus:') {
-                window.location.assign(uri);
-              } else {
-                window.open(uri, '_blank', 'noopener');
-              }
+              window.farhelmTerminalLinks.openTerminalUrl(uri);
             },
           },
         });
@@ -2953,6 +2968,54 @@
         // this override.
         term.loadAddon(
           new ClipboardAddon.ClipboardAddon(new ClipboardAddon.Base64(), clipboardProvider),
+        );
+        // Plain-text URL links (the vendored `@xterm/addon-web-links`; see
+        // `VENDOR_WEB_LINKS_JS`'s provenance comment in lib.rs for the
+        // exact version). One addon per constructed terminal, loaded here
+        // — after construction, before `open()` — alongside Fit and
+        // Clipboard, so every island gets links and no island gets two
+        // providers. The addon's `activate` registers its provider through
+        // xterm's `registerLinkProvider`, AFTER the `OscLinkProvider` the
+        // constructor installed, so an OSC 8 span keeps precedence over a
+        // plain-text match under it (the core resolves providers in order
+        // and drops overlapped lower-priority links). Disposal is xterm's:
+        // `loadAddon` hands the instance to the terminal's `AddonManager`,
+        // which disposes it with `term.dispose()` — nothing here disposes
+        // it on unmount, because the `keepTerm` reconnect path retains the
+        // terminal and the addon must live exactly as long.
+        //
+        // No options: the verified upstream default matcher is the whole
+        // detection boundary (explicit http(s) text in lowercase or
+        // UPPERCASE schemes only — the upstream regex has no `i` flag —
+        // absolute-URL-with-host validation, wrapped-line reconstruction),
+        // and this file keeps it rather than substituting a custom regex.
+        // The callback below is
+        // the activation-time half — a selection guard plus the shared
+        // opener's allowlist — and it runs synchronously inside the click,
+        // with no fetch, lookup, or confirmation.
+        term.loadAddon(
+          new WebLinksAddon.WebLinksAddon((_event, uri) => {
+            // A drag that starts AND ends inside one long URL reaches this
+            // callback: xterm's Linkifier activates on matching
+            // press/release link identity with no selection guard of its
+            // own (checked against the vendored core's `_handleMouseUp`),
+            // and the addon adds none either. So a non-empty selection at
+            // activation time means "that was a drag, not a click", and
+            // opening would both navigate away from selected text the user
+            // was trying to copy and open a URL they never clicked. A
+            // plain click never trips this — mousedown clears the old
+            // selection before mouseup runs — so clicking a link right
+            // after selecting text still opens. Both halves are pinned by
+            // e2e/tests/terminal-links.spec.ts, in both engines. Scoped to
+            // this adapter only: OSC 8 gestures are untouched.
+            if (term.getSelection()) return;
+            // The second boundary (the addon's default matcher is the
+            // first): http(s) with a host, or nothing opens — printed
+            // `javascript:`/`data:`/`file:` text is never clickable (see
+            // terminal-links.js for the full four-check rationale).
+            if (!window.farhelmTerminalLinks.isPlainWebUrl(uri)) return;
+            window.farhelmTerminalLinks.openTerminalUrl(uri);
+          }),
         );
         term.open(el);
         fit.fit();
