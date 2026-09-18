@@ -1007,3 +1007,26 @@ left the working copy, so none remains to remove.
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-09-18 — `events::tests::a_subscriber_answering_keepalives_stays_connected` (crates/farhelm-helm)
+
+Failed once in the `v0.10.0-rc.2` release gate's workspace suite on a GitHub-hosted x86_64 4-vCPU runner: the
+subscriber's `recv()` returned `None` at a keepalive step 0.037 s into the test ("a live subscriber must receive each
+keepalive"), meaning the server had closed the socket; the run otherwise passed (2044/2045, 4 nextest slots, retries 0,
+pinned tmux 3.7c executable SHA256 `22bf00a4ea3869fedb572320b5423b0f78e1fc22b3386510316b663544efd8e1`, `LANG=C.UTF-8`,
+ambient `FARHELM_*` scrubbed). Passed on the `--failed` rerun of the same leg; release run 35353049987, retained
+recorder run `8717a7d7-806a-4fbd-8566-1354783d3c57` (failure evidence also uploaded as the run's
+`test-run-failure-35353049987-1-2` artifact). Tested commit `9331971a491885461ebf678698a7cb0908eadb87`, clean release
+checkout, full workspace selection excluding the desktop crate. The test and its harness (`events.rs`,
+`rest_harness.rs`) are byte-identical back to the `0.10.0-rc.1` tag, so the race predates the two feature commits added
+to the binary between the tags. Local evidence, none reproducing: 20/20 single-test repetitions (batch
+`19773c1e-0adf-4558-a2ed-4a696c56fc4c`) and 5/5 full `farhelm-helm` lib runs, 768 tests across four nextest slots (batch
+`8d2db996-60ac-4165-baf4-170f8a30e358`). Suspected mechanism: the test answers each keepalive Ping with `send_pong()`
+plus a single `yield_now()` before advancing virtual time a further idle interval; if the server's pong-read readiness
+is not collected before that `advance(IDLE_PING_INTERVAL)` fires the idle timer, `select!` can take the idle branch
+while `awaiting_liveness` is still true and drop the seat, closing the socket. Disposition: open (TODO.md deflake entry
+written).
+
+Class: peer-lifecycle
+
+Cause: hypothesis

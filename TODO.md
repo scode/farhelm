@@ -87,6 +87,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- Deflake `events::tests::a_subscriber_answering_keepalives_stays_connected` in `crates/farhelm-helm/src/events.rs`.
+  Failed once in the rc.2 release gate (run 35353049987) with the server closing the subscriber's socket at a keepalive
+  step; the `--failed` rerun and 25 local runs (20 single-test, 5 full-lib at the gate's four-slot budget) all passed.
+  Suspected interleave: the single `yield_now()` after `send_pong()` can lose to the idle-timer fire inside the next
+  `advance(IDLE_PING_INTERVAL)`, letting `select!` drop the seat while `awaiting_liveness` is still true (FLAKES.md
+  2026-09-18). A fix shape to weigh: make an in-hand liveness answer win the select (e.g. `biased` with the inbound
+  branch ahead of the idle timer) or make the pong's processing observable to the test before it advances virtual time
+  again.
+
 - Watch the initial profile focus failures in `e2e/tests/profiles.spec.ts` after the focus-budget fix. WebKit failed the
   editor focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus
   in `a profile edited in another browser reaches this one over the real feed` (the latter occurs before the separately
