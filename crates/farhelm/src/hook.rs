@@ -410,23 +410,33 @@ fn parse_payload(bytes: &[u8]) -> Result<(String, String), &'static str> {
         Some(serde_json::Value::String(source)) => source.clone(),
         _ => String::new(),
     };
+    // A vendor-prefixed payload encodes the durable locator under its own
+    // vendor's spelling; the two locator vendors never accept each other's
+    // tokens downstream, which starts here with a per-vendor encode.
+    const LOCATOR_VENDORS: &[(&str, farhelm_supervisor::agent_kind::LocatorVendor)] = &[
+        ("pi", farhelm_supervisor::agent_kind::LocatorVendor::Pi),
+        ("omp", farhelm_supervisor::agent_kind::LocatorVendor::Omp),
+    ];
     match value.get("vendor") {
-        Some(serde_json::Value::String(vendor)) if vendor == "pi" => {
+        Some(serde_json::Value::String(vendor)) => {
+            let Some((_, expected)) = LOCATOR_VENDORS.iter().find(|(name, _)| name == vendor)
+            else {
+                return Err("unknown-vendor");
+            };
             let session_file = match value.get("session_file") {
                 None | Some(serde_json::Value::Null) => None,
                 Some(serde_json::Value::String(path)) => Some(path.clone()),
-                Some(_) => return Err("pi-session-file-not-a-string"),
+                Some(_) => return Err("session-file-not-a-string"),
             };
-            let locator = farhelm_supervisor::agent_kind::PiLocator {
+            let locator = farhelm_supervisor::agent_kind::SessionLocator {
                 version: 1,
                 session_id: session_id.clone(),
                 session_file,
             };
-            let encoded = farhelm_supervisor::agent_kind::encode_pi_locator(locator)
-                .map_err(|_| "invalid-pi-locator")?;
+            let encoded = farhelm_supervisor::agent_kind::encode_locator(*expected, locator)
+                .map_err(|_| "invalid-locator")?;
             return Ok((encoded, source));
         }
-        Some(serde_json::Value::String(_)) => return Err("unknown-vendor"),
         Some(_) => return Err("vendor-not-a-string"),
         None => {}
     }
@@ -1088,6 +1098,48 @@ mod tests {
         assert_eq!(
             parse_payload(payload.as_bytes()).expect_err("132 bytes is over the cap"),
             "oversized-session-id"
+        );
+    }
+
+    /// A locator-reporting vendor's payload encodes the durable locator under
+    /// that vendor's own prefix, an unknown vendor keeps being refused, and a
+    /// non-string vendor is never silently read as a plain id. These are the
+    /// three branches of [`parse_payload`]'s vendor handling; pinning them
+    /// together keeps a new vendor from accidentally widening the plain-id
+    /// path or from cross-reporting through the other vendor's prefix.
+    #[farhelm_testtrace::test]
+    fn vendor_payloads_encode_locators_per_vendor_and_stay_closed() {
+        let (id, source) = parse_payload(
+            br#"{"vendor":"omp","session_id":"omp-id-1",
+                "session_file":"/tmp/s/conv.jsonl","source":"session_start"}"#,
+        )
+        .expect("omp payload parses");
+        assert!(
+            id.starts_with("omp:"),
+            "OMP reports under its own prefix: {id}"
+        );
+        assert_eq!(source, "session_start");
+
+        let (id, _) =
+            parse_payload(br#"{"vendor":"pi","session_id":"pi-1"}"#).expect("pi payload parses");
+        assert!(id.starts_with("pi:"), "Pi's spelling is unchanged: {id}");
+
+        assert_eq!(
+            parse_payload(br#"{"vendor":"goose","session_id":"x"}"#)
+                .expect_err("an unknown vendor is refused"),
+            "unknown-vendor"
+        );
+        assert_eq!(
+            parse_payload(br#"{"vendor":7,"session_id":"x"}"#)
+                .expect_err("a non-string vendor is refused"),
+            "vendor-not-a-string"
+        );
+        // A session_file that is not a string is refused rather than
+        // stringified into a resume target.
+        assert_eq!(
+            parse_payload(br#"{"vendor":"omp","session_id":"x","session_file":42}"#)
+                .expect_err("a non-string session file is refused"),
+            "session-file-not-a-string"
         );
     }
 

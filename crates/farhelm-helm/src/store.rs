@@ -465,6 +465,7 @@ fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str {
         farhelm_proto::AgentKind::Codex => "codex",
         farhelm_proto::AgentKind::Goose => "goose",
         farhelm_proto::AgentKind::Pi => "pi",
+        farhelm_proto::AgentKind::Omp => "omp",
         farhelm_proto::AgentKind::Generic => "generic",
     }
 }
@@ -477,6 +478,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "codex" => Ok(farhelm_proto::AgentKind::Codex),
         "goose" => Ok(farhelm_proto::AgentKind::Goose),
         "pi" => Ok(farhelm_proto::AgentKind::Pi),
+        "omp" => Ok(farhelm_proto::AgentKind::Omp),
         "generic" => Ok(farhelm_proto::AgentKind::Generic),
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     }
@@ -12665,6 +12667,33 @@ mod tests {
                 .expect("catalog read skips malformed row");
             assert_eq!(profiles.len(), builtin_profiles().len() + 1);
             assert!(profiles.iter().any(|profile| profile.id == "valid-profile"));
+        }
+    }
+
+    /// The OMP kind round-trips through the profile column vocabulary, and an
+    /// unknown spelling is still refused rather than downgraded to a default.
+    /// Pinned beside the round-trip test above because the strict decode is
+    /// the data-integrity half of the protocol bump that introduced the kind:
+    /// a helm that silently coerced `omp` (or a typo next to it) would change
+    /// which integration a stored profile selects without any write happening.
+    #[farhelm_testtrace::test]
+    fn omp_agent_kind_round_trips_and_unknown_spellings_stay_refused() {
+        assert_eq!(agent_kind_column(farhelm_proto::AgentKind::Omp), "omp");
+        assert_eq!(
+            agent_kind_from_column("omp").expect("the omp spelling decodes"),
+            farhelm_proto::AgentKind::Omp
+        );
+        // Pi's spelling is unchanged by the OMP addition: the two kinds are
+        // distinct at this boundary, never aliases.
+        assert_eq!(
+            agent_kind_from_column("pi").expect("pi still decodes"),
+            farhelm_proto::AgentKind::Pi
+        );
+        for unknown in ["ompish", "OMP", "", "generic "] {
+            assert!(
+                agent_kind_from_column(unknown).is_err(),
+                "{unknown:?} must stay outside the strict vocabulary"
+            );
         }
     }
 

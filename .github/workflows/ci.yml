@@ -193,6 +193,11 @@ jobs:
       # inside js-tests/ uses node's long-supported default test discovery
       # instead of relying on glob CLI syntax from an unpinned node release.
       - run: cd crates/farhelm-ui/js-tests && node --test
+      # The OMP conversation-reporter asset's scenarios are the only
+      # automated execution of an injected asset, so they ride the same lint
+      # runner on the same terms: node is already here, and running from
+      # inside the suite directory keeps node's default test discovery.
+      - run: cd crates/farhelm-supervisor/asset-js-tests && node --test
 
   # The desktop renderer is compiled by no other ordinary-CI job: clippy
   # builds without the renderer feature and e2e is disabled. Keep this fast

@@ -1182,6 +1182,41 @@ reports a failed listing rather than a silently shortened one.
   protecting a different newer mirrored identity. An identity that changes away and back during the read may briefly
   leave a stale offer until the next pass; restart always checks the durable identity.
 
+  **The OMP reporter and its locator.** OMP (`AgentKind::Omp`, wire `omp`) is a third report-only integration with no
+  record-root scanning, added beside the Goose/Pi pair rather than inside it. The locator is Pi's shape re-generalized:
+  one `SessionLocator` type with a closed `LocatorVendor` enum, encoded and parsed per expected vendor, with Pi's `pi:`
+  wire bytes, bounds, and deny-unknown-fields layout preserved exactly and `omp:` added beside it. Parsing is always
+  dispatched by the vendor the stored kind expects, never by sniffing the prefix, because accepting a locator under the
+  wrong vendor's prefix would let one integration's report become another's resume target — a data-integrity bug, not a
+  convenience. The plain-id escape routes (restart offers, template substitution, report acceptance for id-based kinds)
+  reject BOTH reserved prefixes through one shared check that does not decode JSON first: a malformed locator must be
+  refused as a locator, not fall through as an id. Pre-resume verification dispatches on the stored kind and gives OMP
+  its own header parser — a bounded no-follow prefix read that skips at most one well-formed leading title slot (the
+  fixed-width 256-byte record OMP 18.2.4 rewrites in place) and then requires a `type:"session"` record at `version: 3`
+  carrying the reported id, refusing anything else. That parser is deliberately separate from Pi's first-record rule,
+  which stays exactly as strict as it was: one vendor's tolerance must not become the other's loosening. The cost of the
+  separation is stated in SPEC.md — a title-less OMP version-3 header is byte-indistinguishable from a Pi-shaped file,
+  so the vendor boundary is enforced by per-kind locator and report acceptance, not by file bytes. OMP's resume template
+  strips OMP's own session selectors before appending `--resume <verified-file>`, because unlike Pi's, OMP's
+  `--resume`/`-r`/`--session` consume optional values (and its `--fork`, `--continue`, and import flags have their own
+  shapes), so Pi's valueless-flag classification would leave an old session source standing between the user and the
+  verified target. An OMP argv containing a GENUINE end-of-options delimiter (an unconsumed `--`, walked with the same
+  argument grammar the stripper and the classifier share) refuses the DERIVED template: everything after `--` is prompt
+  text in OMP, so an appended resume target can never be read as one, and refusing the create fails closed rather than
+  persisting a template that cannot work. A `--` consumed as an option value (`--system-prompt --`, a prompt spelled
+  `--`) is not a delimiter and creates normally, and an explicit template override — filled verbatim, never appended —
+  creates normally behind a genuine delimiter too. Which OMP launches get the extension is decided by an OMP-specific
+  interactive-shape classifier following OMP's own command and flag-consumption tables; Pi's classifier is untouched.
+  The extension asset is materialized per vendor under Farhelm's state directory (`integrations/omp/`) with the same
+  exact-bytes, private-file, no-follow rules Pi's had, loaded with `-e <materialized path>` and pointed at the reporter
+  through `FARHELM_OMP_REPORTER_EXE`. The extension ALWAYS reports the current conversation id, with
+  `session_file: null` when there is no file to name, and a null-file report withdraws the old target instead of
+  retaining it — gating the whole report on file existence would leave the previous conversation's resume target
+  standing after a fileless transition. Reports serialize so a slow report for an old conversation cannot win. OMP
+  18.2.4's `/new` persists eagerly, so a fresh-but-empty conversation can legitimately carry a resume offer immediately;
+  the eventless-relocation and non-file-backend gaps SPEC.md states are accepted here rather than papered over.
+  `PROTOCOL_VERSION` is 22 for this kind; PR 2 bumps it to 23 for `LaunchHarness::Omp`.
+
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the
   agent that `$farhelm <request>` means the `farhelm agent` CLI and that `farhelm agent instructions` explains it. Both

@@ -55,6 +55,12 @@ pub const GOOSE_REPORTER_EXE_ENV_VAR: &str = "FARHELM_GOOSE_REPORTER_EXE";
 /// Absolute reporter executable supplied only to Pi launches Farhelm injected.
 pub const PI_REPORTER_EXE_ENV_VAR: &str = "FARHELM_PI_REPORTER_EXE";
 
+/// Absolute reporter executable supplied only to OMP launches Farhelm
+/// injected. Deliberately its own variable rather than Pi's: the two
+/// harnesses are different processes and a launch must never be able to
+/// cross-report through the other vendor's channel.
+pub const OMP_REPORTER_EXE_ENV_VAR: &str = "FARHELM_OMP_REPORTER_EXE";
+
 /// The environment marker every TERMINAL TAB carries on top of
 /// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). Set by
 /// tmux itself (`new-window -e`) rather than by a shim, because a tab has

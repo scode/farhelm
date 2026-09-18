@@ -582,7 +582,9 @@ before output comparison, while retaining the raw bounded screen for approval de
 It may also recognize a current vendor work indicator, but a waiting prompt wins and neither heuristic creates lifecycle
 state. Wrong status must be cosmetic only — status detection must never gate or delay interaction with the terminal.
 Integrations that require configuring the agent itself (e.g. Claude Code hooks) may be supported later but are not part
-of v1 and must never be required.
+of v1 and must never be required. OMP is a stated exception in the other direction: its integration is conversation
+identity only, and Farhelm performs no OMP waiting recognition at all. An OMP approval prompt shows the generic
+running/idle classification, never waiting — a settled scope decision, not a heuristic waiting to be sharpened.
 
 Notifications (desktop or otherwise) are explicitly out of v1. The status column is the whole story.
 
@@ -756,21 +758,46 @@ absolute: the report it delivers lands in farhelm's own database, and every run 
 Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
 example — hooks written into the agent's configuration — still stands. Scanning stays the fallback whenever no report
 has been accepted, which covers more than unhooked launches: a hook that is skipped, fails, times out, or is refused
-leaves the scan in charge exactly as before. Goose and Pi are report-only integrations: Farhelm never scans or guesses
-from their vendor state. Goose persists a credential-free named MCP reporter with the conversation and reuses it on
-resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
+leaves the scan in charge exactly as before. Goose, Pi, and OMP are report-only integrations: Farhelm never scans or
+guesses from their vendor state. Goose persists a credential-free named MCP reporter with the conversation and reuses it
+on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
 session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
 file without following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh
 and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that request.
 
+OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is a third report-only integration beside Pi. A launch
+whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
+subcommands, print/mode/export/alias/help/version/license/list-models occurrences, the reserved-word rejecting forms,
+internal worker selectors, `--trusted-extension` launches (which OMP refuses to combine with an injected `-e`), and a
+genuine end-of-options `--` are left without the extension — runnable exactly as written. A genuine `--` additionally
+refuses the CREATE when the derived OMP resume template would be appended behind it (the appended `--resume` would land
+in prompt position); a `--` consumed as an option value or an explicit resume template creates normally. An OMP report
+carries the same durable locator shape under an `omp:` prefix instead of Pi's `pi:`, and the two are never
+interchangeable: an OMP locator is never accepted for a Pi session or the reverse, and neither passes as a plain
+conversation id for the other kinds. Before an OMP resume, Farhelm reads a bounded prefix of the reported file without
+following symlinks, skips at most one leading shape-checked title slot (a fixed-width 256-byte record OMP rewrites in
+place), and requires the next record to be the session header at `version: 3` carrying the reported id — anything else
+refuses. The refusal fails closed the same way Pi's does: the durable offer becomes fresh and the stale Resume request
+is rejected, never silently launched fresh. A session header with no title slot cannot be told apart from a Pi-shaped
+file by its bytes, so OMP's vendor isolation lives at the locator and report boundary, not in file bytes. Two OMP
+limitations are stated rather than smoothed over. OMP can move an active conversation's file without any event Farhelm
+subscribes to, so an immediate exit after such a move can leave a stale locator until the next subscribed event —
+pre-resume verification is what keeps that offer from resuming an absent file. And a conversation stored somewhere other
+than a session file, or compressed into a `.jsonl.gz` archive, has nothing Farhelm can verify, so its resume offer
+withdraws — fail closed, not a silent fresh start. One OMP difference works in the user's favor: OMP 18.2.4 persists a
+new conversation eagerly, so after `/new` the fresh conversation can be resumable at once instead of waiting for a first
+assistant message.
+
 When an integrated session has no explicit resume invocation, its resume invocation is derived from the original launch
 argv retained for that session: Claude appends `--resume <conversation-id>`, and Codex appends
-`resume <conversation-id>`, Goose uses `session --resume --session-id <conversation-id>`, and Pi uses
-`--session <verified-absolute-file>`. For Pi, `{conversation}` in every resume template means that verified file path,
-not Farhelm's internal durable locator. The original argv is reused as-is, including permission and configuration
-arguments, and is preserved as argv elements rather than rejoined shell text. This immediate rule assumes every original
-argument is reusable and that the launch has no initial prompt or launch-only option; separating those concerns into
-common, launch, and resume arguments is deferred.
+`resume <conversation-id>`, Goose uses `session --resume --session-id <conversation-id>`, Pi uses
+`--session <verified-absolute-file>`, and OMP uses `--resume <verified-absolute-file>`. For Pi and OMP, `{conversation}`
+in a resume template means that verified file path, not Farhelm's internal durable locator. The original argv is reused
+as-is, including permission and configuration arguments, and is preserved as argv elements rather than rejoined shell
+text — except that OMP's own session selectors are stripped from the retained argv first, so an old resume or fork
+target cannot survive between the user and the verified one. This immediate rule assumes every original argument is
+reusable and that the launch has no initial prompt or launch-only option; separating those concerns into common, launch,
+and resume arguments is deferred.
 
 Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
 no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job

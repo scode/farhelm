@@ -184,7 +184,15 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// decode or retain them, so mixed versions must refuse the hello rather than
 /// silently compiling another harness or dropping exact-resume behavior.
 ///
-/// `protocol_version_is_pinned_at_21` (renamed at every bump since `_at_4`)
+/// Version 22 adds the OMP agent kind (`omp`) to the closed [`AgentKind`]
+/// vocabulary. The kind decides which conversation reports a supervisor
+/// accepts (OMP reports a typed locator under its own `omp:` prefix) and
+/// which hook injection its launches receive; an older peer cannot decode
+/// the new enum tag at all, so mixed versions must refuse the hello rather
+/// than silently dropping exact-resume behavior or accepting a report
+/// against the wrong integration.
+///
+/// `protocol_version_is_pinned_at_22` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -196,7 +204,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1185,6 +1193,7 @@ pub fn validate_profile_fields(
             AgentKind::Codex => "codex",
             AgentKind::Goose => "goose",
             AgentKind::Pi => "pi",
+            AgentKind::Omp => "omp",
             AgentKind::Generic => unreachable!(),
         };
         return Err(format!(
@@ -1426,6 +1435,13 @@ pub enum AgentKind {
     /// Pi reports a typed locator containing its session id and exact saved
     /// file; Farhelm verifies that file only when a restart asks to resume.
     Pi,
+    /// OMP reports a typed locator containing its session id and exact saved
+    /// file, under its own `omp:` prefix; Farhelm verifies that file only when
+    /// a restart asks to resume. The wire vocabulary is shared with Pi's
+    /// locator, but a locator reported for one of these kinds is never
+    /// accepted for the other, and neither may pass as a plain conversation
+    /// id for the id-reporting kinds.
+    Omp,
     /// Explicitly non-integrated: no status heuristics beyond the
     /// generic ones, no conversation-identity capture, regardless of
     /// what basename recognition would have concluded on its own.
@@ -4015,8 +4031,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_21() {
-        assert_eq!(PROTOCOL_VERSION, 21);
+    fn protocol_version_is_pinned_at_22() {
+        assert_eq!(PROTOCOL_VERSION, 22);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -5402,6 +5418,7 @@ mod tests {
             AgentKind::Codex,
             AgentKind::Goose,
             AgentKind::Pi,
+            AgentKind::Omp,
             AgentKind::Generic,
         ] {
             let expected = match kind {
@@ -5409,6 +5426,7 @@ mod tests {
                 AgentKind::Codex => "codex",
                 AgentKind::Goose => "goose",
                 AgentKind::Pi => "pi",
+                AgentKind::Omp => "omp",
                 AgentKind::Generic => "generic",
             };
             assert_eq!(
@@ -8096,6 +8114,27 @@ mod tests {
                 Some(&["claude".to_string()]),
             )
             .is_err()
+        );
+        // The integrated-kind placeholder rule covers every integrated kind,
+        // so pin the newest one explicitly: an OMP profile without
+        // `{conversation}` is refused for exactly the reason Claude's is,
+        // and one with it is accepted.
+        assert!(
+            validate_profile_fields("Omp", "omp", AgentKind::Omp, Some(&["omp".to_string()]))
+                .is_err()
+        );
+        assert!(
+            validate_profile_fields(
+                "Omp",
+                "omp",
+                AgentKind::Omp,
+                Some(&[
+                    "omp".to_string(),
+                    "--resume".to_string(),
+                    "{conversation}".to_string()
+                ]),
+            )
+            .is_ok()
         );
         assert!(
             validate_profile_fields("Wrapper", "wrapper {cwd}", AgentKind::Generic, None,).is_ok()

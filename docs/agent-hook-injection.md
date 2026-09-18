@@ -1,6 +1,6 @@
 # Agent hook injection
 
-Farhelm injects a conversation reporter into Claude, Codex, Goose, and Pi launches so the agent tells farhelm which
+Farhelm injects a conversation reporter into Claude, Codex, Goose, Pi, and OMP launches so the agent tells farhelm which
 conversation it is in. That is what makes "resume conversation" land in the conversation you were actually in after a
 `/clear` or a `/new`, instead of the one you threw away. It writes nothing to your `~/.claude` or to Codex's
 configuration home. For Claude and Codex, the flags ride on one command line and die with the process. On a Codex launch
@@ -8,9 +8,10 @@ that gets the flags, Codex prints one warning line about hook trust, and with th
 in that configuration home (`$CODEX_HOME` when it is set, `~/.codex` otherwise) that you have not trusted runs too. A
 few Claude and Codex invocation shapes turn the injection off and fall back to the older record-scanning method.
 
-Goose and Pi do not have a scanning fallback. See the harness notes for
-[Goose's saved reporter and manual-resume dependency](harnesses/goose.md) and
-[Pi's saved-file requirement and permission behavior](harnesses/pi.md).
+Goose, Pi, and OMP do not have a scanning fallback. See the harness notes for
+[Goose's saved reporter and manual-resume dependency](harnesses/goose.md),
+[Pi's saved-file requirement and permission behavior](harnesses/pi.md), and
+[OMP's report-only contract and limits](harnesses/omp.md).
 
 ## Why hooks at all
 
@@ -25,36 +26,51 @@ the exact conversation id. Farhelm uses it purely as a messenger: the agent says
 farhelm stores that. Nothing else rides on the hook. No status, no control, no extra permissions.
 
 Goose exposes the same fact as `AGENT_SESSION_ID` to its MCP extensions. Pi exposes it to extensions together with its
-optional persisted session file. Their reporters feed the same authenticated supervisor message as the hooks, but they
-never inspect or search the vendors' own state directories.
+optional persisted session file. OMP exposes it to extensions through separate session events — `session_start`,
+`session_switch` (which carries the reason: a new, resumed, or forked conversation), `session_branch`, and `agent_end` —
+and reports each conversation's exact id and, when one exists, its session file. Their reporters feed the same
+authenticated supervisor message as the hooks, but they never inspect or search the vendors' own state directories.
+
+OMP's reporter is loaded the way Pi's is: Farhelm materializes a private extension under its own state directory
+(`integrations/omp/`, written with exact-bytes verification and private permissions) and loads it with `-e <path>` on
+launches whose invocation is an interactive-shaped `omp` command — utility subcommands, occurrences of `-p`/`--print`,
+`--mode`, `--export`, `--alias`, help/version/license/`--list-models` flags, reserved-word rejecting forms, internal
+worker selectors, a genuine end-of-options `--`, and `--trusted-extension` launches (which OMP refuses to combine with
+`-e`) get no extension. Farhelm's own instructions pointer also yields: an invocation that already carries
+`--append-system-prompt` (OMP keeps only the last occurrence) gets the reporter without a second occurrence that would
+silently replace the user's instructions. The reporter executable is named by the `FARHELM_OMP_REPORTER_EXE` environment
+variable, and the extension never reads or writes OMP's own state: what it knows comes from the session events it
+subscribes to.
 
 ## The no-errors policy
 
-The reporter must never be something you notice. The Claude and Codex hook and Pi's reporting subprocess print nothing
-to your terminal, always exit successfully, give up after two seconds, and do no identity reporting outside a farhelm
-session. Those two seconds cover reading the vendor's payload and reporting it — the part your agent is waiting on.
-Writing the log line afterwards is best-effort and unbounded, but by then the agent already has its answer. Goose is
-different because its credential-free reporter declaration persists in conversation metadata: outside Farhelm it still
-starts as a valid empty MCP server, but without Farhelm launch credentials it reports nothing and exposes no tools.
+The reporter must never be something you notice. The Claude and Codex hook and the Pi and OMP reporting subprocesses
+print nothing to your terminal, always exit successfully, give up after two seconds, and do no identity reporting
+outside a farhelm session. Those two seconds cover reading the vendor's payload and reporting it — the part your agent
+is waiting on. Writing the log line afterwards is best-effort and unbounded, but by then the agent already has its
+answer. Goose is different because its credential-free reporter declaration persists in conversation metadata: outside
+Farhelm it still starts as a valid empty MCP server, but without Farhelm launch credentials it reports nothing and
+exposes no tools.
 
-If a reporter fails, the session itself is unaffected. Claude and Codex retain the older record-scan fallback; Goose and
-Pi gain no new exact resume target. The one visible thing is the Codex warning line, and that is Codex talking, not the
-reporter.
+If a reporter fails, the session itself is unaffected. Claude and Codex retain the older record-scan fallback; Goose,
+Pi, and OMP gain no new exact resume target. The one visible thing is the Codex warning line, and that is Codex talking,
+not the reporter.
 
 ## Does my invocation get the hook?
 
-| invocation shape                                                                              | kind farhelm derives | hook injected? | what you get instead                                                                                                                                                                                                                                                                  |
-| --------------------------------------------------------------------------------------------- | -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude <any flags>`                                                                          | Claude               | yes            | —                                                                                                                                                                                                                                                                                     |
-| `claude --settings <x> …`                                                                     | Claude               | no             | the record scan — Claude honors only the LAST `--settings`, so injecting ours would silently drop yours                                                                                                                                                                               |
-| `codex <any flags>`, `codex resume …`                                                         | Codex                | yes            | —                                                                                                                                                                                                                                                                                     |
-| `codex --dangerously-bypass-hook-trust …`, `codex -c hooks.… …`, `codex -c features.hooks… …` | Codex                | no             | the record scan — you are already steering codex's hook configuration, and appending a second bypass flag could break the launch                                                                                                                                                      |
-| `goose session …`                                                                             | Goose                | fresh only     | resumes use the reporter Goose already persisted; utility, help, ambiguous, and reporter-name-collision forms are left unchanged                                                                                                                                                      |
-| `pi …`                                                                                        | Pi                   | yes            | the static extension reports the exact ID and optional persisted file; utility/help forms are left unchanged                                                                                                                                                                          |
-| `claude … -- <prompt>`, `codex … -- <prompt>`                                                 | either               | no             | the record scan — after a bare `--`, our flags would become prompt text. This check runs ahead of the per-vendor ones, so it disqualifies both kinds alike                                                                                                                            |
-| `/opt/bin/my-wrapper …`                                                                       | generic              | no             | no hook and no scan as written — write the directory as `{cwd}`, set the kind explicitly, and both come back; see [docs/agent-wrappers.md](agent-wrappers.md)                                                                                                                         |
-| `env FOO=1 claude …`                                                                          | generic              | no             | no hook and no scan as written, and no `{cwd}` needed — set the kind, and write the resume invocation out by hand, since the derived default would be `env --resume …`                                                                                                                |
-| `bash -c 'claude …'`                                                                          | generic              | no             | the record scan once you set the kind, and no hook as written: the flags are appended to the argv, so they land as the shell's `$0` and the following positional parameters rather than reaching the agent inside the script string — a script that forwards `"$@"` does pass them on |
+| invocation shape                                                                              | kind farhelm derives | hook injected?       | what you get instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude <any flags>`                                                                          | Claude               | yes                  | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `claude --settings <x> …`                                                                     | Claude               | no                   | the record scan — Claude honors only the LAST `--settings`, so injecting ours would silently drop yours                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `codex <any flags>`, `codex resume …`                                                         | Codex                | yes                  | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `codex --dangerously-bypass-hook-trust …`, `codex -c hooks.… …`, `codex -c features.hooks… …` | Codex                | no                   | the record scan — you are already steering codex's hook configuration, and appending a second bypass flag could break the launch                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `goose session …`                                                                             | Goose                | fresh only           | resumes use the reporter Goose already persisted; utility, help, ambiguous, and reporter-name-collision forms are left unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `pi …`                                                                                        | Pi                   | yes                  | the static extension reports the exact ID and optional persisted file; utility/help forms are left unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `omp …`                                                                                       | OMP                  | interactive launches | the static extension reports the exact ID and optional session file; utility subcommands, print/mode/export/alias/help/version/license/list-models occurrences, reserved-word rejecting forms, internal worker selectors, `--trusted-extension` launches (OMP refuses to combine those with our `-e`), and a genuine end-of-options `--` are left unchanged and runnable. A genuine `--` additionally cannot be CREATED with the derived OMP resume template (the appended `--resume` would land in prompt position); an explicit resume template or a `--` consumed as an option value creates normally |
+| `claude … -- <prompt>`, `codex … -- <prompt>`                                                 | either               | no                   | the record scan — after a bare `--`, our flags would become prompt text. This check runs ahead of the per-vendor ones, so it disqualifies both kinds alike                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `/opt/bin/my-wrapper …`                                                                       | generic              | no                   | no hook and no scan as written — write the directory as `{cwd}`, set the kind explicitly, and both come back; see [docs/agent-wrappers.md](agent-wrappers.md)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `env FOO=1 claude …`                                                                          | generic              | no                   | no hook and no scan as written, and no `{cwd}` needed — set the kind, and write the resume invocation out by hand, since the derived default would be `env --resume …`                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `bash -c 'claude …'`                                                                          | generic              | no                   | the record scan once you set the kind, and no hook as written: the flags are appended to the argv, so they land as the shell's `$0` and the following positional parameters rather than reaching the agent inside the script string — a script that forwards `"$@"` does pass them on                                                                                                                                                                                                                                                                                                                    |
 
 One more case skips injection independent of invocation shape entirely: if farhelm's own absolute executable path (the
 one every injected hook command would name) is not valid UTF-8, no kind gets the hook, for any invocation — see
@@ -69,12 +85,17 @@ that argv's tail actually reaches the real agent. [docs/agent-wrappers.md](agent
 ## How the kind is decided
 
 By the basename of the invocation's first word, compared for exact equality: `claude` is Claude, `codex` is Codex,
-`goose` is Goose, `pi` is Pi, and everything else is generic. A path in front makes no difference (`/opt/bin/goose` is
-still Goose); a decoration around it does (`goose-wrapper` and a raw `env FOO=1 goose` invocation are both generic).
-That is deliberately dumb rather than clever, because a wrapper that silently inherited an integration would look
-integrated and never capture anything. The profile's agent-kind field overrides the derivation, and is the supported way
-to tell farhelm what your wrapper really launches. Once a structured launch identifies the kind, injection can preserve
-a simple leading `env NAME=value …` prefix; option-bearing forms such as `env -i …` remain untouched.
+`goose` is Goose, `pi` is Pi, `omp` is OMP, and everything else is generic. A path in front makes no difference
+(`/opt/bin/goose` is still Goose); a decoration around it does (`goose-wrapper` and a raw `env FOO=1 goose` invocation
+are both generic). That is deliberately dumb rather than clever, because a wrapper that silently inherited an
+integration would look integrated and never capture anything. The profile's agent-kind field overrides the derivation,
+and is the supported way to tell farhelm what your wrapper really launches. Pi and OMP both additionally run a
+VENDOR-SPECIFIC shape check before the extension rides along, and the two checks are not the same: OMP's excludes its
+utility subcommands, print/mode/export/alias occurrences, reserved-word rejecting forms, worker selectors, and
+`--trusted-extension` launches, while Pi's excludes only its own utility commands and help/version/export forms — an
+unrecognized Pi flag or an option VALUE that merely looks excluded stays hooked for Pi (see the table above). Once a
+structured launch identifies the kind, injection can preserve a simple leading `env NAME=value …` prefix; option-bearing
+forms such as `env -i …` remain untouched.
 
 ## What the hook does
 
@@ -112,14 +133,22 @@ when it is set, `~/.codex` otherwise) but have not trusted will also run during 
 is not what you want, turn injection off for Codex (below) and farhelm launches it without the bypass flag, falling back
 to record scanning.
 
+OMP: the resume offer follows the extension's session-event reports. Typing `/new` starts a conversation that OMP 18.2.4
+persists at once, so the fresh conversation can be resumable immediately, not only after a first assistant message.
+Farhelm does not scan OMP's own state directory to guess at anything; what it knows about your conversations comes from
+those reports alone — with one bounded exception: before a resume, Farhelm reads a bounded prefix of the exact session
+file the report named, wherever it lives (usually inside OMP's state directory), to verify it still belongs to that
+conversation. The sidebar shows no waiting status for OMP — an approval prompt is the ordinary running/idle
+classification.
+
 ## Turning it off
 
 `FARHELM_AGENT_HOOKS` in the supervisor's environment, read once when the supervisor starts:
 
 - unset, empty, or `all` — every supported kind gets its reporter. The default.
 - `none` — no kind gets its reporter.
-- a comma-separated list of kinds, `claude`, `codex`, `goose`, and/or `pi` — only those kinds get it. Whitespace around
-  each name is trimmed and case does not matter.
+- a comma-separated list of kinds, `claude`, `codex`, `goose`, `pi`, and/or `omp` — only those kinds get it. Whitespace
+  around each name is trimmed and case does not matter.
 
 An unrecognized value is not honored in part: the supervisor warns, names the token it did not recognize, and behaves as
 if the variable were unset. An opt-out with a typo in it must not quietly become "opt out of everything".
@@ -135,9 +164,9 @@ supervisor starts, same as above. Anything else warns, names what you wrote, and
 whose off position removes a feature must not be flipped by a typo.
 
 What you lose by turning `FARHELM_AGENT_HOOKS` off: Claude and Codex resume after `/clear` or `/new` goes back to the
-old, scan-only behavior. Where the scan captured nothing or found an ambiguity, restart offers a fresh launch. Goose and
-Pi have no scan, so disabling their reporter prevents new exact targets from being captured. It does not erase a target
-already stored for the current launch.
+old, scan-only behavior. Where the scan captured nothing or found an ambiguity, restart offers a fresh launch. Goose,
+Pi, and OMP have no scan, so disabling their reporter prevents new exact targets from being captured. It does not erase
+a target already stored for the current launch.
 
 ## When something goes wrong
 
@@ -180,8 +209,8 @@ uncreatable directory, an unwritable path, or a full disk is ignored rather than
 - `conversation hook flags not injected` — the skip and its reason: `invocation already passes --settings`,
   `invocation already configures codex hooks`, `invocation contains a bare --`, `disabled by FARHELM_AGENT_HOOKS`, or
   `farhelm executable path is not utf-8`. A generic session logs nothing — no integration means there was never a hook
-  to skip. Every one of these launches still runs. Claude and Codex use the record scan for identity; Goose and Pi keep
-  running without gaining a new exact target from that launch.
+  to skip. Every one of these launches still runs. Claude and Codex use the record scan for identity; Goose, Pi, and OMP
+  keep running without gaining a new exact target from that launch.
 - `recorded the conversation identity this session's agent reported` — an accepted report, with the conversation and the
   vendor's `source` word. When it displaced a claim naming a DIFFERENT id, a second line says so:
   `this session's
@@ -204,5 +233,5 @@ JSON blob naming the farhelm binary; Codex's are `--dangerously-bypass-hook-trus
 `features.hooks=true` and one for `hooks.SessionStart`.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
-offer points at: Claude and Codex fall back to the record scan, while Goose and Pi have no scan and gain no new exact
-target from the failed or skipped reporter.
+offer points at: Claude and Codex fall back to the record scan, while Goose, Pi, and OMP have no scan and gain no new
+exact target from the failed or skipped reporter.

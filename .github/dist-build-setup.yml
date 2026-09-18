@@ -249,6 +249,19 @@
       --kind release --selection 'asset JavaScript unit harness' --concurrency 'node default discovery' \
       --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
 
+- name: Run the OMP reporter asset scenarios
+  # The injected OMP asset's own execution proof — dispatch ordering, stale-id
+  # cancellation, execution-time file recheck, the silent-failure boundary —
+  # rides the release JS validation on the same recorder terms as the UI
+  # harness above, with its own selection name. Node is already present for
+  # that harness.
+  if: runner.os == 'Linux' && runner.arch == 'X64'
+  run: |
+    cd crates/farhelm-supervisor/asset-js-tests
+    python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
+      --kind release --selection 'OMP reporter asset scenarios' --concurrency 'node default discovery' \
+      --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
+
 - name: Provision a CentOS Stream 9 host over ssh
   # The cross-distribution provisioning leg. It belongs in the release gate
   # more than anywhere else: what it proves is that the musl-static payloads

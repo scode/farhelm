@@ -222,6 +222,13 @@ jobs:
           python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
             --kind release --selection 'asset JavaScript unit harness' --concurrency 'node default discovery' \
             --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
+      - name: "Run the OMP reporter asset scenarios"
+        if: "runner.os == 'Linux' && runner.arch == 'X64'"
+        run: |
+          cd crates/farhelm-supervisor/asset-js-tests
+          python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
+            --kind release --selection 'OMP reporter asset scenarios' --concurrency 'node default discovery' \
+            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
       - name: "Provision a CentOS Stream 9 host over ssh"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
