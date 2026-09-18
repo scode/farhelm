@@ -192,7 +192,17 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// than silently dropping exact-resume behavior or accepting a report
 /// against the wrong integration.
 ///
-/// `protocol_version_is_pinned_at_22` (renamed at every bump since `_at_4`)
+/// Version 23 adds the OMP structured harness (`omp`) to the closed
+/// [`LaunchHarness`] vocabulary. The harness tag is durable launch
+/// provenance — it is stored beside the resolved invocation, replayed by
+/// clone and history, and its strict stored-row decoding pairs it with
+/// `AgentKind::Omp` — so an older peer that could not decode the tag could
+/// neither retain a stored launch nor validate a new create, and mixed
+/// versions must refuse the hello rather than silently losing the recorded
+/// launch selection. (The split from version 22 is deliberate: each closed
+/// wire vocabulary grows in its own reviewed step.)
+///
+/// `protocol_version_is_pinned_at_23` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -204,7 +214,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -4031,8 +4041,8 @@ mod tests {
     /// an edit per bump; this test is the one place the number itself is
     /// asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_22() {
-        assert_eq!(PROTOCOL_VERSION, 22);
+    fn protocol_version_is_pinned_at_23() {
+        assert_eq!(PROTOCOL_VERSION, 23);
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump

@@ -156,13 +156,19 @@ provider prefix is refused. OpenCode has no offered effort choices. Its default 
 uses OpenCode's `--auto`, which auto-approves only permissions not explicitly denied. OpenCode uses generic activity
 status with no hooks, conversation capture/resume, or waiting-state recognition.
 
-Goose and Pi are structured OpenRouter harnesses, not built-in profiles. Both require an explicit model and suggest
-`z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, and `z-ai/glm-5.3`; a literal custom OpenRouter id remains
-available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers
+Goose, Pi, and OMP are structured OpenRouter harnesses, not built-in profiles. All three require an explicit model and
+suggest `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, and `z-ai/glm-5.3`; a literal custom OpenRouter id
+remains available after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers
 `approve`, `smart approve`, `chat`, and `yolo` modes. Pi requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
 `max` thinking and has only the visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not
 its project-resource `--approve` flag. Pi stores that mode as `yolo`; an older snapshot that omitted the formerly
-optional permission field reads and displays as YOLO too. Provider capabilities may clamp or reject a requested effort.
+optional permission field reads and displays as YOLO too. OMP requests `off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, or `max` thinking (OMP's `auto` level is not offered) and offers `default` (which adds no flag), `approve`
+(`--approval-mode always-ask`), and `yolo` (`--approval-mode yolo`); its `write` mode is not offered, and
+`smart approve`/`chat` are refused. An omitted OMP permission stays omitted in both argv and stored selection — unlike
+Pi, no default is rewritten onto it, and the session row displays exactly that absence. OMP gets no waiting-state
+recognition: an OMP approval prompt shows the generic running/idle status, a settled scope decision rather than a
+detection gap. Provider capabilities may clamp or reject a requested effort.
 
 Standard operation must never require falling back to SSH or a separate command line, with four v1 carve-outs:
 transport, web-token bootstrap, bringing up the helm's own machine, and starting the v1 Mac supervisor by hand when a
@@ -298,15 +304,15 @@ Session creation is one action, not a wizard. Only the working directory is fund
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Goose, Pi, and OpenCode
-  launches carry a harness plus model, effort, and permission choices where that harness supports them; visible
+- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Goose, Pi, OpenCode, and
+  OMP launches carry a harness plus model, effort, and permission choices where that harness supports them; visible
   permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`. Absent optional choices mean the
   selected harness's defaults and omit their flags, except an omitted Pi permission means its mandatory YOLO mode.
-  OpenCode, Goose, and Pi require a model; OpenCode offers no effort choice. The helm owns the released model catalog
-  and validates every structured choice, so the browser never turns a model identifier into an argv fragment. A known
-  model identifies its owning harness; a custom model needs an explicit harness. A shared known model retains a selected
-  owning harness, while an unselected ambiguous id asks for one. Replacing a harness clears only choices that are
-  incompatible with it. An invalid combination cannot launch. The one exception to "New preselects nothing": the
+  OpenCode, Goose, Pi, and OMP require a model; OpenCode offers no effort choice. The helm owns the released model
+  catalog and validates every structured choice, so the browser never turns a model identifier into an argv fragment. A
+  known model identifies its owning harness; a custom model needs an explicit harness. A shared known model retains a
+  selected owning harness, while an unselected ambiguous id asks for one. Replacing a harness clears only choices that
+  are incompatible with it. An invalid combination cannot launch. The one exception to "New preselects nothing": the
   permissions mode remembers the last SUCCESSFUL structured launch, helm-wide across every client; "reset choices"
   returns the segment to that remembered value rather than to the harness default, and a recent-setup row's own saved
   choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by the

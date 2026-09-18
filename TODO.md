@@ -69,10 +69,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - Out of scope for the first version: real deletion, `gh:owner/repo@branch`, faster clones from a local reference
     mirror, a clone URL template, and user-defined labels.
 
-- Add support for the OMP agent harness (`LaunchHarness` in `farhelm-proto/src/launch.rs`). Cover its invocation, resume
-  syntax, and waiting/status signals alongside the existing harnesses; choose the exact integration depth when
-  implementing this item.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly

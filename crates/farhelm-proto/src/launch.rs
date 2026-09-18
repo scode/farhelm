@@ -28,6 +28,12 @@ pub enum LaunchHarness {
     Goose,
     /// Pi's OpenRouter-backed terminal command.
     Pi,
+    /// OMP's OpenRouter-backed terminal command — the Pi fork's launch
+    /// surface, compiled beside Pi's with OMP's own approval-mode and
+    /// thinking flags. Like Pi, an OMP launch is a report-only integration:
+    /// the structured choice records intent, while conversation capture and
+    /// resume stay the supervisor's `AgentKind::Omp` behavior.
+    Omp,
     /// OpenCode's terminal UI, intentionally kept on the generic runtime
     /// integration because Farhelm does not capture or resume its sessions.
     OpenCode,
