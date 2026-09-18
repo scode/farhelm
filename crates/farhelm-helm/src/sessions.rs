@@ -1494,6 +1494,7 @@ pub(crate) async fn mode_from_source(
                 farhelm_proto::LaunchHarness::OpenCode => farhelm_proto::AgentKind::Generic,
                 farhelm_proto::LaunchHarness::Goose => farhelm_proto::AgentKind::Goose,
                 farhelm_proto::LaunchHarness::Pi => farhelm_proto::AgentKind::Pi,
+                farhelm_proto::LaunchHarness::Omp => farhelm_proto::AgentKind::Omp,
             },
             resume_template: source.resume_template.clone(),
             selection,

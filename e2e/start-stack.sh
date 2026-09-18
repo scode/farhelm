@@ -174,7 +174,7 @@ printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 # which binary name they are installed under and in their own counter
 # file's name, so two structured sessions on different harnesses do not
 # share one generation sequence.
-for structured_name in codex claude muse goose pi opencode; do
+for structured_name in codex claude muse goose pi omp opencode; do
   cat >"$structured_bin/$structured_name" <<EOF || exit 1
 #!/bin/sh
 session="\${FARHELM_SESSION_ID:?missing session id}"

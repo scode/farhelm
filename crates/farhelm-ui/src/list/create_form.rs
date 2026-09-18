@@ -121,6 +121,7 @@ fn missing_model_error(harness: LaunchHarness) -> Option<&'static str> {
         LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
         LaunchHarness::Goose => Some("choose a Goose model before launching"),
         LaunchHarness::Pi => Some("choose a Pi model before launching"),
+        LaunchHarness::Omp => Some("choose an OMP model before launching"),
         LaunchHarness::Codex | LaunchHarness::Claude | LaunchHarness::Muse => None,
     }
 }
@@ -1971,7 +1972,12 @@ pub(super) fn CreateSessionForm(
                 .unwrap_or(model),
             None if matches!(
                 structured_harness(),
-                Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi)
+                Some(
+                    LaunchHarness::OpenCode
+                        | LaunchHarness::Goose
+                        | LaunchHarness::Pi
+                        | LaunchHarness::Omp
+                )
             ) =>
             {
                 String::new()
@@ -3596,6 +3602,7 @@ pub(super) fn CreateSessionForm(
                                     (LaunchHarness::Muse, "Muse"),
                                     (LaunchHarness::Goose, "Goose"),
                                     (LaunchHarness::Pi, "Pi"),
+                                    (LaunchHarness::Omp, "OMP"),
                                     (LaunchHarness::OpenCode, "OpenCode"),
                                 ] {
                                     button {
@@ -3691,7 +3698,7 @@ pub(super) fn CreateSessionForm(
                                     spellcheck: false,
                                     dir: "ltr",
                                     disabled: busy,
-                                    placeholder: matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi)).then_some("model required"),
+                                    placeholder: matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp)).then_some("model required"),
                                     value: "{model_display}",
                                     onfocus: move |_| {
                                         if !draft_transition_allowed(ops) {
@@ -3983,6 +3990,30 @@ pub(super) fn CreateSessionForm(
                                         (LaunchPermission::SmartApprove, "smart approve"),
                                         (LaunchPermission::Chat, "chat"),
                                     ] {
+                                        button {
+                                            key: "{label}", r#type: "button",
+                                            class: if *structured_permissions.read() == Some(permission) { "selected" } else { "" },
+                                            aria_pressed: *structured_permissions.read() == Some(permission), disabled: busy,
+                                            onclick: move |_| {
+                                                if !draft_transition_allowed(ops) { return; }
+                                                promote_fetched_history_snapshot(
+                                                    offered_history, create_target, fetched_history,
+                                                );
+                                                structured_permissions.set(Some(permission));
+                                                structured_permissions_is_explicit.set(true);
+                                                intent_key.set(None);
+                                            },
+                                            "{label}"
+                                        }
+                                    }
+                                }
+                                if structured_harness() == Some(LaunchHarness::Omp) {
+                                    // OMP carries its permission as one
+                                    // explicit `--approval-mode` flag; unlike
+                                    // Pi, the harness default is a real
+                                    // choice and stays selectable, and
+                                    // unlike Goose only Approve is offered.
+                                    for (permission, label) in [(LaunchPermission::Approve, "approve")] {
                                         button {
                                             key: "{label}", r#type: "button",
                                             class: if *structured_permissions.read() == Some(permission) { "selected" } else { "" },

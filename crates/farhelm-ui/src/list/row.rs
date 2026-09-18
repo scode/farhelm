@@ -418,6 +418,7 @@ fn known_harness(program: &str) -> HarnessGlyph {
         "muse" => HarnessGlyph::Muse,
         "goose" => HarnessGlyph::Goose,
         "pi" => HarnessGlyph::Pi,
+        "omp" => HarnessGlyph::Omp,
         "opencode" => HarnessGlyph::OpenCode,
         _ => HarnessGlyph::Terminal,
     }
@@ -447,8 +448,13 @@ fn agent_badge(session: &Session) -> AgentBadge {
             LaunchHarness::Muse => HarnessGlyph::Muse,
             LaunchHarness::Goose => HarnessGlyph::Goose,
             LaunchHarness::Pi => HarnessGlyph::Pi,
+            LaunchHarness::Omp => HarnessGlyph::Omp,
             LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         };
+        // Pi is the compatibility rewrite: an omitted permission from an
+        // older snapshot MEANS its mandatory YOLO mode, so the row displays
+        // that. OMP has a real harness default, so an omitted permission is
+        // displayed as absent — the actual selection, never an invented YOLO.
         let effective_permission = if launch.harness == LaunchHarness::Pi {
             Some(crate::LaunchPermission::Yolo)
         } else {
@@ -466,6 +472,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
             HarnessGlyph::Muse => "Muse Code".to_string(),
             HarnessGlyph::Goose => "Goose".to_string(),
             HarnessGlyph::Pi => "Pi".to_string(),
+            HarnessGlyph::Omp => "OMP".to_string(),
             HarnessGlyph::OpenCode => "OpenCode".to_string(),
             HarnessGlyph::Terminal => unreachable!("structured selections always name a harness"),
         };

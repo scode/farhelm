@@ -74,6 +74,7 @@ impl FakeHarness {
                     LaunchHarness::Muse => "muse",
                     LaunchHarness::Goose => "goose",
                     LaunchHarness::Pi => "pi",
+                    LaunchHarness::Omp => "omp",
                     LaunchHarness::OpenCode => "opencode",
                 })
                 .to_string_lossy()
@@ -96,6 +97,15 @@ impl FakeHarness {
                 | LaunchHarness::Goose
                 | LaunchHarness::Pi
                 | LaunchHarness::OpenCode => argv.extend(["--model".to_string(), model.clone()]),
+                // OMP compiles the provider-qualified form its CLI's
+                // resolver documents; the fixture mirrors that shape so a
+                // forwarded argv reads like a real compiled launch.
+                LaunchHarness::Omp => argv.extend([
+                    "--provider".to_string(),
+                    "openrouter".to_string(),
+                    "--model".to_string(),
+                    model.clone(),
+                ]),
             }
         }
         if let Some(effort) = selection.effort {
@@ -114,7 +124,7 @@ impl FakeHarness {
                 // Goose carries effort in `GOOSE_THINKING_EFFORT`, outside
                 // the executable argv this fixture records.
                 LaunchHarness::Goose => {}
-                LaunchHarness::Pi => {
+                LaunchHarness::Pi | LaunchHarness::Omp => {
                     argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
                 }
                 LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
@@ -125,10 +135,23 @@ impl FakeHarness {
                 LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
                 LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
                 LaunchHarness::OpenCode => Some("--auto"),
-                LaunchHarness::Goose | LaunchHarness::Pi => None,
+                LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => None,
             };
             if let Some(flag) = flag {
                 argv.push(flag.to_string());
+            }
+        }
+        // OMP carries its permission as one explicit approval-mode flag; the
+        // harness default adds nothing, mirroring the compiler's shape.
+        if selection.harness == LaunchHarness::Omp {
+            match selection.permissions {
+                Some(LaunchPermission::Yolo) => {
+                    argv.extend(["--approval-mode".to_string(), "yolo".to_string()])
+                }
+                Some(LaunchPermission::Approve) => {
+                    argv.extend(["--approval-mode".to_string(), "always-ask".to_string()])
+                }
+                _ => {}
             }
         }
         shell_words::join(argv)
@@ -204,6 +227,7 @@ fn agent_kind(selection: &LaunchSelection) -> AgentKind {
         LaunchHarness::Claude => AgentKind::Claude,
         LaunchHarness::Goose => AgentKind::Goose,
         LaunchHarness::Pi => AgentKind::Pi,
+        LaunchHarness::Omp => AgentKind::Omp,
         // Muse deliberately remains a Generic runtime integration: it has no
         // conversation-resume contract for this release.
         LaunchHarness::Muse => AgentKind::Generic,
@@ -505,12 +529,23 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             | LaunchHarness::Muse
             | LaunchHarness::Goose
             | LaunchHarness::Pi
+            | LaunchHarness::Omp
             | LaunchHarness::OpenCode => "--model",
         };
         assert!(
             words.windows(2).any(|pair| pair == [model_flag, model]),
             "model must remain one argv element: {words:?}"
         );
+        // OMP's provider intent is explicit in every compiled launch; the
+        // fixture mirrors it, so the forwarded argv carries the same pair.
+        if selection.harness == LaunchHarness::Omp {
+            assert!(
+                words
+                    .windows(2)
+                    .any(|pair| pair == ["--provider", "openrouter"]),
+                "OMP's provider qualification must reach the fake executable: {words:?}"
+            );
+        }
     }
     if let Some(effort) = selection.effort {
         let expected = match selection.harness {
@@ -518,7 +553,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Claude => effort.as_cli_arg().to_string(),
             LaunchHarness::Muse => effort.as_cli_arg().to_string(),
             LaunchHarness::Goose => return,
-            LaunchHarness::Pi => effort.as_cli_arg().to_string(),
+            LaunchHarness::Pi | LaunchHarness::Omp => effort.as_cli_arg().to_string(),
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         };
         let flag = match selection.harness {
@@ -526,7 +561,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Claude => "--effort",
             LaunchHarness::Muse => "--reasoning-effort",
             LaunchHarness::Goose => return,
-            LaunchHarness::Pi => "--thinking",
+            LaunchHarness::Pi | LaunchHarness::Omp => "--thinking",
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
         };
         assert!(
@@ -536,12 +571,44 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             "effort must reach the fake executable: {words:?}"
         );
     }
+    // OMP's permission rides `--approval-mode` with a VALUE, so the pair —
+    // not a bare flag — is the process-boundary witness; `always-ask` must
+    // never be misread as yolo by a bare-flag check. An omitted permission
+    // is the harness default and must contribute NO approval-mode option at
+    // all, so absence is asserted rather than computed from `expected`.
+    if selection.harness == LaunchHarness::Omp {
+        let expected = match selection.permissions {
+            Some(LaunchPermission::Yolo) => Some("yolo"),
+            Some(LaunchPermission::Approve) => Some("always-ask"),
+            _ => None,
+        };
+        let modes: Vec<&str> = words
+            .windows(2)
+            .filter(|pair| pair[0] == "--approval-mode")
+            .map(|pair| pair[1].as_str())
+            .collect();
+        match expected {
+            Some(value) => {
+                assert_eq!(
+                    modes,
+                    vec![value],
+                    "OMP's approval-mode pair must match the selection exactly: {words:?}"
+                );
+            }
+            None => {
+                assert!(
+                    modes.is_empty(),
+                    "an omitted OMP permission must add no approval-mode option: {words:?}"
+                );
+            }
+        }
+    }
     if selection.permissions == Some(LaunchPermission::Yolo) {
         let flag = match selection.harness {
             LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
             LaunchHarness::Claude => "--dangerously-skip-permissions",
             LaunchHarness::OpenCode => "--auto",
-            LaunchHarness::Goose | LaunchHarness::Pi => return,
+            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => return,
         };
         assert!(
             words.iter().any(|word| word == flag),
@@ -1113,5 +1180,67 @@ mod decoder_tests {
             ),
             GenerationArgv::Pending
         ));
+    }
+    /// The OMP approval-mode witness must reject every wrong shape, not only
+    /// accept the right one (review finding 1): an omitted permission means
+    /// NO approval-mode option at all, an explicit mode means exactly one
+    /// pair with the selection's value, and a conflicting second pair is a
+    /// failure even when a correct pair is also present.
+    #[test]
+    fn omp_approval_mode_witness_rejects_wrong_shapes() {
+        let base = LaunchSelection {
+            harness: LaunchHarness::Omp,
+            model: Some("z-ai/glm-5.3".to_string()),
+            effort: None,
+            permissions: None,
+        };
+
+        // Omitted permission: no approval-mode option may exist.
+        assert_forwarded("omp --provider openrouter --model z-ai/glm-5.3", &base);
+
+        // Approve: exactly the always-ask pair.
+        let approve = LaunchSelection {
+            permissions: Some(LaunchPermission::Approve),
+            ..base.clone()
+        };
+        assert_forwarded(
+            "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode always-ask",
+            &approve,
+        );
+
+        // YOLO: exactly the yolo pair.
+        let yolo = LaunchSelection {
+            permissions: Some(LaunchPermission::Yolo),
+            ..base.clone()
+        };
+        assert_forwarded(
+            "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode yolo",
+            &yolo,
+        );
+
+        // A deliberately wrong mode must fail the Approve selection.
+        let wrong = "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode yolo";
+        let panicked = std::panic::catch_unwind(|| assert_forwarded(wrong, &approve));
+        assert!(
+            panicked.is_err(),
+            "a yolo pair must not satisfy an Approve selection"
+        );
+
+        // An unexpected approval-mode option must fail the omitted case.
+        let unexpected =
+            "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode always-ask";
+        let panicked = std::panic::catch_unwind(|| assert_forwarded(unexpected, &base));
+        assert!(
+            panicked.is_err(),
+            "an omitted permission must reject any approval-mode option"
+        );
+
+        // A conflicting second pair must fail even with a correct pair present.
+        let conflicting = "omp --provider openrouter --model z-ai/glm-5.3 --approval-mode always-ask --approval-mode yolo";
+        let panicked = std::panic::catch_unwind(|| assert_forwarded(conflicting, &approve));
+        assert!(
+            panicked.is_err(),
+            "conflicting approval-mode pairs must fail"
+        );
     }
 }

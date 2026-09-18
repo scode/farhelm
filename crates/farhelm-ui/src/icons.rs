@@ -57,6 +57,12 @@ pub(crate) enum HarnessGlyph {
     Muse,
     Goose,
     Pi,
+    /// OMP — the Pi fork's terminal command. Drawn as the Greek capital
+    /// omega rather than a second letter mark: at sidebar size a Latin
+    /// letter would sit beside Pi's "P" as two near-identical strokes, while
+    /// the omega's open bowl reads as a different mark even at the smallest
+    /// supported row width.
+    Omp,
     OpenCode,
     Terminal,
 }
@@ -102,6 +108,7 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
         HarnessGlyph::Muse => "muse",
         HarnessGlyph::Goose => "goose",
         HarnessGlyph::Pi => "pi",
+        HarnessGlyph::Omp => "omp",
         HarnessGlyph::OpenCode => "opencode",
         HarnessGlyph::Terminal => "terminal",
     };
@@ -117,6 +124,7 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
                 HarnessGlyph::Muse => rsx! { path { d: "M1.2 10V2h1.9l2.9 4.6L8.9 2h1.9v8H9V5.2L6.8 8.7H5.2L3 5.2V10z", fill: "currentColor" } },
                 HarnessGlyph::Goose => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "G" } },
                 HarnessGlyph::Pi => rsx! { text { x: "3", y: "9", fill: "currentColor", font_size: "9", "P" } },
+                HarnessGlyph::Omp => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "Ω" } },
                 HarnessGlyph::OpenCode => rsx! {
                     // Source geometry uses a 240×300 canvas. A nested group
                     // preserves that ratio inside this common 12px glyph box.

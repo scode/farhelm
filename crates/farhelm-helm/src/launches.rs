@@ -68,6 +68,20 @@ const PI_EFFORTS: &[LaunchEffort] = &[
     LaunchEffort::Xhigh,
     LaunchEffort::Max,
 ];
+/// OMP accepts the same request levels as Pi through its own `--thinking`
+/// flag. OMP's `auto` level is deliberately NOT offered: the composer
+/// presents a closed explicit vocabulary, and a mode whose meaning is
+/// "vendor decides" is exactly the guessed default the structured launch
+/// exists to keep out.
+const OMP_EFFORTS: &[LaunchEffort] = &[
+    LaunchEffort::Off,
+    LaunchEffort::Minimal,
+    LaunchEffort::Low,
+    LaunchEffort::Medium,
+    LaunchEffort::High,
+    LaunchEffort::Xhigh,
+    LaunchEffort::Max,
+];
 /// OpenCode's inspected interactive CLI has no portable effort flag. An empty
 /// catalog vocabulary makes an explicit effort invalid rather than guessing a
 /// translation to a provider-specific variant.
@@ -143,6 +157,26 @@ const CATALOG: &[CatalogModel] = &[
         id: "z-ai/glm-5.3",
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "z-ai/glm-5.3-flash",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "x-ai/grok-4.5",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "x-ai/grok-4.6",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "z-ai/glm-5.3",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "opencode/glm-5.3-flash",
@@ -236,7 +270,12 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
                 "--model".to_string(),
                 opencode_model_argument(model)?.to_string(),
             ]),
-            LaunchHarness::Goose | LaunchHarness::Pi => argv.extend([
+            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => argv.extend([
+                // The explicit `--provider` makes provider intent
+                // unambiguous to the CLI's resolver; it is NOT a promise
+                // that an unknown custom id routes literally upstream —
+                // OMP's provider-scoped matching still applies — but the
+                // id itself stays one argv element, stored verbatim.
                 "--provider".to_string(),
                 "openrouter".to_string(),
                 "--model".to_string(),
@@ -260,9 +299,23 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             // `validate_selection` has already rejected this combination.
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Goose => {}
-            LaunchHarness::Pi => {
+            LaunchHarness::Pi | LaunchHarness::Omp => {
                 argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
             }
+        }
+    }
+    // OMP carries its permission as one explicit approval-mode flag; the
+    // harness default adds NOTHING, so an omitted OMP permission stays
+    // omitted rather than being rewritten the way Pi's is above.
+    if selection.harness == LaunchHarness::Omp {
+        match selection.permissions {
+            Some(LaunchPermission::Yolo) => {
+                argv.extend(["--approval-mode".to_string(), "yolo".to_string()])
+            }
+            Some(LaunchPermission::Approve) => {
+                argv.extend(["--approval-mode".to_string(), "always-ask".to_string()])
+            }
+            _ => {}
         }
     }
     if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -270,7 +323,10 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
             LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
             LaunchHarness::OpenCode => Some("--auto"),
-            LaunchHarness::Goose | LaunchHarness::Pi => None,
+            // Goose encodes every mode in the environment above; Pi has no
+            // approval flag at all; OMP's own approval-mode arm above already
+            // wrote its flag.
+            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => None,
         };
         if let Some(flag) = flag {
             argv.push(flag.to_string());
@@ -286,6 +342,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::OpenCode => AgentKind::Generic,
             LaunchHarness::Goose => AgentKind::Goose,
             LaunchHarness::Pi => AgentKind::Pi,
+            LaunchHarness::Omp => AgentKind::Omp,
         },
         resume_template: None,
         selection,
@@ -300,6 +357,7 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::OpenCode => "opencode",
         LaunchHarness::Goose => "goose",
         LaunchHarness::Pi => "pi",
+        LaunchHarness::Omp => "omp",
     }
 }
 
@@ -309,6 +367,7 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
             LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
             LaunchHarness::Goose => Some("choose a Goose model before launching"),
             LaunchHarness::Pi => Some("choose a Pi model before launching"),
+            LaunchHarness::Omp => Some("choose an OMP model before launching"),
             LaunchHarness::Codex | LaunchHarness::Claude | LaunchHarness::Muse => None,
         };
         if let Some(message) = message {
@@ -356,12 +415,16 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
     match (selection.harness, selection.permissions) {
         (LaunchHarness::Goose, _)
         | (LaunchHarness::Pi, Some(LaunchPermission::Yolo))
+        // OMP offers the harness default (no flag), Approve, and YOLO; its
+        // `write` mode is not a Farhelm choice and the Goose-only labels do
+        // not cross harnesses.
+        | (LaunchHarness::Omp, None)
+        | (LaunchHarness::Omp, Some(LaunchPermission::Yolo))
+        | (LaunchHarness::Omp, Some(LaunchPermission::Approve))
         | (_, None)
         | (_, Some(LaunchPermission::Yolo)) => {}
         (_, Some(permission)) => {
-            return Err(format!(
-                "permission {permission:?} is only supported by Goose"
-            ));
+            return Err(format!("the {permission:?} permission is not offered by this harness"));
         }
     }
     Ok(())
@@ -407,6 +470,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::OpenCode => OPENCODE_EFFORTS,
         LaunchHarness::Goose => GOOSE_EFFORTS,
         LaunchHarness::Pi => PI_EFFORTS,
+        LaunchHarness::Omp => OMP_EFFORTS,
     }
 }
 
@@ -819,6 +883,171 @@ mod tests {
         }
     }
 
+    /// OMP compiles its own OpenRouter contract beside Pi's: the same
+    /// provider-qualified model form, its own `--thinking` effort flag, and
+    /// its own `--approval-mode` pair — where an OMITTED permission stays
+    /// omitted (the harness default is a real choice, unlike Pi's rewritten
+    /// yolo) and both explicit modes carry their exact value.
+    #[test]
+    fn omp_compiles_its_native_openrouter_contract_with_an_explicit_approval_mode() {
+        // Every optional flag at once, with the OMP-specific Approve mode.
+        let full = compile(LaunchSelection {
+            harness: LaunchHarness::Omp,
+            model: Some("x-ai/grok-4.6".into()),
+            effort: Some(LaunchEffort::Minimal),
+            permissions: Some(LaunchPermission::Approve),
+        })
+        .expect("OMP selection compiles");
+        assert_eq!(full.agent_kind, AgentKind::Omp);
+        assert_eq!(
+            shell_words::split(&full.invocation).unwrap(),
+            [
+                "omp",
+                "--provider",
+                "openrouter",
+                "--model",
+                "x-ai/grok-4.6",
+                "--thinking",
+                "minimal",
+                "--approval-mode",
+                "always-ask"
+            ]
+        );
+
+        // YOLO carries its own approval-mode value, never a bare flag.
+        let yolo = compile(LaunchSelection {
+            harness: LaunchHarness::Omp,
+            model: Some("z-ai/glm-5.3".into()),
+            effort: Some(LaunchEffort::Xhigh),
+            permissions: Some(LaunchPermission::Yolo),
+        })
+        .expect("OMP yolo compiles");
+        assert_eq!(
+            shell_words::split(&yolo.invocation).unwrap(),
+            [
+                "omp",
+                "--provider",
+                "openrouter",
+                "--model",
+                "z-ai/glm-5.3",
+                "--thinking",
+                "xhigh",
+                "--approval-mode",
+                "yolo"
+            ]
+        );
+
+        // The harness default is real: an omitted permission adds NO flag —
+        // the selection keeps recording the omission, never a rewrite.
+        let omitted = compile(LaunchSelection {
+            harness: LaunchHarness::Omp,
+            model: Some("z-ai/glm-5.3".into()),
+            effort: None,
+            permissions: None,
+        })
+        .expect("OMP default compiles");
+        assert_eq!(
+            omitted.selection.permissions, None,
+            "an omitted OMP permission must stay omitted, unlike Pi's rewrite"
+        );
+        assert_eq!(
+            shell_words::split(&omitted.invocation).unwrap(),
+            ["omp", "--provider", "openrouter", "--model", "z-ai/glm-5.3"]
+        );
+    }
+
+    /// OMP's composer vocabulary is closed: the shared enum's four
+    /// suggested OpenRouter ids are OMP's catalog, its effort list stops at
+    /// max (OMP's `auto` and the enum's `ultra` are not offered), a missing
+    /// model refuses with OMP's own message, unsupported efforts refuse, and
+    /// the Goose-only permission labels are refused for OMP.
+    #[test]
+    fn omp_vocabulary_is_closed_and_model_required() {
+        let ids = [
+            "z-ai/glm-5.3-flash",
+            "x-ai/grok-4.5",
+            "x-ai/grok-4.6",
+            "z-ai/glm-5.3",
+        ];
+        let offered: Vec<_> = super::catalog()
+            .iter()
+            .filter(|row| row.harness == LaunchHarness::Omp)
+            .collect();
+        assert_eq!(offered.iter().map(|row| row.id).collect::<Vec<_>>(), ids);
+        for row in &offered {
+            assert_eq!(row.efforts, super::OMP_EFFORTS);
+            assert!(
+                compile(LaunchSelection {
+                    model: Some(row.id.to_string()),
+                    ..selection(LaunchHarness::Omp)
+                })
+                .is_ok(),
+                "every suggested OMP model compiles"
+            );
+        }
+        // A custom id stays one literal argv element under OMP's contract.
+        let custom = compile(LaunchSelection {
+            harness: LaunchHarness::Omp,
+            model: Some("release/candidate'42;$literal".to_string()),
+            effort: None,
+            permissions: None,
+        })
+        .expect("a custom OMP id is the escape hatch");
+        assert_eq!(
+            shell_words::split(&custom.invocation).unwrap(),
+            [
+                "omp",
+                "--provider",
+                "openrouter",
+                "--model",
+                "release/candidate'42;$literal"
+            ]
+        );
+
+        assert_eq!(
+            compile(selection(LaunchHarness::Omp)).unwrap_err(),
+            "choose an OMP model before launching"
+        );
+        // OMP's own effort vocabulary is OMP_EFFORTS: `ultra` (the shared
+        // enum's extra level) is refused; every listed level compiles.
+        for effort in super::OMP_EFFORTS {
+            assert!(
+                compile(LaunchSelection {
+                    harness: LaunchHarness::Omp,
+                    model: Some("z-ai/glm-5.3".into()),
+                    effort: Some(*effort),
+                    permissions: None,
+                })
+                .is_ok(),
+                "OMP's catalog offers {effort:?}"
+            );
+        }
+        assert!(
+            compile(LaunchSelection {
+                harness: LaunchHarness::Omp,
+                model: Some("z-ai/glm-5.3".into()),
+                effort: Some(LaunchEffort::Ultra),
+                permissions: None,
+            })
+            .is_err(),
+            "ultra is not in OMP's released offering"
+        );
+        // OMP offers no permission beyond Approve and YOLO: the Goose-only
+        // labels refuse exactly as they do for Pi.
+        for permission in [LaunchPermission::SmartApprove, LaunchPermission::Chat] {
+            assert!(
+                compile(LaunchSelection {
+                    harness: LaunchHarness::Omp,
+                    model: Some("z-ai/glm-5.3".into()),
+                    effort: None,
+                    permissions: Some(permission),
+                })
+                .is_err(),
+                "OMP must reject {permission:?}"
+            );
+        }
+    }
+
     /// Every explicit-model harness names itself in the refusal. OpenCode's
     /// established wording remains stable while Goose and Pi avoid claiming
     /// the wrong catalog.
@@ -834,16 +1063,17 @@ mod tests {
                 "choose a Goose model before launching",
             ),
             (LaunchHarness::Pi, "choose a Pi model before launching"),
+            (LaunchHarness::Omp, "choose an OMP model before launching"),
         ] {
             assert_eq!(compile(selection(harness)).unwrap_err(), expected);
         }
     }
 
-    /// Shared model IDs are valid for both owners, while Goose-only modes
-    /// remain invalid for every other harness.
+    /// Shared model IDs are valid for every OpenRouter owner, while
+    /// Goose-only modes remain invalid for every other harness.
     #[test]
     fn shared_models_keep_owner_and_goose_modes_do_not_cross_harnesses() {
-        for harness in [LaunchHarness::Goose, LaunchHarness::Pi] {
+        for harness in [LaunchHarness::Goose, LaunchHarness::Pi, LaunchHarness::Omp] {
             assert!(
                 compile(LaunchSelection {
                     harness,

@@ -379,6 +379,10 @@ pub enum LaunchHarness {
     Muse,
     Goose,
     Pi,
+    /// OMP's OpenRouter-backed terminal command — the Pi fork's launch
+    /// surface, compiled beside Pi's with OMP's own approval-mode and
+    /// thinking flags.
+    Omp,
     /// OpenCode's generic integration has no captured conversation or
     /// synthesized resume command, despite being a first-class composer row.
     OpenCode,
