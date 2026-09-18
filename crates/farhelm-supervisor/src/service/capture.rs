@@ -22,7 +22,7 @@
 //! This does not make farhelm an agent-configuring integration: the hook rides one launch's argv
 //! and touches no user configuration or record directory, and a launch that carries no hook (an
 //! unsupported kind, an argv shape that forbids injection, hooks disabled) can use a scan only
-//! for Claude and Codex. Goose and Pi instead reconcile their durable reported row before
+//! for Claude and Codex. Goose, Pi, and OMP instead reconcile their durable reported row before
 //! constructing offers; no vendor file is opened by that reconciliation.
 //! So the ordering to hold in mind is: identity is REPORTED where it can be,
 //! and inferred where it cannot — the scan is the fallback, never the override.
@@ -742,7 +742,9 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
     for entry in entries {
         if !matches!(
             entry.snapshot.kind,
-            farhelm_proto::AgentKind::Goose | farhelm_proto::AgentKind::Pi
+            farhelm_proto::AgentKind::Goose
+                | farhelm_proto::AgentKind::Pi
+                | farhelm_proto::AgentKind::Omp
         ) {
             continue;
         }

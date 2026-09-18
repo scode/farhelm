@@ -28,10 +28,12 @@
 //! 2. **Conversation-identity capture** (item 8). Claude and Codex write
 //!    discoverable on-disk records that the supervisor can scan as a
 //!    fallback, and also report exact identities through a per-launch hook.
-//!    Goose and Pi are report-only integrations: they never expose a record
-//!    root for Farhelm to scan. Reporter artifacts stay in Farhelm's state;
-//!    Goose alone retains the credential-free reporter declaration in its
-//!    conversation metadata. An exact report always wins
+//!    Goose, Pi, and OMP are report-only integrations: they never expose a
+//!    record root for Farhelm to scan, and a locator reported under one
+//!    vendor's prefix is never accepted for another's. Reporter artifacts
+//!    stay in Farhelm's state; Goose alone retains the credential-free
+//!    reporter declaration in its conversation metadata. An exact report
+//!    always wins
 //!    over a scan-derived inference for the kinds that have both.
 //! 3. **Activity interpretation** (PLAN_M6_75.md item 2). The generic
 //!    classifier can compare successive screens, but it cannot know which
@@ -180,63 +182,110 @@ const RECORD_PREFIX_LINES: usize = 64;
 /// silently dropping a candidate that might have been the ambiguity.
 const MAX_CONVERSATION_ID_LEN: usize = 128;
 
-/// Largest absolute Pi session-file path accepted from its injected extension.
-const MAX_PI_SESSION_PATH_BYTES: usize = 4 * 1024;
+/// Largest vendor session-file path accepted from an injected extension.
+const MAX_SESSION_PATH_BYTES: usize = 4 * 1024;
 
-/// Largest encoded Pi locator accepted on the existing conversation field.
+/// Largest encoded vendor locator accepted on the existing conversation field.
 ///
 /// This bound is checked after JSON escaping as well as before decoding, so
 /// every value the encoder produces is one the decoder can accept unchanged.
-pub const MAX_PI_LOCATOR_BYTES: usize = 8 * 1024;
+pub const MAX_LOCATOR_BYTES: usize = 8 * 1024;
 
-/// Pi's exact durable resume target, carried inside the existing conversation
-/// column because the vendor needs both values to resume without a scan.
+/// Which vendor's locator spelling a conversation token claims.
+///
+/// The two harnesses share one locator SHAPE (a versioned JSON object carrying
+/// the session id and optional exact file) but never share a wire token: the
+/// prefix is part of the identity, and a locator reported for one vendor is
+/// never accepted for the other. Closed rather than stringly-typed so a new
+/// harness cannot silently inherit both prefixes' rejection rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocatorVendor {
+    Pi,
+    Omp,
+}
+
+impl LocatorVendor {
+    /// The exact wire prefix this vendor's locators carry. Pi's bytes are
+    /// frozen by every database already holding them; OMP's mirror the shape.
+    pub(crate) fn prefix(self) -> &'static str {
+        match self {
+            LocatorVendor::Pi => "pi:",
+            LocatorVendor::Omp => "omp:",
+        }
+    }
+
+    /// This module's stable spelling of the vendor for human-facing messages —
+    /// deliberately not a protocol surface (see [`kind_name`]).
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            LocatorVendor::Pi => "Pi",
+            LocatorVendor::Omp => "OMP",
+        }
+    }
+}
+
+/// Whether a conversation token claims EITHER vendor's locator spelling.
+///
+/// Used by the plain-id kinds, whose rejection must not depend on the token
+/// parsing as anything in particular: a malformed `pi:` or `omp:` prefix is
+/// still a claim this build must refuse, not garbage to treat as a bare id.
+pub fn is_reserved_locator_token(value: &str) -> bool {
+    value.starts_with(LocatorVendor::Pi.prefix()) || value.starts_with(LocatorVendor::Omp.prefix())
+}
+
+/// A vendor's exact durable resume target, carried inside the existing
+/// conversation column because the vendor needs both values to resume without
+/// a scan. One shape for every locator-reporting vendor; the vendor lives in
+/// the token's prefix, never in the JSON body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PiLocator {
+pub struct SessionLocator {
     pub version: u8,
     pub session_id: String,
     pub session_file: Option<String>,
 }
 
-/// Encode a validated Pi locator with an unmistakable versioned prefix.
-pub fn encode_pi_locator(locator: PiLocator) -> anyhow::Result<String> {
-    validate_pi_locator(&locator)?;
-    let encoded = format!("pi:{}", serde_json::to_string(&locator)?);
-    if encoded.len() > MAX_PI_LOCATOR_BYTES {
-        anyhow::bail!("Pi locator exceeds its encoded byte bound");
+/// Encode a validated locator with an unmistakable versioned vendor prefix.
+pub fn encode_locator(vendor: LocatorVendor, locator: SessionLocator) -> anyhow::Result<String> {
+    validate_locator(vendor, &locator)?;
+    let encoded = format!("{}{}", vendor.prefix(), serde_json::to_string(&locator)?);
+    if encoded.len() > MAX_LOCATOR_BYTES {
+        anyhow::bail!("{} locator exceeds its encoded byte bound", vendor.name());
     }
     Ok(encoded)
 }
 
-/// Decode the only conversation-token form accepted for a Pi session.
-pub fn parse_pi_locator(value: &str) -> anyhow::Result<PiLocator> {
-    if value.len() > MAX_PI_LOCATOR_BYTES {
-        anyhow::bail!("Pi locator exceeds its encoded byte bound");
+/// Decode the only conversation-token form accepted for `vendor`'s sessions.
+pub fn parse_locator(vendor: LocatorVendor, value: &str) -> anyhow::Result<SessionLocator> {
+    if value.len() > MAX_LOCATOR_BYTES {
+        anyhow::bail!("{} locator exceeds its encoded byte bound", vendor.name());
     }
     let json = value
-        .strip_prefix("pi:")
-        .ok_or_else(|| anyhow::anyhow!("not a Pi locator"))?;
-    let locator: PiLocator = serde_json::from_str(json)?;
-    validate_pi_locator(&locator)?;
+        .strip_prefix(vendor.prefix())
+        .ok_or_else(|| anyhow::anyhow!("not a {} locator", vendor.name()))?;
+    let locator: SessionLocator = serde_json::from_str(json)?;
+    validate_locator(vendor, &locator)?;
     Ok(locator)
 }
 
-/// Enforce the parts of a Pi locator that are safe to store before touching
+/// Enforce the parts of a vendor locator that are safe to store before touching
 /// the exact file named by it at restart time.
-fn validate_pi_locator(locator: &PiLocator) -> anyhow::Result<()> {
+fn validate_locator(vendor: LocatorVendor, locator: &SessionLocator) -> anyhow::Result<()> {
     if locator.version != 1 {
-        anyhow::bail!("Pi locator version is not supported");
+        anyhow::bail!("{} locator version is not supported", vendor.name());
     }
     if !is_plausible_conversation_id(&locator.session_id) {
-        anyhow::bail!("Pi session id is not plausible");
+        anyhow::bail!("{} session id is not plausible", vendor.name());
     }
     if let Some(path) = &locator.session_file
-        && (path.len() > MAX_PI_SESSION_PATH_BYTES
+        && (path.len() > MAX_SESSION_PATH_BYTES
             || !Path::new(path).is_absolute()
             || path.chars().any(char::is_control))
     {
-        anyhow::bail!("Pi session file is not a bounded absolute text path");
+        anyhow::bail!(
+            "{} session file is not a bounded absolute text path",
+            vendor.name()
+        );
     }
     Ok(())
 }
@@ -449,6 +498,7 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Codex => Some(&CodexIntegration),
         AgentKind::Goose => Some(&GooseIntegration),
         AgentKind::Pi => Some(&PiIntegration),
+        AgentKind::Omp => Some(&OmpIntegration),
         AgentKind::Generic => None,
     }
 }
@@ -466,6 +516,11 @@ struct GooseIntegration;
 
 /// Pi reports an exact file locator; it has no record tree Farhelm may scan.
 struct PiIntegration;
+
+/// OMP reports an exact file locator; it has no record tree Farhelm may scan.
+/// Its session files may open with a rewritable title-slot record before the
+/// session header, which is the one header-shape difference from Pi.
+struct OmpIntegration;
 
 /// Locate the executable behind the launcher's simple `env NAME=value` prefix.
 /// Option-bearing `env` commands have different parsing rules and are deliberately
@@ -562,6 +617,392 @@ impl AgentIntegration for PiIntegration {
         }
         Ok(Some(RecordCorrelators {
             conversation: conversation.to_string(),
+            cwd: String::new(),
+            created_at: 0,
+        }))
+    }
+}
+
+/// OMP's known string flags — each consumes the NEXT argv token as its value
+/// unconditionally, even a flag-looking one (`OMP/cli/flag-tables.ts`
+/// STRING_SETTERS plus the `--profile`/`--alias` profile surface). ONE table
+/// backs everything that walks an OMP argv: the resume-template stripper, the
+/// create-time delimiter check, and injection's classifier. Three readers of
+/// one vendor grammar that must never drift apart — a consumption rule one
+/// walker missed would misplace exactly the tokens the others preserved.
+pub(crate) const OMP_STRING_FLAGS: &[&str] = &[
+    "--cwd",
+    "--config",
+    "--add-dir",
+    "--mode",
+    "--provider",
+    "--model",
+    "--smol",
+    "--slow",
+    "--plan",
+    "--prewalk-into",
+    "--plan-yolo-into",
+    "--max-time",
+    "--service-tier",
+    "--api-key",
+    "--system-prompt",
+    "--append-system-prompt",
+    "--provider-session-id",
+    "--prompt-cache-key",
+    "--session-dir",
+    "--models",
+    "--tools",
+    "--thinking",
+    "--export",
+    "--fork",
+    "--hook",
+    "--extension",
+    "-e",
+    "--trusted-extension",
+    "--plugin-dir",
+    "--skills",
+    "--approval-mode",
+    "--profile",
+    "--alias",
+];
+
+/// OMP's optional-value flags: the next token is consumed only when it looks
+/// like a value — not `-`-prefixed, and not empty, because OMP rejects an
+/// empty value for these (`OMP/cli/flag-tables.ts` OPTIONAL_FLAGS).
+pub(crate) const OMP_OPTIONAL_FLAGS: &[&str] = &["--resume", "-r", "--session"];
+
+/// OMP's known valueless flags: `VALUELESS_FLAGS` plus the short
+/// help/version/print/continue aliases.
+pub(crate) const OMP_VALUELESS_FLAGS: &[&str] = &[
+    "--help",
+    "--version",
+    "--allow-home",
+    "--continue",
+    "--from-claude",
+    "--from-codex",
+    "--no-session",
+    "--no-tools",
+    "--no-lsp",
+    "--no-pty",
+    "--hide-thinking",
+    "--advisor",
+    "--external-thinking",
+    "--prewalk",
+    "--no-prewalk",
+    "--plan-yolo",
+    "--print",
+    "--print-thoughts",
+    "--no-extensions",
+    "--no-skills",
+    "--no-rules",
+    "--no-title",
+    "--auto-approve",
+    "--yolo",
+    "-h",
+    "-v",
+    "-c",
+    "-p",
+];
+
+/// How OMP reads one flag's value from the argv that follows it — the arity
+/// half of `flagConsumesValue`, with the unknown-flag cases OMP's bootstrap
+/// spells out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OmpFlagArity {
+    /// Consumes the next token unconditionally, even a flag-looking one.
+    String,
+    /// Consumes the next token only when it looks like a value.
+    Optional,
+    /// Consumes nothing.
+    Valueless,
+    /// A bare long flag the built-in tables do not know: OMP's bootstrap
+    /// reads it as a possible extension string flag that consumes a
+    /// value-like successor.
+    UnknownLong,
+    /// An unknown short flag, which consumes nothing.
+    UnknownShort,
+}
+
+/// One OMP flag occurrence, named the way OMP's own parsers read it.
+pub(crate) struct OmpFlagOccurrence<'a> {
+    /// The flag's name: for a long option, everything before an inline
+    /// `=value`; short flags stay whole (`-r=x` is its own unknown token,
+    /// exactly as OMP's restart rewrite leaves it).
+    pub name: &'a str,
+    /// Whether the token carries its own inline value (`--model=x`).
+    pub inline_value: bool,
+    pub arity: OmpFlagArity,
+}
+
+/// Classify one argv token as an OMP flag occurrence, or `None` when it is a
+/// positional or the end-of-options `--` delimiter.
+pub(crate) fn omp_flag_occurrence(argument: &str) -> Option<OmpFlagOccurrence<'_>> {
+    if argument == "--" || !argument.starts_with('-') {
+        return None;
+    }
+    let (name, inline_value) = if argument.starts_with("--") {
+        match argument.find('=') {
+            Some(at) => (&argument[..at], true),
+            None => (argument, false),
+        }
+    } else {
+        (argument, false)
+    };
+    let arity = if OMP_STRING_FLAGS.contains(&name) {
+        OmpFlagArity::String
+    } else if OMP_OPTIONAL_FLAGS.contains(&name) {
+        OmpFlagArity::Optional
+    } else if OMP_VALUELESS_FLAGS.contains(&name) {
+        OmpFlagArity::Valueless
+    } else if name.starts_with("--") {
+        OmpFlagArity::UnknownLong
+    } else {
+        OmpFlagArity::UnknownShort
+    };
+    Some(OmpFlagOccurrence {
+        name,
+        inline_value,
+        arity,
+    })
+}
+
+/// Whether `flag` consumes the following token, under OMP's own
+/// `flagConsumesValue`: an inline `=value` belongs to the token itself and
+/// never consumes a successor; string flags consume any successor;
+/// optional-value flags consume only a non-empty value-looking successor; an
+/// unknown long flag may be an extension string flag consuming a value-like
+/// successor; an unknown short flag consumes nothing.
+pub(crate) fn omp_flag_consumes_next(flag: &OmpFlagOccurrence<'_>, next: Option<&str>) -> bool {
+    if flag.inline_value {
+        return false;
+    }
+    let value_like = next.is_some_and(|value| !value.starts_with('-'));
+    match flag.arity {
+        OmpFlagArity::String => next.is_some(),
+        OmpFlagArity::Optional => value_like && next != Some(""),
+        OmpFlagArity::Valueless => false,
+        OmpFlagArity::UnknownLong => value_like,
+        OmpFlagArity::UnknownShort => false,
+    }
+}
+
+/// Whether an OMP argv carries an UNCONSUMED end-of-options delimiter — a
+/// `--` in a position where no option claimed it as a value. Walked with the
+/// same grammar as the resume-template stripper and injection's classifier,
+/// so every boundary that cares agrees on which `--` shapes are genuine:
+/// `omp --system-prompt --` carries a prompt literally spelled `--` (no
+/// delimiter), while `omp hello --` carries one.
+pub(crate) fn omp_has_unconsumed_delimiter(args: &[String]) -> bool {
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        let Some(flag) = omp_flag_occurrence(argument) else {
+            if argument == "--" {
+                return true;
+            }
+            index += 1;
+            continue;
+        };
+        if omp_flag_consumes_next(&flag, args.get(index + 1).map(String::as_str)) {
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    false
+}
+
+/// Remove OMP's session-source flags before inserting its verified file.
+///
+/// OMP-SPECIFIC, and deliberately not shared with [`strip_pi_selectors`]:
+/// OMP's `--resume`/`-r`/`--session` take OPTIONAL values and `--fork` takes a
+/// required one (`OMP/cli/flag-tables.ts`), while Pi's equivalents are
+/// valueless or differently-shaped — a selector that consumes a value under
+/// one vendor's grammar may be valueless under the other's, so the two
+/// vendors' stripping cannot share one consumption table without one of them
+/// silently mis-stripping. OMP's own restart path
+/// (`OMP/cli/flag-tables.ts::restartArgv`) drops these same selectors plus
+/// positionals; only the selector half is mirrored here, because Farhelm's
+/// policy keeps the original argv (prompt included) intact.
+///
+/// Long options are NORMALIZED before the selector decision — the name
+/// before an inline `=value` is what matches — so every supported inline
+/// spelling of every session-source selector drops whole (`--resume=<id>`,
+/// `--fork=<id>`, `--continue=x`, `--from-claude=true`), consuming no extra
+/// element, while an inline value of a kept flag (`--model=x`) survives as
+/// the single element it is. A dropped separate selector consumes its value
+/// under its own arity; a kept flag consumes under the shared grammar, which
+/// is what keeps an opaque value spelled like a selector (`--model --resume`)
+/// from being mistaken for one.
+fn strip_omp_selectors(argv: &[String]) -> Vec<String> {
+    /// OMP's session-source selectors, by their normalized names, with the
+    /// arity each one consumes its separate-form value under.
+    fn selector_arity(name: &str) -> Option<OmpFlagArity> {
+        match name {
+            "--resume" | "-r" | "--session" => Some(OmpFlagArity::Optional),
+            "--fork" => Some(OmpFlagArity::String),
+            "--continue" | "-c" | "--from-claude" | "--from-codex" => Some(OmpFlagArity::Valueless),
+            _ => None,
+        }
+    }
+
+    let mut kept = Vec::with_capacity(argv.len());
+    let mut index = 0;
+    while index < argv.len() {
+        let argument = &argv[index];
+        if index == 0 {
+            kept.push(argument.clone());
+            index += 1;
+            continue;
+        }
+        // End-of-options: everything after is prompt text for OMP, so the
+        // scan stops here and the tail is preserved verbatim. (A genuine
+        // delimiter refuses template resolution — see [`SnapshotError`] —
+        // but the ORIGINAL argv is still preserved element for element, and
+        // a `--` consumed as an option value is just a kept value.)
+        if argument == "--" {
+            kept.extend(argv[index..].iter().cloned());
+            break;
+        }
+        let next = argv.get(index + 1).map(String::as_str);
+        match omp_flag_occurrence(argument) {
+            Some(flag) if selector_arity(flag.name).is_some() => {
+                if flag.inline_value {
+                    // The inline spelling carries its own value: drop the
+                    // single token and nothing else.
+                    index += 1;
+                } else if omp_flag_consumes_next(&flag, next) {
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            Some(flag) => {
+                kept.push(argument.clone());
+                if omp_flag_consumes_next(&flag, next) {
+                    kept.push(argv[index + 1].clone());
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            None => {
+                kept.push(argument.clone());
+                index += 1;
+            }
+        }
+    }
+    kept
+}
+
+/// Read an OMP session file's header id out of its bounded prefix.
+///
+/// OMP's own parser, deliberately separate from Pi's first-record rule: an
+/// OMP session file may open with ONE rewritable title-slot record —
+/// `{"type":"title","v":1,"title":...,"updatedAt":...,"pad":"..."}`, a fixed
+/// 256-byte line OMP overwrites in place (`OMP/session/session-title-slot.ts`)
+/// — before the real session header. The prefix reader hands this function a
+/// bounded, possibly mid-line-truncated text, so every malformed or truncated
+/// shape refuses (fail closed) rather than being skipped: verification must
+/// never accept a file it cannot fully parse as exactly the session it was
+/// told the agent is in.
+///
+/// Refused: a missing first line, unparseable JSON, a leading title slot with
+/// the wrong shape (which is NOT skipped — only a well-formed slot may be),
+/// a second title-shaped record, any record whose type is not `session`, a
+/// missing or non-3 `version`, a missing/non-string/implausible id, and —
+/// implicitly — compressed bytes, which are not JSON at all.
+fn parse_omp_session_header(text: &str) -> anyhow::Result<String> {
+    /// The one record shape a leading title slot may take, checked field by
+    /// field (type, v, title, updatedAt, pad, and the optional `source`)
+    /// rather than by its type tag alone — a record that merely CLAIMS to be
+    /// the title slot is not one. `source` mirrors OMP's own
+    /// `parseTitleSlotObject`: it must be absent or exactly `auto`/`user`,
+    /// because any other value makes OMP decline the record as a title slot
+    /// and reject the whole file as an invalid session header — so a file
+    /// Farhelm accepted here would fail inside OMP after the resume launched.
+    fn is_title_slot(record: &serde_json::Value) -> bool {
+        let Some(object) = record.as_object() else {
+            return false;
+        };
+        object.get("type").and_then(serde_json::Value::as_str) == Some("title")
+            && object.get("v").and_then(serde_json::Value::as_u64) == Some(1)
+            && object
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+            && object
+                .get("updatedAt")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+            && object
+                .get("pad")
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+            && match object.get("source") {
+                None => true,
+                Some(source) => matches!(source.as_str(), Some("auto") | Some("user")),
+            }
+    }
+
+    let mut lines = text.lines().map(str::trim_start);
+    let first = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("OMP session file has no header"))?;
+    let first: serde_json::Value = serde_json::from_str(first)
+        .map_err(|_| anyhow::anyhow!("OMP session prefix is not JSONL"))?;
+    let header = if is_title_slot(&first) {
+        let second = lines
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("OMP session file ends after its title slot"))?;
+        let second: serde_json::Value = serde_json::from_str(second)
+            .map_err(|_| anyhow::anyhow!("the record after OMP's title slot is not JSONL"))?;
+        second
+    } else {
+        first
+    };
+    let object = header
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("OMP session header is not an object"))?;
+    if object.get("type").and_then(serde_json::Value::as_str) != Some("session") {
+        anyhow::bail!("OMP session header has the wrong record type");
+    }
+    if object.get("version").and_then(serde_json::Value::as_u64) != Some(3) {
+        anyhow::bail!("OMP session header is not session-record version 3");
+    }
+    let conversation = object
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("OMP session header has no string id"))?;
+    if !is_plausible_conversation_id(conversation) {
+        anyhow::bail!("OMP session header id is not plausible");
+    }
+    Ok(conversation.to_string())
+}
+
+impl AgentIntegration for OmpIntegration {
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
+        let mut template = strip_omp_selectors(original_argv);
+        template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
+        template
+    }
+
+    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        None
+    }
+
+    fn record_depth(&self) -> usize {
+        0
+    }
+
+    fn is_record_file(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        let conversation = parse_omp_session_header(text)?;
+        Ok(Some(RecordCorrelators {
+            conversation,
             cwd: String::new(),
             created_at: 0,
         }))
@@ -1904,6 +2345,23 @@ pub enum SnapshotError {
          discard the conversation identity this session captures"
     )]
     IntegratedTemplateHasNoPlaceholder { kind: &'static str },
+    /// An OMP launch whose DERIVED resume template would have to be appended
+    /// behind a GENUINE end-of-options delimiter: OMP reads everything after
+    /// an unconsumed `--` as prompt text, so the appended
+    /// `--resume <verified-file>` could only ever be read as more prompt,
+    /// and the derived template would silently launch a fresh conversation
+    /// instead of resuming. Three shapes are deliberately NOT this error:
+    /// a `--` consumed as an option value (`--system-prompt --` is a prompt
+    /// spelled `--`, and appended flags are still options), an explicit
+    /// template override (filled verbatim, never appended), and every other
+    /// kind. Refusing the create is the fail-closed outcome; the error text
+    /// is what the user reads.
+    #[error(
+        "an OMP invocation containing a bare \"--\" cannot carry a verified resume: OMP reads \
+         everything after \"--\" as prompt text, so the appended --resume flag would never \
+         resume the captured conversation"
+    )]
+    OmpAmbiguousResumeBoundary,
 }
 
 /// This module's stable spelling of a kind for human-facing messages.
@@ -1915,6 +2373,7 @@ fn kind_name(kind: AgentKind) -> &'static str {
         AgentKind::Codex => "codex",
         AgentKind::Goose => "goose",
         AgentKind::Pi => "pi",
+        AgentKind::Omp => "omp",
         AgentKind::Generic => "generic",
     }
 }
@@ -1939,9 +2398,11 @@ impl IntegrationSnapshot {
     /// establishes that precondition before resolution; an empty slice has
     /// no program from which to derive a kind and is therefore invalid.
     ///
-    /// One validation invariant, and it is the only thing that can fail
-    /// here: an integrated kind must end up with a template containing the
-    /// placeholder. See [`SnapshotError`].
+    /// Two validation invariants, and they are the only things that can
+    /// fail here: an integrated kind must end up with a template containing
+    /// the placeholder, and — OMP only — a DERIVED template must not be
+    /// appended behind a GENUINE end-of-options delimiter (see
+    /// [`SnapshotError`] for both).
     pub fn resolve(
         original_argv: &[String],
         kind_override: Option<AgentKind>,
@@ -1949,8 +2410,21 @@ impl IntegrationSnapshot {
     ) -> Result<IntegrationSnapshot, SnapshotError> {
         let kind = kind_override.unwrap_or_else(|| derive_kind(&original_argv[0]));
         let integration = integration_for(kind);
+        let explicit_override = template_override.is_some();
         let resume_template = template_override
             .or_else(|| integration.map(|i| i.default_resume_template(original_argv)));
+        // The refusal is scoped to the shape that cannot work: the DERIVED
+        // template appends `--resume` at the tail, which a genuine delimiter
+        // would turn into prompt text. A `--` consumed as an option value is
+        // not a delimiter (`omp --system-prompt --` carries a prompt spelled
+        // `--`, and appended flags remain options), and an explicit override
+        // is filled verbatim rather than appended, so neither refuses here.
+        if kind == AgentKind::Omp
+            && !explicit_override
+            && omp_has_unconsumed_delimiter(&original_argv[1..])
+        {
+            return Err(SnapshotError::OmpAmbiguousResumeBoundary);
+        }
         if integration.is_some() && !template_has_placeholder(resume_template.as_deref()) {
             return Err(SnapshotError::IntegratedTemplateHasNoPlaceholder {
                 kind: kind_name(kind),
@@ -1988,9 +2462,14 @@ impl IntegrationSnapshot {
     /// `{conversation}` invocation unfilled, so offering it would be
     /// offering a garbled command line.
     pub fn restart_offer(&self, captured: Option<&str>) -> RestartOffer {
-        if self.kind == AgentKind::Pi {
+        let locator_vendor = match self.kind {
+            AgentKind::Pi => Some(LocatorVendor::Pi),
+            AgentKind::Omp => Some(LocatorVendor::Omp),
+            _ => None,
+        };
+        if let Some(vendor) = locator_vendor {
             return match captured
-                .and_then(|value| parse_pi_locator(value).ok())
+                .and_then(|value| parse_locator(vendor, value).ok())
                 .and_then(|locator| locator.session_file)
             {
                 Some(_) if self.resume_template.is_some() => RestartOffer::Resume,
@@ -2003,8 +2482,8 @@ impl IntegrationSnapshot {
         // the offer would be one `filled_resume_argv` then declines to
         // honor, which is a confusing refusal at the worst moment. Judged
         // here so the offer and the command it promises can never disagree.
-        let captured =
-            captured.filter(|id| is_plausible_conversation_id(id) && !id.starts_with("pi:"));
+        let captured = captured
+            .filter(|id| is_plausible_conversation_id(id) && !is_reserved_locator_token(id));
         match (&self.resume_template, captured) {
             (Some(_), Some(_)) if self.integration().is_some() => RestartOffer::Resume,
             (Some(template), _)
@@ -2037,13 +2516,25 @@ impl IntegrationSnapshot {
     /// tests can assert the end-to-end promise ("resume this exact
     /// conversation") rather than only the id in isolation.
     pub fn filled_resume_argv(&self, conversation: &str) -> Option<Vec<String>> {
-        let replacement = if self.kind == AgentKind::Pi {
-            parse_pi_locator(conversation).ok()?.session_file?
-        } else {
-            if conversation.starts_with("pi:") || !is_plausible_conversation_id(conversation) {
-                return None;
+        let replacement = match self.kind {
+            AgentKind::Pi => {
+                parse_locator(LocatorVendor::Pi, conversation)
+                    .ok()?
+                    .session_file?
             }
-            conversation.to_string()
+            AgentKind::Omp => {
+                parse_locator(LocatorVendor::Omp, conversation)
+                    .ok()?
+                    .session_file?
+            }
+            _ => {
+                if is_reserved_locator_token(conversation)
+                    || !is_plausible_conversation_id(conversation)
+                {
+                    return None;
+                }
+                conversation.to_string()
+            }
         };
         // Re-validated at the boundary it actually matters at, not only
         // where the value was captured: a durable column written by an
@@ -2060,9 +2551,10 @@ impl IntegrationSnapshot {
 /// Validate a reported identity against the durable kind before any write.
 pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
     match kind {
-        AgentKind::Pi => parse_pi_locator(value).is_ok(),
+        AgentKind::Pi => parse_locator(LocatorVendor::Pi, value).is_ok(),
+        AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
         AgentKind::Claude | AgentKind::Codex | AgentKind::Goose => {
-            !value.starts_with("pi:") && is_plausible_conversation_id(value)
+            !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
         }
         AgentKind::Generic => false,
     }
@@ -2288,10 +2780,10 @@ pub enum AgentHooks {
     #[default]
     All,
     /// No integrated kind gets its reporter. Claude and Codex fall back to
-    /// their record scans; Goose and Pi gain no new exact target.
+    /// their record scans; Goose, Pi, and OMP gain no new exact target.
     None,
     /// Exactly these kinds get their reporter. A disabled Claude or Codex
-    /// falls back to scanning; a disabled Goose or Pi does not. An
+    /// falls back to scanning; a disabled Goose, Pi, or OMP does not. An
     /// [`AgentKind::Generic`] entry would be inert rather than rejected —
     /// `allows` is never asked about it because the caller skips kinds with
     /// no integration before consulting this value.
@@ -2335,9 +2827,9 @@ impl AgentHooks {
 ///   [`AgentHooks::All`].
 /// - `none` maps to [`AgentHooks::None`].
 /// - Anything else is read as a comma-separated list of kind names
-///   (`claude`, `codex`, `goose`, `pi` — this module's own canonical spelling, from
-///   [`kind_name`], rather than a spelling invented for this variable).
-///   Whitespace around each token is trimmed, and matching is
+///   (`claude`, `codex`, `goose`, `pi`, `omp` — this module's own canonical
+///   spelling, from [`kind_name`], rather than a spelling invented for this
+///   variable). Whitespace around each token is trimmed, and matching is
 ///   case-insensitive throughout this grammar: this is a value a human
 ///   types into a shell profile, not a wire format, so tolerating `Claude`
 ///   or `ALL` costs nothing and saves a support question.
@@ -2351,8 +2843,8 @@ impl AgentHooks {
 ///
 /// ## Failure mode: fail open, not partially
 ///
-/// A token outside `all`, `none`, `claude`, `codex`, `goose`, and `pi`
-/// invalidates the WHOLE value, not just that token: a `tracing::warn!` names the bad
+/// A token outside `all`, `none`, `claude`, `codex`, `goose`, `pi`, and
+/// `omp` invalidates the WHOLE value, not just that token: a `tracing::warn!` names the bad
 /// token and the full offending value, and the result is `All`. The
 /// reasoning is that this variable is an opt-OUT — a typo in it must not
 /// silently turn into "opt out of everything" (which is what an
@@ -2375,6 +2867,7 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
             "codex" => kinds.push(AgentKind::Codex),
             "goose" => kinds.push(AgentKind::Goose),
             "pi" => kinds.push(AgentKind::Pi),
+            "omp" => kinds.push(AgentKind::Omp),
             _ => {
                 tracing::warn!(
                     token,
@@ -2403,8 +2896,8 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
 /// It is deliberately NOT folded into `AgentHooks`. The two answer
 /// different questions and fail in different directions: turning hooks off
 /// costs identity capture (a scan fallback for Claude and Codex, no new
-/// target for Goose and Pi), while turning instructions off costs an agent
-/// knowing the CLI exists and nothing else. Someone who wants a silent
+/// target for Goose, Pi, or OMP), while turning instructions off costs an
+/// agent knowing the CLI exists and nothing else. Someone who wants a silent
 /// launch but working resume must be able to say so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentInstructions {
@@ -2483,6 +2976,7 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
         "codex" => AgentKind::Codex,
         "goose" => AgentKind::Goose,
         "pi" => AgentKind::Pi,
+        "omp" => AgentKind::Omp,
         _ => AgentKind::Generic,
     }
 }
@@ -2664,9 +3158,14 @@ mod tests {
         assert_eq!(derive_kind("/opt/bin/claude"), AgentKind::Claude);
         assert_eq!(derive_kind("codex"), AgentKind::Codex);
         assert_eq!(derive_kind("/usr/local/bin/codex"), AgentKind::Codex);
+        assert_eq!(derive_kind("pi"), AgentKind::Pi);
+        assert_eq!(derive_kind("/opt/bin/pi"), AgentKind::Pi);
+        assert_eq!(derive_kind("omp"), AgentKind::Omp);
+        assert_eq!(derive_kind("/opt/bin/omp"), AgentKind::Omp);
         assert_eq!(derive_kind("env"), AgentKind::Generic);
         assert_eq!(derive_kind("claude-wrapper"), AgentKind::Generic);
         assert_eq!(derive_kind("my-claude"), AgentKind::Generic);
+        assert_eq!(derive_kind("omp-format"), AgentKind::Generic);
         assert_eq!(derive_kind(""), AgentKind::Generic);
     }
 
@@ -3163,31 +3662,632 @@ mod tests {
         }
     }
 
-    /// Pi's durable token round-trips paths that are hostile to shell-word
-    /// parsing because the path is later substituted as one argv element.
-    /// A fileless report remains valid but deliberately removes Resume.
+    /// OMP's default resume template strips every session-source selector
+    /// under OMP'S OWN consumption rules — which differ from Pi's — and
+    /// appends `--resume {conversation}`. The subtle cases are the
+    /// optional-value selectors: a dropped `--resume`/`-r`/`--session` takes
+    /// the next token only when that token is value-like, `--fork` takes its
+    /// value unconditionally, and unrelated option values survive opaquely
+    /// even when they are themselves spelled like selectors.
     #[farhelm_testtrace::test]
-    fn pi_locator_round_trips_hostile_paths_and_controls_the_offer() {
-        let locator = PiLocator {
-            version: 1,
-            session_id: "session-1".to_string(),
-            session_file: Some("/tmp/a b/quote-\"-\\-雪.jsonl".to_string()),
+    fn omp_resume_template_strips_session_selectors_under_omp_consumption_rules() {
+        let strip = |argv: &[&str]| -> Vec<String> {
+            IntegrationSnapshot::resolve(
+                &argv.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                Some(AgentKind::Omp),
+                None,
+            )
+            .expect("an OMP template resolves")
+            .resume_template
+            .expect("OMP has a derived template")
         };
-        let encoded = encode_pi_locator(locator.clone()).expect("encode");
-        assert_eq!(parse_pi_locator(&encoded).expect("decode"), locator);
 
-        let snapshot = IntegrationSnapshot::resolve(&["pi".to_string()], Some(AgentKind::Pi), None)
-            .expect("Pi integration");
-        assert_eq!(snapshot.restart_offer(Some(&encoded)), RestartOffer::Resume);
-        let fileless = encode_pi_locator(PiLocator {
-            session_file: None,
-            ..locator
-        })
-        .expect("encode fileless locator");
+        // Optional-value consumption: the bare form of `--resume` consumes a
+        // value-like successor, keeps a flag-looking one, and handles its own
+        // inline spelling.
         assert_eq!(
-            snapshot.restart_offer(Some(&fileless)),
-            RestartOffer::FreshOnly
+            strip(&["omp", "--resume", "old-id"]),
+            vec!["omp", "--resume", "{conversation}"]
         );
+        assert_eq!(
+            strip(&["omp", "--resume", "--model", "x"]),
+            vec!["omp", "--model", "x", "--resume", "{conversation}"]
+        );
+        assert_eq!(
+            strip(&["omp", "--resume=old-id"]),
+            vec!["omp", "--resume", "{conversation}"]
+        );
+        assert_eq!(
+            strip(&["omp", "-r", "old-id"]),
+            vec!["omp", "--resume", "{conversation}"]
+        );
+        assert_eq!(
+            strip(&["omp", "--session", "old-id"]),
+            vec!["omp", "--resume", "{conversation}"]
+        );
+        // `--fork` takes a value unconditionally, even a flag-looking one —
+        // so `--model` is consumed as the fork value and `x` survives as the
+        // prompt, exactly as OMP's own parser reads that argv.
+        assert_eq!(
+            strip(&["omp", "--fork", "branch-1"]),
+            vec!["omp", "--resume", "{conversation}"]
+        );
+        assert_eq!(
+            strip(&["omp", "--fork", "--model", "x"]),
+            vec!["omp", "x", "--resume", "{conversation}"]
+        );
+        // Valueless import selectors drop alone.
+        assert_eq!(
+            strip(&["omp", "--from-claude", "--from-codex", "--continue", "-c"]),
+            vec!["omp", "--resume", "{conversation}"]
+        );
+        // Their supported INLINE spellings drop whole too — the name before
+        // `=` is what matches — consuming no extra element, so the prompt
+        // after them survives. OMP's own equals handling makes
+        // `--from-claude=true` the same import selector as the bare flag.
+        assert_eq!(
+            strip(&["omp", "--from-claude=true", "hello"]),
+            vec!["omp", "hello", "--resume", "{conversation}"]
+        );
+        assert_eq!(
+            strip(&["omp", "--from-codex=false", "--continue=x", "hello"]),
+            vec!["omp", "hello", "--resume", "{conversation}"]
+        );
+        // Inline values of KEPT flags survive as the single elements they are.
+        assert_eq!(
+            strip(&["omp", "--model=openrouter/x", "--session-dir=/s", "hello"]),
+            vec![
+                "omp",
+                "--model=openrouter/x",
+                "--session-dir=/s",
+                "hello",
+                "--resume",
+                "{conversation}"
+            ]
+        );
+        // Unrelated option values survive opaquely, even selector-shaped.
+        assert_eq!(
+            strip(&["omp", "--system-prompt", "--continue", "--model", "x"]),
+            vec![
+                "omp",
+                "--system-prompt",
+                "--continue",
+                "--model",
+                "x",
+                "--resume",
+                "{conversation}"
+            ],
+            "a prompt value that merely looks like a selector is data, not a selector"
+        );
+        // An unknown long flag keeps a value-like successor, as OMP's own
+        // restart rewrite does.
+        assert_eq!(
+            strip(&["omp", "--ext-flag", "value"]),
+            vec!["omp", "--ext-flag", "value", "--resume", "{conversation}"]
+        );
+        // The end-of-options boundary is preserved verbatim in the ORIGINAL
+        // argv; nothing is stripped behind it. (Template resolution REFUSES
+        // this argv overall — see the test below — so this pins the stripper
+        // itself rather than going through `resolve`.)
+        assert_eq!(
+            strip_omp_selectors(
+                &["omp", "--", "--resume", "prompt-text"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            ),
+            vec!["omp", "--", "--resume", "prompt-text"]
+        );
+    }
+
+    /// A GENUINE end-of-options delimiter refuses an OMP template: OMP reads
+    /// everything after an unconsumed `--` as prompt text, so the appended
+    /// `--resume <verified-file>` could never resume, and the honest failure
+    /// is a refused create rather than a resume that silently launches fresh.
+    /// Three neighbouring shapes deliberately do NOT refuse, each for its own
+    /// reason: a `--` consumed as an option value (the prompt is literally
+    /// spelled `--`, and appended flags remain options), an explicit template
+    /// override (filled verbatim, never appended), and every other kind.
+    #[farhelm_testtrace::test]
+    fn an_omp_argv_with_a_bare_double_dash_refuses_its_template() {
+        // A genuine delimiter with the DERIVED template refuses.
+        let argv = ["omp".to_string(), "--".to_string(), "hello".to_string()];
+        let error = IntegrationSnapshot::resolve(&argv, Some(AgentKind::Omp), None)
+            .expect_err("a genuine -- delimiter must refuse OMP template resolution");
+        assert!(format!("{error:?}").contains("OmpAmbiguousResumeBoundary"));
+
+        // A `--` consumed as an option value is not a delimiter: the prompt
+        // value is literally `--`, and appended flags are still options.
+        let consumed = [
+            "omp".to_string(),
+            "--system-prompt".to_string(),
+            "--".to_string(),
+        ];
+        let snapshot = IntegrationSnapshot::resolve(&consumed, Some(AgentKind::Omp), None)
+            .expect("a -- consumed as an option value resolves");
+        assert_eq!(
+            snapshot.resume_template.expect("derived template"),
+            vec![
+                "omp".to_string(),
+                "--system-prompt".to_string(),
+                "--".to_string(),
+                "--resume".to_string(),
+                CONVERSATION_PLACEHOLDER.to_string(),
+            ],
+            "the consumed -- survives verbatim and the resume flag lands AFTER it, in \
+             option position"
+        );
+        // Same for a consumed `--` behind a prompt.
+        let consumed_after_prompt = [
+            "omp".to_string(),
+            "hello".to_string(),
+            "--system-prompt".to_string(),
+            "--".to_string(),
+        ];
+        assert!(
+            IntegrationSnapshot::resolve(&consumed_after_prompt, Some(AgentKind::Omp), None)
+                .is_ok()
+        );
+
+        // A genuine delimiter plus an EXPLICIT, independently valid template
+        // override still resolves: the override REPLACES the derived
+        // template verbatim — the original argv (delimiter included) is not
+        // carried into it, so nothing is ever appended behind the delimiter.
+        // The override here is an exact-file resume command OMP itself
+        // honors (`--resume` with an absolute path opens that session file
+        // directly); filling it with an OMP locator yields exactly the argv
+        // OMP would run, with no delimiter and no prompt inside it.
+        let override_argv = ["omp".to_string(), "--".to_string(), "hello".to_string()];
+        let snapshot = IntegrationSnapshot::resolve(
+            &override_argv,
+            Some(AgentKind::Omp),
+            Some(vec![
+                "omp".to_string(),
+                "--resume".to_string(),
+                CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+        )
+        .expect("an explicit template override needs no appending");
+        let verified = encode_locator(
+            LocatorVendor::Omp,
+            SessionLocator {
+                version: 1,
+                session_id: "conv-b".to_string(),
+                session_file: Some("/sessions/conv-b.jsonl".to_string()),
+            },
+        )
+        .expect("a verified locator encodes");
+        assert_eq!(
+            snapshot
+                .filled_resume_argv(&verified)
+                .expect("the override fills"),
+            vec![
+                "omp".to_string(),
+                "--resume".to_string(),
+                "/sessions/conv-b.jsonl".to_string(),
+            ],
+            "the filled override is exactly the exact-file resume command, with no \
+             delimiter behind which a target could be misread"
+        );
+
+        // The refusal is OMP-specific: Pi's grammar treats `--` differently
+        // and its template derivation is unchanged.
+        let pi_argv = ["pi".to_string(), "--".to_string(), "hello".to_string()];
+        assert!(IntegrationSnapshot::resolve(&pi_argv, Some(AgentKind::Pi), None).is_ok());
+    }
+
+    /// Each locator vendor's durable token round-trips paths that are hostile
+    /// to shell-word parsing because the path is later substituted as one
+    /// argv element. A fileless report remains valid but deliberately removes
+    /// Resume. The two vendors' tokens are also cross-rejected: neither
+    /// spelling parses as the other's locator, and neither passes a plain-id
+    /// kind's acceptance.
+    #[farhelm_testtrace::test]
+    fn locator_round_trips_hostile_paths_and_controls_the_offer() {
+        for (vendor, argv0) in [(LocatorVendor::Pi, "pi"), (LocatorVendor::Omp, "omp")] {
+            let locator = SessionLocator {
+                version: 1,
+                session_id: "session-1".to_string(),
+                session_file: Some("/tmp/a b/quote-\"-\\-雪.jsonl".to_string()),
+            };
+            let encoded = encode_locator(vendor, locator.clone()).expect("encode");
+            assert!(encoded.starts_with(vendor.prefix()), "{encoded:?}");
+            assert_eq!(parse_locator(vendor, &encoded).expect("decode"), locator);
+
+            let snapshot =
+                IntegrationSnapshot::resolve(&[argv0.to_string()], None, None).expect("integrated");
+            assert_eq!(snapshot.restart_offer(Some(&encoded)), RestartOffer::Resume);
+            let fileless = encode_locator(
+                vendor,
+                SessionLocator {
+                    session_file: None,
+                    ..locator.clone()
+                },
+            )
+            .expect("encode fileless locator");
+            assert_eq!(
+                snapshot.restart_offer(Some(&fileless)),
+                RestartOffer::FreshOnly
+            );
+            assert!(
+                snapshot.filled_resume_argv(&fileless).is_none(),
+                "a fileless locator fills nothing"
+            );
+            let filled = snapshot
+                .filled_resume_argv(&encoded)
+                .expect("a verified locator fills the template");
+            let mut template = snapshot.resume_template.clone().expect("derived template");
+            assert_eq!(template.pop().as_deref(), Some(CONVERSATION_PLACEHOLDER));
+            assert_eq!(filled.len(), template.len() + 1);
+            assert_eq!(&filled[..template.len()], &template[..]);
+            assert_eq!(
+                filled.last().map(String::as_str),
+                Some("/tmp/a b/quote-\"-\\-雪.jsonl"),
+                "the captured path lands exactly in the placeholder slot"
+            );
+
+            // Cross-vendor rejection is symmetrical, and a locator is also
+            // never accepted as a plain id by the id-reporting kinds.
+            let other = match vendor {
+                LocatorVendor::Pi => LocatorVendor::Omp,
+                LocatorVendor::Omp => LocatorVendor::Pi,
+            };
+            assert!(parse_locator(other, &encoded).is_err());
+            for plain_kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Goose] {
+                assert!(!accepts_reported_conversation(plain_kind, &encoded));
+            }
+            let own_kind = match vendor {
+                LocatorVendor::Pi => AgentKind::Pi,
+                LocatorVendor::Omp => AgentKind::Omp,
+            };
+            assert!(accepts_reported_conversation(own_kind, &encoded));
+            // The OTHER vendor's snapshot refuses this token at the OFFER and
+            // SUBSTITUTION boundaries too — the durable decision points, not
+            // just the parser.
+            let other_argv0 = match other {
+                LocatorVendor::Pi => "pi",
+                LocatorVendor::Omp => "omp",
+            };
+            let other_snapshot =
+                IntegrationSnapshot::resolve(&[other_argv0.to_string()], None, None)
+                    .expect("integrated");
+            assert_eq!(
+                other_snapshot.restart_offer(Some(&encoded)),
+                RestartOffer::FreshOnly,
+                "a {vendor:?} locator cannot make a {other:?} session offer a resume"
+            );
+            assert!(
+                other_snapshot.filled_resume_argv(&encoded).is_none(),
+                "a {vendor:?} locator never substitutes into a {other:?} template"
+            );
+            // A malformed reserved token is likewise refused as a claim at
+            // both boundaries, for its own vendor as well as the other's.
+            for malformed in [
+                format!("{}{{", vendor.prefix()),
+                "pi:{".to_string(),
+                "omp:nonsense".to_string(),
+            ] {
+                assert_eq!(
+                    snapshot.restart_offer(Some(&malformed)),
+                    RestartOffer::FreshOnly,
+                    "{malformed:?} cannot make a {vendor:?} session offer a resume"
+                );
+                assert!(
+                    snapshot.filled_resume_argv(&malformed).is_none(),
+                    "{malformed:?} never substitutes into a {vendor:?} template"
+                );
+            }
+        }
+    }
+
+    /// A malformed reserved prefix is refused as a claim, not parsed as a
+    /// plain conversation id — the rejection must not depend on successful
+    /// JSON decoding, so truncated or corrupted locator tokens cannot pass
+    /// as ids for Claude, Codex, or Goose.
+    #[farhelm_testtrace::test]
+    fn malformed_reserved_prefixes_reject_without_decoding() {
+        for malformed in [
+            "pi:",
+            "omp:",
+            "pi:{",
+            "omp:not json",
+            "pi:{\"version\":1}",
+            "omp:{\"version\":2,\"session_id\":\"s\",\"session_file\":null}",
+        ] {
+            assert!(
+                is_reserved_locator_token(malformed),
+                "{malformed:?} claims a reserved prefix"
+            );
+            for plain_kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Goose] {
+                assert!(
+                    !accepts_reported_conversation(plain_kind, malformed),
+                    "{malformed:?} must not pass as a plain id for {plain_kind:?}"
+                );
+            }
+            // And each locator vendor refuses the other's malformed token.
+            assert!(parse_locator(LocatorVendor::Pi, malformed).is_err());
+            assert!(parse_locator(LocatorVendor::Omp, malformed).is_err());
+        }
+    }
+
+    /// The fixtures an OMP session header can present, and the one answer
+    /// each must get. Mirrors the shapes OMP 18.2.4 writes: a fixed-width
+    /// 256-byte title slot that may precede the version-3 session record, or
+    /// no slot at all for legacy files — and nothing else, ever. Every
+    /// non-header shape refuses rather than being skipped, because pre-resume
+    /// verification may only accept a file it parsed completely.
+    ///
+    /// Every fixture is built from NEWLINE-SEPARATED, independently valid
+    /// JSONL records, and every fixture that CLAIMS to be well-formed
+    /// records-with-wrong-content asserts that structure FIRST, so a refusal
+    /// is attributable to the mechanism under test (the version check, the
+    /// type check, the title-slot shape check) and not to malformed JSON. The
+    /// genuinely malformed fixtures are the exceptions, and their premise IS
+    /// the malformation.
+    #[farhelm_testtrace::test]
+    fn omp_header_verification_accepts_only_the_session_shapes_it_parses() {
+        /// The records a fixture claims to carry, asserted before the parser
+        /// runs: every line parses on its own, and each premise names one
+        /// record's field and the value the fixture's premise is about.
+        fn assert_records(text: &str, premises: &[(usize, &str, serde_json::Value)]) {
+            let records: Vec<serde_json::Value> = text
+                .lines()
+                .map(|line| {
+                    serde_json::from_str(line)
+                        .expect("fixture line is an independently valid JSON record")
+                })
+                .collect();
+            for (index, field, expected) in premises {
+                let record = records
+                    .get(*index)
+                    .unwrap_or_else(|| panic!("fixture record {index} exists in {text:?}"));
+                assert_eq!(
+                    record.get(*field),
+                    Some(expected),
+                    "fixture record {index} premise on field {field:?}"
+                );
+            }
+        }
+
+        let session = r#"{"type":"session","version":3,"id":"omp-id-1","timestamp":"2026-09-17T00:00:00.000Z","cwd":"/work"}
+{"type":"user","text":"hello"}
+"#;
+        // A REAL title slot: exactly 256 UTF-8 bytes including its newline,
+        // the fixed width OMP rewrites in place — not an arbitrary-width
+        // look-alike.
+        let title = {
+            let base = r#"{"type":"title","v":1,"title":"my session","updatedAt":"2026-09-17T00:00:00.000Z","pad":""#;
+            let spaces = 256 - base.len() - "\"}\n".len();
+            assert!(spaces > 0, "fixture sanity: room for the pad");
+            format!("{base}{}\"}}\n", " ".repeat(spaces))
+        };
+        assert_eq!(
+            title.len(),
+            256,
+            "the title slot is the real 256-byte width"
+        );
+        let wrong_version = session.replace("\"version\":3", "\"version\":2");
+        let foreign_record = session.replace("\"type\":\"session\"", "\"type\":\"turn\"");
+        let wrong_title_shape = format!(
+            "{}{}",
+            r#"{"type":"title","v":2,"title":"t","updatedAt":"u","pad":"p"}"#, "\n"
+        );
+        let leading_summary = format!("{}\n{}", r#"{"type":"summary","text":"earlier"}"#, session);
+
+        // The two real shapes. Their premises are asserted first: an
+        // independently valid session record, and a well-formed 256-byte
+        // title slot in front of one.
+        assert_eq!(
+            parse_omp_session_header(session).expect("a plain session header parses"),
+            "omp-id-1"
+        );
+        assert_records(
+            &format!("{title}{session}"),
+            &[(0, "title", serde_json::json!("my session"))],
+        );
+        assert_eq!(
+            parse_omp_session_header(&format!("{title}{session}"))
+                .expect("exactly one well-formed title slot is skipped"),
+            "omp-id-1"
+        );
+
+        // The optional `source` field mirrors OMP's own parseTitleSlotObject:
+        // absent, "auto", or "user" is a title slot; every other value —
+        // including explicit null and numbers — makes OMP decline the record,
+        // so the file stops being a valid session header and Farhelm refuses
+        // it instead of resuming into an agent-side load failure.
+        let with_source = |source: &str| {
+            format!(
+                "{}{}",
+                title.replace(
+                    "\"updatedAt\":\"2026-09-17T00:00:00.000Z\"",
+                    &format!("\"updatedAt\":\"2026-09-17T00:00:00.000Z\",\"source\":{source}"),
+                ),
+                session
+            )
+        };
+        for (source, premise) in [
+            ("\"auto\"", serde_json::json!("auto")),
+            ("\"user\"", serde_json::json!("user")),
+        ] {
+            let fixture = with_source(source);
+            assert_records(&fixture, &[(0usize, "source", premise)]);
+            assert_eq!(
+                parse_omp_session_header(&fixture)
+                    .expect("a well-formed title slot with this source is skipped"),
+                "omp-id-1"
+            );
+        }
+        for (source, premise, why) in [
+            (
+                "\"bogus\"",
+                serde_json::json!("bogus"),
+                "an unknown source string",
+            ),
+            ("null", serde_json::json!(null), "an explicit null source"),
+            ("42", serde_json::json!(42), "a numeric source"),
+        ] {
+            let fixture = with_source(source);
+            assert_records(&fixture, &[(0usize, "source", premise)]);
+            assert!(
+                parse_omp_session_header(&fixture).is_err(),
+                "{why} must refuse: OMP does not treat the record as a title slot"
+            );
+        }
+
+        // Fixtures whose records are individually valid JSON: each asserts
+        // its premise (wrong field values, right shape) so the refusal is
+        // attributable to the mechanism named.
+        for (fixture, premises, why) in [
+            (
+                format!("{title}{title}{session}"),
+                vec![
+                    (0usize, "title", serde_json::json!("my session")),
+                    (1usize, "title", serde_json::json!("my session")),
+                ],
+                "a second title-shaped record is refused, not skipped",
+            ),
+            (
+                format!("{wrong_title_shape}{session}"),
+                vec![(0usize, "v", serde_json::json!(2))],
+                "a leading record with the wrong title-slot SHAPE (v:2) is not a title slot",
+            ),
+            (
+                wrong_version.clone(),
+                vec![(0usize, "version", serde_json::json!(2))],
+                "a session record of the wrong version is refused",
+            ),
+            (
+                foreign_record.clone(),
+                vec![(0usize, "type", serde_json::json!("turn"))],
+                "any other record type is refused in the session slot",
+            ),
+            (
+                leading_summary.clone(),
+                vec![(0usize, "type", serde_json::json!("summary"))],
+                "a leading non-title, non-session record is refused, not skipped",
+            ),
+        ] {
+            assert_records(&fixture, &premises);
+            assert!(
+                parse_omp_session_header(&fixture).is_err(),
+                "{why}: fixture must refuse"
+            );
+        }
+
+        // Field-shape fixtures built by replacement, whose premises are the
+        // replaced values themselves.
+        for (fixture, why) in [
+            (
+                session.replace("\"version\":3,", ""),
+                "a session record with no version is refused",
+            ),
+            (
+                session.replace("\"id\":\"omp-id-1\"", "\"id\":42"),
+                "a non-string id is refused",
+            ),
+            (
+                session.replace("omp-id-1", "-option-shaped"),
+                "an implausible (option-shaped) id is refused",
+            ),
+        ] {
+            serde_json::from_str::<serde_json::Value>(fixture.lines().next().expect("line"))
+                .expect("fixture record stays independently valid JSON");
+            assert!(
+                parse_omp_session_header(&fixture).is_err(),
+                "{why}: fixture must refuse"
+            );
+        }
+
+        // Fixtures whose premise IS malformation: no structure to assert.
+        for (fixture, why) in [
+            (
+                format!(
+                    "{title}{}",
+                    "{\"type\":\"session\",\"version\":3,\"id\":\"omp-id-1\""
+                ),
+                "a prefix truncated mid-record is refused",
+            ),
+            (
+                "{\"type\":\"session\",\"version\":3,\"id\":\"omp-id-1\"\n".to_string(),
+                "a prefix ending mid-line without a title slot is refused",
+            ),
+            (
+                "not json at all\n".to_string(),
+                "a non-JSON prefix is refused (compressed bytes refuse here too)",
+            ),
+            (
+                format!("\x1f\u{8b}\u{8}{session}"),
+                "gzip magic bytes are refused rather than decompressed",
+            ),
+            (
+                title.clone(),
+                "a file that ends after its title slot is refused",
+            ),
+        ] {
+            assert!(
+                parse_omp_session_header(&fixture).is_err(),
+                "{why}: fixture must refuse"
+            );
+        }
+    }
+
+    /// Verification goes through the shared no-follow regular-file reader, so
+    /// a symlink — or any non-regular file — placed where the reported
+    /// session file should be refuses at the read, and `OmpIntegration`'s
+    /// parser rides on the OMP header rules rather than Pi's first-record
+    /// rule. Each refusal is bounded by a completion oracle: the reader opens
+    /// `O_NONBLOCK`, so none of these futures may park.
+    #[farhelm_testtrace::test]
+    async fn omp_record_reads_refuse_symlinks_and_non_regular_files() {
+        use std::time::Duration;
+
+        const ORACLE: Duration = Duration::from_secs(5);
+        let dir = farhelm_teststate::tempdir().expect("tempdir");
+        let session = r#"{"type":"session","version":3,"id":"omp-id-1"}
+{"type":"user","text":"hello"}
+"#;
+        let real = dir.path().join("session.jsonl");
+        std::fs::write(&real, session).expect("fixture file");
+        let integration = integration_for(AgentKind::Omp).expect("OMP integration");
+
+        let parsed =
+            tokio::time::timeout(ORACLE, crate::agent_kind::read_record(&real, integration))
+                .await
+                .expect("a regular file's read completes, bounded")
+                .expect("a regular file reads")
+                .expect("a well-formed OMP header is a record");
+        assert_eq!(parsed.0.conversation, "omp-id-1");
+
+        let link = dir.path().join("link.jsonl");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink fixture");
+        let read = tokio::time::timeout(ORACLE, crate::agent_kind::read_record(&link, integration))
+            .await
+            .expect("the symlink case completes, bounded");
+        assert!(read.is_err(), "a symlink is refused through O_NOFOLLOW");
+
+        // A FIFO named where a session file should be: opened without
+        // blocking (O_NONBLOCK), then refused by the regular-file check —
+        // never read, never parked on.
+        let fifo = dir.path().join("pipe.jsonl");
+        let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes())
+            .expect("fixture path has no NUL");
+        assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);
+        let read = tokio::time::timeout(ORACLE, crate::agent_kind::read_record(&fifo, integration))
+            .await
+            .expect("the FIFO case completes, bounded");
+        assert!(read.is_err(), "a FIFO is not a regular session file");
+
+        // An owned directory named where a session file should be.
+        let directory = dir.path().join("directory.jsonl");
+        std::fs::create_dir(&directory).expect("directory fixture");
+        let read = tokio::time::timeout(
+            ORACLE,
+            crate::agent_kind::read_record(&directory, integration),
+        )
+        .await
+        .expect("the directory case completes, bounded");
+        assert!(read.is_err(), "a directory is not a regular session file");
     }
 
     /// `restart_offer` is what the UI (PR8) turns into an affordance, so
@@ -4229,6 +5329,10 @@ mod tests {
         assert_eq!(
             parse_agent_hooks("claude"),
             AgentHooks::Only(vec![AgentKind::Claude])
+        );
+        assert_eq!(
+            parse_agent_hooks("omp"),
+            AgentHooks::Only(vec![AgentKind::Omp])
         );
         assert_eq!(
             parse_agent_hooks("codex,claude"),

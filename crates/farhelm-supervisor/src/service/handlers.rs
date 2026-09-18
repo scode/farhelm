@@ -125,12 +125,13 @@ const INTENT_KEY_CAP: usize = 512;
 /// the log line, which are the two places an unbounded field would cost
 /// something.
 ///
-/// This envelope must fit Pi's encoded ID and file locator. A post-handshake
-/// control frame otherwise permits megabytes, so the handler bounds the whole
-/// report before the kind-specific validation in `Supervisor::report_conversation`.
-/// Ordinary Claude, Codex, and Goose IDs still have a separate 128-byte limit;
-/// accepting an envelope of this size does not make an equally large ID valid.
-const MAX_CONVERSATION_BYTES: usize = crate::agent_kind::MAX_PI_LOCATOR_BYTES;
+/// This envelope must fit either locator-reporting vendor's encoded ID and
+/// file locator. A post-handshake control frame otherwise permits megabytes,
+/// so the handler bounds the whole report before the kind-specific validation
+/// in `Supervisor::report_conversation`. Ordinary Claude, Codex, and Goose IDs
+/// still have a separate 128-byte limit; accepting an envelope of this size
+/// does not make an equally large ID valid.
+const MAX_CONVERSATION_BYTES: usize = crate::agent_kind::MAX_LOCATOR_BYTES;
 
 /// Byte cap on `ControlMsg::ReportConversation`'s `source` — the vendor's
 /// own word for why the hook fired (`startup`, `resume`, `clear`,

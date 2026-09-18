@@ -90,6 +90,11 @@ that its required systemd or SSH substrate ran.
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
   in cwd) is the oldest, most version-portable form the test runner has, whereas quoted-glob CLI arguments are newer and
   CI pins no node version.
+- `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
+  proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
+  proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the
+  silent-failure boundary, run against the real shipped asset. Same node terms as the UI harness above; the release gate
+  runs it through the recorder with the `OMP reporter asset scenarios` selection.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`

@@ -2155,7 +2155,7 @@ fn with_hook_argv_using(
     hooks: &crate::agent_kind::AgentHooks,
     instructions: crate::agent_kind::AgentInstructions,
     exe: Option<&str>,
-    pi_extension: Option<&str>,
+    vendor_extension: Option<&str>,
     session: &str,
 ) -> (Vec<String>, bool) {
     let Some(integration) = snapshot.integration() else {
@@ -2219,6 +2219,44 @@ fn with_hook_argv_using(
         argv = with_launch_environment(argv, &controls);
         return (argv, enabled);
     }
+    if snapshot.kind == AgentKind::Omp {
+        match omp_injection_decision(&argv) {
+            OmpInjection::Leave(reason) => {
+                skip(reason);
+                return (argv, false);
+            }
+            OmpInjection::Inject { pointer } => {
+                if !hooks.allows(snapshot.kind) {
+                    skip("disabled by FARHELM_AGENT_HOOKS");
+                    return (argv, false);
+                }
+                let (Some(exe), Some(extension)) = (exe, vendor_extension) else {
+                    skip(if exe.is_none() {
+                        "farhelm executable path is not utf-8"
+                    } else {
+                        "OMP extension artifact is unavailable"
+                    });
+                    return (argv, false);
+                };
+                argv.extend(["-e".to_string(), extension.to_string()]);
+                // `pointer` is false when the user's own argv already
+                // carries an `--append-system-prompt`: OMP assigns each
+                // occurrence to one field and the LAST one wins, so a
+                // second occurrence would silently replace the user's
+                // instructions with Farhelm's pointer. The reporter still
+                // rides; only the pointer yields.
+                if instructions.announces() && pointer {
+                    argv.extend([
+                        "--append-system-prompt".to_string(),
+                        crate::agent_kind::INSTRUCTIONS_POINTER.to_string(),
+                    ]);
+                }
+                let controls = [format!("{}={exe}", crate::launch::OMP_REPORTER_EXE_ENV_VAR)];
+                argv = with_launch_environment(argv, &controls);
+                return (argv, true);
+            }
+        }
+    }
     if snapshot.kind == AgentKind::Pi {
         if !pi_interactive_invocation(&argv) {
             skip("Pi invocation is a utility command or is ambiguous");
@@ -2228,7 +2266,7 @@ fn with_hook_argv_using(
             skip("disabled by FARHELM_AGENT_HOOKS");
             return (argv, false);
         }
-        let (Some(exe), Some(extension)) = (exe, pi_extension) else {
+        let (Some(exe), Some(extension)) = (exe, vendor_extension) else {
             skip(if exe.is_none() {
                 "farhelm executable path is not utf-8"
             } else {
@@ -2458,6 +2496,266 @@ fn pi_interactive_invocation(argv: &[String]) -> bool {
         index += 1;
     }
     true
+}
+
+/// OMP's registered top-level commands and aliases EXCEPT `launch` — the
+/// command table (`OMP/cli-commands.ts`) whose dispatch makes the process a
+/// utility rather than an interactive conversation. `launch` is the one
+/// command token that IS an ordinary launch, and any unregistered word is a
+/// prompt, so both stay out of this list.
+const OMP_UTILITY_COMMANDS: &[&str] = &[
+    "acp",
+    "auth-broker",
+    "auth-gateway",
+    "agents",
+    "bench",
+    "browser-relay",
+    "cleanse",
+    "collab",
+    "commit",
+    "completions",
+    "__complete",
+    "compress",
+    "config",
+    "dry-balance",
+    "gc",
+    "grep",
+    "gallery",
+    "git",
+    "grievances",
+    "images",
+    "img",
+    "if-bench",
+    "install",
+    "join",
+    "models",
+    "plugin",
+    "plugins",
+    "ps",
+    "say",
+    "share",
+    "setup",
+    "shell",
+    "read",
+    "render",
+    "ssh",
+    "stats",
+    "update",
+    "usage",
+    "tiny-models",
+    "token",
+    "ttsr",
+    "worktree",
+    "wt",
+    "search",
+    "q",
+];
+
+/// Options whose OCCURRENCE anywhere in the argv makes the launch
+/// non-interactive or exiting: print and explicit modes, export, the alias
+/// installer, help, version, license, and the obsolete list-models. Inline
+/// `--flag=value` spellings count.
+const OMP_EXCLUDED_OPTIONS: &[&str] = &[
+    "-p",
+    "--print",
+    "--export",
+    "--alias",
+    "--mode",
+    "-h",
+    "--help",
+    "-v",
+    "--version",
+    "--license",
+    "--list-models",
+];
+
+/// OMP's reserved plugin/marketplace words, rejected ONLY in the forms
+/// `reservedTopLevelWordMessage` rejects: a bare verb, a `marketplace`
+/// sub-action, or any later argument carrying a `name@marketplace` plugin id.
+/// A prompt such as `omp list all my files` still launches, so the word
+/// alone decides nothing.
+const OMP_RESERVED_WORDS: &[&str] = &[
+    "extensions",
+    "list",
+    "remove",
+    "uninstall",
+    "marketplace",
+    "discover",
+    "upgrade",
+    "enable",
+    "disable",
+];
+
+/// The sub-actions that make `omp marketplace <sub>` unambiguously a
+/// management command (`OMP/cli-commands.ts` MARKETPLACE_SUBCOMMANDS).
+const OMP_MARKETPLACE_SUBCOMMANDS: &[&str] = &["add", "remove", "rm", "update", "list"];
+
+/// Whether a reserved word in OMP's command position is one of the REJECTING
+/// forms OMP itself turns into an error message (and exits) rather than a
+/// launch — mirroring `reservedTopLevelWordMessage`. Only the FIRST CLI token
+/// is ever this word: OMP's guard runs on argv[0] before flag-hoisted
+/// subcommand resolution, so `omp --model x list` is a prompt "list", not a
+/// rejected management command.
+fn omp_reserved_word_rejects(command: &str, rest: &[String]) -> bool {
+    if !OMP_RESERVED_WORDS.contains(&command) {
+        return false;
+    }
+    let Some(second) = rest.first() else {
+        return true;
+    };
+    if command == "marketplace" && OMP_MARKETPLACE_SUBCOMMANDS.contains(&second.as_str()) {
+        return true;
+    }
+    rest.iter()
+        .any(|argument| !argument.starts_with('-') && argument.contains('@'))
+}
+
+/// What injection should do with one OMP invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OmpInjection {
+    /// Leave the invocation untouched, runnable as the user wrote it. The
+    /// reason is the skip-log line, and it is the only evidence for why
+    /// identity capture did not ride along.
+    Leave(&'static str),
+    /// Inject the reporter. `pointer` says the instructions pointer may also
+    /// ride: false when the user's own argv already carries an
+    /// `--append-system-prompt` occurrence, whose value OMP's last-wins
+    /// assignment would otherwise silently replace with Farhelm's pointer.
+    Inject { pointer: bool },
+}
+
+/// Classify one OMP invocation for reporter injection.
+///
+/// The scan identifies the ONE command position and then walks the ENTIRE
+/// option stream, because OMP keeps parsing options after its first
+/// positional: `omp launch --print`, a prompt followed by `--mode rpc`, and
+/// `omp @input.txt --export saved.jsonl` are all excluded shapes, and a
+/// trailing string option left without its value would swallow an injected
+/// flag as its own. Fail-closed choices, and why:
+///
+/// - a GENUINE end-of-options delimiter (an unconsumed `--`, per the shared
+///   grammar) declines: everything after it is prompt text, so an appended
+///   hook flag has no defined meaning — while a `--` consumed as an option
+///   value is just a value, and the walk never reinterprets one;
+/// - `--trusted-extension` declines the WHOLE injection: OMP refuses to
+///   combine it with `-e`/`--extension`/`--hook`, so appending Farhelm's
+///   extension would turn a valid launch into an error before the session
+///   starts. Never inferred from an opaque value;
+/// - an excluded option occurrence (`--print`, `--mode`, help, version,
+///   license, export, alias, inline forms included) declines, because each
+///   either exits before an interactive session exists or selects a
+///   non-interactive output mode;
+/// - an unknown long flag followed by a value-like token declines ONLY
+///   before the command position is settled: the successor might be the
+///   command (`omp --extflag acp` with a boolean extension flag runs the
+///   `acp` command). Once a prompt or `launch` is established, later words
+///   are not subcommands and the pair is consumed opaquely;
+/// - a string flag left without its successor declines: the injected `-e`
+///   would become that option's value.
+///
+/// Values of KNOWN flags stay opaque: `omp --system-prompt --help` is a
+/// prompt that says `--help`, not a help request, exactly as OMP's own
+/// parser reads it.
+fn omp_injection_decision(argv: &[String]) -> OmpInjection {
+    let Some(program) = effective_program_index(argv) else {
+        return OmpInjection::Leave("invocation has no effective program to classify");
+    };
+    if Path::new(&argv[program])
+        .file_name()
+        .and_then(|name| name.to_str())
+        != Some("omp")
+    {
+        return OmpInjection::Leave("invocation is not an omp launch");
+    }
+    let args = &argv[program + 1..];
+    let mut command_classified = false;
+    let mut user_appends_prompt = false;
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        let Some(flag) = crate::agent_kind::omp_flag_occurrence(argument) else {
+            if argument == "--" {
+                // A `--` the walk reached is, by construction, unconsumed:
+                // every value a flag claimed was skipped past wholesale.
+                return OmpInjection::Leave(
+                    "invocation contains an end-of-options boundary; appended hook flags \
+                     would be prompt text",
+                );
+            }
+            if !command_classified {
+                // The command position: the first token OMP could dispatch
+                // as a subcommand, or the start of the prompt. `help`,
+                // worker selectors, and the reserved words are rejected
+                // only from the literal first CLI position, mirroring where
+                // OMP checks them. Later positionals are prompt words.
+                if index == 0 && argument.starts_with('@') {
+                    // `@file` tokens are prompts, never subcommands.
+                } else if index == 0
+                    && (argument == "help" || argument.starts_with("__omp_worker_"))
+                {
+                    return OmpInjection::Leave("invocation is a help or worker-selector form");
+                } else if OMP_UTILITY_COMMANDS.contains(&argument) {
+                    return OmpInjection::Leave("invocation runs a utility command");
+                } else if index == 0 && omp_reserved_word_rejects(argument, &args[index + 1..]) {
+                    return OmpInjection::Leave(
+                        "invocation is a reserved management form OMP itself rejects",
+                    );
+                }
+                command_classified = true;
+            }
+            index += 1;
+            continue;
+        };
+        // Option occurrences are checked ANYWHERE in the stream, before
+        // their values are consumed.
+        if OMP_EXCLUDED_OPTIONS.contains(&flag.name) {
+            return OmpInjection::Leave("invocation carries a non-interactive or exiting option");
+        }
+        if flag.name == "--trusted-extension" {
+            return OmpInjection::Leave(
+                "invocation declares --trusted-extension, which OMP refuses to combine with \
+                 an injected -e",
+            );
+        }
+        if flag.name == "--append-system-prompt" {
+            user_appends_prompt = true;
+        }
+        let next = args.get(index + 1).map(String::as_str);
+        // Both successor-based refusals apply ONLY to non-inline
+        // occurrences: an inline `=value` belongs to the token itself, so
+        // `--model=<model>` as the FINAL token needs no successor, and an
+        // inline unknown option cannot be eating the command-position word.
+        if flag.arity == crate::agent_kind::OmpFlagArity::UnknownLong
+            && !flag.inline_value
+            && !command_classified
+            && next.is_some_and(|value| !value.starts_with('-'))
+        {
+            // Before the command position is settled, an unknown long flag
+            // might be an extension string flag eating the very token that
+            // would have named the command — or a boolean flag leaving it in
+            // command position. No guess.
+            return OmpInjection::Leave(
+                "an unknown long flag makes the command position ambiguous",
+            );
+        }
+        if flag.arity == crate::agent_kind::OmpFlagArity::String
+            && !flag.inline_value
+            && next.is_none()
+        {
+            return OmpInjection::Leave(
+                "invocation ends in a string option with no value; an injected flag would \
+                 become its value",
+            );
+        }
+        if crate::agent_kind::omp_flag_consumes_next(&flag, next) {
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    OmpInjection::Inject {
+        pointer: !user_appends_prompt,
+    }
 }
 
 /// Add launch-local reporter controls without persisting them in vendor metadata.
@@ -3788,8 +4086,9 @@ pub struct Supervisor {
     /// `None` is a real, if vanishing, state and not a should-never-happen:
     /// a farhelm installed under a non-UTF-8 path simply never has reporter
     /// controls injected — [`Supervisor::with_hook_argv`] logs the skip.
-    /// Claude and Codex retain their scan fallback; Goose and Pi do not gain
-    /// a new exact target. Nothing else about the launch changes, because the shim itself is addressed by `PathBuf`
+    /// Claude and Codex retain their scan fallback; Goose, Pi, and OMP do not
+    /// gain a new exact target. Nothing else about the launch changes,
+    /// because the shim itself is addressed by `PathBuf`
     /// (see [`crate::launch::window_command`]) and has never needed the
     /// path to be text.
     farhelm_exe_str: Option<String>,
@@ -4439,7 +4738,7 @@ impl Supervisor {
                 exe = %farhelm_exe.display(),
                 "this farhelm executable's path is not valid UTF-8, so no launch can carry \
                  conversation reporter controls; Claude and Codex retain record scanning, \
-                 while Goose and Pi cannot report a new exact target"
+                 while Goose, Pi, and OMP cannot report a new exact target"
             );
         }
         // Store one absolute spelling after creation. Every injected
@@ -5423,30 +5722,41 @@ impl Supervisor {
         }))
     }
 
-    /// Verify Pi's exact session file immediately before a resume can launch.
+    /// Verify a locator-reporting session's exact file immediately before a
+    /// resume can launch.
     ///
-    /// Pi treats a missing or malformed `--session` path as a fresh session,
-    /// so passing an unchecked locator would make a Resume request silently
-    /// lose its meaning. A failed check replaces only the exact locator and
+    /// Both locator vendors (Pi and OMP) treat a missing or malformed resume
+    /// path as a fresh session, so passing an unchecked locator would make a
+    /// Resume request silently lose its meaning. The parser and verifier are
+    /// dispatched from the session's STORED kind — each vendor's session-file
+    /// header has its own shape (OMP may open with a title-slot record), and
+    /// a locator reported under one vendor's prefix is never decoded by the
+    /// other's rules. A failed check replaces only the exact locator and
     /// generation read by the caller with a fileless token. The request then
     /// conflicts, and a refresh exposes `FreshOnly`; a concurrent newer
     /// report fails the comparison and remains the durable answer.
-    async fn verify_pi_resume(
+    async fn verify_report_only_resume(
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
     ) -> anyhow::Result<()> {
-        let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("a Pi resume offer has no durable conversation locator")
-        })?;
-        let locator = crate::agent_kind::parse_pi_locator(stored)
-            .context("decoding the Pi resume locator")?;
+        let vendor = match snapshot.kind {
+            AgentKind::Pi => crate::agent_kind::LocatorVendor::Pi,
+            AgentKind::Omp => crate::agent_kind::LocatorVendor::Omp,
+            other => anyhow::bail!("{other:?} sessions have no resume locator to verify"),
+        };
+        let stored = snapshot
+            .captured_conversation
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("a resume offer has no durable conversation locator"))?;
+        let locator = crate::agent_kind::parse_locator(vendor, stored)
+            .with_context(|| format!("decoding the {} resume locator", vendor.name()))?;
         let path = locator
             .session_file
             .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("a Pi resume offer has no durable session file"))?;
-        let integration = crate::agent_kind::integration_for(AgentKind::Pi)
-            .expect("Pi has a report-only integration");
+            .ok_or_else(|| anyhow::anyhow!("a resume offer has no durable session file"))?;
+        let integration = crate::agent_kind::integration_for(snapshot.kind)
+            .expect("a locator-reporting kind has a report-only integration");
         let verified = match crate::agent_kind::read_record(Path::new(path), integration).await {
             Ok(Some((record, _))) => record.conversation == locator.session_id,
             Ok(None) | Err(_) => false,
@@ -5455,11 +5765,14 @@ impl Supervisor {
             return Ok(());
         }
 
-        let replacement = crate::agent_kind::encode_pi_locator(crate::agent_kind::PiLocator {
-            version: locator.version,
-            session_id: locator.session_id,
-            session_file: None,
-        })?;
+        let replacement = crate::agent_kind::encode_locator(
+            vendor,
+            crate::agent_kind::SessionLocator {
+                version: locator.version,
+                session_id: locator.session_id,
+                session_file: None,
+            },
+        )?;
         self.store
             .replace_reported_conversation_if_current(
                 session_id,
@@ -5468,11 +5781,11 @@ impl Supervisor {
                 &replacement,
             )
             .await
-            .context("invalidating a stale Pi resume locator")?;
+            .with_context(|| format!("invalidating a stale {} resume locator", vendor.name()))?;
         Err(RequestError::new(
             ErrorKind::Conflict,
             "this session's restart offer changed while the restart was being prepared; its \
-             exact Pi session file could not be verified, so nothing was relaunched — refresh \
+             exact session file could not be verified, so nothing was relaunched — refresh \
              the session and re-present the offer",
         )
         .into())
@@ -7718,8 +8031,9 @@ impl Supervisor {
             .into());
         };
         let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
-        if mode == RestartMode::Resume && snapshot.kind == AgentKind::Pi {
-            self.verify_pi_resume(session_id, &snapshot).await?;
+        if mode == RestartMode::Resume && matches!(snapshot.kind, AgentKind::Pi | AgentKind::Omp) {
+            self.verify_report_only_resume(session_id, &snapshot)
+                .await?;
         }
         ensure_cwd_usable(&entry.info.cwd).await?;
         // The VERIFIED path travels with the relaunch rather than being
@@ -9908,8 +10222,8 @@ impl Supervisor {
     /// rather than inferred: the agent itself reports the id it is
     /// actually using, which is the only thing that survives a `/clear`.
     /// Everything this function can refuse leaves the launch runnable.
-    /// Claude and Codex then use their record scans; Goose and Pi gain no
-    /// new exact target because their integrations are report-only.
+    /// Claude and Codex then use their record scans; Goose, Pi, and OMP gain
+    /// no new exact target because their integrations are report-only.
     ///
     /// Returns the argv to spawn and whether it was hooked; see
     /// [`with_hook_argv_using`] for the refusal list, the order it applies
@@ -9934,7 +10248,7 @@ impl Supervisor {
         &self,
         argv: Vec<String>,
         snapshot: &IntegrationSnapshot,
-        pi_extension: Option<&str>,
+        vendor_extension: Option<&str>,
         session: &str,
     ) -> (Vec<String>, bool) {
         with_hook_argv_using(
@@ -9943,7 +10257,7 @@ impl Supervisor {
             &self.seams.agent_hooks,
             self.seams.agent_instructions,
             self.farhelm_exe_str.as_deref(),
-            pi_extension,
+            vendor_extension,
             session,
         )
     }
@@ -10024,25 +10338,37 @@ impl Supervisor {
         // after the fill above, and nothing after it: the spec on disk is
         // what the shim execs, so the flags have to be in it, and putting
         // the injection here is what lets the shim stay ignorant of hooks
-        // entirely.
-        let pi_extension =
-            if snapshot.kind == AgentKind::Pi && self.seams.agent_hooks.allows(AgentKind::Pi) {
-                match crate::pi_extension::materialize(&self.state_dir).await {
+        // entirely. The two locator-reporting kinds each need their OWN
+        // vendor's artifact published; one vendor's asset can never serve
+        // the other because the reporters carry different event surfaces
+        // and different `vendor` payloads.
+        let vendor_asset = match snapshot.kind {
+            AgentKind::Pi if self.seams.agent_hooks.allows(AgentKind::Pi) => {
+                Some(crate::pi_extension::PI_ASSET)
+            }
+            AgentKind::Omp if self.seams.agent_hooks.allows(AgentKind::Omp) => {
+                Some(crate::pi_extension::OMP_ASSET)
+            }
+            _ => None,
+        };
+        let vendor_extension = match vendor_asset {
+            Some(asset) => {
+                match crate::pi_extension::materialize_asset(&self.state_dir, &asset).await {
                     Ok(path) => path.to_str().map(str::to_string),
                     Err(error) => {
                         warn!(
                             session = %id,
                             error = %format!("{error:#}"),
-                            "could not materialize Pi's conversation extension; launching without \
-                             identity capture or instruction injection"
+                            "could not materialize the agent's conversation extension; launching \
+                             without identity capture or instruction injection"
                         );
                         None
                     }
                 }
-            } else {
-                None
-            };
-        let (argv, hooked) = self.with_hook_argv(argv, snapshot, pi_extension.as_deref(), id);
+            }
+            None => None,
+        };
+        let (argv, hooked) = self.with_hook_argv(argv, snapshot, vendor_extension.as_deref(), id);
         let spec_path = crate::launch::spec_path_for_launch(&self.state_dir, id, generation);
         // Derived the SAME way the shim derives it from its own copy of
         // `spec_path` (`launch::status_path_for_spec`) — never computed
@@ -10394,7 +10720,7 @@ impl Supervisor {
     ///   mode validation from `captured_conversation` in SQLite, so a
     ///   restart landing inside the divergence resumes the reported
     ///   conversation regardless of what memory holds.
-    /// - **The mirror catches up on its own.** Goose and Pi reconcile their
+    /// - **The mirror catches up on its own.** Goose, Pi, and OMP reconcile their
     ///   durable reported row before every capture reply because they have
     ///   no scan. For Claude and Codex, the next capture pass that
     ///   reaches a commit has its write-once UPDATE refused by the fence
@@ -13004,11 +13330,14 @@ pub(crate) mod tests {
         let id = uuid::Uuid::new_v4().to_string();
         let file = state.path().join("pi session.jsonl");
         std::fs::write(&file, "{\"type\":\"session\",\"id\":\"pi-exact\"}\n").unwrap();
-        let token = crate::agent_kind::encode_pi_locator(crate::agent_kind::PiLocator {
-            version: 1,
-            session_id: "pi-exact".into(),
-            session_file: Some(file.to_str().unwrap().to_owned()),
-        })
+        let token = crate::agent_kind::encode_locator(
+            crate::agent_kind::LocatorVendor::Pi,
+            crate::agent_kind::SessionLocator {
+                version: 1,
+                session_id: "pi-exact".into(),
+                session_file: Some(file.to_str().unwrap().to_owned()),
+            },
+        )
         .unwrap();
         let integration = IntegrationSnapshot::resolve(&["pi".into()], None, None).unwrap();
         sup.store
@@ -13072,13 +13401,13 @@ pub(crate) mod tests {
             RestartOffer::Resume
         );
         let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
-        sup.verify_pi_resume(&id, &snapshot)
+        sup.verify_report_only_resume(&id, &snapshot)
             .await
             .expect("matching exact file");
 
         std::fs::remove_file(&file).unwrap();
         let error = sup
-            .verify_pi_resume(&id, &snapshot)
+            .verify_report_only_resume(&id, &snapshot)
             .await
             .expect_err("missing file cannot resume");
         assert_eq!(error_kind(&error), ErrorKind::Conflict);
@@ -13089,6 +13418,366 @@ pub(crate) mod tests {
         );
         let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
         assert!(relaunch_argv(RestartMode::Fresh, &fresh, "pi").is_ok());
+    }
+
+    /// The OMP twin of the Pi offer test above, exercising OMP's own seams:
+    /// a report before publication and a later withdrawal must both reach the
+    /// offer users see; the pre-resume verifier dispatches OMP's header parser
+    /// (the fixture carries a real leading title slot) and refuses a file
+    /// whose header id disagrees with the reported one; a Pi locator never
+    /// passes as an OMP report; and a refreshed file for the SAME id keeps the
+    /// offer pointed at the new path. The fixture has no terminal: the store,
+    /// capture pass, verifier, and reply builder are the real boundaries
+    /// under test, without launching a model.
+    #[farhelm_testtrace::test]
+    async fn omp_report_before_publication_and_missing_file_refresh_the_offer() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let file = state.path().join("omp session.jsonl");
+        std::fs::write(
+            &file,
+            "{\"type\":\"title\",\"v\":1,\"title\":\"t\",\"updatedAt\":\"u\",\"pad\":\"   \"}\n\
+             {\"type\":\"session\",\"version\":3,\"id\":\"omp-exact\"}\n",
+        )
+        .unwrap();
+        let encode = |session_id: &str, path: Option<&std::path::Path>| {
+            crate::agent_kind::encode_locator(
+                crate::agent_kind::LocatorVendor::Omp,
+                crate::agent_kind::SessionLocator {
+                    version: 1,
+                    session_id: session_id.to_string(),
+                    session_file: path.map(|p| p.to_str().unwrap().to_owned()),
+                },
+            )
+            .unwrap()
+        };
+        let integration = IntegrationSnapshot::resolve(&["omp".into()], None, None).unwrap();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: id.clone(),
+                    parent: None,
+                    archived: false,
+                    title: "Omp".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: state.path().to_str().unwrap().into(),
+                    invocation: "omp".into(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: AgentKind::Omp,
+                    resume_template: integration.resume_template.clone(),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                    conversation_source: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!sup.sessions.lock().await.contains_key(&id));
+
+        // A Pi locator is refused for an OMP session BEFORE any write: the
+        // vendors' report channels are closed to each other in both
+        // directions, so no durable state can be poisoned cross-kind.
+        let pi_token = crate::agent_kind::encode_locator(
+            crate::agent_kind::LocatorVendor::Pi,
+            crate::agent_kind::SessionLocator {
+                version: 1,
+                session_id: "omp-exact".into(),
+                session_file: Some(file.to_str().unwrap().to_owned()),
+            },
+        )
+        .unwrap();
+        let error = sup
+            .report_conversation(&id, pi_token, "startup".into())
+            .await
+            .expect_err("a Pi locator cannot report for an OMP session");
+        assert_eq!(error.kind, ErrorKind::InvalidRequest);
+
+        sup.report_conversation(&id, encode("omp-exact", Some(&file)), "startup".into())
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        assert_eq!(entry.capture.lock().unwrap().committed_conversation(), None);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::Resume
+        );
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        sup.verify_report_only_resume(&id, &snapshot)
+            .await
+            .expect("a title-slotted header with the matching id verifies");
+
+        // A file whose header id disagrees with the reported locator refuses,
+        // replaces the exact locator with a fileless token, and the stale
+        // offer collapses to FreshOnly.
+        let other = state.path().join("omp other.jsonl");
+        std::fs::write(
+            &other,
+            "{\"type\":\"session\",\"version\":3,\"id\":\"omp-different\"}\n",
+        )
+        .unwrap();
+        let mismatched = encode("omp-exact", Some(&other));
+        sup.report_conversation(&id, mismatched.clone(), "agent_end".into())
+            .await
+            .unwrap();
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        let error = sup
+            .verify_report_only_resume(&id, &snapshot)
+            .await
+            .expect_err("a mismatched id cannot resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::FreshOnly
+        );
+
+        // A title slot whose `source` OMP itself refuses (anything but
+        // absent, "auto", or "user") makes the whole file an invalid session
+        // header to OMP, so Farhelm must refuse it too — BEFORE the resume
+        // launches — and collapse the durable offer to FreshOnly, exactly
+        // like a mismatched id.
+        let invalid_source = state.path().join("omp invalid source.jsonl");
+        std::fs::write(
+            &invalid_source,
+            "{\"type\":\"title\",\"v\":1,\"title\":\"t\",\"source\":\"bogus\",\"updatedAt\":\"u\",\"pad\":\"   \"}\n\
+             {\"type\":\"session\",\"version\":3,\"id\":\"omp-exact\"}\n",
+        )
+        .unwrap();
+        let invalid_token = encode("omp-exact", Some(&invalid_source));
+        sup.report_conversation(&id, invalid_token.clone(), "agent_end".into())
+            .await
+            .unwrap();
+        sup.capture_now().await;
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        let error = sup
+            .verify_report_only_resume(&id, &snapshot)
+            .await
+            .expect_err("a title slot OMP itself refuses cannot resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::FreshOnly
+        );
+        let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
+        assert!(relaunch_argv(RestartMode::Fresh, &fresh, "omp").is_ok());
+        std::fs::remove_file(&invalid_source).unwrap();
+
+        // A refreshed file for the SAME id puts the offer back, now pointing
+        // at the new path — the fileless withdrawal is a state, not a tombstone.
+        let refreshed = encode("omp-exact", Some(&file));
+        sup.report_conversation(&id, refreshed.clone(), "agent_end".into())
+            .await
+            .unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::Resume
+        );
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+
+        std::fs::remove_file(&file).unwrap();
+        let error = sup
+            .verify_report_only_resume(&id, &snapshot)
+            .await
+            .expect_err("missing file cannot resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::FreshOnly
+        );
+        let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
+        assert!(relaunch_argv(RestartMode::Fresh, &fresh, "omp").is_ok());
+    }
+
+    /// The fileless TRANSITION path, end to end and WITHOUT invoking
+    /// pre-resume verification: a session holding a verified Resume offer for
+    /// conversation A receives a report for conversation B with NO session
+    /// file, and the durable identity becomes B (fileless) while the offer
+    /// collapses to FreshOnly. If a fileless transition retained the previous
+    /// target instead, the user would be offered a resume of a conversation
+    /// the agent has left — the central regression this sequence pins. When B
+    /// then persists, the SAME session id's report restores the offer and the
+    /// filled resume argv names B's file exactly in the placeholder slot.
+    #[farhelm_testtrace::test]
+    async fn omp_fileless_transition_withdraws_and_persistence_restores_the_substituted_path() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let file_a = state.path().join("omp-a.jsonl");
+        std::fs::write(
+            &file_a,
+            "{\"type\":\"session\",\"version\":3,\"id\":\"conv-a\"}\n",
+        )
+        .unwrap();
+        let encode = |session_id: &str, path: Option<&std::path::Path>| {
+            crate::agent_kind::encode_locator(
+                crate::agent_kind::LocatorVendor::Omp,
+                crate::agent_kind::SessionLocator {
+                    version: 1,
+                    session_id: session_id.to_string(),
+                    session_file: path.map(|p| p.to_str().unwrap().to_owned()),
+                },
+            )
+            .unwrap()
+        };
+        let integration = IntegrationSnapshot::resolve(&["omp".into()], None, None).unwrap();
+        sup.store
+            .insert_session(
+                StoredSession {
+                    id: id.clone(),
+                    parent: None,
+                    archived: false,
+                    title: "Omp".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: state.path().to_str().unwrap().into(),
+                    invocation: "omp".into(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: AgentKind::Omp,
+                    resume_template: integration.resume_template.clone(),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                    conversation_source: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+
+        // 1. Conversation A, persisted: the offer is Resume for A.
+        sup.report_conversation(&id, encode("conv-a", Some(&file_a)), "session_start".into())
+            .await
+            .unwrap();
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::Resume
+        );
+
+        // 2. The agent switches to conversation B, which has NO file yet. The
+        // report carries B's id with a null file — and the durable identity
+        // becomes B. No verifier runs in this sequence: the withdrawal is the
+        // report path's own work.
+        sup.report_conversation(&id, encode("conv-b", None), "session_switch:new".into())
+            .await
+            .unwrap();
+        sup.capture_now().await;
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some(encode("conv-b", None).as_str()),
+            "the durable identity is the fileless B locator, not the retained A target"
+        );
+        assert_eq!(
+            snapshot.restart_offer,
+            RestartOffer::FreshOnly,
+            "a fileless transition withdraws the old resume offer"
+        );
+        assert!(
+            snapshot.resume_argv.is_none(),
+            "nothing may substitute for a fileless target"
+        );
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::FreshOnly
+        );
+
+        // 3. B persists under its own file; the SAME id's report restores the
+        // offer, and the substituted resume argv names that file exactly in
+        // the placeholder slot.
+        let file_b = state.path().join("omp-b.jsonl");
+        std::fs::write(
+            &file_b,
+            "{\"type\":\"session\",\"version\":3,\"id\":\"conv-b\"}\n",
+        )
+        .unwrap();
+        sup.report_conversation(&id, encode("conv-b", Some(&file_b)), "agent_end".into())
+            .await
+            .unwrap();
+        sup.capture_now().await;
+        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
+        assert_eq!(
+            snapshot.restart_offer,
+            RestartOffer::Resume,
+            "the same id's persisted file restores the offer"
+        );
+        let mut template = snapshot.resume_template.clone().expect("derived template");
+        assert_eq!(
+            template.pop().as_deref(),
+            Some(crate::agent_kind::CONVERSATION_PLACEHOLDER)
+        );
+        let filled = snapshot.resume_argv.expect("the offer fills");
+        assert_eq!(&filled[..template.len()], &template[..]);
+        assert_eq!(
+            filled.last().map(String::as_str),
+            Some(file_b.to_str().unwrap()),
+            "the verified B file substitutes exactly, never the withdrawn A target"
+        );
     }
 
     /// Deleting a session removes its conversation-hook trace, at the path
@@ -16959,6 +17648,7 @@ pub(crate) mod tests {
             AgentKind::Codex => "codex",
             AgentKind::Goose => "goose",
             AgentKind::Pi => "pi",
+            AgentKind::Omp => "omp",
             AgentKind::Generic => "agent",
         };
         IntegrationSnapshot::resolve(&[argv0.to_string()], Some(kind), None)
@@ -17283,6 +17973,426 @@ pub(crate) mod tests {
             result
                 .windows(2)
                 .any(|pair| pair == ["--system-prompt", "--export"])
+        );
+    }
+
+    /// OMP injects the static extension and pointer as one unit, mirroring
+    /// Pi's contract with OMP's own classifier: either the hook opt-out or an
+    /// unavailable verified artifact leaves the user's argv byte-for-byte
+    /// unchanged; OMP's utility commands (including a command token BEHIND
+    /// leading flags), reserved-word rejecting forms, help/worker selectors,
+    /// and non-interactive print/mode options must also remain exact, while
+    /// selector-looking option values and a prompt like `omp list all my
+    /// files` stay hooked.
+    #[farhelm_testtrace::test]
+    fn omp_injection_requires_both_policy_and_verified_artifact() {
+        let argv = vec![
+            "omp".to_string(),
+            "--model".to_string(),
+            "model-1".to_string(),
+        ];
+        for (hooks, extension) in [
+            (crate::agent_kind::AgentHooks::None, Some("/state/omp.ts")),
+            (crate::agent_kind::AgentHooks::All, None),
+        ] {
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Omp),
+                &hooks,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                extension,
+                "session-1",
+            );
+            assert!(!hooked);
+            assert_eq!(result, argv);
+        }
+
+        let shaped_value = ["omp", "--append-system-prompt", "--help"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            shaped_value,
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::Off,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(
+            hooked,
+            "a value that looks like --help is still only a value"
+        );
+        assert!(
+            result
+                .windows(2)
+                .any(|pair| pair == ["--append-system-prompt", "--help"])
+        );
+
+        for argv in [
+            vec!["omp", "acp"],
+            vec!["omp", "--approval-mode=yolo", "acp"],
+            vec!["omp", "--model", "model-1", "gc"],
+            vec!["omp", "list"],
+            vec!["omp", "marketplace", "add", "xyz"],
+            vec!["omp", "uninstall", "foo@bar"],
+            vec!["omp", "install", "package"],
+            vec!["omp", "help"],
+            vec!["omp", "__omp_worker_stats"],
+            vec!["omp", "--print"],
+            vec!["omp", "-p"],
+            vec!["omp", "--mode", "text"],
+            vec!["omp", "--mode=text"],
+            vec!["omp", "--export", "session.jsonl"],
+            vec!["omp", "--alias", "work"],
+            vec!["omp", "--help"],
+            vec!["omp", "-v"],
+            vec!["omp", "--version"],
+            vec!["omp", "--license"],
+            vec!["omp", "--list-models"],
+            vec!["omp", "--"],
+            // OMP keeps parsing options AFTER its first positional: an
+            // explicit `launch`, a prompt, and an `@file` all still receive
+            // excluded options, and none of them is interactive.
+            vec!["omp", "launch", "--print"],
+            vec!["omp", "summarize this", "--mode", "rpc"],
+            vec!["omp", "@input.txt", "--export", "saved.jsonl"],
+            vec!["omp", "--model", "m", "hello", "--export", "out.jsonl"],
+            // A string option left without its SEPARATE value would swallow
+            // the injected `-e` as its own value.
+            vec!["omp", "hello", "--model"],
+            vec!["omp", "--model"],
+            // Before the command position is settled, an unknown long flag
+            // followed by a value-like token is ambiguous: with a boolean
+            // extension flag the successor would be the command.
+            vec!["omp", "--extflag", "acp"],
+            // Excluded INLINE options stay excluded: the inline spelling is
+            // the same option occurrence to OMP.
+            vec!["omp", "--mode=rpc"],
+            vec!["omp", "hello", "--mode=text"],
+        ] {
+            let argv = argv.into_iter().map(str::to_string).collect::<Vec<_>>();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Omp),
+                &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                Some("/state/omp.ts"),
+                "session-1",
+            );
+            assert!(!hooked, "OMP utility argv must remain unchanged: {argv:?}");
+            assert_eq!(result, argv);
+        }
+
+        // The exact injected tail for a bare launch: the extension flag, the
+        // pointer, and the reporter control riding on a wrapped `env` prefix.
+        let (injected, hooked) = with_hook_argv_using(
+            vec!["omp".to_string()],
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked);
+        assert_eq!(
+            injected,
+            [
+                "env",
+                "FARHELM_OMP_REPORTER_EXE=/opt/farhelm",
+                "omp",
+                "-e",
+                "/state/omp.ts",
+                "--append-system-prompt",
+                crate::agent_kind::INSTRUCTIONS_POINTER,
+            ]
+        );
+
+        for argv in [
+            vec!["omp"],
+            vec!["/opt/bin/omp", "fix the build"],
+            vec!["omp", "launch"],
+            vec!["omp", "launch", "list"],
+            vec!["omp", "list", "all", "my", "files"],
+            vec!["omp", "upgrade", "the", "deps"],
+            vec!["omp", "--no-session", "hello"],
+            vec!["omp", "--approval-mode", "yolo", "hello"],
+            vec!["omp", "--fork", "branch-1", "hello"],
+            // After the command position, later words are prompt text, not
+            // subcommands — and an unknown long flag keeping its value-like
+            // successor is no longer ambiguous about the command.
+            vec!["omp", "hello", "--extflag", "value"],
+            vec!["omp", "hello", "--model", "m"],
+            // Inline options carry their own value and need NO successor:
+            // a final inline option is still an interactive launch.
+            vec!["omp", "--model=openrouter/z-ai/glm-5.3-flash"],
+            vec!["omp", "--approval-mode=yolo"],
+            vec!["omp", "--session-dir=/sessions"],
+            vec!["omp", "--custom=value", "hello"],
+            vec!["omp", "--extension=/x.ts", "hello"],
+        ] {
+            let argv = argv.into_iter().map(str::to_string).collect::<Vec<_>>();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Omp),
+                &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                Some("/state/omp.ts"),
+                "session-1",
+            );
+            assert!(hooked, "OMP launch-shaped argv must be hooked: {argv:?}");
+            assert!(
+                result
+                    .windows(2)
+                    .any(|pair| pair == ["-e", "/state/omp.ts"]),
+                "the extension rides on every hooked OMP launch: {argv:?}"
+            );
+        }
+
+        let export_value = ["omp", "--system-prompt", "--export"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            export_value,
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::Off,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked, "--export is data when consumed as an option value");
+        assert!(
+            result
+                .windows(2)
+                .any(|pair| pair == ["--system-prompt", "--export"])
+        );
+    }
+
+    /// Farhelm's instructions pointer must never displace the user's own
+    /// appended system prompt. OMP assigns every `--append-system-prompt`
+    /// occurrence to one field and the LAST occurrence wins, so the effective
+    /// outcome is what this pins: when the user's argv already carries the
+    /// option (separate or inline form), the injected argv contains EXACTLY
+    /// ONE occurrence of it and that occurrence's value is the USER's — the
+    /// reporter still rides, only the pointer yields. Without the user's
+    /// option, the single occurrence is Farhelm's pointer.
+    #[farhelm_testtrace::test]
+    fn omp_pointer_yields_to_a_users_own_appended_system_prompt() {
+        let count_flag = |argv: &[String]| -> usize {
+            argv.iter()
+                .filter(|element| element.as_str() == "--append-system-prompt")
+                .count()
+        };
+        let value_of_sole_flag = |argv: &[String]| -> String {
+            assert_eq!(count_flag(argv), 1, "exactly one occurrence: {argv:?}");
+            let position = argv
+                .iter()
+                .position(|element| element == "--append-system-prompt")
+                .expect("the occurrence exists");
+            argv[position + 1].clone()
+        };
+
+        // Separate form: the user's instructions win, the pointer is absent.
+        let user_separate = [
+            "omp",
+            "--append-system-prompt",
+            "review every diff against the spec",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            user_separate.clone(),
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked, "the reporter still rides");
+        assert_eq!(
+            value_of_sole_flag(&injected),
+            "review every diff against the spec"
+        );
+        assert!(
+            !injected.contains(&crate::agent_kind::INSTRUCTIONS_POINTER.to_string()),
+            "Farhelm's pointer must not be appended behind the user's occurrence"
+        );
+
+        // Inline form: same outcome, and the user's inline token survives as
+        // the one occurrence's value.
+        let user_inline = [
+            "omp",
+            "--append-system-prompt=user instructions inline",
+            "hello",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            user_inline.clone(),
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked);
+        // The inline occurrence is the user's own; the effective outcome is
+        // that NO SEPARATE occurrence was appended on top of it.
+        assert_eq!(
+            count_flag(&injected),
+            0,
+            "no second --append-system-prompt was appended: {injected:?}"
+        );
+        assert!(
+            injected.contains(&"--append-system-prompt=user instructions inline".to_string()),
+            "the user's inline occurrence is untouched: {injected:?}"
+        );
+        assert!(!injected.contains(&crate::agent_kind::INSTRUCTIONS_POINTER.to_string()));
+
+        // The user's option coming AFTER other flags is still recognized as
+        // an occurrence of it, not merely in a leading position.
+        let user_trailing = [
+            "omp",
+            "--model",
+            "openrouter/z-ai/glm-5.3-flash",
+            "--append-system-prompt",
+            "trailing user instructions",
+            "hello",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            user_trailing,
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked);
+        assert_eq!(value_of_sole_flag(&injected), "trailing user instructions");
+
+        // A FINAL inline user prompt option — no successor, announcements
+        // enabled — is hooked with the pointer suppressed and the user's
+        // inline occurrence untouched.
+        let user_final_inline = ["omp", "--append-system-prompt=user notes inline"]
+            .map(str::to_string)
+            .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            user_final_inline,
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked, "a final inline option still launches");
+        assert_eq!(
+            count_flag(&injected),
+            0,
+            "no separate occurrence was appended behind the user's final inline one: \
+             {injected:?}"
+        );
+        assert!(
+            injected.contains(&"--append-system-prompt=user notes inline".to_string()),
+            "the user's inline occurrence is untouched: {injected:?}"
+        );
+        assert!(!injected.contains(&crate::agent_kind::INSTRUCTIONS_POINTER.to_string()));
+
+        // Without the user's option, the pointer is exactly the one
+        // occurrence's value — the default delivery still works.
+        let (injected, hooked) = with_hook_argv_using(
+            vec!["omp".to_string()],
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked);
+        assert_eq!(
+            value_of_sole_flag(&injected),
+            crate::agent_kind::INSTRUCTIONS_POINTER
+        );
+    }
+
+    /// A launch that declares `--trusted-extension` is left COMPLETELY
+    /// unchanged: OMP refuses to combine that flag with `-e`, so appending
+    /// Farhelm's extension would turn a valid invocation into an error before
+    /// the session starts — the one outcome injection is never allowed to
+    /// cause. The declaration is recognized wherever it actually occurs
+    /// (separate, inline, after positionals) and NEVER inferred from an
+    /// opaque option value, which still launches hooked.
+    #[farhelm_testtrace::test]
+    fn omp_trusted_extension_launches_are_left_completely_unchanged() {
+        for argv in [
+            vec!["omp", "--trusted-extension", "/abs/user-extension.ts"],
+            vec!["omp", "--trusted-extension=/abs/user-extension.ts"],
+            vec![
+                "omp",
+                "hello",
+                "--trusted-extension",
+                "/abs/user-extension.ts",
+            ],
+            vec!["omp", "--model", "m", "--trusted-extension=/x.ts", "hello"],
+        ] {
+            let argv = argv.into_iter().map(str::to_string).collect::<Vec<_>>();
+            let (result, hooked) = with_hook_argv_using(
+                argv.clone(),
+                &hook_snapshot(AgentKind::Omp),
+                &crate::agent_kind::AgentHooks::All,
+                crate::agent_kind::AgentInstructions::On,
+                Some("/opt/farhelm"),
+                Some("/state/omp.ts"),
+                "session-1",
+            );
+            assert!(
+                !hooked,
+                "trusted-extension argv must stay unhooked: {argv:?}"
+            );
+            assert_eq!(
+                result, argv,
+                "the invocation must be byte-for-byte unchanged"
+            );
+        }
+
+        // An opaque VALUE spelled like the flag is data, not a declaration:
+        // `--system-prompt` consumes it, OMP never sees a
+        // `--trusted-extension` occurrence, and the launch stays hooked.
+        let value = ["omp", "--system-prompt", "--trusted-extension", "hello"]
+            .map(str::to_string)
+            .to_vec();
+        let (result, hooked) = with_hook_argv_using(
+            value,
+            &hook_snapshot(AgentKind::Omp),
+            &crate::agent_kind::AgentHooks::All,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            Some("/state/omp.ts"),
+            "session-1",
+        );
+        assert!(hooked, "a consumed value is not a declaration");
+        assert!(
+            result
+                .windows(2)
+                .any(|pair| pair == ["--system-prompt", "--trusted-extension"]),
+            "the value pair survives verbatim"
+        );
+        assert!(
+            result
+                .windows(2)
+                .any(|pair| pair == ["-e", "/state/omp.ts"]),
+            "the extension rides the hooked value-only launch"
         );
     }
 

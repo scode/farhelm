@@ -1016,6 +1016,7 @@ pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str 
         K::Codex => "codex",
         K::Goose => "goose",
         K::Pi => "pi",
+        K::Omp => "omp",
         K::Generic => "generic",
     }
 }
@@ -1040,6 +1041,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "codex" => K::Codex,
         "goose" => K::Goose,
         "pi" => K::Pi,
+        "omp" => K::Omp,
         "generic" => K::Generic,
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     })
@@ -6720,6 +6722,50 @@ mod tests {
             launch_scoped: false,
             source_profile: None,
         }
+    }
+
+    /// The OMP kind round-trips through the supervisor's strict column
+    /// vocabulary, and a hand-edited unknown spelling fails the row decode
+    /// rather than downgrading the session to a different integration. This
+    /// is the supervisor-side half of the protocol bump that introduced the
+    /// kind: the store is the trust boundary a binary downgrade's rows reach
+    /// first, and silently coercing the kind would misdirect conversation
+    /// reports and resume offers.
+    #[farhelm_testtrace::test]
+    async fn omp_agent_kind_round_trips_and_unknown_spellings_fail_decode() {
+        let (_dir, store) = fresh_store().await;
+        let mut row = launching_row("s-omp");
+        row.agent_kind = farhelm_proto::AgentKind::Omp;
+        // An OMP row must carry the placeholder-bearing template a real
+        // create resolves; the decoder refuses an integrated kind whose
+        // stored template could never be filled.
+        row.resume_template = Some(vec![
+            "omp".to_string(),
+            "--resume".to_string(),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+        ]);
+        let claimed = store.insert_session(row, None).await.expect("insert");
+        assert!(matches!(claimed, Claimed::Ours { .. }));
+        let loaded = store
+            .session("s-omp")
+            .await
+            .expect("read")
+            .expect("present");
+        assert_eq!(loaded.agent_kind, farhelm_proto::AgentKind::Omp);
+
+        {
+            let conn = store.conn.lock().expect("db mutex");
+            conn.execute(
+                "UPDATE sessions SET agent_kind = 'ompish' WHERE id = 's-omp'",
+                [],
+            )
+            .expect("hand-edit the kind column");
+        }
+        let error = store
+            .session("s-omp")
+            .await
+            .expect_err("an unknown kind must fail the decode");
+        assert!(format!("{error:#}").contains("unrecognized agent kind"));
     }
 
     /// Seed one reserved launch: a launching session row plus the pending
