@@ -1537,8 +1537,11 @@ async fn handle_archive_session(
     let reply_sup = Arc::clone(sup);
     let tx = tx.clone();
     tasks.spawn(async move {
-        let entry = match mutation.await {
-            Ok((Ok(entry), _permit)) => entry,
+        // Move the permit into this reply task after a successful mutation.
+        // Rebuilding metadata can still make tmux and store round trips, so
+        // archive remains admitted until that work and its response finish.
+        let (entry, _permit) = match mutation.await {
+            Ok((Ok(entry), permit)) => (entry, permit),
             Ok((Err(error), _permit)) => {
                 send_reply(
                     &tx,
@@ -4958,6 +4961,87 @@ mod tests {
             session.annotation.as_deref(),
             Some(farhelm_proto::STOP_ANNOTATION)
         );
+    }
+
+    /// Archive admission also covers reply-only metadata work after the mutation.
+    /// The existing capture gate identifies that exact handoff without a scheduling
+    /// delay; cancelling the reply must release its transferred permit.
+    #[farhelm_testtrace::test]
+    async fn archive_reply_retains_admission_during_metadata_reconstruction() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let state = StateDir::new();
+        let home = farhelm_teststate::tempdir().expect("owned agent home");
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let armed = Arc::new(AtomicBool::new(false));
+        let gate_entered = Arc::clone(&entered);
+        let gate_armed = Arc::clone(&armed);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            super::super::core::SupervisorTimeouts::default(),
+            SupervisorSeams {
+                agent_home: Some(home.path().to_path_buf()),
+                capture_gate: Some(Arc::new(move || {
+                    let entered = Arc::clone(&gate_entered);
+                    let armed = Arc::clone(&gate_armed);
+                    Box::pin(async move {
+                        if armed.load(Ordering::SeqCst) {
+                            entered.notify_one();
+                            std::future::pending::<()>().await;
+                        }
+                    })
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: None,
+                annotation: None,
+            },
+        );
+        entry.info.archived = true;
+        sup.sessions
+            .lock()
+            .await
+            .insert("session-1".to_string(), Arc::new(entry));
+        assert!(sup.sessions.lock().await["session-1"].info.archived);
+        let capacity = sup.admission.available_permits();
+        assert!(capacity > 0);
+        // Capture is disabled without an agent home, so this readiness premise
+        // belongs to the fixture rather than the environment running the test.
+        assert_eq!(sup.agent_home.as_deref(), Some(home.path()));
+        assert!(home.path().is_dir());
+        // Construction performs an initial capture pass; only the reply pass is parked.
+        armed.store(true, Ordering::SeqCst);
+        let (tx, _rx) = mpsc::channel(1);
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_archive_session(&sup, &tx, &mut tasks, 43, "session-1".to_string()).await;
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the archive never reached metadata reconstruction; agent_home={:?}, exists={}",
+                    sup.agent_home,
+                    home.path().is_dir(),
+                )
+            });
+        assert_eq!(
+            sup.admission.available_permits(),
+            capacity - 1,
+            "metadata reconstruction is still work owned by the admitted archive"
+        );
+        tasks.abort_all();
+        let joined = tokio::time::timeout(Duration::from_secs(5), tasks.join_next())
+            .await
+            .expect("cancelling the blocked reply must finish")
+            .expect("the reply task is retained");
+        assert!(joined.unwrap_err().is_cancelled());
+        assert_eq!(sup.admission.available_permits(), capacity);
     }
 
     /// Aborting the connection-owned reply waiter cannot cancel archive's

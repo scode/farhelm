@@ -132,7 +132,10 @@
   task's scope through metadata reconstruction and response delivery. No new quota or scheduling mechanism.
 - Completion criteria: archive success and metadata-read failure retain admission until the reply task finishes or is
   cancelled. Preserve mutation ownership. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/764/changes. jj change:
+  `qsnstvqpwvqsyzvvkoyvtokkzmwulntx`; bookmark: `fix-archive-reply-admission`. The metadata-boundary regression
+  reproduced early permit release; four focused checks pass after the fix, including reply cancellation and
+  supervisor-owned mutation cancellation.
 
 ## attach-refuses-tombstoned-channel.md
 

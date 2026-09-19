@@ -8,7 +8,6 @@ One line per open item. This file must always match the feedback files in this d
   generation's exit.
 - `archive-discards-stopped-agent-exit-code.md` — archive drops a stopped agent's exit code and can misattribute a
   natural exit.
-- `archive-drops-permit-before-reply.md` — archive drops its admission permit before the metadata rebuild and reply.
 - `archived-retry-resurrects-session.md` — retried create resurrects an archived session and launches a stood-down
   agent.
 - `attach-refuses-tombstoned-channel.md` — Attach refuses a channel that only holds a finished upload's tombstone.
