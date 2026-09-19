@@ -3605,59 +3605,63 @@ pub(crate) async fn handle_restricted_control(
             // — `AgentVerb::is_mutating` is the single exhaustive answer
             // both sides of the relay read, so a verb added to the enum
             // cannot be fenced on one side and not the other.
-            let fence = if request.is_mutating() {
-                Some(sup.agent_request_locks.claim(&auth.session_id).await)
-            } else {
-                None
-            };
-            // The claim-before-check window, held open on demand so a test
-            // can attempt the delete inside it — see `AgentAuthGate` for
-            // why nothing observable distinguishes the two orderings from
-            // outside. Production installs no gate.
-            if let Some(gate) = &sup.seams.agent_auth_gate {
-                gate().await;
-            }
-            let outcome = match sup
-                .store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-            {
-                // The fence moves into the relay, which releases it when the
-                // mutation is really over rather than when this call returns
-                // — see `HelmLink::upcall`.
-                Ok(true) if session_id == auth.session_id => {
-                    sup.relay_agent_request(session_id, request, fence).await
+            // Refusal delivery may wait on the writer, outside the fence.
+            let outcome = {
+                let fence = if request.is_mutating() {
+                    Some(sup.agent_request_locks.claim(&auth.session_id).await)
+                } else {
+                    None
+                };
+                // The claim-before-check window, held open on demand so a test
+                // can attempt the delete inside it — see `AgentAuthGate` for
+                // why nothing observable distinguishes the two orderings from
+                // outside. Production installs no gate.
+                if let Some(gate) = &sup.seams.agent_auth_gate {
+                    gate().await;
                 }
-                // A credential for one session is not authority to speak AS
-                // another. The check is here rather than at the far end
-                // because the helm never sees the credential: by the time
-                // the request reaches it, `session_id` is the only claim
-                // about who is asking, and it has to already be true.
-                //
-                // The refusal names the distinction it is enforcing,
-                // because the obvious reading of the old wording ("may ask
-                // only as itself") was that a session could not touch any
-                // other session at all — which is not the rule. This field
-                // is the ASKER's identity; the lifecycle verbs carry their
-                // own target and may name any session in the fleet.
-                Ok(true) => farhelm_proto::AgentOutcome::Err {
-                    kind: ErrorKind::Unauthorized,
-                    message: format!(
-                        "a session-authenticated peer may only send requests under its own \
+                match sup
+                    .store
+                    .authenticates_session(&auth.session_id, &auth.token)
+                    .await
+                {
+                    // The fence moves into the relay, which releases it when the
+                    // mutation is really over rather than when this call returns
+                    // — see `HelmLink::upcall`.
+                    Ok(true) if session_id == auth.session_id => {
+                        sup.relay_agent_request(session_id, request, fence).await
+                    }
+                    // A credential for one session is not authority to speak AS
+                    // another. The check is here rather than at the far end
+                    // because the helm never sees the credential: by the time
+                    // the request reaches it, `session_id` is the only claim
+                    // about who is asking, and it has to already be true.
+                    //
+                    // The refusal names the distinction it is enforcing,
+                    // because the obvious reading of the old wording ("may ask
+                    // only as itself") was that a session could not touch any
+                    // other session at all — which is not the rule. This field
+                    // is the ASKER's identity; the lifecycle verbs carry their
+                    // own target and may name any session in the fleet.
+                    Ok(true) => farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::Unauthorized,
+                        message: format!(
+                            "a session-authenticated peer may only send requests under its own \
                          identity ({}); to act on a different session, ask as yourself and name \
                          that session as the verb's own target",
-                        truncate_for_error(&auth.session_id)
-                    ),
-                },
-                Ok(false) => farhelm_proto::AgentOutcome::Err {
-                    kind: ErrorKind::Unauthorized,
-                    message: "the session credential is invalid or its session no longer exists"
-                        .to_string(),
-                },
-                Err(error) => farhelm_proto::AgentOutcome::Err {
-                    kind: ErrorKind::Internal,
-                    message: format!("could not validate the session credential: {error:#}"),
-                },
+                            truncate_for_error(&auth.session_id)
+                        ),
+                    },
+                    Ok(false) => farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::Unauthorized,
+                        message:
+                            "the session credential is invalid or its session no longer exists"
+                                .to_string(),
+                    },
+                    Err(error) => farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::Internal,
+                        message: format!("could not validate the session credential: {error:#}"),
+                    },
+                }
             };
             send_reply(tx, &ControlMsg::AgentResponse { req_id, outcome }).await;
         }
@@ -5944,6 +5948,99 @@ mod tests {
         dispatch
             .await
             .expect("invalid dispatch finishes after its refusal");
+    }
+
+    /// A locally refused mutation releases its deletion fence before its
+    /// reply can wait behind a client that has stopped reading.
+    ///
+    /// Filling the owned writer queue makes the refusal's send wait without
+    /// involving a socket. The second claim is the observable that separates
+    /// the two mechanisms: it can complete only after the refusal releases
+    /// the fence, while the still-full queue keeps the original handler from
+    /// completing by accident.
+    #[farhelm_testtrace::test]
+    async fn refused_mutating_agent_request_releases_its_fence_before_reply_delivery() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let auth = authenticated_parent(&sup, state.path(), "asker").await;
+        let (tx, mut rx) = mpsc::channel(1);
+        let fence = sup.agent_request_locks.claim("asker").await;
+        tx.send(reply_frame(&ControlMsg::Error {
+            req_id: 0,
+            message: "occupy the only writer slot".to_string(),
+            kind: ErrorKind::Internal,
+        }))
+        .await
+        .expect("the test's writer queue starts empty");
+
+        let dispatch = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let tx = tx.clone();
+            let auth = auth.clone();
+            async move {
+                handle_restricted_control(
+                    &sup,
+                    ControlMsg::AgentRequest {
+                        req_id: 11,
+                        session_id: "someone-else".to_string(),
+                        request: AgentVerb::Stop {
+                            session_id: Some("asker".to_string()),
+                        },
+                    },
+                    &tx,
+                    &auth,
+                )
+                .await;
+            }
+        });
+        drop(fence);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.agent_request_locks.claims_reached_for_test("asker", 2),
+        )
+        .await
+        .expect("the refused request must claim the asking session's fence");
+
+        let released_fence = tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.agent_request_locks.claim("asker"),
+        )
+        .await
+        .expect("a refusal must release its fence before its blocked reply is delivered");
+        let occupied = rx
+            .recv()
+            .await
+            .expect("the occupied writer slot remains queued");
+        assert!(
+            matches!(
+                serde_json::from_slice::<ControlMsg>(&occupied.body).unwrap(),
+                ControlMsg::Error { req_id: 0, .. }
+            ),
+            "the test must free only its own queued frame"
+        );
+        drop(released_fence);
+        dispatch
+            .await
+            .expect("the refusal completes once its writer slot is free");
+        let reply = rx
+            .recv()
+            .await
+            .expect("the refused request sends one reply");
+        assert!(
+            matches!(
+                serde_json::from_slice::<ControlMsg>(&reply.body).unwrap(),
+                ControlMsg::AgentResponse {
+                    req_id: 11,
+                    outcome: AgentOutcome::Err {
+                        kind: ErrorKind::Unauthorized,
+                        ..
+                    },
+                }
+            ),
+            "the identity refusal must remain an AgentResponse"
+        );
     }
 
     /// Spec: the `agent_request_locks` fence and a session's own

@@ -118,7 +118,9 @@
   credential validation under the fence and successful relay ownership. No new timeout or task mechanism.
 - Completion criteria: reply backpressure on a refusal no longer holds the deletion fence; successful mutations retain
   their existing lifetime protection. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/763/changes. jj change:
+  `krslnlvxuqztxzzkkpzpzlvkqnrvqvvo`; bookmark: `fix-agent-refusal-fence-lifetime`. The reply-backpressure regression
+  failed before the fix and passes after it, together with five related mutation and credential-ordering checks.
 
 ## archive-drops-permit-before-reply.md
 
