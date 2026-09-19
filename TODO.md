@@ -128,19 +128,6 @@ on the frozen baseline; the menu failure appears pre-existing but did not reprod
 stall failure recurred from the existing entry. Their evidence and remaining uncertainty are below. Neither full command
 is a clean gate.
 
-- Deflake `a client that stops draining is detached with the stall reason after the full stall interval` in
-  `e2e/tests/terminal-flood.spec.ts`, WebKit. The loaded 2026-09-03 failure saw zero pauses after thirty seconds, before
-  the sixty-second stall interval could start. Thirty prior loaded repetitions passed; ten gate-to-first-pause
-  measurements were 1.3–2.7 seconds versus the thirty-second allowance. Source inspection found the fixture still
-  patches future writes before mounting, waits for readiness, and releases a gated producer of 800,000 numbered records
-  that then idles. The final `6903cf90` WebKit run reproduced zero pauses for thirty seconds, with a stalled-detach
-  banner already visible about 404 ms after the gate send. This is much earlier than the supervisor's sixty-second
-  interval. The unchanged helm outgoing-channel backstop may have detached first, before the browser paused; the trace
-  does not prove that cause. Retain detach-reason and queue receipts alongside gate send, received bytes, pending
-  writes, pauses, replay state, and FLOOD-DONE to distinguish helm backpressure from supervisor stall, producer
-  completion, and replay cutover. Do not widen the budget before locating why HIGH_WATER was never reached. Assessed
-  2026-09-17 and left parked: the scenario is expensive (a sixty-second stall interval per attempt) and its
-  discriminator receipts only pay on a fresh reproduction; the single-client stall shape is separately watched above.
 - Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
   isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
   worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
