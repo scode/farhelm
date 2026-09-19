@@ -132,36 +132,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Difficult deflake
 
-The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
-
-The earlier entries below remain unresolved after targeted investigation; clean repetitions are non-reproduction
-evidence, not fixes. Their 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM.
-Those workers reported pinned tmux 3.7c, but no resolved executable hash was retained; exact substrate identity remains
-unverified. Unless stated otherwise, Rust batches ran twenty fresh invocations of the built `farhelm` e2e binary with
-the exact named test and `--exact --show-output`, stopping at the first failure. The ignored binary-output case also
-used `--include-ignored`. Browser batches used the named project/test with
-`--workers=1 --repeat-each=20
---max-failures=1`. `.agents/narrow-tests.md` gives the corresponding Cargo and Playwright
-commands. Extra load, changed fixtures, and historical evidence are called out per entry.
-
-The combined native run at `aa333815` used four test threads and the same reported tmux pin, with a real systemd user
-manager and no extra CPU-load process. The stalled-viewer RSS, degenerate-size READY, replacement-claim, and malformed
-sentinel cases all passed in that run. The whole e2e binary was 336 passed, four failed in the shared forced-pause
-helper described below, and five ignored (four credentialed real-agent cases plus binary output). That wider
-non-reproduction does not resolve the four historical cases.
-
-An earlier corrected combined browser run passed 467 Chromium tests with two credential skips. WebKit passed 457,
-skipped eleven (two credential cases and nine unsupported clipboard-permission cases), and failed the large-message case
-below. That failure also reproduced on the frozen baseline; the WebKit command remains a failed command, not a clean
-gate.
-
-The final browser runs at `6903cf90` selected all 469 tests per engine with one worker. Chromium finished with 465
-passed, two profiles failures, and two credential skips in 24.4 minutes. WebKit finished with 456 passed, two failures
-(menu focus and stalled-client detachment), and eleven expected skips in 29.4 minutes. The profiles failures reproduced
-on the frozen baseline; the menu failure appears pre-existing but did not reproduce in twenty baseline attempts; the
-stall failure recurred from the existing entry. Their evidence and remaining uncertainty are below. Neither full command
-is a clean gate.
-
 - Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
   isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
   worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
@@ -179,13 +149,6 @@ is a clean gate.
   target. The integration suite remains available for explicit local or worker validation; ordinary CI and the release
   gate do not run it while this exclusion stands. A single clean combined run cannot establish that these latent
   failures are fixed; retain the release exclusion until the evidence supports reversing it.
-
-### Flakes difficult to repro
-
-Single sightings with unsuccessful targeted hunts and no actionable investigative lead: one retained failure, no
-reproduction since, no suspected mechanism to chase. What parks an entry here is the absence of a live lead, not a claim
-about any other bucket. On recurrence, move the entry back to the regular bucket with the new evidence rather than
-hunting blind from here.
 
 ### Systematic deflake
 
