@@ -240,14 +240,6 @@ is a clean gate.
   test already waits for popup focus before the second scroll. No failing trace yet establishes that its timing or
   geometry contract should change. Assessed 2026-09-17 and left parked: no failing trace exists and the twenty isolated
   repetitions have stood; a recurrence carrying the named epochs is the only lead.
-- Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail` in
-  `crates/farhelm/tests/e2e/launch_sentinel_error_status.rs`. Twenty exact baseline runs passed. The historical loaded
-  four-thread assertion found the expected durable Error state but a surviving sentinel. Source awaits cleanup after
-  `transition_many` commits; removal is best-effort and logs non-NotFound errors. It is not an unawaited deletion race.
-  On recurrence capture unlink path/errno, planted versus derived generation paths, and the committed session ID. If the
-  paths match and no removal warning exists, inspect the actual directory entry before changing cleanup semantics.
-  Assessed 2026-09-17 and left parked: no recurrence since the sighting; the unlink-path capture only pays on a fresh
-  reproduction.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
   viewer RSS, degenerate-size READY, and malformed-sentinel cases still block restoring the entire `farhelm` integration
