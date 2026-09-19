@@ -290,17 +290,6 @@ reproduction since, no suspected mechanism to chase. What parks an entry here is
 about any other bucket. On recurrence, move the entry back to the regular bucket with the new evidence rather than
 hunting blind from here.
 
-- Investigate the forced-pause helper's "no output control client found among tmux clients" sighting (four cases in the
-  combined `aa333815` run; the exact replay-marker case failed again on untouched `d71a87fb` in 0.47s on a second
-  worker): the listing visibly contained the output client's `pause-after=5` flag, but an underscore appeared where
-  `force_tmux_pause` (`crates/farhelm/tests/e2e/terminal_backpressure.rs`) expects a tab between `#{client_name}` and
-  `#{client_flags}`. Moved here from "Difficult deflake" on 2026-09-17: the formatter's delimiter bytes were hexdumped
-  from a verified pinned tmux 3.7c with a control client carrying the supervisor's exact `!no-output,pause-after=5`
-  cutover flags — a real 0x09 tab, exactly what the helper parses — so the mismatch is not reproducible on the supported
-  substrate and the condition for an unambiguous separator was never met. Both failing workers reported a 3.7c pin but
-  kept no executable hash; CI run 34006471792 at `2069e0c8` passed all four cases on its built pin. Recorder runs now
-  retain substrate identity: on recurrence, keep the run directory and hexdump the listing before touching the helper.
-
 - Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
   `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
   `.host-details-toggle`. Moved here from the regular bucket on 2026-09-16: forty more clean executions (20 per engine,
