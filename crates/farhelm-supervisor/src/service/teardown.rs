@@ -292,9 +292,9 @@ impl Supervisor {
         // until those checks have proved teardown can start: a refused
         // archive must not discard an upload and then claim nothing changed.
         // Once the checks pass, cancelling and joining immediately before
-        // the first process kill closes the other side of the contract — no
-        // transfer can publish into a session while it is being made
-        // terminal-less. Committed attachments remain untouched.
+        // the first process kill ends the async transfer tasks. An abandoned
+        // blocking publication may still complete; its attachment is retained
+        // just like one whose path was acknowledged.
         abort_session_uploads(self, session_id, "the session was archived", false).await;
         reap_process_tree(
             &self.seams.scopes,
@@ -535,15 +535,15 @@ impl Supervisor {
         // walks), and a transfer left running through it goes on
         // writing into the directory this delete is about to take
         // away, for as long as the sweep lasts. Cancelling first
-        // costs nothing (the transfer is doomed either way) and
-        // bounds those writes to the instant it takes each task to
-        // notice.
+        // costs nothing (the transfer is doomed either way) and stops
+        // further chunks once each task notices. An already-running
+        // blocking disk operation can still finish.
         //
-        // `abort_session_uploads` also WAITS for each task to
-        // finish cleaning up, so from here on nothing can write
-        // into (or publish into) that directory, and the lifecycle
-        // claim the caller has held since its first line keeps a
-        // new transfer from staging into it (see `stage_upload`).
+        // `abort_session_uploads` waits for the async tasks, not abandoned
+        // blocking operations. A late publication can still race the
+        // directory teardown below; cancellation itself is not rollback.
+        // The lifecycle claim keeps new transfers from staging here
+        // (see `stage_upload`).
         abort_session_uploads(self, session_id, "the session was deleted", true).await;
 
         // The process-tree sweep runs BEFORE any lock is held: it can

@@ -756,6 +756,13 @@ make. Attachment files are removed as part of deleting their session. An explici
 before a later step fails and leaves the session row for retry; this partial deletion is acceptable, with a visible
 failure and no rollback guarantee. Archive and Stop do not gain permission to remove attachment files from this rule.
 
+Cancellation or disconnection during final publication, including desktop Quit, may leave a complete attachment even
+though the client receives no acknowledged path. Stopping the wait does not roll back publication. Such a file is an
+ordinary attachment: it is retained until session deletion, not removed on startup, Stop, or Archive. Retrying may
+create an additional copy under a different name. Before publication starts, ordinary staging cleanup still applies;
+partial files must never become published attachments. A failure response must distinguish a definitely unpublished
+upload from one whose publication outcome is unknown.
+
 Attachment bytes ride the existing edges — client to helm, helm to supervisor. There is no direct client-to-supervisor
 path; a browser never needs to reach any machine but the helm's.
 
@@ -1144,10 +1151,11 @@ while the filesystem is healthy.
 
 Quit must close the desktop app promptly, without waiting for in-flight uploads or other requests to finish.
 Interrupting that work is intentional product behavior, not merely an acceptable simplification; do not add a
-graceful-completion window that delays Quit. Ordinary cleanup of interrupted work still applies. Agent sessions outlive
-the app under the existing durability contract. Giant bulk uploads, such as 50 GB files, are not an expected attachment
-use case; this does not impose a new numeric upload limit. Credential rotation is a separate operation and retains its
-admission-only contract.
+graceful-completion window that delays Quit. Ordinary cleanup of interrupted work still applies, with the accepted
+final-publication race described under Attachments; cleanup does not require rolling back a completed attachment. Agent
+sessions outlive the app under the existing durability contract. Giant bulk uploads, such as 50 GB files, are not an
+expected attachment use case; this does not impose a new numeric upload limit. Credential rotation is a separate
+operation and retains its admission-only contract.
 
 ### Provisioning download sanity limit
 

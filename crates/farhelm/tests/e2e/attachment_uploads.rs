@@ -82,6 +82,74 @@ impl farhelm_supervisor::files::FaultSeam for SlowFs {
     }
 }
 
+/// Hold the first publication at `link`, after fsync but before any final
+/// name exists. Later links run normally so a retry exercises no-clobber.
+/// Dropping the release sender also unblocks the worker on test failure.
+struct GatedPublicationFs {
+    entered: tokio::sync::Notify,
+    cleaned: tokio::sync::Notify,
+    release: std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+}
+
+impl GatedPublicationFs {
+    fn new() -> (Arc<Self>, tokio::sync::oneshot::Sender<()>) {
+        let (release, receiver) = tokio::sync::oneshot::channel();
+        (
+            Arc::new(Self {
+                entered: tokio::sync::Notify::new(),
+                cleaned: tokio::sync::Notify::new(),
+                release: std::sync::Mutex::new(Some(receiver)),
+            }),
+            release,
+        )
+    }
+
+    /// A named operation boundary, not a delay that guesses when the
+    /// blocking worker was scheduled. Notifications retain their permit.
+    async fn wait_at(&self, boundary: &tokio::sync::Notify, name: &str) {
+        tokio::time::timeout(Duration::from_secs(20), boundary.notified())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "publication never reached {name}; link entered: {}",
+                    self.release.lock().expect("publication gate").is_none()
+                )
+            });
+    }
+}
+
+impl farhelm_supervisor::files::FaultSeam for GatedPublicationFs {
+    fn link(&self, from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
+        let release = self.release.lock().expect("publication gate").take();
+        if let Some(release) = release {
+            self.entered.notify_one();
+            release
+                .blocking_recv()
+                .map_err(|_| io::Error::other("publication gate owner dropped"))?;
+        }
+        farhelm_supervisor::files::RealFs.link(from, to)
+    }
+
+    fn remove_temp(&self, path: &std::path::Path) -> io::Result<()> {
+        let result = farhelm_supervisor::files::RealFs.remove_temp(path);
+        self.cleaned.notify_one();
+        result
+    }
+}
+
+/// Error prose is open-ended, but its meaning must admit a stored file.
+/// Check uncertainty and reject a definite absence claim, not exact prose.
+fn assert_publication_unknown(message: &str) {
+    assert!(
+        message.contains("unknown") || message.contains("may"),
+        "the client must be told publication is uncertain: {message}"
+    );
+    assert!(
+        !message.contains("nothing was"),
+        "an interrupted publication must not promise an absent file: {message}"
+    );
+}
+
 /// A filesystem that fails one named stage outright.
 struct FailingFs {
     stage: &'static str,
@@ -371,12 +439,10 @@ fn staging_names(state: &std::path::Path, session_id: &str) -> Vec<String> {
 /// Poll until a session's published attachments are exactly `expected`
 /// AND nothing is left staged, failing the test if it never happens.
 ///
-/// Both halves in one helper because every ending of a transfer owes
-/// both: an aborted upload must publish nothing and leave no staging
-/// file, and checking only the first would pass against an implementation
-/// that quietly accumulates debris. Polled because cleanup happens in the
-/// transfer's own task, so it is observable only after the fact — a
-/// single read would race it.
+/// Both halves matter: prepublication aborts leave neither a published
+/// file nor staging debris, while a completed publication keeps its final
+/// name even if the client stopped waiting. Polled because cleanup happens
+/// in the transfer's own task, so a single read would race it.
 async fn wait_for_attachments(
     state: &std::path::Path,
     session_id: &str,
@@ -653,8 +719,8 @@ async fn hostile_and_empty_filenames_publish_under_safe_generated_names() {
     assert_eq!(std::fs::read(&path).expect("published file"), b"nameless");
 }
 
-/// An abandoned transfer leaves nothing behind — whether the client says
-/// so or simply disappears.
+/// An abandoned transfer BEFORE commit leaves nothing behind — whether
+/// the client says so or simply disappears.
 ///
 /// The two paths are one mechanism on purpose (dropping the channel's
 /// route is what ends the transfer either way), and the failure they
@@ -1791,21 +1857,17 @@ async fn a_write_that_outlives_its_bound_fails_the_transfer() {
     wait_for_attachments(h.state.path(), &session.id, &[], 30).await;
 }
 
-/// A publication that outlives its bound fails the commit AND releases
-/// the session, which is the half that matters.
-///
-/// Publication runs under the session's lifecycle claim, so an unbounded
-/// hold would make one stuck disk enough to render a session
-/// unmanageable — its stop, restart, and delete all queue behind a
-/// transfer nobody can finish. The delete at the end is the assertion:
-/// it has to complete promptly, not after the wedged filesystem
-/// eventually answers.
+/// A publication timeout reports unknown completion and releases the
+/// lifecycle claim before the blocking operation returns. Archive must
+/// finish while `link` is gated; the late complete attachment then has
+/// ordinary retention, not rollback or Archive cleanup.
 #[farhelm_testtrace::test]
 async fn a_publication_that_outlives_its_bound_frees_the_session() {
+    let (seam, release) = GatedPublicationFs::new();
     let h = upload_harness(
-        SlowFs::seam("link", Duration::from_secs(10)),
+        seam.clone(),
         SupervisorTimeouts {
-            upload_disk_stage: Duration::from_millis(300),
+            upload_disk_stage: Duration::from_secs(2),
             ..SupervisorTimeouts::default()
         },
     )
@@ -1813,23 +1875,113 @@ async fn a_publication_that_outlives_its_bound_frees_the_session() {
     let (session, _work) = basic_session(&h).await;
     let mut peer = RawPeer::connect(&h.sup).await;
 
-    let outcome = peer.upload(&session.id, 1, "shot.png", b"bytes").await;
-    let ControlMsg::Error { req_id, kind, .. } = outcome else {
-        panic!("a wedged publication must fail the commit, got: {outcome:?}");
+    let started = peer.begin(1, &session.id, 1, "shot.png", 5).await;
+    assert!(matches!(started, ControlMsg::UploadStarted { .. }));
+    peer.chunk(1, b"bytes".to_vec()).await;
+    peer.control(&ControlMsg::CommitUpload {
+        req_id: 2,
+        channel: 1,
+    })
+    .await;
+    seam.wait_at(&seam.entered, "link").await;
+    assert!(attachment_names(h.state.path(), &session.id).is_empty());
+    assert_eq!(staging_names(h.state.path(), &session.id).len(), 1);
+
+    let outcome = peer.next_outcome(20).await;
+    let ControlMsg::Error {
+        req_id,
+        kind,
+        message,
+    } = outcome
+    else {
+        panic!("an unconfirmed publication must not acknowledge a path: {outcome:?}");
     };
     assert_eq!(req_id, 2);
     assert_eq!(kind, ErrorKind::Internal);
+    assert_publication_unknown(&message);
 
-    let started = tokio::time::Instant::now();
-    h.client
-        .delete_session(&session.id)
-        .await
-        .expect("a session must stay manageable through a wedged publication");
-    assert!(
-        started.elapsed() < Duration::from_secs(8),
-        "the delete waited {:?} — the publication is holding the session's lifecycle claim",
-        started.elapsed()
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        h.client.archive_session(&session.id),
+    )
+    .await
+    .expect("archive must not wait for the gated publication")
+    .expect("archive");
+    release.send(()).expect("publication is still gated");
+    seam.wait_at(&seam.cleaned, "staging cleanup").await;
+    assert!(staging_names(h.state.path(), &session.id).is_empty());
+    let path =
+        farhelm_supervisor::attachments::session_dir(h.state.path(), &session.id).join("shot.png");
+    assert_eq!(
+        std::fs::read(&path).expect("late complete attachment"),
+        b"bytes"
     );
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(
+        !path.exists(),
+        "deletion removes the unacknowledged attachment"
+    );
+}
+
+/// Cancellation while `link` is gated must not claim rollback. Complete
+/// bytes may land after the error, and a retry must keep both copies
+/// without clobbering the first. This contrasts with the definite fsync
+/// refusal below, which cannot leave any published attachment.
+#[farhelm_testtrace::test]
+async fn a_cancelled_publication_can_leave_an_attachment_and_a_retry_copy() {
+    let (seam, release) = GatedPublicationFs::new();
+    let h = upload_harness(seam.clone(), SupervisorTimeouts::default()).await;
+    let (session, _work) = basic_session(&h).await;
+    let mut peer = RawPeer::connect(&h.sup).await;
+    let started = peer.begin(1, &session.id, 1, "shot.png", 5).await;
+    assert!(matches!(started, ControlMsg::UploadStarted { .. }));
+    peer.chunk(1, b"bytes".to_vec()).await;
+    peer.control(&ControlMsg::CommitUpload {
+        req_id: 2,
+        channel: 1,
+    })
+    .await;
+    seam.wait_at(&seam.entered, "link").await;
+    assert!(attachment_names(h.state.path(), &session.id).is_empty());
+    assert_eq!(staging_names(h.state.path(), &session.id).len(), 1);
+
+    peer.control(&ControlMsg::AbortUpload { channel: 1 }).await;
+    let outcome = peer.next_outcome(20).await;
+    let ControlMsg::Error {
+        req_id,
+        kind,
+        message,
+    } = outcome
+    else {
+        panic!("cancelled publication must not acknowledge a path: {outcome:?}");
+    };
+    assert_eq!(req_id, 2);
+    assert_eq!(kind, ErrorKind::InvalidRequest);
+    assert_publication_unknown(&message);
+
+    release.send(()).expect("publication is still gated");
+    seam.wait_at(&seam.cleaned, "staging cleanup").await;
+    assert!(staging_names(h.state.path(), &session.id).is_empty());
+    let first =
+        farhelm_supervisor::attachments::session_dir(h.state.path(), &session.id).join("shot.png");
+    assert_eq!(
+        std::fs::read(&first).expect("late complete attachment"),
+        b"bytes"
+    );
+
+    let retry = peer.upload(&session.id, 2, "shot.png", b"bytes").await;
+    let ControlMsg::UploadCommitted { path, .. } = retry else {
+        panic!("retry must publish a separate attachment: {retry:?}");
+    };
+    assert_ne!(std::path::Path::new(&path), first);
+    assert_eq!(std::fs::read(&path).expect("retry attachment"), b"bytes");
+    assert_eq!(
+        std::fs::read(&first).expect("retained first attachment"),
+        b"bytes"
+    );
+    h.client.delete_session(&session.id).await.expect("delete");
+    assert!(!first.exists());
+    assert!(!std::path::Path::new(&path).exists());
 }
 
 /// A commit-time filesystem fault is a CORRELATED error, with no
@@ -1862,8 +2014,9 @@ async fn a_commit_time_filesystem_fault_is_a_correlated_error_with_no_debris() {
     assert_eq!(req_id, 2, "the failure must answer the commit");
     assert_eq!(kind, ErrorKind::Internal);
     assert!(
-        message.contains("gave up at fsync"),
-        "the error must carry what actually failed, got: {message}"
+        message.contains("nothing")
+            && (message.contains("stored") || message.contains("published")),
+        "a definite fsync refusal must not be presented as unknown completion: {message}"
     );
 
     // Nothing else may arrive on the channel: an `UploadAborted` here

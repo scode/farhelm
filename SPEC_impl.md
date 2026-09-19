@@ -1358,8 +1358,16 @@ failure can leave private evidence, but cannot authorize another directory move.
   practice. See lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided.
 - Attachments land in `~/.local/state/farhelm/attachments/<session-id>/`, deleted with the session. There is no size cap
   in v1: the bytes are the user's, on the user's own machine, and every hop streams them under a credit window, so a
-  large file costs time rather than memory. A disk that fills up is therefore a failed upload with nothing published and
-  a visible error, never a truncated file at the published path.
+  large file costs time rather than memory. A reported write or fsync failure before publication leaves nothing
+  published and produces a visible error, never a truncated file at the published path.
+
+  Final publication runs on a blocking thread: fsync the completed staging file, then hard-link it to the first free
+  candidate name without clobbering another attachment. Cancellation, disconnection, or a disk-stage timeout may stop
+  awaiting that thread without stopping publication. An abandoned publication may therefore leave a complete file with
+  no path acknowledged to the client. Its retention is the same as any attachment: until session deletion, not startup
+  reconciliation, Stop, or Archive. A retry may create another copy; there is no rollback, deduplication, or background
+  undo. Error responses must not claim nothing was stored when publication completion is unknown. This does not change
+  prepublication staging cleanup, no-clobber semantics, prompt desktop Quit, or the healthy-local-filesystem assumption.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
   private tmux server, and `launch/` holding one 0600 JSON spec per session. A launch spec carries the agent's full
