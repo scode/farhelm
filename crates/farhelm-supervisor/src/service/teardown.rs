@@ -73,6 +73,7 @@ use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
 use crate::store::LastOutcome;
 use crate::tmux::PaneProbe;
+
 use farhelm_proto::STOP_ANNOTATION;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -473,6 +474,39 @@ impl Supervisor {
     /// destroying, and what keeps a new transfer from staging into the
     /// directory this is about to take away.
     ///
+    /// ALSO called under the supervisor's directory admission
+    /// (`working_copy_operations`), passed in as `directory_admission`
+    /// rather than acquired here. The lock order is directory admission
+    /// BEFORE the lifecycle claim (R1.1), so this function must NEVER
+    /// acquire the mutex itself — it would order lifecycle → directory
+    /// against every create's intent → directory → lifecycle sequence and
+    /// form a cycle with a restricted create waiting on this very delete.
+    /// The guard is held across the WHOLE teardown, not just the archival
+    /// step: the last-reference decision must be made against the same
+    /// world the final transaction commits into, and a create admitted in
+    /// between could bind a membership after the member count said zero.
+    /// This is the one place a slow process sweep runs under directory
+    /// admission; the cost is that concurrent fresh creates wait, and the
+    /// alternative is archiving a directory a create just attached to.
+    ///
+    /// The archival contract (Design E): for each working-copy membership
+    /// of the deleted session, if OTHER retained member rows remain, the
+    /// delete proceeds normally and only the membership is removed. If
+    /// this session is the LAST reference, the checkout is archived —
+    /// identity verified (missing source = visible cleanup diagnostic and
+    /// metadata deletion; a foreign object at the source FAILS CLOSED),
+    /// then `archive_move`'s journal/durable/rename sequence — and in the
+    /// final SQLite transaction the session row, its reservations, its
+    /// memberships, and the zero-member records whose archive outcome
+    /// settled all commit together. An `archive_pending` row is
+    /// reconciled first (crash recovery), and an unresolved `planned` row
+    /// is retired WITHOUT moving the unknown directory. If `archive_move`
+    /// fails, the session row is RETAINED with the failure returned —
+    /// partial deletion is the accepted product contract — and a retry
+    /// re-decides everything. An unrelated unmanaged directory is never
+    /// touched: only registry rows this session is a member of are even
+    /// considered.
+    ///
     /// The attachment-map guard's ENTIRE lifetime is inside this function,
     /// by design: it is taken once the slow phase is over and released
     /// only after the row is gone, so a concurrent `Attach` cannot install
@@ -493,6 +527,7 @@ impl Supervisor {
         &self,
         entry: &SessionEntry,
         session_id: &str,
+        _directory_admission: tokio::sync::OwnedMutexGuard<()>,
     ) -> Result<(), TeardownError> {
         // In-flight uploads are cancelled FIRST — before the
         // process sweep, not after it. The sweep is where a delete
@@ -747,7 +782,7 @@ impl Supervisor {
         // once the row removal has committed (see the
         // quarantining step's own comment).
         let mut quarantined: Option<PathBuf> = None;
-        let teardown: Result<(), String> = async {
+        let teardown: Result<Vec<String>, String> = async {
             if let Some(error) = forwarder_error {
                 return Err(error);
             }
@@ -831,6 +866,182 @@ impl Supervisor {
             // the session's lifecycle claim.
             quarantined =
                 crate::attachments::quarantine_session_dir(&self.state_dir, session_id).await?;
+            // Design E's archival decision, made HERE — after the process
+            // sweep and terminal removal have PROVEN complete, before the
+            // final transaction — and under the directory admission the
+            // caller passed in (see this method's doc for why the guard is
+            // a parameter and never acquired here). Each membership of the
+            // dying session is decided per row; the final transaction in
+            // `delete_session_archiving_memberships` commits the outcomes
+            // atomically with the row deletion.
+            for row in self
+                .store
+                .member_working_copies_all(session_id)
+                .await
+                .map_err(|e| format!("enumerating the deleted session's checkout memberships: {e:#}"))?
+            {
+                match row.allocation_state {
+                    crate::working_copies::AllocationState::Planned => {
+                        // The ambiguous unresolved plan (Design C's crash
+                        // window): an explicit Delete retires the record
+                        // without moving the unknown directory — no
+                        // rename, no adoption. Name the preserved path in
+                        // the diagnostic so the operator can find what we
+                        // deliberately left alone.
+                        let path = PathBuf::from(&row.canonical_root).join(&row.original_basename);
+                        if tokio::fs::symlink_metadata(&path).await.is_ok() {
+                            warn!(
+                                session = %session_id, path = %path.display(),
+                                "delete retired an unresolved checkout plan; the directory at \
+                                 the recorded path has no established ownership and is left untouched"
+                            );
+                        }
+                    }
+                    crate::working_copies::AllocationState::Allocated
+                    | crate::working_copies::AllocationState::ArchivePending => {
+                        if self
+                            .store
+                            .working_copy_member_count(&row.id)
+                            .await
+                            .map_err(|e| format!("counting the checkout's members: {e:#}"))?
+                            > 1
+                        {
+                            // Other retained member rows remain: the
+                            // checkout stays exactly where it is.
+                            continue;
+                        }
+                        // Last reference: this delete's row removal would
+                        // orphan the checkout, so the archive decision
+                        // below governs. First the corrupt-evidence check
+                        // (Design E): overlapping managed paths can only
+                        // exist against the admission rule, and such a
+                        // registry is preserved — the automated move is
+                        // refused until an expert has assessed it.
+                        let overlapping = self
+                            .store
+                            .working_copy_rows()
+                            .await
+                            .map_err(|e| {
+                                format!("reading the registry for the reference check: {e:#}")
+                            })?
+                            .into_iter()
+                            .filter(|other| {
+                                other.id != row.id
+                                    && other.allocation_state
+                                        != crate::working_copies::AllocationState::Retired
+                                    && other
+                                        .canonical_path
+                                        .as_deref()
+                                        .is_some_and(|other_path| {
+                                            crate::working_copies::path_overlaps(&row.canonical_path, other_path)
+                                        })
+                            })
+                            .count();
+                        if overlapping > 0 {
+                            return Err(format!(
+                                "the checkout at {} has another active registry record whose \
+                                 path overlaps it; this is inconsistent ownership evidence, \
+                                 so the automated archive move is refused and the registry \
+                                 is preserved for inspection",
+                                row.canonical_path.as_deref().unwrap_or(&row.canonical_root)
+                            ));
+                        }
+                        // A pending row first completes its crash
+                        // recovery; a live row is archived.
+                        if row.allocation_state
+                            == crate::working_copies::AllocationState::ArchivePending
+                        {
+                            match self
+                                .store
+                                .reconcile_working_copy_archive(&row.id, self.seams.archive_parent_sync.clone())
+                                .await
+                                .map_err(|e| {
+                                    format!("reconciling the pending archive: {e:#}")
+                                })? {
+                                crate::working_copies::ReconcileOutcome::Moved { destination } => {
+                                    warn!(session = %session_id, destination = %destination,
+                                        "the interrupted archive of a deleted session's checkout \
+                                         completed on retry");
+                                }
+                                crate::working_copies::ReconcileOutcome::MetadataComplete => {}
+                                crate::working_copies::ReconcileOutcome::SourceMissing => {
+                                    warn!(session = %session_id,
+                                        "a pending archive's source was already gone; \
+                                         deleting the record only");
+                                }
+                            }
+                        } else {
+                            // Missing-source cleanup needs the same root
+                            // proof as a rename: a replacement empty root can
+                            // otherwise hide a still-owned checkout elsewhere.
+                            crate::working_copies::verified_root(&row)
+                                .map_err(|e| format!("verifying the checkout's recorded root: {e:#}"))?;
+                            match crate::working_copies::verify_identity(&row) {
+                                Ok(crate::working_copies::IdentityStatus::Missing) => {
+                                    // Missing source: a visible cleanup
+                                    // diagnostic, and metadata deletion is
+                                    // permitted without moving anything.
+                                    warn!(session = %session_id,
+                                        path = %row.canonical_path.as_deref().unwrap_or(""),
+                                        "the managed checkout's recorded directory is gone; \
+                                         deleting its ownership record without any move");
+                                }
+                                Ok(crate::working_copies::IdentityStatus::Matches) => {
+                                    match self.store.archive_move_working_copy(&row.id, self.seams.archive_parent_sync.clone()).await {
+                                        Ok(crate::working_copies::ArchiveOutcome::Archived {
+                                            destination,
+                                        }) => {
+                                            warn!(session = %session_id, destination = %destination,
+                                                "the last reference to this checkout is being \
+                                                 deleted; the directory moved to the archive");
+                                        }
+                                        Ok(crate::working_copies::ArchiveOutcome::SourceMissing) => {
+                                            warn!(session = %session_id,
+                                                "the checkout vanished between the identity \
+                                                 check and the archive move; deleting only \
+                                                 the record");
+                                        }
+                                        // A post-rename durability failure
+                                        // retains the row and journal too.
+                                        // Do not claim the path stayed put:
+                                        // retry reconciles the recorded move.
+                                        Err(e) => {
+                                            return Err(format!(
+                                                "archiving the checkout at {} kept the session \
+                                                 row; the directory may already be at its \
+                                                 journaled archive destination: {e:#}",
+                                                row.canonical_path.as_deref().unwrap_or(""),
+                                            ));
+                                        }
+                                    }
+                                }
+                                Ok(crate::working_copies::IdentityStatus::DifferentObject) => {
+                                    return Err(format!(
+                                        "the managed checkout at {} is no longer the object its \
+                                         registry row captured; the directory is not ours to \
+                                         move and the session is retained",
+                                        row.canonical_path.as_deref().unwrap_or(""),
+                                    ));
+                                }
+                                Ok(status) => {
+                                    return Err(format!(
+                                        "the managed checkout's registry row has no captured \
+                                         identity ({status:?}); refusing to move or delete \
+                                         evidence, session retained",
+                                    ));
+                                }
+                                Err(e) => {
+                                    return Err(format!(
+                                        "verifying the managed checkout's identity kept the \
+                                         session row and moved nothing: {e:#}"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    crate::working_copies::AllocationState::Retired => {}
+                }
+            }
             // Settles this session's create reservations in the
             // same transaction as the row removal, which is what
             // turns them into TOMBSTONES rather than stale claims:
@@ -839,24 +1050,33 @@ impl Supervisor {
             // duplicate (PLAN_M3.md item 6; the store method's own
             // docs carry the argument).
             self.store
-                .delete_session_settling_reservations(session_id)
+                .delete_session_archiving_memberships(session_id)
                 .await
                 .map_err(|e| format!("{e:#}"))
         }
         .await;
 
-        if let Err(err_msg) = teardown {
-            for (channel, notify) in &notify_detach {
-                notify_detached(
-                    notify,
-                    *channel,
-                    format!("detached during a failed delete: {err_msg}"),
-                );
+        let retired_checkouts = match teardown {
+            Ok(retired) => retired,
+            Err(err_msg) => {
+                for (channel, notify) in &notify_detach {
+                    notify_detached(
+                        notify,
+                        *channel,
+                        format!("detached during a failed delete: {err_msg}"),
+                    );
+                }
+                drop(attachments);
+                return Err(TeardownError::FailClosed(err_msg));
             }
-            drop(attachments);
-            return Err(TeardownError::FailClosed(err_msg));
-        }
+        };
         self.sessions.lock().await.remove(session_id);
+        // Every former member's process teardown has now completed, and the
+        // final membership is durably gone. Unlinking a preparation lock any
+        // earlier could split a live shim's flock across two different inodes.
+        for checkout_id in retired_checkouts {
+            cleanup_retired_preparation(&self.state_dir, &checkout_id).await;
+        }
         // The row is gone, so the quarantined attachments now
         // belong to nothing and can be removed for real. Failure
         // here is logged rather than reported: there is no row
@@ -894,13 +1114,42 @@ impl Supervisor {
     }
 }
 
+/// Remove private preparation evidence only after final retirement and process
+/// teardown. Cleanup failure cannot undo committed Delete or authorize another
+/// checkout move: leave the failed artifact and report its path for inspection.
+async fn cleanup_retired_preparation(state_dir: &std::path::Path, checkout_id: &str) {
+    // Registry IDs originate as UUIDs. Corrupt persisted text must not turn
+    // this metadata cleanup into an unlink outside the preparation directory.
+    if uuid::Uuid::parse_str(checkout_id).is_err() {
+        warn!(working_copy = %checkout_id, "invalid retired checkout id; preparation files left untouched");
+        return;
+    }
+    let state_path = state_dir
+        .join("checkout-preparation")
+        .join(format!("{checkout_id}.json"));
+    // Keep the state evidence if removing its lock fails. No surviving member
+    // can prepare this checkout, so successful unlink needs no replacement lock.
+    for path in [
+        crate::launch::preparation_lock_path(&state_path),
+        state_path,
+    ] {
+        if let Err(error) = tokio::fs::remove_file(&path).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(working_copy = %checkout_id, path = %path.display(), error = %error,
+                "checkout retirement committed but preparation cleanup failed; remaining files retained");
+            return;
+        }
+    }
+}
+
 /// The archived entry's cell-sharing rule, which has no other coverage:
 /// archiving REPLACES a session's entry, and the cells that describe the
 /// launch must be the same objects the replaced entry held.
 #[cfg(test)]
 mod tests {
-    use super::super::core::tests::{StateDir, dummy_exe, entry_with};
-    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
+    use super::super::core::tests::{StateDir, dummy_exe, entry_with, test_admission};
+    use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
     use super::*;
     use crate::store::{LastOutcome, StoredSession};
 
@@ -992,7 +1241,9 @@ mod tests {
                 .is_some()
         );
 
-        let result = sup.teardown_session(&entry, &id).await;
+        let result = sup
+            .teardown_session(&entry, &id, test_admission(&sup).await)
+            .await;
         assert!(matches!(result, Err(TeardownError::Sweep(_))));
         assert!(
             sup.store
@@ -1027,7 +1278,9 @@ mod tests {
             .cloned()
             .expect("retained row reloads into memory");
         assert!(
-            sup.teardown_session(&entry, &id).await.is_ok(),
+            sup.teardown_session(&entry, &id, test_admission(&sup).await)
+                .await
+                .is_ok(),
             "a working scope manager must allow the retry"
         );
         assert!(
@@ -1398,7 +1651,10 @@ mod tests {
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.clone();
 
-        let Ok(()) = sup.teardown_session(&entry, &id).await else {
+        let Ok(()) = sup
+            .teardown_session(&entry, &id, test_admission(&sup).await)
+            .await
+        else {
             panic!("a terminal-less session with a confirmed old scope deletes");
         };
 
@@ -1418,5 +1674,1342 @@ mod tests {
             )),
             "the previous launch scope returned by the glob must be killed: {observed:?}"
         );
+    }
+
+    /// A seeded terminal-less session row + in-memory entry with the given
+    /// id and cwd — the E1 fixture's per-session scaffolding.
+    async fn seeded_session(sup: &Arc<Supervisor>, id: &str, cwd: &str) -> Arc<SessionEntry> {
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: 1_700_000_000,
+                    last_activity_at: 1_700_000_000,
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: cwd.to_string(),
+                    invocation: "agent".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: farhelm_proto::AgentKind::Generic,
+                    resume_template: None,
+                    canonical_cwd: Some(cwd.to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: true,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session row");
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        entry.info.cwd = cwd.to_string();
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::clone(&entry));
+        entry
+    }
+
+    /// Durable Ready evidence and its flock inode let lifecycle tests observe
+    /// exactly when final retirement grants cleanup authority. These fixtures
+    /// have no running shim; the ordinary teardown still proves process absence.
+    fn preparation_files(state_dir: &std::path::Path, checkout_id: &str) -> (PathBuf, PathBuf) {
+        let path = state_dir
+            .join("checkout-preparation")
+            .join(format!("{checkout_id}.json"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        crate::launch::write_preparation_state(
+            &path,
+            checkout_id,
+            &crate::launch::PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let lock = crate::launch::preparation_lock_path(&path);
+        std::fs::File::create(&lock).unwrap();
+        assert!(path.is_file() && lock.is_file());
+        (path, lock)
+    }
+
+    /// E1 (Design E): the last-reference delete archives the checkout —
+    /// exact contents appear ONCE under farhelm-archived-working-copies,
+    /// the source path is gone, the registry row retires — while a
+    /// multi-member delete moves NOTHING, and an unmanaged directory is
+    /// never touched.
+    ///
+    /// Preparation state and its lock survive Archive, owner deletion with a
+    /// borrower, and a failed last Delete; successful final retirement removes
+    /// both. This keeps cleanup tied to durable lifetime rather than visibility.
+    ///
+    /// The fixture plants registry rows through the SAME `&Connection`
+    /// primitives production composes (`record_planned` + `allocate` +
+    /// `add_member`), so `allocate`'s exclusive mkdir and identity capture
+    /// are the real ones.
+    #[farhelm_testtrace::test]
+    async fn deleting_the_last_reference_archives_and_other_members_hold_the_directory() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir_all(&root).expect("the checkout root");
+        let team_id;
+        {
+            let conn = sup.store.conn.lock().expect("db mutex");
+            let team = crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    canonical_root: root.to_string_lossy().into_owned(),
+                    repo_owner: "octo".to_string(),
+                    repo_name: "team".to_string(),
+                    original_basename: "team".to_string(),
+                    origin_session_id: "s-a".to_string(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .expect("record the team checkout plan");
+            let team_dir = crate::working_copies::allocate(&conn, &team.id, None)
+                .expect("allocate the team checkout");
+            crate::working_copies::add_member(&conn, "s-b", &team.id)
+                .expect("attach the second member");
+            team_id = team.id;
+            let nested = crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    canonical_root: root.to_string_lossy().into_owned(),
+                    repo_owner: "octo".to_string(),
+                    repo_name: "nested".to_string(),
+                    original_basename: "nested".to_string(),
+                    origin_session_id: "s-c".to_string(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .expect("record the nested checkout plan");
+            crate::working_copies::allocate(&conn, &nested.id, None)
+                .expect("allocate the nested checkout");
+            std::fs::write(team_dir.canonical_path.join("file.txt"), "contents")
+                .expect("seed the checkout's contents");
+        }
+        let team_path = root.join("team");
+        let nested_path = root.join("nested");
+        let unmanaged = root.join("unmanaged");
+        std::fs::create_dir_all(&unmanaged).expect("the unmanaged directory");
+        std::fs::write(unmanaged.join("keep.txt"), "keep").expect("seed the stranger");
+
+        let entry_a = seeded_session(&sup, "s-a", &team_path.to_string_lossy()).await;
+        let _entry_b = seeded_session(&sup, "s-b", &team_path.to_string_lossy()).await;
+        let entry_c = seeded_session(&sup, "s-c", &nested_path.to_string_lossy()).await;
+        let (preparation, preparation_lock) = preparation_files(state.path(), &team_id);
+        let prepared_bytes = std::fs::read(&preparation).unwrap();
+        let entry_a = sup
+            .teardown_for_archive(&entry_a, "s-a")
+            .await
+            .unwrap_or_else(|_| panic!("Archive retains checkout preparation"));
+        assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
+        assert!(preparation_lock.is_file());
+        assert_eq!(
+            sup.store.working_copy_member_count(&team_id).await.unwrap(),
+            2
+        );
+
+        // Delete A: B still holds the checkout — no move, row gone, path
+        // unchanged, membership down to one.
+        sup.teardown_session(&entry_a, "s-a", test_admission(&sup).await)
+            .await
+            .unwrap_or_else(|_| panic!("delete the first member"));
+        assert!(
+            team_path.join("file.txt").exists(),
+            "a delete that leaves another member must not move the checkout"
+        );
+        assert!(
+            sup.store.session("s-a").await.expect("read").is_none(),
+            "the first member's row is gone"
+        );
+        assert_eq!(
+            sup.store
+                .working_copy_member_count(&team_id)
+                .await
+                .expect("member count"),
+            1,
+            "the surviving member keeps its membership"
+        );
+        assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
+        assert!(preparation_lock.is_file());
+
+        // Delete B: last reference — archive, source gone, retired record.
+        let entry_b = sup
+            .sessions
+            .lock()
+            .await
+            .get("s-b")
+            .cloned()
+            .expect("the surviving member reloads");
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        std::os::unix::fs::symlink(&unmanaged, &archive_root).unwrap();
+        assert!(matches!(
+            sup.teardown_session(&entry_b, "s-b", test_admission(&sup).await)
+                .await,
+            Err(TeardownError::FailClosed(_))
+        ));
+        assert!(team_path.join("file.txt").exists());
+        assert!(sup.store.session("s-b").await.unwrap().is_some());
+        assert_eq!(
+            sup.store.working_copy_member_count(&team_id).await.unwrap(),
+            1
+        );
+        assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
+        assert!(preparation_lock.is_file());
+        std::fs::remove_file(&archive_root).unwrap();
+        sup.teardown_session(&entry_b, "s-b", test_admission(&sup).await)
+            .await
+            .unwrap_or_else(|_| panic!("delete the last member"));
+        assert!(!preparation.exists());
+        assert!(!preparation_lock.exists());
+        assert!(
+            !team_path.exists(),
+            "the last-reference delete vacates the source path"
+        );
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        let archived: Vec<_> = std::fs::read_dir(&archive_root)
+            .expect("the archive directory")
+            .collect();
+        assert_eq!(
+            archived.len(),
+            1,
+            "the checkout's contents appear exactly once in the archive"
+        );
+        assert!(
+            archived[0]
+                .as_ref()
+                .unwrap()
+                .path()
+                .join("file.txt")
+                .exists(),
+            "the contents moved, not copied-and-dropped"
+        );
+        let team_row = sup
+            .store
+            .working_copy_rows()
+            .await
+            .expect("read the registry")
+            .into_iter()
+            .find(|row| row.id == team_id)
+            .expect("the archived row survives as evidence history");
+        assert_eq!(
+            team_row.allocation_state,
+            crate::working_copies::AllocationState::Retired,
+            "the settled archive retires its record"
+        );
+
+        // Delete C: the second checkout archives the same way.
+        sup.teardown_session(&entry_c, "s-c", test_admission(&sup).await)
+            .await
+            .unwrap_or_else(|_| panic!("delete the nested checkout's last member"));
+        assert!(
+            !nested_path.exists(),
+            "the nested checkout's source is gone"
+        );
+        assert_eq!(
+            std::fs::read_dir(&archive_root)
+                .expect("the archive directory")
+                .count(),
+            2,
+            "each checkout is archived exactly once"
+        );
+
+        // The unmanaged directory is untouched, always.
+        assert!(
+            unmanaged.join("keep.txt").exists(),
+            "an unrelated unmanaged directory is never moved or removed"
+        );
+    }
+
+    /// E2/E3 shared premise, fail-closed arm: a foreign object at a managed
+    /// checkout's recorded source refuses the delete's move, retains the
+    /// session row, and leaves the stranger untouched.
+    #[farhelm_testtrace::test]
+    async fn deleting_refuses_to_move_a_stranger_at_the_recorded_source() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir_all(&root).expect("the checkout root");
+        let checkout_id;
+        {
+            let conn = sup.store.conn.lock().expect("db mutex");
+            let plan = crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    canonical_root: root.to_string_lossy().into_owned(),
+                    repo_owner: "octo".to_string(),
+                    repo_name: "swap".to_string(),
+                    original_basename: "swap".to_string(),
+                    origin_session_id: "s-swap".to_string(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .expect("record the checkout plan");
+            let accepted = crate::working_copies::allocate(&conn, &plan.id, None)
+                .expect("allocate the checkout");
+            checkout_id = plan.id;
+            // The stranger replaces the checkout after capture: identity
+            // evidence now disagrees, and the delete must not move it. A
+            // plain remove+recreate can be silently RE-IDENTIFIED by the
+            // filesystem (freed inode numbers are reused immediately), so
+            // the stranger is created only once its (dev,ino) provably
+            // differs from the captured identity — retrying through filler
+            // directories otherwise.
+            std::fs::remove_dir_all(&accepted.canonical_path).expect("vacate the source");
+            // Fillers are KEPT (removed only after the stranger differs):
+            // removing them as we go would hand the freed low inode number
+            // straight back to the next allocation and the loop would
+            // never advance on a lowest-free allocator.
+            let mut filler_root = accepted
+                .canonical_path
+                .parent()
+                .unwrap()
+                .join("stranger-fx");
+            let mut made_fillers = 0usize;
+            let mut differs = false;
+            for _ in 0..64 {
+                std::fs::create_dir_all(&accepted.canonical_path).expect("plant the stranger");
+                let stranger =
+                    std::fs::symlink_metadata(&accepted.canonical_path).expect("stat the stranger");
+                use std::os::unix::fs::MetadataExt as _;
+                if (stranger.dev(), stranger.ino()) != accepted.identity {
+                    differs = true;
+                    break;
+                }
+                std::fs::remove_dir_all(&accepted.canonical_path)
+                    .expect("retry past an inode-number reuse");
+                std::fs::create_dir_all(filler_root.join(format!("f{made_fillers}")))
+                    .expect("consume an inode number");
+                made_fillers += 1;
+                filler_root = filler_root.join(format!("n{made_fillers}"));
+            }
+            std::fs::remove_dir_all(
+                accepted
+                    .canonical_path
+                    .parent()
+                    .unwrap()
+                    .join("stranger-fx"),
+            )
+            .expect("drop the identity shifters");
+            assert!(
+                differs,
+                "the fixture could not mint a stranger with a different identity"
+            );
+        }
+        let entry = seeded_session(&sup, "s-swap", &root.join("swap").to_string_lossy()).await;
+        let result = sup
+            .teardown_session(&entry, "s-swap", test_admission(&sup).await)
+            .await;
+        assert!(
+            matches!(result, Err(TeardownError::FailClosed(_))),
+            "a foreign object at the recorded source fails closed"
+        );
+        assert!(
+            sup.store.session("s-swap").await.expect("read").is_some(),
+            "the failed delete retains the session row for a retry"
+        );
+        assert!(
+            sup.store
+                .working_copy_rows()
+                .await
+                .expect("read the registry")
+                .into_iter()
+                .any(|row| row.id == checkout_id),
+            "the ownership evidence is preserved, never deleted over a stranger"
+        );
+        assert!(
+            root.join("swap").exists(),
+            "the stranger at the recorded path is untouched"
+        );
+    }
+
+    /// Planned rows deliberately lack an accepted path. Explicit Delete must
+    /// still name the candidate it leaves untouched, without adopting its inode
+    /// or treating that diagnostic path as authority to archive unknown content.
+    #[farhelm_testtrace::test]
+    async fn deleting_an_unresolved_plan_names_and_preserves_the_unknown_path() {
+        use std::os::unix::fs::MetadataExt;
+        let capture = farhelm_testtrace::current_capture().expect("test capture");
+        let state = StateDir::new();
+        let root = state.path().join("workroot");
+        let unknown = root.join("unknown");
+        std::fs::create_dir_all(&unknown).unwrap();
+        std::fs::write(unknown.join("payload"), b"not adopted").unwrap();
+        let identity = std::fs::symlink_metadata(&unknown).unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let entry = seeded_session(&sup, "planned-origin", unknown.to_str().unwrap()).await;
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        {
+            let conn = sup.store.conn.lock().unwrap();
+            let plan = crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: checkout_id.clone(),
+                    canonical_root: root.to_str().unwrap().into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "unknown".into(),
+                    original_basename: "unknown".into(),
+                    origin_session_id: "planned-origin".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            assert!(plan.canonical_path.is_none() && plan.path_identity.is_none());
+            crate::working_copies::add_member(&conn, "planned-origin", &checkout_id).unwrap();
+            conn.execute(
+                "UPDATE sessions SET canonical_cwd = NULL WHERE id = 'planned-origin'",
+                [],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            sup.store
+                .working_copy_member_count(&checkout_id)
+                .await
+                .unwrap(),
+            1
+        );
+        sup.teardown_session(&entry, "planned-origin", test_admission(&sup).await)
+            .await
+            .unwrap_or_else(|_| panic!("explicit Delete retires only the unresolved metadata"));
+        let warnings = capture
+            .matching("delete retired an unresolved checkout plan")
+            .unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].level, "WARN");
+        assert_eq!(
+            warnings[0].fields.get("path").map(String::as_str),
+            unknown.to_str()
+        );
+        assert_eq!(
+            warnings[0].fields.get("session").map(String::as_str),
+            Some("planned-origin")
+        );
+        assert!(sup.store.session("planned-origin").await.unwrap().is_none());
+        assert_eq!(
+            sup.store
+                .working_copy_member_count(&checkout_id)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        let after = std::fs::symlink_metadata(&unknown).unwrap();
+        assert_eq!((after.dev(), after.ino()), (identity.dev(), identity.ino()));
+        assert_eq!(
+            std::fs::read(unknown.join("payload")).unwrap(),
+            b"not adopted"
+        );
+        assert!(!root.join(crate::working_copies::ARCHIVE_DIR_NAME).exists());
+    }
+
+    /// Startup must refuse an otherwise valid pending archive when its path
+    /// overlaps another active record. A separate nonoverlapping fixture proves
+    /// that matching identities and the journal really permit ordinary recovery.
+    #[farhelm_testtrace::test]
+    async fn startup_archive_recovery_preserves_overlapping_registry_evidence() {
+        use std::os::unix::fs::MetadataExt;
+        for overlapping in [true, false] {
+            let state = StateDir::new();
+            let root = state.path().join("workroot");
+            std::fs::create_dir(&root).unwrap();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let mut allocated = Vec::new();
+            for (id, basename, checkout_root) in [
+                ("outer-origin", "outer", root.clone()),
+                (
+                    "inner-origin",
+                    "inner",
+                    if overlapping {
+                        root.join("outer")
+                    } else {
+                        root.clone()
+                    },
+                ),
+            ] {
+                let accepted = {
+                    let conn = sup.store.conn.lock().unwrap();
+                    let plan = crate::working_copies::record_planned(
+                        &conn,
+                        &crate::working_copies::PlannedWorkingCopy {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            canonical_root: checkout_root.to_str().unwrap().into(),
+                            repo_owner: "acme".into(),
+                            repo_name: basename.into(),
+                            original_basename: basename.into(),
+                            origin_session_id: id.into(),
+                            root_identity: None,
+                            preparation_snapshot: None,
+                        },
+                    )
+                    .unwrap();
+                    crate::working_copies::allocate(&conn, &plan.id, None).unwrap()
+                };
+                seeded_session(&sup, id, accepted.canonical_path.to_str().unwrap()).await;
+                std::fs::write(accepted.canonical_path.join("payload"), basename).unwrap();
+                allocated.push(accepted);
+            }
+            let outer = &allocated[0];
+            let inner = &allocated[1];
+            let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+            let destination = archive_root.join("outer-journaled");
+            {
+                let conn = sup.store.conn.lock().unwrap();
+                assert_eq!(conn.execute(
+                    "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = 'outer-journaled' WHERE id = ?1",
+                    [&outer.row.id],
+                ).unwrap(), 1);
+            }
+            let before = sup.store.working_copy_rows().await.unwrap();
+            assert_eq!(before.len(), 2);
+            for accepted in &allocated {
+                assert_eq!(
+                    crate::working_copies::verify_identity(&accepted.row).unwrap(),
+                    crate::working_copies::IdentityStatus::Matches
+                );
+                assert!(crate::working_copies::verified_root(&accepted.row).is_ok());
+            }
+            let memberships = (
+                sup.store
+                    .member_working_copies_all("outer-origin")
+                    .await
+                    .unwrap()
+                    .len(),
+                sup.store
+                    .member_working_copies_all("inner-origin")
+                    .await
+                    .unwrap()
+                    .len(),
+            );
+            assert!(!archive_root.exists());
+            drop(sup);
+            let reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            assert!(
+                reopened.owns_state_dir(),
+                "recovery must own the state directory"
+            );
+            let after = reopened.store.working_copy_rows().await.unwrap();
+            assert_eq!(after.len(), before.len());
+            for row in before {
+                let retained = after
+                    .iter()
+                    .find(|candidate| candidate.id == row.id)
+                    .unwrap();
+                assert_eq!(retained.allocation_state, row.allocation_state);
+                assert_eq!(retained.archive_destination, row.archive_destination);
+                assert_eq!(retained.path_identity, row.path_identity);
+                assert_eq!(retained.canonical_path, row.canonical_path);
+            }
+            assert_eq!(
+                reopened
+                    .store
+                    .member_working_copies_all("outer-origin")
+                    .await
+                    .unwrap()
+                    .len(),
+                memberships.0
+            );
+            assert_eq!(
+                reopened
+                    .store
+                    .member_working_copies_all("inner-origin")
+                    .await
+                    .unwrap()
+                    .len(),
+                memberships.1
+            );
+            assert!(
+                reopened
+                    .store
+                    .session("outer-origin")
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                reopened
+                    .store
+                    .session("inner-origin")
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            let surviving_outer = if overlapping {
+                assert!(
+                    !archive_root.exists(),
+                    "refusal precedes archive directory creation"
+                );
+                outer.canonical_path.clone()
+            } else {
+                assert!(!outer.canonical_path.exists());
+                assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
+                destination
+            };
+            let metadata = std::fs::metadata(&surviving_outer).unwrap();
+            assert_eq!((metadata.dev(), metadata.ino()), outer.identity);
+            assert_eq!(
+                std::fs::read(surviving_outer.join("payload")).unwrap(),
+                b"outer"
+            );
+            let metadata = std::fs::metadata(&inner.canonical_path).unwrap();
+            assert_eq!((metadata.dev(), metadata.ino()), inner.identity);
+            assert_eq!(
+                std::fs::read(inner.canonical_path.join("payload")).unwrap(),
+                b"inner"
+            );
+        }
+    }
+
+    /// Delete must retain ownership when a moved root hides the checkout at
+    /// its recorded pathname. Reopening cannot turn that refusal into cleanup;
+    /// genuine absence under the restored root still permits metadata deletion.
+    /// Preparation artifacts follow that final metadata settlement as well.
+    #[farhelm_testtrace::test]
+    async fn deleting_a_missing_source_refuses_a_replaced_root_across_reopen() {
+        use std::os::unix::fs::MetadataExt;
+        for symlink_root in [false, true] {
+            let state = StateDir::new();
+            let root = state.path().join("workroot");
+            let parked = state.path().join("parked");
+            let foreign = state.path().join("foreign");
+            std::fs::create_dir(&root).unwrap();
+            let mut sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let checkout_id = uuid::Uuid::new_v4().to_string();
+            let accepted = {
+                let conn = sup.store.conn.lock().unwrap();
+                crate::working_copies::record_planned(
+                    &conn,
+                    &crate::working_copies::PlannedWorkingCopy {
+                        id: checkout_id.clone(),
+                        canonical_root: root.to_str().unwrap().into(),
+                        repo_owner: "acme".into(),
+                        repo_name: "bar".into(),
+                        original_basename: "bar".into(),
+                        origin_session_id: "missing-origin".into(),
+                        root_identity: None,
+                        preparation_snapshot: None,
+                    },
+                )
+                .unwrap();
+                crate::working_copies::allocate(&conn, &checkout_id, None).unwrap()
+            };
+            seeded_session(&sup, "missing-origin", root.join("bar").to_str().unwrap()).await;
+            let (preparation, preparation_lock) = preparation_files(state.path(), &checkout_id);
+            std::fs::write(root.join("bar/payload"), b"owned bytes").unwrap();
+            std::fs::rename(&root, &parked).unwrap();
+            if symlink_root {
+                std::fs::create_dir(&foreign).unwrap();
+                std::os::unix::fs::symlink(&foreign, &root).unwrap();
+            } else {
+                std::fs::create_dir(&root).unwrap();
+            }
+            for reopen in [false, true] {
+                if reopen {
+                    drop(sup);
+                    sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                        .await
+                        .unwrap();
+                }
+                assert!(!root.join("bar").exists());
+                let metadata = std::fs::metadata(parked.join("bar")).unwrap();
+                assert_eq!((metadata.dev(), metadata.ino()), accepted.identity);
+                assert_eq!(
+                    sup.store
+                        .working_copy_member_count(&checkout_id)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                let entry = sup
+                    .sessions
+                    .lock()
+                    .await
+                    .get("missing-origin")
+                    .cloned()
+                    .unwrap();
+                assert!(matches!(
+                    sup.teardown_session(&entry, "missing-origin", test_admission(&sup).await)
+                        .await,
+                    Err(TeardownError::FailClosed(_))
+                ));
+                assert!(sup.store.session("missing-origin").await.unwrap().is_some());
+                assert!(preparation.is_file() && preparation_lock.is_file());
+                assert_eq!(
+                    sup.store
+                        .working_copy_member_count(&checkout_id)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                let row = sup
+                    .store
+                    .working_copy_rows()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|row| row.id == checkout_id)
+                    .unwrap();
+                assert_eq!(
+                    row.allocation_state,
+                    crate::working_copies::AllocationState::Allocated
+                );
+                assert_eq!(row.path_identity, Some(accepted.identity));
+                assert_eq!(row.root_identity, accepted.row.root_identity);
+                assert_eq!(row.archive_destination, None);
+                assert_eq!(
+                    std::fs::read(parked.join("bar/payload")).unwrap(),
+                    b"owned bytes"
+                );
+                assert!(!root.join(crate::working_copies::ARCHIVE_DIR_NAME).exists());
+                assert!(
+                    !parked
+                        .join(crate::working_copies::ARCHIVE_DIR_NAME)
+                        .exists()
+                );
+            }
+            if symlink_root {
+                std::fs::remove_file(&root).unwrap();
+            } else {
+                std::fs::remove_dir(&root).unwrap();
+            }
+            std::fs::rename(&parked, &root).unwrap();
+            std::fs::remove_file(root.join("bar/payload")).unwrap();
+            std::fs::remove_dir(root.join("bar")).unwrap();
+            let entry = sup
+                .sessions
+                .lock()
+                .await
+                .get("missing-origin")
+                .cloned()
+                .unwrap();
+            sup.teardown_session(&entry, "missing-origin", test_admission(&sup).await)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("matching root and missing checkout permit metadata cleanup")
+                });
+            assert!(sup.store.session("missing-origin").await.unwrap().is_none());
+            assert!(!preparation.exists() && !preparation_lock.exists());
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&checkout_id)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert!(
+                !sup.store
+                    .working_copy_rows()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|row| row.id == checkout_id)
+            );
+            assert!(!root.join(crate::working_copies::ARCHIVE_DIR_NAME).exists());
+        }
+    }
+
+    /// R1.6/E2: either failed parent barrier keeps the session, membership
+    /// and journal across repeated Delete and reopen. Once syncing succeeds,
+    /// Delete retires the same moved inode without touching a replacement at
+    /// the old source name. This tests the actual fsync seam, not a failure
+    /// adjacent to the durability operation.
+    #[farhelm_testtrace::test]
+    async fn archive_parent_sync_failure_retains_evidence_until_retry_is_durable() {
+        use std::os::unix::fs::MetadataExt;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        for fail_archive_parent in [true, false] {
+            let state = StateDir::new();
+            let root = state.path().join("workroot");
+            std::fs::create_dir(&root).unwrap();
+            let source = root.join("checkout");
+            let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+            std::fs::create_dir(&archive_root).unwrap();
+            let fail_path = if fail_archive_parent {
+                archive_root.clone()
+            } else {
+                root.clone()
+            };
+            let failing = Arc::new(AtomicBool::new(true));
+            let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let sync: crate::working_copies::ArchiveParentSync = {
+                let failing = failing.clone();
+                let calls = calls.clone();
+                Arc::new(move |path, file| {
+                    let actual = file.metadata()?;
+                    let expected = std::fs::metadata(path)?;
+                    assert_eq!(
+                        (actual.dev(), actual.ino()),
+                        (expected.dev(), expected.ino())
+                    );
+                    calls.lock().unwrap().push(path.to_path_buf());
+                    if path == fail_path && failing.load(Ordering::SeqCst) {
+                        Err(std::io::Error::other(
+                            "injected archive parent sync failure",
+                        ))
+                    } else {
+                        file.sync_all()
+                    }
+                })
+            };
+            let mut sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    archive_parent_sync: Some(sync.clone()),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .unwrap();
+            let checkout_id = uuid::Uuid::new_v4().to_string();
+            let owned_identity = {
+                let conn = sup.store.conn.lock().unwrap();
+                crate::working_copies::record_planned(
+                    &conn,
+                    &crate::working_copies::PlannedWorkingCopy {
+                        id: checkout_id.clone(),
+                        canonical_root: root.to_str().unwrap().into(),
+                        repo_owner: "acme".into(),
+                        repo_name: "checkout".into(),
+                        original_basename: "checkout".into(),
+                        origin_session_id: "sync-origin".into(),
+                        root_identity: None,
+                        preparation_snapshot: None,
+                    },
+                )
+                .unwrap();
+                crate::working_copies::allocate(&conn, &checkout_id, None)
+                    .unwrap()
+                    .identity
+            };
+            let mut entry = seeded_session(&sup, "sync-origin", source.to_str().unwrap()).await;
+            std::fs::write(source.join("owned"), b"uncommitted content").unwrap();
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&checkout_id)
+                    .await
+                    .unwrap(),
+                1
+            );
+            let mut destination = None;
+
+            for attempt in 0..3 {
+                calls.lock().unwrap().clear();
+                let result = sup
+                    .teardown_session(&entry, "sync-origin", test_admission(&sup).await)
+                    .await;
+                let message = match result {
+                    Err(TeardownError::FailClosed(message)) => message,
+                    _ => panic!("failed durability must refuse Delete"),
+                };
+                assert!(
+                    message.contains("injected archive parent sync failure"),
+                    "{message}"
+                );
+                assert!(
+                    !message.contains("moved nothing"),
+                    "rename has already succeeded"
+                );
+                let expected_calls = if fail_archive_parent {
+                    vec![archive_root.clone()]
+                } else {
+                    vec![archive_root.clone(), root.clone()]
+                };
+                assert_eq!(*calls.lock().unwrap(), expected_calls);
+                assert!(sup.store.session("sync-origin").await.unwrap().is_some());
+                assert_eq!(
+                    sup.store
+                        .working_copy_member_count(&checkout_id)
+                        .await
+                        .unwrap(),
+                    1
+                );
+                let row = sup
+                    .store
+                    .working_copy_rows()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|row| row.id == checkout_id)
+                    .unwrap();
+                assert_eq!(
+                    row.allocation_state,
+                    crate::working_copies::AllocationState::ArchivePending
+                );
+                let moved = archive_root.join(row.archive_destination.unwrap());
+                let metadata = std::fs::metadata(&moved).unwrap();
+                assert_eq!((metadata.dev(), metadata.ino()), owned_identity);
+                assert_eq!(
+                    std::fs::read(moved.join("owned")).unwrap(),
+                    b"uncommitted content"
+                );
+                if let Some(previous) = &destination {
+                    assert_eq!(
+                        &moved, previous,
+                        "retry must keep the already-moved destination"
+                    );
+                } else {
+                    assert!(!source.exists(), "the failure is after the real rename");
+                    destination = Some(moved);
+                    // A foreign source makes a second rename observably wrong;
+                    // recovery must rely on the matching archived identity.
+                    std::fs::create_dir(&source).unwrap();
+                    std::fs::write(source.join("foreign"), b"leave untouched").unwrap();
+                    let foreign = std::fs::metadata(&source).unwrap();
+                    assert_ne!((foreign.dev(), foreign.ino()), owned_identity);
+                }
+                assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
+                if attempt == 1 {
+                    drop(entry);
+                    drop(sup);
+                    calls.lock().unwrap().clear();
+                    // The new owner attempts recovery during construction.
+                    // Its failed barrier must leave the journal available
+                    // for the explicit Delete retry below as well.
+                    sup = Supervisor::new_with_seams(
+                        state.path(),
+                        dummy_exe(),
+                        SupervisorTimeouts::default(),
+                        SupervisorSeams {
+                            archive_parent_sync: Some(sync.clone()),
+                            ..SupervisorSeams::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                    assert_eq!(*calls.lock().unwrap(), expected_calls);
+                    entry = sup
+                        .sessions
+                        .lock()
+                        .await
+                        .get("sync-origin")
+                        .cloned()
+                        .unwrap();
+                }
+            }
+
+            let foreign = std::fs::metadata(&source).unwrap();
+            failing.store(false, Ordering::SeqCst);
+            calls.lock().unwrap().clear();
+            sup.teardown_session(&entry, "sync-origin", test_admission(&sup).await)
+                .await
+                .unwrap_or_else(|_| panic!("both successful barriers must permit retirement"));
+            assert_eq!(
+                *calls.lock().unwrap(),
+                vec![archive_root.clone(), root.clone()]
+            );
+            assert!(sup.store.session("sync-origin").await.unwrap().is_none());
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&checkout_id)
+                    .await
+                    .unwrap(),
+                0
+            );
+            let row = sup
+                .store
+                .working_copy_rows()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == checkout_id)
+                .unwrap();
+            assert_eq!(
+                row.allocation_state,
+                crate::working_copies::AllocationState::Retired
+            );
+            let moved = destination.unwrap();
+            assert_eq!(
+                row.archive_destination.as_deref(),
+                moved.file_name().unwrap().to_str()
+            );
+            let metadata = std::fs::metadata(&moved).unwrap();
+            assert_eq!((metadata.dev(), metadata.ino()), owned_identity);
+            assert_eq!(
+                std::fs::read(moved.join("owned")).unwrap(),
+                b"uncommitted content"
+            );
+            let after = std::fs::metadata(&source).unwrap();
+            assert_eq!((after.dev(), after.ino()), (foreign.dev(), foreign.ino()));
+            assert_eq!(
+                std::fs::read(source.join("foreign")).unwrap(),
+                b"leave untouched"
+            );
+            assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
+        }
+    }
+
+    /// F10/R1.6: after rename but before metadata settlement, the journal's
+    /// matching destination is authoritative even if someone reuses the old
+    /// source name. Reopen and Delete must finish the original move without
+    /// moving, deleting, or adopting that foreign directory.
+    /// A post-commit preparation unlink failure preserves diagnostic evidence
+    /// without undoing retirement or triggering another move after reopening.
+    #[farhelm_testtrace::test]
+    async fn delete_after_reopen_preserves_foreign_source_when_archive_destination_matches() {
+        use std::os::unix::fs::MetadataExt;
+        let state = StateDir::new();
+        let root = state.path().join("workroot");
+        std::fs::create_dir(&root).unwrap();
+        let source = root.join("checkout");
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        let destination = archive_root.join("checkout-journaled");
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        let owned_identity = {
+            let conn = sup.store.conn.lock().unwrap();
+            crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: checkout_id.clone(),
+                    canonical_root: root.to_str().unwrap().into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "bar".into(),
+                    original_basename: "checkout".into(),
+                    origin_session_id: "archive-origin".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            crate::working_copies::allocate(&conn, &checkout_id, None)
+                .unwrap()
+                .identity
+        };
+        let entry = seeded_session(&sup, "archive-origin", source.to_str().unwrap()).await;
+        let (preparation, preparation_lock) = preparation_files(state.path(), &checkout_id);
+        let prepared_bytes = std::fs::read(&preparation).unwrap();
+        // A directory at the lock pathname causes a real unlink failure,
+        // independent of uid. The completed archive must still retire once.
+        std::fs::remove_file(&preparation_lock).unwrap();
+        std::fs::create_dir(&preparation_lock).unwrap();
+        std::fs::write(source.join("owned"), b"original checkout").unwrap();
+        std::fs::create_dir(&archive_root).unwrap();
+        {
+            let conn = sup.store.conn.lock().unwrap();
+            assert_eq!(conn.execute(
+                "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = ?2 WHERE id = ?1",
+                rusqlite::params![checkout_id, "checkout-journaled"],
+            ).unwrap(), 1);
+        }
+        // Model the precise crash boundary: journal committed and filesystem
+        // rename completed, while the session and its membership remain.
+        std::fs::rename(&source, &destination).unwrap();
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("foreign"), b"leave me here").unwrap();
+        let foreign = std::fs::metadata(&source).unwrap();
+        let archived = std::fs::metadata(&destination).unwrap();
+        assert_eq!((archived.dev(), archived.ino()), owned_identity);
+        assert_ne!((foreign.dev(), foreign.ino()), owned_identity);
+        assert_eq!(
+            sup.store
+                .working_copy_member_count(&checkout_id)
+                .await
+                .unwrap(),
+            1
+        );
+        drop(entry);
+        drop(sup);
+
+        let reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let row = reopened
+            .store
+            .working_copy_rows()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == checkout_id)
+            .unwrap();
+        assert_eq!(
+            row.allocation_state,
+            crate::working_copies::AllocationState::ArchivePending
+        );
+        let entry = reopened
+            .sessions
+            .lock()
+            .await
+            .get("archive-origin")
+            .cloned()
+            .unwrap();
+        reopened
+            .teardown_session(&entry, "archive-origin", test_admission(&reopened).await)
+            .await
+            .unwrap_or_else(|_| panic!("Delete must settle the matching archived identity"));
+        assert!(
+            reopened
+                .store
+                .session("archive-origin")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            reopened
+                .store
+                .working_copy_member_count(&checkout_id)
+                .await
+                .unwrap(),
+            0
+        );
+        let row = reopened
+            .store
+            .working_copy_rows()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == checkout_id)
+            .unwrap();
+        assert_eq!(
+            row.allocation_state,
+            crate::working_copies::AllocationState::Retired
+        );
+        let after = std::fs::metadata(&source).unwrap();
+        assert_eq!((after.dev(), after.ino()), (foreign.dev(), foreign.ino()));
+        assert_eq!(
+            std::fs::read(source.join("foreign")).unwrap(),
+            b"leave me here"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("owned")).unwrap(),
+            b"original checkout"
+        );
+        assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
+        assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
+        assert!(
+            preparation_lock.is_dir(),
+            "failed cleanup preserves the offending artifact"
+        );
+        let warnings = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("checkout retirement committed but preparation cleanup failed")
+            .unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].fields.get("path").map(String::as_str),
+            preparation_lock.to_str()
+        );
+        assert_eq!(warnings[0].fields.get("working_copy"), Some(&checkout_id));
+        drop(entry);
+        drop(reopened);
+        let reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .store
+                .session("archive-origin")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let metadata = std::fs::metadata(&destination).unwrap();
+        assert_eq!((metadata.dev(), metadata.ino()), owned_identity);
+        assert_eq!(std::fs::read_dir(&archive_root).unwrap().count(), 1);
+        assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
+        assert!(preparation_lock.is_dir());
+    }
+
+    /// A real Existing create queued behind last-reference Delete must
+    /// revalidate the now-absent cwd and insert no session or membership.
+    #[farhelm_testtrace::test]
+    async fn existing_create_after_last_reference_delete_refuses_the_archived_path() {
+        existing_create_races_last_reference_delete(false).await;
+    }
+
+    /// A real Existing create admitted first must commit its reference before
+    /// Delete counts members, preserving the directory for the new borrower.
+    #[farhelm_testtrace::test]
+    async fn existing_create_before_last_reference_delete_preserves_the_checkout() {
+        existing_create_races_last_reference_delete(true).await;
+    }
+
+    /// Exercise both admission orders with the production create and teardown
+    /// paths. The chosen winner holds admission before either path starts;
+    /// actual Pending acquisition proves contention. Both paths then run to
+    /// completion, and durable membership plus sentinel location distinguish
+    /// an admitted borrower from a mere mutex handoff.
+    async fn existing_create_races_last_reference_delete(create_first: bool) {
+        let state = StateDir::new();
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let signal = waiting.clone();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir_all(&root).expect("the checkout root");
+        let working_copy_id;
+        {
+            let conn = sup.store.conn.lock().expect("db mutex");
+            let plan = crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    canonical_root: root.to_string_lossy().into_owned(),
+                    repo_owner: "octo".to_string(),
+                    repo_name: "race".to_string(),
+                    original_basename: "race".to_string(),
+                    origin_session_id: "s-race".to_string(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .expect("record the checkout plan");
+            crate::working_copies::allocate(&conn, &plan.id, None).expect("allocate the checkout");
+            working_copy_id = plan.id;
+        }
+        let source = root.join("race");
+        let cwd = source.to_str().unwrap();
+        std::fs::write(source.join("sentinel"), b"keep").unwrap();
+        let entry = seeded_session(&sup, "s-race", cwd).await;
+        assert_eq!(
+            sup.store
+                .working_copy_member_count(&working_copy_id)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(sup.store.session("s-race").await.unwrap().is_some());
+        assert!(source.is_dir());
+        let inputs = CreateInputs {
+            cwd,
+            parent: None,
+            github_checkout: None,
+            mode: CreateMode::Raw {
+                invocation: "agent".into(),
+                agent_kind: None,
+                resume_template: None,
+                source_profile: None,
+                launch: None,
+            },
+            title: None,
+            cols: 80,
+            rows: 24,
+        };
+        if create_first {
+            let guards = sup.admit_create(None, None).await.unwrap();
+            let admission = Arc::clone(&sup.working_copy_operations).lock_owned();
+            tokio::pin!(admission);
+            std::future::poll_fn(|cx| {
+                assert!(
+                    std::future::Future::poll(admission.as_mut(), cx).is_pending(),
+                    "Delete must queue behind the admitted create"
+                );
+                std::task::Poll::Ready(())
+            })
+            .await;
+            let (created, deleted) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    tokio::join!(sup.create_session_admitted(inputs, None, guards), async {
+                        sup.teardown_session(&entry, "s-race", admission.await)
+                            .await
+                    })
+                })
+                .await
+                .expect("create and Delete complete");
+            let created = created.expect("admitted Existing create succeeds");
+            deleted.unwrap_or_else(|_| panic!("Delete succeeds with a borrower"));
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&working_copy_id)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert!(sup.store.session(&created.id).await.unwrap().is_some());
+            assert_eq!(std::fs::read(source.join("sentinel")).unwrap(), b"keep");
+            assert!(!root.join(crate::working_copies::ARCHIVE_DIR_NAME).exists());
+        } else {
+            let guard = test_admission(&sup).await;
+            let delete = sup.teardown_session(&entry, "s-race", guard);
+            let create = sup.create_session(inputs, None);
+            tokio::pin!(create);
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                tokio::select! {
+                    _ = &mut create => panic!("create must wait behind Delete"),
+                    _ = waiting.notified() => {},
+                }
+            })
+            .await
+            .expect("create observes Pending directory admission");
+            let (deleted, refused) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    tokio::join!(delete, &mut create)
+                })
+                .await
+                .expect("Delete and create complete");
+            deleted.unwrap_or_else(|_| panic!("last-reference Delete succeeds"));
+            let refused = refused.expect_err("create revalidates the archived cwd");
+            assert!(
+                format!("{refused:#}").contains("working directory"),
+                "{refused:#}"
+            );
+            assert!(!source.exists());
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&working_copy_id)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert!(sup.store.load_all().await.unwrap().is_empty());
+            let archives: Vec<_> =
+                std::fs::read_dir(root.join(crate::working_copies::ARCHIVE_DIR_NAME))
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .collect();
+            assert_eq!(archives.len(), 1);
+            assert_eq!(
+                std::fs::read(archives[0].join("sentinel")).unwrap(),
+                b"keep"
+            );
+        }
+        assert!(sup.store.session("s-race").await.unwrap().is_none());
     }
 }

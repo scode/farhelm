@@ -475,6 +475,19 @@ pub enum CreateStage {
     /// create has no outcome to precede, so there is no window here to
     /// crash in.
     BeforeOutcome,
+    /// Immediately BEFORE the durable launching row is committed (the
+    /// create-lifecycle seam's earliest point for a fresh checkout's
+    /// recovery tests): everything after it — the row, the plan, the
+    /// mkdir — never happened. Nothing durable exists on this side, which
+    /// is the state a crash before the very first write leaves.
+    BeforeRecord,
+    /// The exclusive mkdir and durable identity transaction completed,
+    /// but preparation has not been published. This is Allocated recovery;
+    /// the earlier mkdir-before-identity window remains ambiguous Planned.
+    AfterCheckoutAllocation,
+    /// NotStarted and its publication provenance are durable, but no
+    /// terminal has been admitted. Only this pending create may continue.
+    AfterPreparationPublication,
 }
 
 /// Marks an error as having come from the create-lifecycle seam rather
@@ -495,6 +508,18 @@ pub enum CreateStage {
 #[error("simulated create crash")]
 struct SimulatedCrash;
 
+/// Marks a validation refusal as one that must RETAIN the session row
+/// (R1.2) instead of taking the ordinary never-launched rollback: the
+/// ambiguous-Planned recovery, where a fresh checkout's registry row is
+/// still `planned` but something — possibly the crashed mkdir's own
+/// winner, possibly a stranger — now sits at the planned path. The
+/// refusal keeps the row as a visible Error, keeps the registry row and
+/// membership as diagnostics, and settles the intent `Failed` with the
+/// same refusal (see [`Supervisor::retain_create_refusal`]).
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct RetainedCreateRefusal(String);
+
 /// A simulated crash at one of [`CreateStage`]'s boundaries in
 /// `create_session`.
 ///
@@ -514,6 +539,12 @@ pub type CreateCrashSeam = Arc<dyn Fn(CreateStage) -> anyhow::Result<()> + Send 
 /// must independently hold the same key before accepting this observation.
 /// The callback must return promptly; it cannot release or replace the lock.
 pub type CreateIntentWaiting = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Replace the preparation directory's parent durability barrier in tests.
+/// The callback receives the opened parent itself, so a fault proves that
+/// publication depends on syncing the intended directory. Production uses
+/// `File::sync_all` and installs no callback.
+pub type PreparationParentSync = Arc<dyn Fn(&std::fs::File) -> std::io::Result<()> + Send + Sync>;
 
 /// Which of a sampling pass's two tmux reads a [`SampleFault`] is being
 /// asked about (PLAN_M6_75.md items 1 and 2).
@@ -710,6 +741,31 @@ pub struct SupervisorSeams {
     pub create_crash: Option<CreateCrashSeam>,
     /// See [`CreateIntentWaiting`]. `None` in production.
     pub create_intent_waiting: Option<CreateIntentWaiting>,
+    /// Reports the parent ID only after restricted create's lifecycle
+    /// acquisition returns Pending. This lets revocation tests change the
+    /// durable credential after the edge check but before protected admission.
+    /// `None` in production; the callback must not block.
+    pub create_parent_waiting: Option<CreateIntentWaiting>,
+    /// Reports an actual Pending directory-admission acquisition. Race tests
+    /// use this to establish that a create is queued behind a real Delete or
+    /// Restart, rather than merely scheduled later. `None` in production.
+    pub create_directory_waiting: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// See [`crate::working_copies::AllocationFault`]. `None` in
+    /// production; tests inject a failure in the post-mkdir durability effect.
+    pub allocation_fault: Option<crate::working_copies::AllocationFault>,
+    /// Replaces the preparation-directory parent fsync itself, not a marker
+    /// beside it. Production uses File::sync_all; tests can prove a failed
+    /// barrier prevents NotStarted publication and terminal admission.
+    pub preparation_parent_sync: Option<PreparationParentSync>,
+    /// Replaces each post-rename archive parent fsync in Delete and startup
+    /// recovery. See [`crate::working_copies::ArchiveParentSync`].
+    pub archive_parent_sync: Option<crate::working_copies::ArchiveParentSync>,
+    /// See [`crate::store::PreMkdirRollbackFault`]. `None` in production;
+    /// the test seam proves a failed rollback preserves every original row.
+    pub pre_mkdir_rollback_fault: Option<crate::store::PreMkdirRollbackFault>,
+    /// See [`crate::store::RetainedRefusalFault`]. `None` in production;
+    /// the test seam proves failed refusal settlement leaves evidence pending.
+    pub retained_refusal_fault: Option<crate::store::RetainedRefusalFault>,
     /// Where the agents' own record directories are rooted (PLAN_M3.md
     /// item 8): `~/.claude/projects/...`, `~/.codex/sessions/...`.
     ///
@@ -903,6 +959,13 @@ impl Default for SupervisorSeams {
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             create_crash: None,
             create_intent_waiting: None,
+            create_parent_waiting: None,
+            create_directory_waiting: None,
+            allocation_fault: None,
+            preparation_parent_sync: None,
+            archive_parent_sync: None,
+            pre_mkdir_rollback_fault: None,
+            retained_refusal_fault: None,
             agent_home: None,
             user_home: None,
             capture_window: CaptureWindowBounds::default(),
@@ -1243,6 +1306,24 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
         .unwrap_or(ErrorKind::Internal)
 }
 
+/// Preserve the stronger outcome of a first-attempt preview refusal. Callers
+/// must establish that this intent has never allocated and, for keyed creates,
+/// settle this kind durably before returning it. Generic replay conflicts do
+/// not establish either fact and must leave `never_allocated` false.
+fn classify_unallocated_checkout_conflict(
+    error: anyhow::Error,
+    never_allocated: bool,
+) -> anyhow::Error {
+    if never_allocated && error_kind(&error) == ErrorKind::Conflict {
+        error.context(RequestError::new(
+            ErrorKind::CheckoutConflict,
+            "the checkout preview is no longer current; obtain a new preview before resubmitting",
+        ))
+    } else {
+        error
+    }
+}
+
 /// The canonical form of everything an intent key is bound to
 /// (PLAN_M3.md item 6): a create replays only when its key AND this string
 /// both match what the key was claimed with.
@@ -1322,11 +1403,35 @@ pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// separate piece of work from bounding the row COUNT (see
 /// `store::Reservation`), and neither is owned here.
 pub(crate) fn create_fingerprint(
+    checkout: Option<&farhelm_proto::ResolvedGithubCheckout>,
     parent: Option<&str>,
     cwd: &str,
     mode: &CreateMode,
     title: Option<&str>,
 ) -> String {
+    // A FRESH GitHub-checkout create gets its own versioned encoding
+    // (R1.4), binding the raw request AND the helm's authoritative
+    // resolution — repo, root, hook snapshot, and the preview binding the
+    // user launched with. Deliberately a SEPARATE discriminant from every
+    // existing tuple: those are FROZEN byte-for-byte (schema-18-preserved
+    // rows must keep replaying against them), and no fresh-destination
+    // fingerprint ever existed before this feature, so there is nothing
+    // historical to stay compatible with. Root/hook/basename changes all
+    // change the fingerprint, which is the point: a same-key retry under a
+    // DIFFERENT resolution is a different request, refused as key reuse.
+    if let Some(checkout) = checkout {
+        // Retain a typed launch snapshot, not a nested legacy fingerprint:
+        // reconciliation must recover the accepted mode without resolving
+        // today's profile or compiling today's structured selection again.
+        return serde_json::to_string(&FreshCreateFingerprint::GithubCheckout {
+            parent: parent.map(str::to_owned),
+            requested_cwd: cwd.to_owned(),
+            mode: mode.clone(),
+            title: title.map(str::to_owned),
+            checkout: checkout.clone(),
+        })
+        .expect("a fingerprint of strings and options always serializes");
+    }
     // Infallible in practice: every element is a string, an option, or an
     // array of strings, none of which can fail to serialize. The `expect`
     // documents that rather than inviting a caller to handle an error that
@@ -1622,6 +1727,18 @@ pub(crate) struct KeyedGuard {
     _held: tokio::sync::OwnedMutexGuard<()>,
 }
 
+/// Admission held from protected request resolution through create settlement.
+///
+/// Acquisition is intent, directory, then restricted parent lifecycle, and
+/// fields drop in the reverse order. Keeping this value explicit lets
+/// the wire handler resolve inherited metadata under the same guards the
+/// shared launch path consumes, without reacquiring a non-reentrant lock.
+pub(crate) struct CreateGuards {
+    _parent: Option<KeyedGuard>,
+    _directory: tokio::sync::OwnedMutexGuard<()>,
+    _intent: Option<KeyedGuard>,
+}
+
 impl Drop for KeyedGuard {
     fn drop(&mut self) {
         let Ok(mut locks) = self.registry.locks.lock() else {
@@ -1750,6 +1867,15 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 struct LaunchRequest {
     /// Direct organizational parentage, persisted verbatim with the child.
     parent: Option<String>,
+    /// Which destination this create was validated against (Design C's
+    /// `DestinationResolution`). Carried until the post-record allocation
+    /// finishes — `launch_reserved` consumes it, and for a fresh checkout
+    /// the accepted directory is what REPLACES the candidate below.
+    /// Deliberately not folded into `cwd`/`canonical_cwd`: a fresh
+    /// destination has no accepted canonical cwd until the exclusive
+    /// mkdir wins, and manufacturing a `String` for it here would put a
+    /// lie in the launching row before any directory exists.
+    destination: DestinationResolution,
     /// The working directory as the caller spelled it — after `~`
     /// expansion, which is the one rewrite the caller's spelling gets
     /// ([`expand_tilde_cwd`]): what the session records and what every
@@ -1801,7 +1927,13 @@ struct LaunchRequest {
     /// directory is already being stat'ed, and stored immutably with the
     /// session because re-resolving later could follow a symlink that has
     /// since been repointed.
-    canonical_cwd: String,
+    ///
+    /// `None` for a FRESH GitHub checkout, deliberately: nothing has been
+    /// accepted yet. The launching row persists `NULL` here until the
+    /// exclusive mkdir wins and identity capture succeeds, at which point
+    /// `launch_reserved` records the accepted directory
+    /// (`SessionStore::accept_working_directory`).
+    canonical_cwd: Option<String>,
     /// The profile this create resolved, as the session will remember it
     /// forever (PLAN_M6_75.md item 4), or `None` for a raw create.
     ///
@@ -1826,6 +1958,13 @@ struct LaunchRequest {
 pub(crate) struct CreateInputs<'a> {
     pub(crate) cwd: &'a str,
     pub(crate) parent: Option<String>,
+    /// The helm-resolved fresh-checkout intent (protocol 24), when this
+    /// create is a fresh GitHub checkout. `None` is every pre-checkout create:
+    /// the destination is the `cwd` string alone. The supervisor validates
+    /// this payload fail-closed (`validate_destination`) — it trusts the
+    /// helm's RESOLVED value, never raw repo text (the helm refuses
+    /// unparsable repo text before this ever reaches the supervisor).
+    pub(crate) github_checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
     /// Which launch selector this request chose, already resolved to one.
     pub(crate) mode: CreateMode,
     pub(crate) title: Option<String>,
@@ -1845,6 +1984,7 @@ pub(crate) struct CreateInputs<'a> {
 /// Lives here rather than in `handlers` because the create path is what
 /// consumes it: [`create_fingerprint`] encodes it, and
 /// [`Supervisor::validate_create`] validates it.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) enum CreateMode {
     /// A complete launch bundle, raw when `source_profile` is absent and
     /// profile-backed when it is present.
@@ -1871,6 +2011,135 @@ pub(crate) enum CreateMode {
         resume_template: Option<Vec<String>>,
         selection: farhelm_proto::LaunchSelection,
     },
+}
+
+/// Durable launch inputs for fresh-checkout reconciliation, independent of
+/// the helm's current settings and profile catalog. Permanent reservations
+/// retain this encoding even after the session disappears; live session rows
+/// therefore need not be the source of truth for a retry.
+///
+/// The version tag rejects other fingerprint families on decode. Existing
+/// directory encodings remain frozen and never deserialize through this type.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+enum FreshCreateFingerprint {
+    #[serde(rename = "github_checkout_v3")]
+    GithubCheckout {
+        parent: Option<String>,
+        requested_cwd: String,
+        mode: CreateMode,
+        title: Option<String>,
+        checkout: farhelm_proto::ResolvedGithubCheckout,
+    },
+}
+
+/// Design C's destination split: which kind of working directory a
+/// validated create is about to use, carrying exactly the facts the
+/// launch needs for each kind and nothing manufactured ahead of time.
+///
+/// `Existing` is today's create, unchanged: the directory was already
+/// validated and canonicalized during validation. `Fresh` is a fresh
+/// GitHub checkout whose directory does NOT exist yet — `planned_cwd` is
+/// only a candidate until `working_copies::allocate`'s exclusive mkdir
+/// wins, and `canonical_root`'s identity is what `allocate` re-verifies
+/// immediately before creating anything so a root swapped underneath the
+/// registry fails closed. The launch consumes this AFTER the launching
+/// row is committed: the row is what makes the plan durable, and the
+/// allocation is what makes it real.
+/// Design E's first-version nesting constraint, evaluated against the
+/// CURRENT registry: a fresh checkout at `planned_cwd` may not sit equal
+/// to or inside any active managed checkout's directory, nor inside one's
+/// reserved archive directory (`<canonical_root>/farhelm-archived-
+/// working-copies`). Nested managed moves are what last-reference
+/// archival cannot do safely, so this is refused with a clear validation
+/// error at preview AND re-checked under directory admission before an
+/// allocation is recorded. Retired rows carry no claim. A registry that
+/// still contains overlapping paths despite this rule is handled as
+/// corrupt evidence by the delete path (preserve and refuse the move).
+fn fresh_root_constraint_error(
+    planned_cwd: &str,
+    rows: &[crate::working_copies::WorkingCopyRow],
+) -> Option<String> {
+    let planned = std::path::Path::new(planned_cwd);
+    for row in rows {
+        if row.allocation_state == crate::working_copies::AllocationState::Retired {
+            continue;
+        }
+        let Some(managed) = row.canonical_path.as_deref() else {
+            continue;
+        };
+        let managed = std::path::Path::new(managed);
+        if planned == managed || planned.starts_with(managed) {
+            return Some(format!(
+                "the planned checkout {} sits inside the managed checkout {}; nested \
+                 managed checkouts are not supported, because deleting the outer one \
+                 could not archive it safely. Choose a path outside it",
+                planned.display(),
+                managed.display()
+            ));
+        }
+        let archive_dir =
+            std::path::Path::new(&row.canonical_root).join(crate::working_copies::ARCHIVE_DIR_NAME);
+        if planned.starts_with(&archive_dir) {
+            return Some(format!(
+                "the planned checkout {} sits inside the reserved archive directory {}; \
+                 that name is where deleted checkouts are moved. Choose a path outside it",
+                planned.display(),
+                archive_dir.display()
+            ));
+        }
+    }
+    None
+}
+
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum DestinationResolution {
+    /// An existing, already-validated working directory. No extra facts:
+    /// everything the launch needs is already on `LaunchRequest`.
+    Existing,
+    /// A fresh checkout to allocate before the agent can launch.
+    Fresh {
+        /// The helm-resolved intent this create carries (repo, root,
+        /// post-clone hook, preview binding) — the supervisor's re-verdict
+        /// on it is what produced the fields below.
+        resolved: Box<farhelm_proto::ResolvedGithubCheckout>,
+        /// Resolved once before recording, then recovered from the private
+        /// snapshot rather than the supervisor's current shell setting.
+        shell: String,
+        /// The canonical absolute root, re-resolved on THIS host at
+        /// admission time and verified to be a real directory.
+        canonical_root: String,
+        /// The root's `(device, inode)` at admission time; `allocate`
+        /// refuses to create anything under a root whose identity no
+        /// longer matches.
+        root_identity: crate::working_copies::DirectoryIdentity,
+        /// The FINAL directory name, including any `-N` suffix the
+        /// preview's occupancy scan chose. Allocation creates exactly
+        /// this name; it never renames.
+        basename: String,
+        /// `canonical_root/basename` — the planned working directory,
+        /// valid as a candidate only until the mkdir wins.
+        planned_cwd: String,
+    },
+}
+
+impl DestinationResolution {
+    /// The planned working directory of a `Fresh` destination — the
+    /// candidate path, valid only until the exclusive mkdir wins.
+    fn planned_cwd(&self) -> &str {
+        match self {
+            DestinationResolution::Fresh { planned_cwd, .. } => planned_cwd,
+            DestinationResolution::Existing => {
+                unreachable!("a planned cwd only exists for a fresh destination")
+            }
+        }
+    }
+
+    /// Whether this destination needs a fresh directory allocated (and
+    /// therefore directory admission) before the launch can proceed.
+    fn is_fresh(&self) -> bool {
+        matches!(self, DestinationResolution::Fresh { .. })
+    }
 }
 
 /// Everything durable a session knows about resuming itself: its
@@ -4286,6 +4555,27 @@ pub struct Supervisor {
     /// tracked while it waits and acquires its permit only after this claim
     /// succeeds.
     pub(crate) agent_request_locks: Arc<KeyedLocks>,
+    /// The supervisor-wide directory-admission mutex (Design C's
+    /// `working_copy_operations`): serializes every create admission that
+    /// touches working-copy state — the fresh checkout's planned-row
+    /// recording through its exclusive mkdir and identity capture — so two
+    /// concurrent allocations can never interleave their registry writes
+    /// or race their mkdirs through any path other than `allocate`'s own
+    /// `mkdir(2)` arbitration.
+    ///
+    /// LOCK ORDER: taken AFTER a create's keyed intent guard and BEFORE
+    /// any lifecycle claim (R1.1); it is held only for supervisor
+    /// bookkeeping and the mkdir itself — never while the clone, the
+    /// post-clone hook, or the agent runs, and never across a tmux round
+    /// trip. Delete/restart admission (their own directory-mutex
+    /// acquisition points) arrives with the teardown slice; until then
+    /// nothing else acquires this mutex, so no cycle can form with the
+    /// lifecycle registry.
+    pub(crate) working_copy_operations: Arc<tokio::sync::Mutex<()>>,
+    /// All discovery requests share this scanner's two-child budget. It is
+    /// independent of directory admission: slow Git inspection must not hold
+    /// up checkout allocation or last-reference deletion.
+    repository_scanner: crate::repository_discovery::RepositoryScanner,
     /// The home directory the agents' own record trees hang off
     /// (PLAN_M3.md item 8), resolved once at construction from
     /// `SupervisorSeams::agent_home` or `$HOME`.
@@ -4399,6 +4689,148 @@ async fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
 }
 
 impl Supervisor {
+    /// Inspect immediate clone origins beneath the effective checkout root.
+    /// No ownership or directory-admission lock is taken: discovery is bounded
+    /// observation, and races with filesystem changes report incomplete results
+    /// through the scanner. Configuration and host claims remain helm-owned.
+    pub(crate) async fn github_repo_search(
+        &self,
+        root: Option<&str>,
+        query: &str,
+    ) -> anyhow::Result<crate::repository_discovery::DiscoveryResult> {
+        if query.len() > 4096 {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "repository query exceeds the 4096-byte limit",
+            )
+            .into());
+        }
+        let root = root.ok_or_else(|| RequestError::new(ErrorKind::InvalidRequest,
+            "repository discovery needs a checkout root; configure one with `farhelm helm checkout-config set-root`"))?;
+        // Root resolution belongs to the same work budget as scanning. On
+        // expiry the scanner's cancellation guard retains any child permit
+        // until kill/reap completes; timing out never makes a live child free.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let root = self.resolve_checkout_root(root).await?;
+            self.repository_scanner.scan(Path::new(&root), query).await
+        })
+        .await
+        .map_err(|_| RequestError::new(ErrorKind::Internal, "repository discovery timed out"))?
+    }
+
+    /// The supervisor's half of the GitHub-checkout preview: expand `~`
+    /// in the helm-resolved root against THIS daemon's captured home,
+    /// canonicalize it, prove it is a real usable directory, run the
+    /// bounded occupancy scan, and propose the deterministic name.
+    ///
+    /// NOTHING is created — preview is a precondition, not a reservation:
+    /// the exclusive mkdir happens at admission time under
+    /// `working_copy_operations`, and the preview deliberately examines
+    /// occupancy without taking that lock. A refused preview must leave
+    /// the filesystem exactly as it found it.
+    ///
+    /// The repo text is re-validated here even though the helm parsed it:
+    /// Design A makes the supervisor's re-verdict the authority, and the
+    /// clone URL is constructed only from values that passed BOTH edges.
+    pub(crate) async fn github_checkout_preview(
+        sup: &Arc<Supervisor>,
+        repo_text: &str,
+        title: Option<&str>,
+        root: Option<String>,
+        config_revision: Option<i64>,
+    ) -> anyhow::Result<farhelm_proto::GithubPreviewResponse> {
+        use farhelm_proto::github_checkout::checkout_basename;
+
+        let Some(root) = root else {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "preview needs the resolved checkout root; configure one with \
+                 `farhelm helm checkout-config set-root`",
+            )
+            .into());
+        };
+        let Some(config_revision) = config_revision else {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "preview needs the checkout-configuration revision the root was \
+                 resolved under",
+            )
+            .into());
+        };
+        let repo = farhelm_proto::parse_github_repo(repo_text).map_err(|error| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("invalid GitHub repository {repo_text:?}: {error}"),
+            )
+        })?;
+
+        if let Some(title) = title {
+            ensure_title_printable(title)?;
+            if title.len() > super::handlers::CREATE_FIELD_CAP {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "checkout preview title exceeds the 65536-byte limit",
+                )
+                .into());
+            }
+        }
+        let canonical_root = sup.resolve_checkout_root(&root).await?;
+
+        // One bounded scan feeds both the occupancy set (titled names) and
+        // the lowest-free number (untitled). The scan cap refusal is
+        // honest incompleteness, never a guessed name.
+        let scan = crate::working_copies::occupied_related_names(
+            std::path::Path::new(&canonical_root),
+            &repo.name,
+            crate::working_copies::OCCUPANCY_SCAN_CAP,
+        )?;
+        let occupied = scan.names;
+        let name = checkout_basename(&repo, title, &|candidate| occupied.contains(candidate))
+            .map_err(|error| match error {
+                farhelm_proto::github_checkout::NameError::EmptySlug => RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "the name contains no usable characters; use letters, digits or hyphens",
+                ),
+                farhelm_proto::github_checkout::NameError::Occupied => RequestError::new(
+                    ErrorKind::Conflict,
+                    "a directory with that checkout name already exists; choose another title",
+                ),
+                other => RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!("cannot propose a checkout directory name: {other}"),
+                ),
+            })?;
+
+        let cwd = Path::new(&canonical_root)
+            .join(&name.basename)
+            .to_str()
+            .expect("validated root and basename are UTF-8")
+            .to_string();
+        if cwd.len() > 4096 {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "checkout preview path exceeds the 4096-byte limit",
+            )
+            .into());
+        }
+        if let Some(message) =
+            fresh_root_constraint_error(&cwd, &sup.store.working_copy_rows().await?)
+        {
+            return Err(RequestError::new(ErrorKind::InvalidRequest, message).into());
+        }
+
+        Ok(farhelm_proto::GithubPreviewResponse {
+            canonical_root,
+            basename: name.basename,
+            cwd,
+            config_revision,
+            claim_context: farhelm_proto::ClaimContext {
+                host: String::new(),
+                incarnation: 0,
+            },
+        })
+    }
+
     /// Hold an intent key so handler tests can park a create after its
     /// lifecycle claim and inspect that claim at the create boundary.
     #[cfg(test)]
@@ -4921,6 +5353,8 @@ impl Supervisor {
             intent_locks: Arc::new(KeyedLocks::default()),
             lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_request_locks: Arc::new(KeyedLocks::default()),
+            working_copy_operations: Arc::new(tokio::sync::Mutex::new(())),
+            repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
             agent_home,
             user_home,
             capture_window,
@@ -5029,6 +5463,69 @@ impl Supervisor {
         seams: &SupervisorSeams,
         may_write: bool,
     ) -> anyhow::Result<(HashMap<String, Arc<SessionEntry>>, bool)> {
+        // Startup-exclusive archive reconciliation (Design E): this runs
+        // BEFORE any session is reloaded, so no runtime mutex — and in
+        // particular `working_copy_operations` — exists yet. It MUST use
+        // this direct store path and never acquire the runtime mutex
+        // (recursive acquisition would deadlock once the caller-facing
+        // paths also hold it): at this point nothing else can contend.
+        // Every row left `archive_pending` by a crashed delete is driven
+        // to a decided outcome (move retried / metadata completed /
+        // source confirmed gone); a row whose recovery cannot establish
+        // safety stays pending, visibly, and its create/restart refusals
+        // (the restart-side check) plus an explicit Delete retry keep the
+        // operator in control. No new directory admission is accepted
+        // past this point until each pending row's fate is decided here.
+        // Gated on `may_write`: a claimless or non-owning constructor
+        // must not rename a pending checkout concurrently with the
+        // legitimate owner's own recovery.
+        for row in store.working_copy_rows().await? {
+            if !may_write {
+                info!(
+                    id = %row.id,
+                    "skipping archive reconciliation without state-dir ownership"
+                );
+                continue;
+            }
+            if row.allocation_state != crate::working_copies::AllocationState::ArchivePending {
+                continue;
+            }
+            match store
+                .reconcile_working_copy_archive(&row.id, seams.archive_parent_sync.clone())
+                .await
+            {
+                Ok(crate::working_copies::ReconcileOutcome::Moved { destination }) => {
+                    info!(
+                        working_copy = %row.id, destination = %destination,
+                        "completed a delete's interrupted checkout archive at startup"
+                    );
+                }
+                Ok(crate::working_copies::ReconcileOutcome::MetadataComplete) => {
+                    info!(
+                        working_copy = %row.id,
+                        "confirmed a delete's moved checkout durable at startup; its record \
+                         retires with the session's delete transaction"
+                    );
+                }
+                Ok(crate::working_copies::ReconcileOutcome::SourceMissing) => {
+                    info!(
+                        working_copy = %row.id,
+                        "a pending archive's source is already gone; the explicit Delete \
+                         retry retires the record"
+                    );
+                }
+                Err(error) => {
+                    // Fail closed and visibly: the row stays
+                    // archive_pending, which refuses restarts into the
+                    // checkout, and the Delete retry re-decides.
+                    warn!(
+                        working_copy = %row.id, error = %format!("{error:#}"),
+                        "could not reconcile a pending checkout archive at startup; the \
+                         checkout stays blocked until Delete is retried"
+                    );
+                }
+            }
+        }
         let stored_boot = store.boot_id().await?;
         let current_boot = (seams.boot_id)();
         // A read failure degrades the whole pass to read-only; see the
@@ -5146,7 +5643,7 @@ impl Supervisor {
                     .map(|row| (row.id.clone(), row.generation))
                     .collect::<Vec<_>>()
                 {
-                    cleanup_launch_artifacts(state_dir, &id, generation).await;
+                    cleanup_launch_artifacts(state_dir, store, &id, generation).await;
                 }
             }
         }
@@ -5194,7 +5691,7 @@ impl Supervisor {
             // pass does not own the state directory's durable writes.
             if matches!(row.outcome, LastOutcome::Error { .. }) {
                 if may_write {
-                    cleanup_launch_artifacts(state_dir, &row.id, row.generation).await;
+                    cleanup_launch_artifacts(state_dir, store, &row.id, row.generation).await;
                 }
                 if let Some((pane, state)) = found {
                     found_panes.insert(row.id.clone(), (pane, state));
@@ -5252,15 +5749,37 @@ impl Supervisor {
                         // DEAD: the shape a launch that never reached the
                         // shim leaves behind.
                         let pane_dead = found.as_ref().is_some_and(|(_, state)| state.dead);
-                        if let Some(detail) = wrapper_failure_detail(
+                        let mut failure = wrapper_failure_detail(
                             state_dir,
                             &row.id,
                             row.generation,
                             row.launch_scoped,
                             pane_dead,
                         )
-                        .await
-                        {
+                        .await;
+                        // Only a previously accepted, now stopped terminal
+                        // can turn incomplete setup into a runtime failure.
+                        // A pending preterminal create remains recoverable.
+                        if failure.is_none() && found.as_ref().is_none_or(|(_, state)| state.dead) {
+                            match super::status::interrupted_preparation_detail(
+                                state_dir,
+                                store,
+                                &row.id,
+                                row.generation,
+                            )
+                            .await
+                            {
+                                Ok(detail) => failure = detail,
+                                Err(error) => {
+                                    warn!(session = %row.id, error = %error, "could not inspect checkout preparation; deferring reconciliation");
+                                    if let Some((pane, state)) = found {
+                                        found_panes.insert(row.id.clone(), (pane, state));
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                        if let Some(detail) = failure {
                             transitions.push((
                                 row.id.clone(),
                                 row.generation,
@@ -5389,11 +5908,10 @@ impl Supervisor {
         // (item 25 of the review-swarm fix batch: the shim's own
         // missing/malformed-spec paths, or a failed unlink, can leave the
         // credential-bearing spec stranded too) — are removed together
-        // via `cleanup_launch_artifacts`. The durable outcome row is now
-        // the truth — nothing ever reads either file again to answer "is
-        // this session an error" (`session_status` consults the store,
-        // never the filesystem) — and leaving them around serves no
-        // reader while leaving credential-bearing debris behind. (A
+        // via `cleanup_launch_artifacts`. That helper also preserves the
+        // first launch's accepted-create evidence before removing its
+        // sentinel: Error alone does not settle a Pending reservation.
+        // Once both facts are durable, the files can be removed. (A
         // relaunch can no longer collide with them: launch files are named
         // per GENERATION — `launch::spec_path_for_launch` — so a later
         // launch's paths are simply different ones.) Folded into this same
@@ -5412,7 +5930,7 @@ impl Supervisor {
                         .collect::<Vec<_>>()
                     {
                         if matches!(committed.get(&id), Some(LastOutcome::Error { .. })) {
-                            cleanup_launch_artifacts(state_dir, &id, generation).await;
+                            cleanup_launch_artifacts(state_dir, store, &id, generation).await;
                         }
                     }
                     committed
@@ -5442,10 +5960,14 @@ impl Supervisor {
                 pane,
             });
             let outcome = committed.get(&row.id).cloned().unwrap_or(row.outcome);
-            if terminal.is_some()
-                || !row.pane.is_empty()
-                || matches!(outcome, LastOutcome::Error { .. })
-            {
+            if terminal.is_some() || !row.pane.is_empty() {
+                // Pane provenance only (R1.2): an `Error` outcome is no
+                // longer launch evidence BY ITSELF. A retained
+                // create-refusal row is an Error row with an EMPTY pane —
+                // exactly the shape this condition now excludes — and a
+                // genuine launch's evidence is its pane, its sentinel, its
+                // scope, or its conversation report, all of which the
+                // pending loop below re-probes before settling anything.
                 launched.insert(row.id.clone());
             }
             // Rebuilt from the stored columns rather than re-derived from
@@ -5561,10 +6083,8 @@ impl Supervisor {
                             name: profile.name,
                             existence: ProfileExistence::Present,
                         }),
-                        // Provenance/association fields; the checkout
-                        // registry that would populate them arrives with
-                        // the GitHub-checkout backend, so every restored
-                        // row reports none yet.
+                        // Reply-time registry projection supplies these;
+                        // cached entries cannot track later memberships.
                         github_repo: None,
                         working_copy: None,
                     },
@@ -5630,7 +6150,7 @@ impl Supervisor {
         //
         // Settlement requires PROVENANCE, not merely a non-launching
         // status. A pane (recorded, or found by this pass) means something
-        // saw this session in tmux; an `Error` outcome means the shim ran.
+        // saw this session in tmux; an actual sentinel means its launch ran.
         // `Interrupted` proves nothing on its own — the reboot conversion
         // blankets `Launching` rows too, so a create that crashed before
         // ever reaching tmux comes back from a reboot looking terminal, and
@@ -5660,6 +6180,23 @@ impl Supervisor {
                             && let Some(unit) = crate::scope::unit_name(&reservation.session_id, 0)
                         {
                             evidence = seams.scopes.exists(&unit).await.unwrap_or(false);
+                        }
+                        // The launch sentinel (R1.2's replacement for the
+                        // Error-outcome shortcut this loop used to take):
+                        // the shim writes it when a launch fails,
+                        // so it is evidence even when the pane was never
+                        // recorded and the tmux session is gone. A retained
+                        // create-refusal row — an Error the REFUSAL wrote,
+                        // with the shim never having run — has no sentinel,
+                        // no scope, and no pane, and stays pending (its
+                        // intent is normally already settled `Failed`
+                        // anyway, so it never reaches this probe at all).
+                        if !evidence
+                            && let Ok(Some(_)) =
+                                read_launch_sentinel(state_dir, reservation.session_id.as_str(), 0)
+                                    .await
+                        {
+                            evidence = true;
                         }
                         if evidence {
                             settled.push(Settlement {
@@ -6036,10 +6573,190 @@ impl Supervisor {
     /// create the supervisor had already accepted and half-performed. The
     /// stored row is what the first attempt actually resolved, and a retry
     /// under the same reservation is the same create.
+    #[cfg(test)]
     pub(crate) async fn create_session(
         &self,
         inputs: CreateInputs<'_>,
         claim: Option<IntentClaim>,
+    ) -> anyhow::Result<SessionInfo> {
+        let guards = self
+            .admit_create(claim.as_ref().map(|claim| claim.intent_key.as_str()), None)
+            .await?;
+        self.create_session_admitted(inputs, claim, guards).await
+    }
+
+    /// Acquire create admission before reading authorization-dependent inputs.
+    ///
+    /// The restricted credential is checked after waiting for its lifecycle
+    /// claim; an earlier network-edge check cannot authorize a request whose
+    /// parent was deleted or whose credential changed during that wait. Profile
+    /// catalog round trips belong before this method, inherited bundle reads
+    /// after it. Credentials are neither retained in the guards nor logged.
+    pub(crate) async fn admit_create(
+        &self,
+        intent_key: Option<&str>,
+        restricted_auth: Option<&farhelm_proto::SessionAuth>,
+    ) -> anyhow::Result<CreateGuards> {
+        let intent = match intent_key {
+            Some(key) => Some(self.claim_create_intent(key).await),
+            None => None,
+        };
+        let acquisition = Arc::clone(&self.working_copy_operations).lock_owned();
+        tokio::pin!(acquisition);
+        let mut observer = self.seams.create_directory_waiting.as_ref();
+        let directory = std::future::poll_fn(|cx| {
+            let result = std::future::Future::poll(acquisition.as_mut(), cx);
+            if result.is_pending()
+                && let Some(observer) = observer.take()
+            {
+                observer();
+            }
+            result
+        })
+        .await;
+        let parent = if let Some(auth) = restricted_auth {
+            let acquisition = self.lifecycle_locks.claim(&auth.session_id);
+            tokio::pin!(acquisition);
+            let mut observer = self.seams.create_parent_waiting.as_ref();
+            let parent = std::future::poll_fn(|cx| {
+                let result = std::future::Future::poll(acquisition.as_mut(), cx);
+                if result.is_pending()
+                    && let Some(observer) = observer.take()
+                {
+                    observer(&auth.session_id);
+                }
+                result
+            })
+            .await;
+            if !self
+                .store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await?
+            {
+                return Err(RequestError::new(
+                    ErrorKind::Unauthorized,
+                    "the session credential is invalid or its session no longer exists",
+                )
+                .into());
+            }
+            Some(parent)
+        } else {
+            None
+        };
+        Ok(CreateGuards {
+            _parent: parent,
+            _directory: directory,
+            _intent: intent,
+        })
+    }
+
+    /// Claim the intent while preserving the real-Pending observation seam.
+    /// Tests observe this future yielding, rather than a task merely reaching
+    /// a line before it attempts acquisition; queue position is unchanged.
+    async fn claim_create_intent(&self, key: &str) -> KeyedGuard {
+        if let Some(observer) = self.seams.create_intent_waiting.as_ref() {
+            let acquisition = self.intent_locks.claim(key);
+            tokio::pin!(acquisition);
+            let mut observer = Some(observer);
+            std::future::poll_fn(|cx| {
+                let result = std::future::Future::poll(acquisition.as_mut(), cx);
+                if result.is_pending()
+                    && let Some(observer) = observer.take()
+                {
+                    observer(key);
+                }
+                result
+            })
+            .await
+        } else {
+            self.intent_locks.claim(key).await
+        }
+    }
+
+    /// Recover a recorded fresh intent without consulting today's helm settings.
+    ///
+    /// Unknown keys return without validation, reservation, or allocation. A
+    /// known key must be permanent and carry the same original client identity;
+    /// neither legacy fingerprints nor restricted spawn reservations can enter
+    /// this recovery path. Intent and directory admission remain held through
+    /// the ordinary settlement/relaunch state machine, closing the lookup gap.
+    pub(crate) async fn reconcile_github_checkout(
+        &self,
+        intent_key: String,
+        client_identity: &str,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<Option<SessionInfo>> {
+        if intent_key.is_empty()
+            || intent_key.len() > 512
+            || client_identity.is_empty()
+            || client_identity.len() > farhelm_proto::github_checkout::MAX_CLIENT_IDENTITY_BYTES
+        {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "fresh reconciliation requires a nonempty key of at most 512 bytes and a nonempty request identity of at most 512 KiB",
+            ).into());
+        }
+        let guards = self.admit_create(Some(&intent_key), None).await?;
+        let Some(reservation) = self.store.reservation(&intent_key).await? else {
+            return Ok(None);
+        };
+        if reservation.dedup_scope != DedupScope::Permanent {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this intent key belongs to a different create request",
+            )
+            .into());
+        }
+        let FreshCreateFingerprint::GithubCheckout {
+            parent,
+            requested_cwd,
+            mode,
+            title,
+            checkout,
+        } = serde_json::from_str(&reservation.fingerprint).map_err(|_| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "this intent key has no compatible fresh-checkout recovery snapshot",
+            )
+        })?;
+        if checkout.client_identity != client_identity {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this intent key belongs to a different create request",
+            )
+            .into());
+        }
+        self.create_session_admitted(
+            CreateInputs {
+                cwd: &requested_cwd,
+                parent,
+                github_checkout: Some(checkout),
+                mode,
+                title,
+                cols,
+                rows,
+            },
+            Some(IntentClaim {
+                intent_key,
+                fingerprint: reservation.fingerprint,
+                dedup_scope: DedupScope::Permanent,
+            }),
+            guards,
+        )
+        .await
+        .map(Some)
+    }
+
+    /// Resolve or launch under admission already held by the caller.
+    /// The wire path constructs its fingerprint only after protected inherited
+    /// resolution; internal callers use `create_session` to acquire the same
+    /// guards before directory validation. Neither path reacquires admission.
+    pub(crate) async fn create_session_admitted(
+        &self,
+        inputs: CreateInputs<'_>,
+        claim: Option<IntentClaim>,
+        guards: CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
         // `~` expansion lives at the head of `validate_create`, and its
         // reach is exactly validation's reach: a replay answers from the
@@ -6052,34 +6769,15 @@ impl Supervisor {
         // computed by the handler from the client's literal string: a
         // client retrying "~" produces the same fingerprint both times,
         // which is all idempotency needs.
+        let fresh = inputs.github_checkout.is_some();
         let Some(claim) = claim else {
-            let request = self.validate_create(inputs).await?;
+            let request = self
+                .validate_create(inputs)
+                .await
+                .map_err(|error| classify_unallocated_checkout_conflict(error, fresh))?;
             return self
-                .launch_session(request, Reserved::Unkeyed(new_session_identity()))
+                .launch_session(request, Reserved::Unkeyed(new_session_identity()), &guards)
                 .await;
-        };
-        // Held for the whole of the rest of this create — lookup, launch,
-        // and outcome settlement alike — so a concurrent retry of the same
-        // intent waits for this one's answer instead of racing it.
-        let _intent = if let Some(observer) = self.seams.create_intent_waiting.as_ref() {
-            let acquisition = self.intent_locks.claim(&claim.intent_key);
-            tokio::pin!(acquisition);
-            let mut observer = Some(observer);
-            // Observe the actual future yielding, rather than announcing a
-            // request before it has even attempted acquisition. Keep polling
-            // the same future so observation does not alter its queue position.
-            std::future::poll_fn(|cx| {
-                let result = std::future::Future::poll(acquisition.as_mut(), cx);
-                if result.is_pending()
-                    && let Some(observer) = observer.take()
-                {
-                    observer(&claim.intent_key);
-                }
-                result
-            })
-            .await
-        } else {
-            self.intent_locks.claim(&claim.intent_key).await
         };
         let existing = self
             .store
@@ -6106,9 +6804,42 @@ impl Supervisor {
         };
         let request = match validated {
             Ok(request) => request,
-            Err(refusal) => return self.record_refused_create(&reserved, refusal).await,
+            Err(refusal) => {
+                // A RETAINED refusal (R1.2 — the ambiguous-Planned
+                // recovery) keeps the session row visible and settles the
+                // intent `Failed` in one transaction, instead of the
+                // ordinary never-launched rollback that deletes the row.
+                if refusal.downcast_ref::<RetainedCreateRefusal>().is_some() {
+                    // Validation has already completed intent and directory
+                    // admission. Take the lifecycle claim before reading or
+                    // publishing so a rename cannot land between the durable
+                    // refusal and its in-memory mirror.
+                    let _lifecycle = self.lifecycle_locks.claim(reserved.session_id()).await;
+                    let row = self
+                        .store
+                        .session(reserved.session_id())
+                        .await
+                        .context("reading the retained retry row before refusal settlement")?;
+                    let Some(row) = row else {
+                        // A fresh pending key whose row disappeared is an
+                        // established fail-closed refusal. There is no row
+                        // to retain or publish, and manufacturing one would
+                        // falsely revive an accepted session identity.
+                        return Err(refusal);
+                    };
+                    return Err(self.retain_create_refusal(&reserved, refusal, &row).await);
+                }
+                // Only a new intent has no historical allocation to account
+                // for. Recovery validation failures keep their original kind;
+                // absence of a live agent is not proof of no checkout.
+                let refusal = classify_unallocated_checkout_conflict(
+                    refusal,
+                    fresh && matches!(&reserved, Reserved::New { .. }),
+                );
+                return self.record_refused_create(&reserved, refusal).await;
+            }
         };
-        self.launch_session(request, reserved).await
+        self.launch_session(request, reserved, &guards).await
     }
 
     /// [`Supervisor::create_session`] with no snapshot overrides — the
@@ -6133,6 +6864,7 @@ impl Supervisor {
             CreateInputs {
                 cwd,
                 parent: None,
+                github_checkout: None,
                 mode: CreateMode::Raw {
                     invocation: invocation.to_string(),
                     agent_kind: None,
@@ -6193,6 +6925,7 @@ impl Supervisor {
             title,
             cols,
             rows,
+            github_checkout,
         } = inputs;
         let (invocation, agent_kind, resume_template, source_profile, launch) = match mode {
             CreateMode::Raw {
@@ -6221,19 +6954,46 @@ impl Supervisor {
                 Some(selection),
             ),
         };
-        // `~` expansion happens here, as the first half of the cwd check,
-        // in the one function every NEW create flows through — unkeyed,
-        // keyed-new, and a retry whose row vanished. A retry with its row
-        // intact never comes here and never re-expands: its first
-        // attempt's stored cwd is the resolution (see `validate_retry`),
-        // so a `HOME` change between the crash and the retry cannot re-aim
-        // or reject an already-accepted create. Everything below — the
-        // usability check, the derived title, the durable row, the
-        // canonical identity — sees only the expanded absolute path.
-        let cwd = expand_tilde_cwd(cwd, self.user_home.as_deref())?;
-        let cwd = cwd.as_ref();
-        let cwd_path = PathBuf::from(cwd);
-        ensure_cwd_usable(cwd).await?;
+        // The destination is resolved FIRST because it decides which
+        // directory every later check speaks about — and because a fresh
+        // checkout's directory does not exist yet, so the working-directory
+        // usability check below belongs only to the Existing arm. `~`
+        // expansion happens here for the same reason as before (see the
+        // block comment this replaces for the idempotency contract): a
+        // replay answers from the reservation without expanding anything,
+        // and a refused expansion is recorded against the intent key like
+        // any other refusal. A fresh destination's cwd arrives empty by
+        // contract (the directory is allocated here, not chosen by the
+        // caller) and is REPLACED by the planned path the resolution
+        // proves.
+        let (cwd, launch_cwd, destination) = match &github_checkout {
+            Some(resolved) => {
+                if !cwd.trim().is_empty() {
+                    return Err(RequestError::new(
+                        ErrorKind::InvalidRequest,
+                        "a fresh GitHub checkout create must leave cwd empty: the checkout \
+                         directory is allocated by the supervisor, not chosen by the caller",
+                    )
+                    .into());
+                }
+                let fresh = self
+                    .validate_destination(resolved, title.as_deref())
+                    .await?;
+                let cwd = fresh.planned_cwd().to_string();
+                (cwd.clone(), cwd, fresh)
+            }
+            None => {
+                let cwd = expand_tilde_cwd(cwd, self.user_home.as_deref())?;
+                let cwd = cwd.as_ref();
+                ensure_cwd_usable(cwd).await?;
+                (
+                    cwd.to_string(),
+                    cwd.to_string(),
+                    DestinationResolution::Existing,
+                )
+            }
+        };
+        let cwd_path = PathBuf::from(&cwd);
         // The invocation itself stays out of the error: it may carry
         // credentials (`--api-key ...`), and this message travels into
         // the HTTP error body and the helm's stderr/journal. shell-words'
@@ -6308,7 +7068,12 @@ impl Supervisor {
         // display label. `cwd` becomes tmux's working-directory argument
         // and `invocation` is parsed into an argv — both are consumed as
         // data by something that already has to accept arbitrary bytes.
-        let title = match title {
+        // Fresh intent treats an empty label as an automatic numbered name.
+        // Its controls were checked before normalization in validate_destination;
+        // ordinary creates still preserve an explicitly empty display title.
+        let title = match title
+            .filter(|value| github_checkout.is_none() || !value.trim().is_empty())
+        {
             Some(explicit) => {
                 ensure_title_printable(&explicit)?;
                 explicit
@@ -6349,25 +7114,41 @@ impl Supervisor {
         // create: the directory was just confirmed usable, so this is a
         // race or an exotic filesystem, and the literal path is the honest
         // fallback — it costs capture for that session, never correctness.
-        let canonical_cwd = match tokio::fs::canonicalize(&cwd_path).await {
-            Ok(resolved) => resolved.to_string_lossy().into_owned(),
-            Err(e) => {
-                warn!(
-                    cwd = %cwd, error = %e,
-                    "could not resolve this working directory to a canonical path; \
-                     conversation capture may not correlate for this session"
-                );
-                cwd.to_string()
+        // Correlation needs the canonical spelling — but only for an
+        // EXISTING directory, which is the only kind that exists yet. A
+        // fresh checkout's canonical cwd is `None` until the exclusive
+        // mkdir wins and `launch_reserved` records the accepted directory;
+        // persisting a candidate here would claim an identity for a
+        // directory that does not exist. A failure on the existing arm
+        // still does NOT fail the create (see the comment below for why).
+        let canonical_cwd = if destination.is_fresh() {
+            None
+        } else {
+            match tokio::fs::canonicalize(&cwd_path).await {
+                Ok(resolved) => Some(resolved.to_string_lossy().into_owned()),
+                Err(e) => {
+                    warn!(
+                        cwd = %cwd, error = %e,
+                        "could not resolve this working directory to a canonical path; \
+                         conversation capture may not correlate for this session"
+                    );
+                    Some(cwd.clone())
+                }
             }
         };
+        if !destination.is_fresh() {
+            self.refuse_pending_archive(&cwd, canonical_cwd.as_deref())
+                .await?;
+        }
         Ok(LaunchRequest {
             parent,
-            cwd: cwd.to_string(),
+            destination,
+            cwd: cwd.clone(),
             // A create has no prior identity to have verified, and the
             // canonicalization above is deliberately allowed to fail
             // without failing the create — so the caller's own spelling is
             // what tmux gets. See [`LaunchRequest::launch_cwd`].
-            launch_cwd: cwd.to_string(),
+            launch_cwd: launch_cwd.clone(),
             invocation,
             argv,
             title,
@@ -6377,6 +7158,278 @@ impl Supervisor {
             canonical_cwd,
             source_profile,
             launch,
+        })
+    }
+
+    /// Refuse admissions under every unresolved archive, including aliases.
+    ///
+    /// Callers hold directory admission through this read and their session
+    /// transaction. A still-present source is not evidence that it is safe to
+    /// join: recovery owns the pending move. Comparing path components avoids
+    /// confusing `repo-old` with a descendant of `repo`.
+    async fn refuse_pending_archive(
+        &self,
+        cwd: &str,
+        canonical_cwd: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let cwd = Path::new(canonical_cwd.unwrap_or(cwd));
+        for row in self.store.working_copy_rows().await? {
+            if row.allocation_state != crate::working_copies::AllocationState::ArchivePending {
+                continue;
+            }
+            let managed = row
+                .canonical_path
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| Path::new(&row.canonical_root).join(&row.original_basename));
+            if cwd.starts_with(&managed) {
+                return Err(RequestError::new(ErrorKind::Conflict,
+                    "this working directory has an unresolved checkout archive; creation is refused until it is reconciled"
+                ).into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve a configured root identically for preview and creation, using
+    /// this supervisor's captured home. A symlink to a directory is usable;
+    /// the canonical target, not the alias, is bound to the preview and registry.
+    /// Refuse paths the UTF-8 wire cannot represent exactly, and never create
+    /// the root as a side effect of configuration or preview.
+    async fn resolve_checkout_root(&self, root: &str) -> anyhow::Result<String> {
+        if root.len() > 4096 {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "checkout root exceeds the 4096-byte limit",
+            )
+            .into());
+        }
+        let expanded = expand_tilde_cwd(root, self.user_home.as_deref())?;
+        if !Path::new(expanded.as_ref()).is_absolute() {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "checkout root must be absolute or start with ~/ on the target host",
+            )
+            .into());
+        }
+        let canonical = tokio::fs::canonicalize(expanded.as_ref())
+            .await
+            .map_err(|error| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    format!(
+                        "the checkout root is not usable on this host: {error}; create it or fix \
+                 the configured root with `farhelm helm checkout-config set-root`"
+                    ),
+                )
+            })?;
+        if !tokio::fs::metadata(&canonical).await?.is_dir() {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the checkout root is not a directory",
+            )
+            .into());
+        }
+        let canonical = canonical.to_str().ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the canonical checkout root is not valid UTF-8",
+            )
+        })?;
+        if canonical.len() > 4096 {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "canonical checkout root exceeds the 4096-byte limit",
+            )
+            .into());
+        }
+        Ok(canonical.to_string())
+    }
+
+    /// Design C's destination preparation for a FRESH GitHub checkout,
+    /// split from `validate_create` because the two kinds answer different
+    /// questions: an existing directory is validated for usability, a
+    /// fresh one is validated for ALLOCATABILITY — everything provable
+    /// before the exclusive mkdir, with no claim that anything exists.
+    ///
+    /// Fail closed per Design A on every input the helm resolved (the
+    /// supervisor trusts the RESOLVED payload, never raw repo text — the
+    /// helm refuses unparsable repo text before this is ever called):
+    ///
+    /// - the configured root is re-resolved on THIS host and must be a
+    ///   real directory (`canonicalize` + `is_dir`); a symlink that
+    ///   resolves to a directory is accepted, its RESOLUTION is what is
+    ///   recorded — the preview's own root was canonical on the same rule;
+    /// - the preview binding must name exactly this root and the exact
+    ///   `root/basename` cwd the browser was shown (a stale preview is
+    ///   refused, never re-aimed);
+    /// - the repo identity is re-parsed from owner/name
+    ///   (`farhelm_proto::parse_github_repo`) and must match the carried
+    ///   pair, so a malformed payload can never reach a clone URL;
+    /// - the bounded occupancy scan and the actual requested title must
+    ///   reproduce the preview's name through the same naming function.
+    ///   Numeric suffixes do not identify untitled intent: an explicit
+    ///   title such as `bar-7` names that exact directory.
+    ///
+    /// The planned cwd is returned as a CANDIDATE. Nothing here creates
+    /// anything; the exclusive mkdir in `working_copies::allocate` is the
+    /// whole race policy.
+    async fn validate_destination(
+        &self,
+        resolved: &farhelm_proto::ResolvedGithubCheckout,
+        title: Option<&str>,
+    ) -> anyhow::Result<DestinationResolution> {
+        // Check before whitespace normalization: a newline-only label must
+        // not become an apparently absent title and evade the control rule.
+        if let Some(title) = title {
+            ensure_title_printable(title)?;
+        }
+        // Re-prove the repo identity from its own canonical text: owner
+        // and name are re-parsed through the same validator the helm used,
+        // so a hand-forged payload carrying shell-hostile text is refused
+        // before it can reach a URL or a directory name.
+        let reparsed = farhelm_proto::parse_github_repo(&format!(
+            "{}/{}",
+            resolved.repo.owner, resolved.repo.name
+        ))
+        .map_err(|e| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("the resolved GitHub repository is not a valid owner/repo pair: {e}"),
+            )
+        })?;
+        if reparsed != resolved.repo {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the resolved GitHub repository identity does not match its own fields",
+            )
+            .into());
+        }
+        let canonical_root = self.resolve_checkout_root(&resolved.root).await?;
+        // The preview binding is a precondition, not a reservation: the
+        // supervisor re-verifies rather than re-derives, so the user
+        // always launches into the path they were shown.
+        let preview = &resolved.preview;
+        if preview.canonical_root != canonical_root {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "the checkout root changed since this preview was shown (preview named \
+                     {}, this host resolves {}); request a new preview",
+                    preview.canonical_root, canonical_root
+                ),
+            )
+            .into());
+        }
+        if preview.basename.trim().is_empty() {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the preview binding carries no directory name",
+            )
+            .into());
+        }
+        let planned_cwd = Path::new(&canonical_root)
+            .join(&preview.basename)
+            .to_str()
+            .expect("validated root and wire basename are UTF-8")
+            .to_string();
+        if planned_cwd.len() > 4096 {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "checkout path exceeds the 4096-byte limit",
+            )
+            .into());
+        }
+        if preview.cwd != planned_cwd {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "the preview's proposed path ({}) does not match its own root and name \
+                     ({planned_cwd}); request a new preview",
+                    preview.cwd
+                ),
+            )
+            .into());
+        }
+        // Recompute from intent, never from the submitted basename. Otherwise
+        // a forged path or an explicit numeric title can masquerade as an
+        // untitled allocation. The scan only proposes; mkdir remains the
+        // authority if another process wins the path after this check.
+        let occupied = crate::working_copies::occupied_related_names(
+            Path::new(&canonical_root),
+            &resolved.repo.name,
+            crate::working_copies::OCCUPANCY_SCAN_CAP,
+        )
+        .map_err(|e| {
+            RequestError::new(
+                ErrorKind::Internal,
+                format!("could not scan the checkout root for a free name: {e}"),
+            )
+        })?;
+        let proposed = farhelm_proto::github_checkout::checkout_basename(
+            &resolved.repo,
+            title,
+            &|candidate| occupied.names.contains(candidate),
+        )
+        .map_err(|error| {
+            let kind = if matches!(error, farhelm_proto::github_checkout::NameError::Occupied) {
+                ErrorKind::Conflict
+            } else {
+                ErrorKind::InvalidRequest
+            };
+            RequestError::new(
+                kind,
+                format!("cannot use the preview's checkout name: {error}"),
+            )
+        })?;
+        if proposed.basename != preview.basename {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                format!(
+                    "the checkout name {} is no longer the free name the preview proposed \
+                     under {}; request a new preview",
+                    preview.basename, canonical_root
+                ),
+            )
+            .into());
+        }
+        // The root's identity at admission time — `allocate` re-stats the
+        // root immediately before the mkdir and refuses a swap.
+        let root_meta = tokio::fs::symlink_metadata(&canonical_root)
+            .await
+            .map_err(|e| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    format!("could not stat the checkout root: {e}"),
+                )
+            })?;
+        use std::os::unix::fs::MetadataExt as _;
+        let root_identity = (root_meta.dev(), root_meta.ino());
+        // Design E's constraint, preview side: a fresh checkout may not be
+        // created equal to/inside an existing managed checkout, or inside
+        // one's reserved archive directory. Nested managed moves are
+        // exactly what last-reference archival cannot do safely, so the
+        // rule is refused here — before any reservation — and RE-CHECKED
+        // under directory admission at recording time (the two decisions
+        // are one rule; the recheck closes the preview-to-launch gap).
+        if let Some(message) = fresh_root_constraint_error(
+            planned_cwd.trim_end_matches('/'),
+            &self.store.working_copy_rows().await.map_err(|e| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    format!("checking the checkout registry for overlapping paths: {e:#}"),
+                )
+            })?,
+        ) {
+            return Err(RequestError::new(ErrorKind::InvalidRequest, message).into());
+        }
+        Ok(DestinationResolution::Fresh {
+            resolved: Box::new(resolved.clone()),
+            shell: self.launch_shell().await,
+            canonical_root,
+            root_identity,
+            basename: preview.basename.clone(),
+            planned_cwd,
         })
     }
 
@@ -6423,11 +7476,10 @@ impl Supervisor {
     ///   would exec a program literally named `{cwd}` instead of failing
     ///   loudly on the refusal.
     ///
-    /// A retry whose row is GONE falls back to validating the request
-    /// normally. That is the honest fallback rather than a failure: there is
-    /// no recorded resolution left to preserve, the reservation's identities
-    /// are still free to reuse, and the alternative — refusing — would
-    /// permanently strand an intent key whose session someone deleted.
+    /// Legacy Existing retries retain their missing-row validation fallback.
+    /// A fresh retry cannot do that: losing its original resolution is not
+    /// authority to allocate a new checkout. Normal deletion is answered by
+    /// the reservation tombstone before this pending-recovery path is reached.
     async fn validate_retry(
         &self,
         inputs: CreateInputs<'_>,
@@ -6439,6 +7491,11 @@ impl Supervisor {
             .await
             .context("reading the interrupted attempt's session row")?;
         let Some(row) = row else {
+            if inputs.github_checkout.is_some() {
+                return Err(anyhow::Error::new(RetainedCreateRefusal(
+                    "the original fresh-create session record is missing; refusing to allocate another checkout".into(),
+                )));
+            }
             return self.validate_create(inputs).await;
         };
         // The row's stored cwd IS the first attempt's resolution — already
@@ -6449,59 +7506,243 @@ impl Supervisor {
         // fingerprint has already proven the request is the same literal
         // string the first attempt resolved, which is all the request's
         // own cwd is good for.
-        ensure_cwd_usable(&row.cwd).await?;
-        let verified = ensure_cwd_identity(&row.cwd, row.canonical_cwd.as_deref()).await?;
-        let argv = shell_words::split(&row.invocation).context(RequestError::new(
-            ErrorKind::InvalidRequest,
-            "parsing the interrupted attempt's recorded agent invocation",
-        ))?;
-        // Same shared rule the raw path applies, for the reason this
-        // function's docs give about the database being a trust boundary:
-        // `''` and an embedded NUL both survive a round trip through
-        // SQLite, and neither is an argv anything can run.
-        crate::agent_kind::ensure_executable_argv(
-            "the interrupted attempt's recorded agent invocation",
-            &argv,
-        )
-        .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        // `decode_session_row` already refuses a `{cwd}`-first invocation
-        // when the row is loaded, so a row read through the store cannot
-        // carry one here. Checked again anyway: this is the gate on the
-        // vector about to be exec'd, and the repo's pattern for a rule this
-        // sharp is to hold both ends of the pipe to it rather than trust
-        // that the one enforcing end never changes underneath the other.
-        crate::agent_kind::ensure_no_cwd_program(
-            "the interrupted attempt's recorded agent invocation",
-            &argv,
-        )
-        .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
-        if let Some(template) = row.resume_template.as_deref() {
-            crate::agent_kind::ensure_resume_template(template)
-                .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+        //
+        // A FRESH checkout's crashed attempt left a registry row (Design
+        // C). Before anything else, its stage decides this retry's fate:
+        //
+        // - `planned` with the target path now OCCUPIED is the ambiguous
+        //   crash window — the mkdir may have won and crashed before its
+        //   identity write, or a stranger may have created the path. The
+        //   registry captured no identity, so there is nothing to verify
+        //   against and NO way to tell our directory from a foreign one.
+        //   Fail closed: refuse with the RETAINED refusal (the row stays
+        //   visible, the plan stays as diagnostic evidence, the intent
+        //   settles `Failed`) rather than adopt, move, clear, or relaunch
+        //   into whatever is there.
+        // - `planned` with the path ABSENT is the clean recovery Design
+        //   C's stages table allows: the launch below re-attempts the same
+        //   exclusive mkdir under the same basename. No new name, no
+        //   second plan row.
+        // - `allocated` means the mkdir won and the identity is captured;
+        //   the stored cwd was accepted and is re-verified below by
+        //   `ensure_cwd_identity` like any other accepted directory.
+        let origin = self
+            .store
+            .origin_working_copy(&row.id)
+            .await
+            .map_err(|error| {
+                anyhow::Error::new(RetainedCreateRefusal(format!(
+                    "fresh-create provenance cannot be verified: {error:#}"
+                )))
+            })?;
+        if inputs.github_checkout.is_some() && origin.is_none() {
+            return Err(anyhow::Error::new(RetainedCreateRefusal(
+                "the original fresh-create provenance is missing; refusing to launch it as an existing directory".into(),
+            )));
         }
-        Ok(LaunchRequest {
-            parent: row.parent,
-            // The path `ensure_cwd_identity` just VERIFIED, so the launch
-            // cannot be aimed somewhere else by a symlink repointed between
-            // that check and the tmux call. `None` only for a row with no
-            // recorded identity, where there was nothing to verify.
-            launch_cwd: verified.unwrap_or_else(|| row.cwd.clone()),
-            invocation: row.invocation,
-            argv,
-            title: row.title,
-            cols: inputs.cols,
-            rows: inputs.rows,
-            snapshot: IntegrationSnapshot {
-                kind: row.agent_kind,
-                resume_template: row.resume_template,
-            },
-            // `None` only for a row written before the column existed, which
-            // is necessarily a non-integrated session; the stored cwd is the
-            // same honest fallback `validate_create` uses.
-            canonical_cwd: row.canonical_cwd.unwrap_or_else(|| row.cwd.clone()),
-            cwd: row.cwd,
-            source_profile: row.source_profile,
-            launch: row.launch,
+        // Once provenance establishes a fresh origin, every remaining
+        // validation failure must retain it. Ordinary cwd/argv checks can
+        // fail after recovery succeeds; those errors must not fall back to
+        // the borrower rollback that deletes an unlaunched session.
+        let retain_origin = origin.is_some();
+        let validated = async {
+            if let Some(plan) = &origin
+                && plan.allocation_state == crate::working_copies::AllocationState::Planned
+            {
+                let target =
+                    std::path::Path::new(&plan.canonical_root).join(&plan.original_basename);
+                if match target.symlink_metadata() {
+                    Ok(_) => true,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => {
+                        return Err(anyhow::Error::new(RetainedCreateRefusal(format!(
+                            "the planned checkout path cannot be inspected: {error}"
+                        ))));
+                    }
+                } {
+                    return Err(anyhow::Error::new(RetainedCreateRefusal(format!(
+                        "the fresh checkout's planned path {} is occupied but its registry \
+                     row recorded no directory identity before the interrupted attempt \
+                     ended, so it cannot be proven to be this create's own checkout; the \
+                     session is retained as an error with its plan, and the directory is \
+                     left untouched — delete the session to retire the plan, then create \
+                     again with a new intent key",
+                        target.display()
+                    ))));
+                }
+            }
+            let destination = match &origin {
+                Some(plan) => {
+                    self.recover_checkout_destination(plan, &row.cwd)
+                        .map_err(|error| {
+                            anyhow::Error::new(RetainedCreateRefusal(format!(
+                                "checkout recovery refused: {error:#}"
+                            )))
+                        })?
+                }
+                None => DestinationResolution::Existing,
+            };
+            let verified = if origin.as_ref().is_some_and(|plan| {
+                plan.allocation_state == crate::working_copies::AllocationState::Planned
+            }) {
+                // Absence is required at this stage, not a failed cwd check.
+                // The exact recorded plan will perform the exclusive mkdir.
+                None
+            } else {
+                ensure_cwd_usable(&row.cwd).await?;
+                ensure_cwd_identity(&row.cwd, row.canonical_cwd.as_deref()).await?
+            };
+            self.refuse_pending_archive(&row.cwd, row.canonical_cwd.as_deref())
+                .await?;
+            let argv = shell_words::split(&row.invocation).context(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "parsing the interrupted attempt's recorded agent invocation",
+            ))?;
+            // Same shared rule the raw path applies, for the reason this
+            // function's docs give about the database being a trust boundary:
+            // `''` and an embedded NUL both survive a round trip through
+            // SQLite, and neither is an argv anything can run.
+            crate::agent_kind::ensure_executable_argv(
+                "the interrupted attempt's recorded agent invocation",
+                &argv,
+            )
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+            // `decode_session_row` already refuses a `{cwd}`-first invocation
+            // when the row is loaded, so a row read through the store cannot
+            // carry one here. Checked again anyway: this is the gate on the
+            // vector about to be exec'd, and the repo's pattern for a rule this
+            // sharp is to hold both ends of the pipe to it rather than trust
+            // that the one enforcing end never changes underneath the other.
+            crate::agent_kind::ensure_no_cwd_program(
+                "the interrupted attempt's recorded agent invocation",
+                &argv,
+            )
+            .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+            if let Some(template) = row.resume_template.as_deref() {
+                crate::agent_kind::ensure_resume_template(template)
+                    .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
+            }
+            Ok(LaunchRequest {
+                parent: row.parent,
+                // Fresh origins recover their original resolution; borrowers
+                // retain the ordinary Existing contract.
+                destination,
+                // The path `ensure_cwd_identity` just VERIFIED, so the launch
+                // cannot be aimed somewhere else by a symlink repointed between
+                // that check and the tmux call. `None` only for a row with no
+                // recorded identity, where there was nothing to verify.
+                launch_cwd: verified.unwrap_or_else(|| row.cwd.clone()),
+                invocation: row.invocation,
+                argv,
+                title: row.title,
+                cols: inputs.cols,
+                rows: inputs.rows,
+                snapshot: IntegrationSnapshot {
+                    kind: row.agent_kind,
+                    resume_template: row.resume_template,
+                },
+                // `None` only for a row whose directory was never accepted —
+                // a pre-mkdir crash of a fresh checkout — or written before
+                // the column existed. The stored value is carried verbatim:
+                // the takeover must not manufacture an identity the first
+                // attempt never recorded.
+                canonical_cwd: row.canonical_cwd.clone(),
+                cwd: row.cwd,
+                source_profile: row.source_profile,
+                launch: row.launch,
+            })
+        }
+        .await;
+        validated.map_err(|error: anyhow::Error| {
+            if retain_origin {
+                error.context(RetainedCreateRefusal(
+                    "fresh checkout retry validation refused".into(),
+                ))
+            } else {
+                error
+            }
+        })
+    }
+
+    /// Reconstruct only the original fresh-create destination. Current helm
+    /// settings and the supervisor's current shell are irrelevant to a
+    /// pending reservation. Ambiguous filesystem or preparation evidence
+    /// refuses before takeover can publish another launch.
+    fn recover_checkout_destination(
+        &self,
+        plan: &crate::working_copies::WorkingCopyRow,
+        cwd: &str,
+    ) -> anyhow::Result<DestinationResolution> {
+        use crate::working_copies::{AllocationState, IdentityStatus, PreparationSnapshot};
+        let snapshot: PreparationSnapshot = serde_json::from_str(
+            plan.preparation_snapshot
+                .as_deref()
+                .context("missing preparation snapshot")?,
+        )
+        .context("invalid preparation snapshot")?;
+        let root = crate::working_copies::verified_root(plan)?;
+        let basename = std::path::Path::new(&plan.original_basename);
+        anyhow::ensure!(
+            matches!(
+                basename.components().next(),
+                Some(std::path::Component::Normal(_))
+            ) && basename.components().count() == 1,
+            "invalid recorded checkout basename"
+        );
+        let planned_cwd = root.join(basename).to_string_lossy().into_owned();
+        let repo =
+            farhelm_proto::parse_github_repo(&format!("{}/{}", plan.repo_owner, plan.repo_name))?;
+        anyhow::ensure!(
+            snapshot.resolved.repo == repo
+                && snapshot.resolved.preview.canonical_root == plan.canonical_root
+                && snapshot.resolved.preview.basename == plan.original_basename
+                && snapshot.resolved.preview.cwd == planned_cwd
+                && cwd == planned_cwd,
+            "recorded checkout resolution is inconsistent"
+        );
+        anyhow::ensure!(
+            !snapshot.shell.is_empty() && !snapshot.shell.contains('\0'),
+            "invalid recorded preparation shell"
+        );
+        match plan.allocation_state {
+            AllocationState::Planned => anyhow::ensure!(
+                !snapshot.publication_started,
+                "preparation was published before allocation identity was recorded"
+            ),
+            AllocationState::Allocated => anyhow::ensure!(
+                crate::working_copies::verify_identity(plan)? == IdentityStatus::Matches,
+                "allocated checkout identity no longer matches"
+            ),
+            _ => anyhow::bail!("checkout allocation is not recoverable"),
+        }
+        let state_path = self
+            .state_dir
+            .join("checkout-preparation")
+            .join(format!("{}.json", plan.id));
+        match (
+            snapshot.publication_started,
+            crate::launch::read_preparation_state(&state_path, &plan.id)?,
+        ) {
+            (false, None) => {}
+            (true, Some(record))
+                if matches!(
+                    record.state,
+                    crate::launch::PreparationState::NotStarted
+                        | crate::launch::PreparationState::Ready
+                ) => {}
+            _ => anyhow::bail!(
+                "checkout preparation is missing, incomplete or inconsistent; it will not be repeated"
+            ),
+        }
+        Ok(DestinationResolution::Fresh {
+            resolved: Box::new(snapshot.resolved),
+            shell: snapshot.shell,
+            canonical_root: plan.canonical_root.clone(),
+            root_identity: plan
+                .root_identity
+                .context("missing recorded root identity")?,
+            basename: plan.original_basename.clone(),
+            planned_cwd,
         })
     }
 
@@ -6657,13 +7898,17 @@ impl Supervisor {
     async fn reserved_launch_evidence(&self, reservation: &Reservation) -> LaunchEvidence {
         match self.store.session(&reservation.session_id).await {
             Ok(Some(row)) => {
-                if !row.pane.is_empty()
-                    || !matches!(
-                        row.outcome,
-                        LastOutcome::Launching | LastOutcome::Interrupted
-                    )
-                    || row.conversation_source.is_some()
-                {
+                // Pane and conversation reports are the only ROW-SHAPE
+                // evidence left here (R1.2): an outcome that is not
+                // Launching/Interrupted — including a retained
+                // create-refusal's `Error` row, which has an EMPTY pane —
+                // is no longer evidence BY ITSELF. The physical probes
+                // below (scope, sentinel, tmux) are what distinguish a
+                // real launch from a refusal the refusal transaction
+                // wrote: a separately written Error must never imply
+                // Created, and every genuine launch leaves one of the
+                // physical traces behind.
+                if !row.pane.is_empty() || row.conversation_source.is_some() {
                     return LaunchEvidence::Present;
                 }
             }
@@ -6825,8 +8070,7 @@ impl Supervisor {
                     // where tabs get real rediscovery.
                     tabs: Vec::new(),
                     source_profile,
-                    // Checkout provenance/association; populated once the
-                    // GitHub-checkout registry exists.
+                    // Filled from the registry at the reply boundary below.
                     github_repo: None,
                     working_copy: None,
                 };
@@ -6921,15 +8165,19 @@ impl Supervisor {
     /// `terminal` is present only when the failed path already received a
     /// pane from tmux. No discovery belongs here: an unknown pane stays
     /// unknown, and Delete uses the row's durable tmux name to tear down a
-    /// terminal-less entry. `Launching` is likewise deliberate; the error
-    /// path has not established whether the agent started, only that it is
-    /// unsafe to discard its record.
+    /// terminal-less entry. `outcome` is `Launching` for the ambiguous arms
+    /// (the error path has not established whether the agent started, only
+    /// that it is unsafe to discard its record) and `Error` for the
+    /// retained-create-refusal arms (R1.2), where the launch provably never
+    /// happened and the row is the retained refusal's visible evidence.
+    #[allow(clippy::too_many_arguments)]
     async fn publish_retained_launch(
         &self,
         info: &SessionInfo,
         terminal: Option<Terminal>,
         snapshot: &IntegrationSnapshot,
-        canonical_cwd: &str,
+        canonical_cwd: Option<&str>,
+        outcome: LastOutcome,
         generation: i64,
         scope: Option<String>,
     ) {
@@ -6938,9 +8186,9 @@ impl Supervisor {
             Arc::new(SessionEntry {
                 info: info.clone(),
                 terminal,
-                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Launching)),
+                outcome: Arc::new(std::sync::Mutex::new(outcome)),
                 snapshot: snapshot.clone(),
-                canonical_cwd: Some(canonical_cwd.to_string()),
+                canonical_cwd: canonical_cwd.map(str::to_string),
                 first_input: Arc::new(std::sync::Mutex::new(FirstInput {
                     at: None,
                     durable: true,
@@ -6994,8 +8242,9 @@ impl Supervisor {
         &self,
         request: LaunchRequest,
         reserved: Reserved,
+        guards: &CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
-        let result = self.launch_reserved(request, &reserved).await;
+        let result = self.launch_reserved(request, &reserved, guards).await;
         // The last crash window item 6 names, and the one acceptance 7
         // describes directly: the session durably exists, but the intent
         // table does not yet know it. Returning here — before the
@@ -7039,6 +8288,7 @@ impl Supervisor {
         &self,
         request: LaunchRequest,
         reserved: &Reserved,
+        _guards: &CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
             parent,
@@ -7053,18 +8303,110 @@ impl Supervisor {
             canonical_cwd,
             source_profile,
             launch,
+            destination,
         } = request;
         // Reassigned on the retry-takeover path below, from the value that
         // transaction actually committed: a rename that landed between the
         // crashed attempt and this retry survives in SQLite, and the reply
         // and the published entry built from here have to agree with it.
+        // A FRESH checkout reassigns them again when the exclusive mkdir
+        // wins: the accepted, identity-captured directory replaces the
+        // planned candidate (see the allocation step below).
+        let mut cwd = cwd;
+        let mut launch_cwd = launch_cwd;
+        let mut canonical_cwd = canonical_cwd;
         let mut title = title;
         let mut creation_seq = 0;
         let mut session_token = None;
         let mut generation = 0;
         let mut retry_intent_key = None;
+        // This is the durable row the failure exits must publish when their
+        // own transaction rolls back. It is carried from the insert or
+        // retry takeover instead of rereading SQLite after an error.
+        let mut retained_snapshot: Option<StoredSession> = None;
         let id = reserved.session_id().to_string();
         let tmux_name = reserved.tmux_name().to_string();
+        // The working-copy plan for a fresh checkout, minted BEFORE the
+        // launching row so `insert_session_with_plan` can commit the
+        // registry row, the origin membership, the session row, and the
+        // intent claim in ONE transaction (Design C's atomic
+        // plan-before-mkdir record). The id is minted here — not inside
+        // the store — so the same identifier can carry into the
+        // preparation state path and every diagnostic below.
+        let mut fresh_plan = match &destination {
+            DestinationResolution::Fresh {
+                resolved,
+                canonical_root,
+                basename,
+                root_identity,
+                shell,
+                ..
+            } => Some(crate::working_copies::PlannedWorkingCopy {
+                id: uuid::Uuid::new_v4().to_string(),
+                canonical_root: canonical_root.clone(),
+                repo_owner: resolved.repo.owner.clone(),
+                repo_name: resolved.repo.name.clone(),
+                original_basename: basename.clone(),
+                origin_session_id: id.clone(),
+                root_identity: Some(*root_identity),
+                preparation_snapshot: Some(serde_json::to_string(
+                    &crate::working_copies::PreparationSnapshot {
+                        resolved: (**resolved).clone(),
+                        shell: shell.clone(),
+                        publication_started: false,
+                    },
+                )?),
+            }),
+            DestinationResolution::Existing => None,
+        };
+        // A RETRY of a fresh create rediscovers its origin from the registry
+        // (Design C): the crashed attempt's registry row — planned or
+        // allocated — is the only record of where the checkout was going
+        // and whether its directory exists. The same plan id is reused so
+        // the preparation state file and every diagnostic stay addressed
+        // to ONE working copy.
+        // Membership alone is not provenance: an interrupted borrower must
+        // remain an Existing create and never run the owner's preparation.
+        if matches!(reserved, Reserved::Retry(_))
+            && let Some(plan_row) = self
+                .store
+                .origin_working_copy(&id)
+                .await
+                .context("reading the retry's working-copy plan")?
+        {
+            fresh_plan = Some(crate::working_copies::PlannedWorkingCopy {
+                id: plan_row.id.clone(),
+                canonical_root: plan_row.canonical_root.clone(),
+                repo_owner: plan_row.repo_owner.clone(),
+                repo_name: plan_row.repo_name.clone(),
+                original_basename: plan_row.original_basename.clone(),
+                origin_session_id: id.clone(),
+                root_identity: plan_row.root_identity,
+                preparation_snapshot: plan_row.preparation_snapshot.clone(),
+            });
+        }
+        // The caller's guards already cover validation, membership commit
+        // and bounded terminal admission. Reacquiring directory or parent
+        // admission here would deadlock the protected handler path. Clone
+        // and hook execution happen asynchronously after terminal admission.
+        // Design E's constraint, re-checked under the admission the
+        // preview could not hold: between preview and here, another create
+        // may have recorded a managed checkout that now contains the
+        // planned path. Overlap found here is a validation error, never an
+        // allocation.
+        if !matches!(reserved, Reserved::Retry(_))
+            && let DestinationResolution::Fresh { planned_cwd, .. } = &destination
+            && let Some(message) = fresh_root_constraint_error(
+                planned_cwd,
+                &self.store.working_copy_rows().await.context(
+                    "re-checking the checkout registry for overlapping paths under admission",
+                )?,
+            )
+        {
+            return Err(anyhow::anyhow!(message));
+        }
+        self.simulate_crash(CreateStage::BeforeRecord)?;
+
         // Decided ONCE, here, and carried into every durable write below —
         // never re-decided per write. An ordinary create's launch is
         // generation 0 by construction (only a restart allocates one), while
@@ -7142,7 +8484,7 @@ impl Supervisor {
                 outcome: LastOutcome::Launching,
                 agent_kind: snapshot.kind,
                 resume_template: snapshot.resume_template.clone(),
-                canonical_cwd: Some(canonical_cwd.clone()),
+                canonical_cwd: canonical_cwd.clone(),
                 captured_conversation: None,
                 captured_record: None,
                 capture_ambiguous: false,
@@ -7211,6 +8553,7 @@ impl Supervisor {
                 // must agree with whatever a concurrent reload-then-list
                 // could already have shown.
                 RetryClaim::Acquired {
+                    snapshot: committed_snapshot,
                     created_at: preserved,
                     creation_seq: preserved_sequence,
                     title: preserved_title,
@@ -7223,6 +8566,7 @@ impl Supervisor {
                     session_token = Some(preserved_token);
                     generation = preserved_generation;
                     retry_intent_key = Some(reservation.intent_key.clone());
+                    retained_snapshot = Some(*committed_snapshot);
                 }
                 RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
                 RetryClaim::Launched => return self.settle_and_replay(reservation).await,
@@ -7258,52 +8602,55 @@ impl Supervisor {
                 Reserved::New { claim, .. } => Some(claim.clone()),
                 _ => None,
             };
+            let mut row = StoredSession {
+                conversation_source: None,
+                id: id.clone(),
+                parent: parent.clone(),
+                archived: false,
+                title: title.clone(),
+                created_at,
+                // Nothing has been observed happening in a session
+                // that has not launched, so creation is the only
+                // honest seed — see the retry path's copy above.
+                last_activity_at: created_at,
+                last_work_started_at: created_at.saturating_mul(1_000),
+                creation_seq: 0,
+                cwd: cwd.to_string(),
+                invocation: invocation.clone(),
+                launch: launch.clone(),
+                tmux_name: tmux_name.clone(),
+                // Not known until tmux has created the session —
+                // see `StoredSession::pane`.
+                pane: String::new(),
+                outcome: LastOutcome::Launching,
+                agent_kind: snapshot.kind,
+                resume_template: snapshot.resume_template.clone(),
+                // For a FRESH checkout this is deliberately None:
+                // no directory has been accepted yet (see
+                // `LaunchRequest::canonical_cwd`). The accepted
+                // value lands right after the exclusive mkdir
+                // wins, via `accept_working_directory`.
+                canonical_cwd: canonical_cwd.clone(),
+                // Every capture column is written by its own later,
+                // write-once path: nothing has been captured for a
+                // session that has not launched, nothing has been
+                // typed into it, and no correlation has been
+                // attempted, let alone found ambiguous.
+                captured_conversation: None,
+                captured_record: None,
+                capture_ambiguous: false,
+                first_input_at: None,
+                generation: 0,
+                launch_scoped: scoped,
+                // Written once, with the row, and never rewritten:
+                // SPEC.md's snapshot rule is that a later edit or
+                // delete of the profile leaves this session's record
+                // of what it came from exactly as it is.
+                source_profile: source_profile.clone(),
+            };
             let claimed = self
                 .store
-                .insert_session(
-                    StoredSession {
-                        conversation_source: None,
-                        id: id.clone(),
-                        parent: parent.clone(),
-                        archived: false,
-                        title: title.clone(),
-                        created_at,
-                        // Nothing has been observed happening in a session
-                        // that has not launched, so creation is the only
-                        // honest seed — see the retry path's copy above.
-                        last_activity_at: created_at,
-                        last_work_started_at: created_at.saturating_mul(1_000),
-                        creation_seq: 0,
-                        cwd: cwd.to_string(),
-                        invocation: invocation.clone(),
-                        launch: launch.clone(),
-                        tmux_name: tmux_name.clone(),
-                        // Not known until tmux has created the session —
-                        // see `StoredSession::pane`.
-                        pane: String::new(),
-                        outcome: LastOutcome::Launching,
-                        agent_kind: snapshot.kind,
-                        resume_template: snapshot.resume_template.clone(),
-                        canonical_cwd: Some(canonical_cwd.clone()),
-                        // Every capture column is written by its own later,
-                        // write-once path: nothing has been captured for a
-                        // session that has not launched, nothing has been
-                        // typed into it, and no correlation has been
-                        // attempted, let alone found ambiguous.
-                        captured_conversation: None,
-                        captured_record: None,
-                        capture_ambiguous: false,
-                        first_input_at: None,
-                        generation: 0,
-                        launch_scoped: scoped,
-                        // Written once, with the row, and never rewritten:
-                        // SPEC.md's snapshot rule is that a later edit or
-                        // delete of the profile leaves this session's record
-                        // of what it came from exactly as it is.
-                        source_profile: source_profile.clone(),
-                    },
-                    claim,
-                )
+                .insert_session_with_plan(row.clone(), claim, fresh_plan.clone())
                 .await
                 .context("recording new session in the database")?;
             match claimed {
@@ -7313,6 +8660,7 @@ impl Supervisor {
                 } => {
                     session_token = Some(inserted_token);
                     creation_seq = inserted_sequence;
+                    row.creation_seq = inserted_sequence;
                 }
                 Claimed::TakenBy(winner) => {
                     // Someone else holds this key. Nothing was committed,
@@ -7320,8 +8668,278 @@ impl Supervisor {
                     return self.answer_from(&winner).await;
                 }
             }
+            retained_snapshot = Some(row);
         }
 
+        // The fresh checkout's ALLOCATION (Design C): the launching row,
+        // intent claim, and planned registry row are durable; the exclusive
+        // mkdir is what turns the plan into a real directory. Runs under
+        // directory admission (acquired above), BEFORE any launch side
+        // effect — the plan is committed first so a crash in the mkdir
+        // window leaves the ambiguous-Planned state Design C's recovery
+        // knows how to refuse, never a silent missing destination.
+        //
+        // - `WorkingCopyError::Conflict` (the mkdir lost its race) is a
+        //   NORMAL refusal: the row is rolled back like any never-launched
+        //   create, the planned registry row is deleted, and NOTHING is
+        //   recorded about the colliding object — ownership is mkdir
+        //   evidence, and we did not win it.
+        // - Every failure after a successful mkdir — and every uncertain
+        //   mkdir or blocking-task failure — retains the last committed row,
+        //   session, membership, and intent as a visible refusal. It must
+        //   never infer ownership by promoting a row without complete
+        //   identity, but it also must never erase possible evidence.
+        // Deliberately before the fresh checkout's allocation (and every
+        // later side effect): a simulated crash at this stage leaves the
+        // launching row, its intent claim, and the planned registry row —
+        // and NOTHING else, which is exactly the state a real crash
+        // between the record and the mkdir leaves. The allocation step
+        // below is what turns the plan into a directory; a crash before
+        // it is the clean "planned, path absent" recovery case.
+        self.simulate_crash(CreateStage::AfterRecord)?;
+
+        let mut allocated_checkout: Option<crate::working_copies::AcceptedDirectory> = None;
+        if let Some(plan) = &fresh_plan {
+            // The registry row's CURRENT state decides what this launch
+            // may do (Design C's stages table): `planned` → the same
+            // exclusive mkdir under the same name; `allocated` → reuse the
+            // captured allocation after verifying its identity, NEVER
+            // mkdir another; anything else → fail closed, retain.
+            let plan_row = self
+                .store
+                .origin_working_copy(&id)
+                .await
+                .context("reading the fresh create's working-copy plan")?
+                .expect("a fresh plan implies its registry row exists");
+            let accepted = match plan_row.allocation_state {
+                crate::working_copies::AllocationState::Planned => {
+                    // Both first attempt and retry carry the original
+                    // admission-time root identity. A retry must never
+                    // allocate under a replacement root with the same name.
+                    let expected = match &destination {
+                        DestinationResolution::Fresh { root_identity, .. } => Some(*root_identity),
+                        DestinationResolution::Existing => None,
+                    };
+                    match self
+                        .store
+                        .allocate_working_copy(
+                            &plan.id,
+                            expected,
+                            self.seams.allocation_fault.clone(),
+                        )
+                        .await
+                    {
+                        Ok(accepted) => accepted,
+                        Err(allocation_failure) => {
+                            let pre_mkdir = matches!(
+                                &allocation_failure,
+                                crate::working_copies::AllocationFailure::PreMkdir(_)
+                            );
+                            let new_collision = matches!(
+                                &allocation_failure,
+                                crate::working_copies::AllocationFailure::PreMkdir(
+                                    crate::working_copies::WorkingCopyError::Conflict { .. }
+                                )
+                            ) && !matches!(reserved, Reserved::Retry(_));
+                            let error = anyhow::Error::new(allocation_failure).context(format!(
+                                "allocating the fresh checkout directory for session {id}"
+                            ));
+                            // The allocator's EEXIST is positive evidence that
+                            // this first attempt created nothing. Publish that
+                            // fact only through the atomic rollback/settlement
+                            // below; failed cleanup replaces it with Internal.
+                            let error = if new_collision {
+                                error.context(RequestError::new(
+                                    ErrorKind::CheckoutConflict,
+                                    "the previewed checkout path is occupied; obtain a new preview before resubmitting",
+                                ))
+                            } else {
+                                error
+                            };
+                            return Err(if pre_mkdir {
+                                self.abandon_fresh_pre_mkdir(
+                                    reserved,
+                                    &plan.id,
+                                    error,
+                                    retained_snapshot
+                                        .as_ref()
+                                        .expect("the allocator follows the durable session insert"),
+                                )
+                                .await
+                            } else {
+                                self.retain_create_refusal(
+                                    reserved,
+                                    error,
+                                    retained_snapshot
+                                        .as_ref()
+                                        .expect("the allocator follows the durable session insert"),
+                                )
+                                .await
+                            });
+                        }
+                    }
+                }
+                crate::working_copies::AllocationState::Allocated => {
+                    // The mkdir already won under the reservation — a
+                    // retry must REUSE this allocation, never mkdir
+                    // another (that would be a second checkout under one
+                    // intent). The captured `(dev, ino)` is re-verified
+                    // against the world first: a replacement object at the
+                    // path is a stranger, and git is never pointed at it.
+                    match crate::working_copies::verify_identity(&plan_row) {
+                        Ok(crate::working_copies::IdentityStatus::Matches) => {
+                            crate::working_copies::AcceptedDirectory {
+                                row: plan_row.clone(),
+                                identity: plan_row.path_identity.expect(
+                                    "an allocated row always carries its captured identity",
+                                ),
+                                canonical_path: std::path::PathBuf::from(
+                                    plan_row
+                                        .canonical_path
+                                        .clone()
+                                        .expect("an allocated row always carries its path"),
+                                ),
+                            }
+                        }
+                        Ok(status) => {
+                            return Err(self.retain_create_refusal(reserved, anyhow::anyhow!(
+                                "the fresh checkout's allocated directory for session {id} is \
+                                 no longer the object its registry row captured ({status:?}); \
+                                 the session is retained with its registry evidence and \
+                                 nothing will be cloned into the replacement"
+                            ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await);
+                        }
+                        Err(e) => {
+                            return Err(self
+                                .retain_create_refusal(
+                                    reserved,
+                                    anyhow::Error::from(e).context(format!(
+                                        "verifying the allocated checkout directory for session {id}"
+                                    )),
+                                    retained_snapshot.as_ref().expect(
+                                        "the allocator follows the durable session insert",
+                                    ),
+                                )
+                                .await);
+                        }
+                    }
+                }
+                other => {
+                    return Err(self
+                        .retain_create_refusal(
+                            reserved,
+                            anyhow::anyhow!(
+                                "the fresh checkout's registry row for session {id} is in state \
+                         {other:?} and cannot carry this create forward; the session is \
+                         retained with its registry evidence"
+                            ),
+                            retained_snapshot
+                                .as_ref()
+                                .expect("the allocator follows the durable session insert"),
+                        )
+                        .await);
+                }
+            };
+            // The mkdir won and the identity is captured. Before anything
+            // else consumes the plan, the session row learns its accepted
+            // working directory — the planned candidate was only ever a
+            // candidate. A failure here is post-mkdir: the directory
+            // exists and the registry owns it, so the retained-refusal
+            // path (not a rollback) records it.
+            if let Err(accept_error) = self
+                .store
+                .accept_working_directory(
+                    &id,
+                    &accepted.canonical_path.to_string_lossy(),
+                    &accepted.canonical_path.to_string_lossy(),
+                )
+                .await
+            {
+                return Err(self
+                    .retain_create_refusal(
+                        reserved,
+                        accept_error.context(format!(
+                            "recording the accepted checkout directory for session {id}; the \
+                         checkout itself was allocated and is kept for inspection"
+                        )),
+                        retained_snapshot
+                            .as_ref()
+                            .expect("the allocator follows the durable session insert"),
+                    )
+                    .await);
+            }
+            cwd = accepted.canonical_path.to_string_lossy().into_owned();
+            launch_cwd = cwd.clone();
+            canonical_cwd = Some(cwd.clone());
+            let snapshot = retained_snapshot
+                .as_mut()
+                .expect("the accepted checkout has an already-inserted session row");
+            snapshot.cwd = cwd.clone();
+            snapshot.canonical_cwd = canonical_cwd.clone();
+            self.simulate_crash(CreateStage::AfterCheckoutAllocation)?;
+            allocated_checkout = Some(accepted);
+        }
+        // Existing ancestor memberships committed with the session row.
+        // Fresh origin membership committed with its plan. No later
+        // compensating write can expose a session without its reference.
+        // The durable NotStarted preparation publication (Design D): the
+        // shim's state file exists BEFORE tmux is asked for anything, so a
+        // crash between spawn and the shim's first transition leaves an
+        // honest "nothing started" record rather than an absent one. Also
+        // re-derived on the retry path — see the retry block's notes.
+        let preparation = match (&allocated_checkout, &fresh_plan) {
+            (Some(accepted), Some(plan)) => {
+                let (resolved, shell) = match &destination {
+                    DestinationResolution::Fresh {
+                        resolved, shell, ..
+                    } => (resolved, shell),
+                    DestinationResolution::Existing => {
+                        unreachable!("allocated_checkout implies a Fresh destination")
+                    }
+                };
+                let state_path = self
+                    .state_dir
+                    .join("checkout-preparation")
+                    .join(format!("{}.json", plan.id));
+                if let Err(publish_error) = self
+                    .publish_preparation_not_started(&plan.id, &state_path)
+                    .await
+                {
+                    return Err(self
+                        .retain_create_refusal(
+                            reserved,
+                            publish_error.context(format!(
+                                "publishing the checkout preparation state for session {id}; \
+                                 the checkout itself was allocated and is kept for inspection"
+                            )),
+                            retained_snapshot
+                                .as_ref()
+                                .expect("the allocator follows the durable session insert"),
+                        )
+                        .await);
+                }
+                Some(crate::launch::CheckoutPreparation {
+                    working_copy_id: plan.id.clone(),
+                    // Constructed ONLY through the proto's verified
+                    // constructor from the re-parsed repo pair — never by
+                    // interpolating caller text.
+                    clone_url: resolved.repo.clone_url(),
+                    cwd: cwd.clone(),
+                    directory_device: accepted.identity.0,
+                    directory_inode: accepted.identity.1,
+                    post_clone: resolved.post_clone.clone(),
+                    // The supervisor's own resolved shell; the hook runs
+                    // under it with the checkout as its working directory.
+                    shell: shell.clone(),
+                    state_path,
+                })
+            }
+            _ => None,
+        };
+
+        if preparation.is_some() {
+            self.simulate_crash(CreateStage::AfterPreparationPublication)?;
+        }
         let launch_scope = launch_scope_unit(&id, generation, scoped);
         let info = SessionInfo {
             parent,
@@ -7343,10 +8961,13 @@ impl Supervisor {
             last_work_started_at: created_at.saturating_mul(1_000),
             creation_seq: Some(creation_seq),
             cwd: cwd.to_string(),
-            // Keep the user-facing spelling above. This separate fact is
-            // the directory create actually accepted and persists with the
-            // row, so helm history never needs to resolve the path itself.
-            canonical_cwd: Some(canonical_cwd.clone()),
+            // The directory create actually accepted: for an existing
+            // destination the canonicalized caller spelling; for a fresh
+            // checkout the allocated directory's canonical path, recorded
+            // above only after the mkdir won. This separate fact persists
+            // with the row, so helm history never needs to resolve the
+            // path itself.
+            canonical_cwd: canonical_cwd.clone(),
             invocation: invocation.clone(),
             resume_template: snapshot.resume_template.clone(),
             launch,
@@ -7385,8 +9006,7 @@ impl Supervisor {
                 name: profile.name,
                 existence: ProfileExistence::Present,
             }),
-            // Checkout provenance/association; populated once the
-            // GitHub-checkout registry exists.
+            // Filled at reply time, including memberships acquired later.
             github_repo: None,
             working_copy: None,
         };
@@ -7409,7 +9029,8 @@ impl Supervisor {
                 &info,
                 None,
                 &snapshot,
-                &canonical_cwd,
+                canonical_cwd.as_deref(),
+                LastOutcome::Launching,
                 generation,
                 launch_scope.clone(),
             )
@@ -7420,10 +9041,10 @@ impl Supervisor {
                 truncate_for_error(&intent_key)
             ));
         }
-        // Deliberately BEFORE the cleanup-bearing paths below: a simulated
-        // crash must leave the launching row (and its reservation) exactly
-        // as a real one would, with nothing tidied up after it.
-        self.simulate_crash(CreateStage::AfterRecord)?;
+        // (The AfterRecord seam fired earlier, before the fresh checkout's
+        // allocation — that ordering is its contract: "after the durable
+        // launching row, before ANY external side effect", and a mkdir is
+        // an external side effect.)
 
         let session_token = session_token.ok_or_else(|| {
             anyhow::anyhow!("session {id} committed without returning its spawn credential")
@@ -7450,6 +9071,7 @@ impl Supervisor {
                 rows,
                 None,
                 launch_scope.as_deref(),
+                preparation,
             )
             .await;
         let (pane, spec_path, status_file_path, hooked) = match spawned {
@@ -7466,6 +9088,28 @@ impl Supervisor {
                 // crash here would leave it instead, which is the case
                 // reload reconciles; this path can do better because the
                 // process is still alive to know.
+                //
+                // A FRESH checkout that already allocated is the exception
+                // (Design C / R1.2): the directory exists and the registry
+                // owns it, so the row is RETAINED as a visible error (with
+                // the registry row and membership intact, the intent
+                // settled `Failed`) rather than deleted — deleting the
+                // last ownership record after an allocation would orphan
+                // a managed checkout.
+                if allocated_checkout.is_some() {
+                    return Err(self
+                        .retain_create_refusal(
+                            reserved,
+                            error.context(
+                                "writing the launch spec; the fresh checkout itself was allocated \
+                         and is kept for inspection and deletion",
+                            ),
+                            retained_snapshot
+                                .as_ref()
+                                .expect("the allocator follows the durable session insert"),
+                        )
+                        .await);
+                }
                 return Err(self.abandon_launching_record(reserved, error).await);
             }
             Err(SpawnFailure::Tmux { spec_path, error }) => {
@@ -7507,7 +9151,8 @@ impl Supervisor {
                                 &info,
                                 None,
                                 &snapshot,
-                                &canonical_cwd,
+                                canonical_cwd.as_deref(),
+                                LastOutcome::Launching,
                                 generation,
                                 launch_scope.clone(),
                             )
@@ -7532,6 +9177,18 @@ impl Supervisor {
                                 spec_path.display()
                             ));
                         }
+                        // A FRESH checkout that already allocated keeps its
+                        // directory and its registry ownership (Design C /
+                        // R1.2): the row is retained as a visible error, not
+                        // deleted — abandon_launching_record's row removal
+                        // must never drop the last ownership record after an
+                        // allocation.
+                        if allocated_checkout.is_some() {
+                            return Err(self.retain_create_refusal(reserved, error.context(
+                                "tmux refused to create the session; the fresh checkout itself \
+                                 was allocated and is kept for inspection and deletion",
+                            ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await);
+                        }
                         error = self.abandon_launching_record(reserved, error).await;
                     }
                     // Both remaining arms RETAIN the launching row, so
@@ -7551,7 +9208,8 @@ impl Supervisor {
                             &info,
                             None,
                             &snapshot,
-                            &canonical_cwd,
+                            canonical_cwd.as_deref(),
+                            LastOutcome::Launching,
                             generation,
                             launch_scope.clone(),
                         )
@@ -7567,7 +9225,8 @@ impl Supervisor {
                             &info,
                             None,
                             &snapshot,
-                            &canonical_cwd,
+                            canonical_cwd.as_deref(),
+                            LastOutcome::Launching,
                             generation,
                             launch_scope.clone(),
                         )
@@ -7741,7 +9400,20 @@ impl Supervisor {
             // over a possibly-live agent, which is what skipping the
             // rollback below also skips.
             if killed.is_ok() {
-                result = self.abandon_launching_record(reserved, result).await;
+                // A FRESH checkout that already allocated keeps its registry
+                // ownership across this failure (Design C / R1.2): the row
+                // is retained as a visible error with the intent settled
+                // `Failed`, never deleted — the launch provably never
+                // happened (the terminal was confirmed killed), but the
+                // allocated checkout is the user's to inspect and delete.
+                if allocated_checkout.is_some() {
+                    result = self.retain_create_refusal(reserved, result.context(
+                        "confirming the fresh checkout session's launch in the database; the \
+                         checkout itself was allocated and is kept for inspection and deletion",
+                    ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await;
+                } else {
+                    result = self.abandon_launching_record(reserved, result).await;
+                }
             } else {
                 self.publish_retained_launch(
                     &info,
@@ -7750,7 +9422,8 @@ impl Supervisor {
                         pane: pane.clone(),
                     }),
                     &snapshot,
-                    &canonical_cwd,
+                    canonical_cwd.as_deref(),
+                    LastOutcome::Launching,
                     generation,
                     launch_scope.clone(),
                 )
@@ -7767,7 +9440,7 @@ impl Supervisor {
                 terminal: Some(Terminal { tmux_name, pane }),
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                 snapshot,
-                canonical_cwd: Some(canonical_cwd.clone()),
+                canonical_cwd: canonical_cwd.clone(),
                 // Nothing has been typed into this session yet, so capture
                 // has no correlator to key on and correctly stays idle
                 // until the input path supplies one.
@@ -7828,35 +9501,29 @@ impl Supervisor {
         })
     }
 
-    /// Re-derive `info`'s source-profile existence against the catalog as it
-    /// stands right now (PLAN_M6_75.md item 5).
-    ///
-    /// The single-snapshot counterpart to `list_all`'s batched read: one
-    /// reply describing one session costs one lookup by id, and a reply
-    /// describing the whole list reads the whole catalog once instead. Both feed the
-    /// same rule (`status::source_profile_existence`).
-    ///
-    /// A raw-created session costs NOTHING — no query is issued at all,
-    /// which is what keeps this off the create and restart paths of every
-    /// session that names no profile.
-    ///
-    /// The read is allowed to FAIL the reply, and deliberately so: an
-    /// unreadable catalog cannot be degraded into "the profile is gone"
-    /// without lying about a specific and alarming thing. Callers on a path
-    /// that has already changed the world add the context saying so, since
-    /// the failure describes the REPLY rather than the operation.
+    /// Resolve reply-time checkout associations and mark profile existence
+    /// for the helm to resolve against its catalog. Registry failures fail
+    /// the reply rather than falsely describing an owned path as unmanaged;
+    /// mutation callers add context that the operation itself already landed.
     async fn with_derived_source_profile(
         &self,
         mut info: SessionInfo,
     ) -> anyhow::Result<SessionInfo> {
-        let Some(snapshotted) = info.source_profile else {
-            return Ok(info);
-        };
-        info.source_profile = Some(SourceProfile {
+        info.source_profile = info.source_profile.map(|snapshotted| SourceProfile {
             existence: ProfileExistence::Unresolved,
             ..snapshotted
         });
-        Ok(info)
+        self.with_checkout_metadata(info).await
+    }
+
+    /// Single-session counterpart of the listing's batched registry snapshot.
+    /// Kept outside `entry_info`, whose status projection performs no I/O.
+    pub(crate) async fn with_checkout_metadata(
+        &self,
+        info: SessionInfo,
+    ) -> anyhow::Result<SessionInfo> {
+        let mut projected = self.store.project_checkout_metadata(vec![info]).await?;
+        Ok(projected.remove(0))
     }
 
     /// Is `owner` the tmux session name of a session this supervisor
@@ -7997,10 +9664,75 @@ impl Supervisor {
         mode: RestartMode,
         stop_if_running: bool,
     ) -> anyhow::Result<SessionInfo> {
-        // Taken FIRST, and released only when the whole restart is done —
-        // including the republication. Lock order is lifecycle →
-        // attachments → sessions (see the `Supervisor` struct's docs).
+        // R1.1: directory admission is taken BEFORE the lifecycle claim —
+        // every create takes intent → directory → lifecycle, so a restart
+        // that claimed lifecycle first could cycle against a restricted
+        // create holding the parent's claim while waiting for the
+        // directory mutex. The admission is held through the pending-
+        // archive/unresolved-plan check and the durable revalidation
+        // below, then released BEFORE any tmux work: no subprocess ever
+        // runs under it.
+        let directory_admission = self.working_copy_operations.lock().await;
+        // Taken SECOND, and released only when the whole restart is done —
+        // including the republication. Lock order is directory admission →
+        // lifecycle → attachments → sessions (see the `Supervisor` struct's
+        // docs).
         let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        // No gap between the admission-time check and the claim it guards
+        // (R1.1): a checkout whose registry row carries unresolved archive
+        // state, or whose fresh-create plan was never accepted, must not be
+        // restarted into. The archived directory's source name is about to
+        // be vacated — a restart there would spawn an agent into a path
+        // recovery still owns — and an ambiguous planned directory was
+        // never accepted at all (the retained-refusal contract: the user
+        // deletes the session; nothing relaunches).
+        for row in self
+            .store
+            .member_working_copies_all(session_id)
+            .await
+            .context("reading the session's working-copy registry row for restart")?
+        {
+            match row.allocation_state {
+                crate::working_copies::AllocationState::ArchivePending => {
+                    return Err(anyhow::anyhow!(
+                        "this session's checkout has an unresolved archive in progress; \
+                         restart is refused until the archive is resolved (delete the \
+                         session to finish it)"
+                    ));
+                }
+                crate::working_copies::AllocationState::Planned => {
+                    return Err(anyhow::anyhow!(
+                        "this session's checkout was never accepted — its plan is unresolved \
+                         and retained as evidence; restart is refused. Delete the session to \
+                         retire the plan"
+                    ));
+                }
+                _ => {}
+            }
+        }
+        // Only the original fresh session needs Ready. A borrower may
+        // explicitly use incomplete contents, but cannot inherit authority
+        // to rerun their preparation. Independent session provenance also
+        // makes a missing registry record a refusal here.
+        if let Some(origin) = self.store.origin_working_copy(session_id).await? {
+            let cwd = origin
+                .canonical_path
+                .as_deref()
+                .context("fresh checkout has no accepted directory")?;
+            self.recover_checkout_destination(&origin, cwd)?;
+            let state_path = self
+                .state_dir
+                .join("checkout-preparation")
+                .join(format!("{}.json", origin.id));
+            let state = crate::launch::read_preparation_state(&state_path, &origin.id)?;
+            anyhow::ensure!(
+                state.is_some_and(|record| record.state == crate::launch::PreparationState::Ready),
+                "checkout preparation is not Ready; restart will not repeat clone or hook"
+            );
+        }
+        // The row/membership revalidation is done; the admission's job
+        // here is over, and the slow relaunch runs WITHOUT it.
+        drop(directory_admission);
         if !self.may_record() {
             // A supervisor with no standing to write cannot open a launch
             // generation, and launching without one is precisely the state
@@ -8602,6 +10334,12 @@ impl Supervisor {
                 RELAUNCH_ROWS,
                 reuse,
                 scope.as_deref(),
+                // A user RESTART never re-runs checkout preparation (Design
+                // D: restart of a non-Ready checkout is refused, and of a
+                // Ready one never clones again) — this parameter belongs to
+                // the create path only. The refusal wiring arrives with the
+                // restart-against-preparation slice.
+                None,
             )
             .await;
         let Spawned {
@@ -10334,6 +12072,7 @@ impl Supervisor {
         rows: u16,
         reuse: Option<&Terminal>,
         scope: Option<&str>,
+        preparation: Option<crate::launch::CheckoutPreparation>,
     ) -> Result<Spawned, SpawnFailure> {
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
@@ -10396,9 +12135,6 @@ impl Supervisor {
         let spec = LaunchSpec {
             argv,
             status_file: status_path.clone(),
-            // Ordinary launches have no checkout preparation. Fresh creates
-            // remain refused until admission can record durable ownership.
-            preparation: None,
             // The kill machinery's environment-marker sweep (see
             // `kill_process_tree`) is keyed on this exact value reaching
             // the agent's process and everything it forks.
@@ -10410,6 +12146,11 @@ impl Supervisor {
                 .parent()
                 .expect("an absolute farhelm executable has a parent directory")
                 .to_path_buf(),
+            // The session-terminal checkout preparation for a fresh GitHub
+            // checkout (Design D): the shim clones, runs the post-clone
+            // hook, and only then execs the agent — all inside this
+            // session's terminal. `None` is an ordinary launch.
+            preparation,
         };
         // Serialized before the write so the (practically impossible)
         // encoding failure shares the write's rollback path rather than
@@ -10579,6 +12320,282 @@ impl Supervisor {
                 }
             }
         }
+    }
+
+    /// Atomically roll back a FRESH create only when `mkdir` positively
+    /// failed before creating anything. The plan, origin membership,
+    /// launching row, and keyed Failed settlement share one transaction;
+    /// an unsuccessful rollback leaves them all intact and reports an
+    /// unresolved outcome instead of deleting a subset.
+    async fn abandon_fresh_pre_mkdir(
+        &self,
+        reserved: &Reserved,
+        working_copy_id: &str,
+        error: anyhow::Error,
+        fallback: &StoredSession,
+    ) -> anyhow::Error {
+        let settlement = reserved.settlement(ReservationOutcome::Failed {
+            kind: error_kind(&error),
+            message: format!("{error:#}"),
+        });
+        let id = reserved.session_id();
+        match self
+            .store
+            .rollback_pre_mkdir_create(
+                id,
+                working_copy_id,
+                settlement,
+                self.seams.pre_mkdir_rollback_fault.clone(),
+            )
+            .await
+        {
+            Ok(()) => error,
+            Err(rollback) => {
+                self.publish_retained_stored_session(fallback, true).await;
+                unrecorded_outcome(
+                    error,
+                    rollback.context(format!(
+                        "the pre-mkdir refusal for session {id} could not atomically remove its \
+                     plan, membership, and session; all evidence remains for reconciliation"
+                    )),
+                )
+            }
+        }
+    }
+
+    /// The R1.2 retained-create-refusal exit: keep the session row as a
+    /// VISIBLE Error row (never deleted — it is the user's handle for the
+    /// retained checkout), keep every registry row and membership, settle
+    /// the pending intent as `Failed` with this refusal, and publish the
+    /// entry so the list shows it immediately. One transaction in the
+    /// store; the entry publication after it mirrors
+    /// [`Supervisor::publish_retained_launch`].
+    ///
+    /// Deliberately DISTINCT from an ambiguous launch failure: this is
+    /// only for failures that CONFIRMED no launch happened (spec write,
+    /// tmux confirmed absent, confirmation with the terminal confirmed
+    /// gone, post-allocation bookkeeping) — anything possibly-live stays
+    /// `Launching` and pending, exactly as before.
+    async fn retain_create_refusal(
+        &self,
+        reserved: &Reserved,
+        error: anyhow::Error,
+        fallback: &StoredSession,
+    ) -> anyhow::Error {
+        let settlement = reserved.settlement(ReservationOutcome::Failed {
+            kind: error_kind(&error),
+            message: format!("{error:#}"),
+        });
+        let id = reserved.session_id();
+        match self
+            .store
+            .settle_create_refusal_retaining_session(
+                id,
+                &format!("{error:#}"),
+                settlement,
+                self.seams.retained_refusal_fault.clone(),
+            )
+            .await
+        {
+            Ok(row) => {
+                // The transaction hands back the row it committed, rather
+                // than making live visibility depend on a second fallible
+                // store read after the durable decision.
+                self.publish_retained_stored_session(&row, false).await;
+                error
+            }
+            Err(e) => {
+                // The refusal transaction failed: retain the evidence and
+                // report unresolved durability — a separately written
+                // Error must never imply Created, and a Failed settlement
+                // that never committed must not close the intent either.
+                // The earlier row and pending reservation remain the
+                // reconcilable state, without claiming a new Error commit.
+                // SQLite rolled the transaction back, so the earlier row
+                // remains the last known durable state. Publish that exact
+                // snapshot instead of claiming the refused Error landed.
+                self.publish_retained_stored_session(fallback, true).await;
+                unrecorded_outcome(
+                    error,
+                    e.context(format!(
+                        "the refused create could not be retained as a visible error for \
+                         session {id}; its intent stays pending for reconciliation"
+                    )),
+                )
+            }
+        }
+    }
+
+    /// Make one durable retained row immediately operable in this process.
+    ///
+    /// This deliberately projects only the row supplied by the insert or
+    /// settlement boundary. It does not reread SQLite: callers use it when
+    /// that independent read is precisely the failure that would otherwise
+    /// hide a row whose Delete handle is still needed.
+    ///
+    /// Callers hold directory admission, which excludes delete and restart.
+    /// Validation refusals also hold this session's lifecycle claim through
+    /// settlement and publication because its existing entry can be renamed.
+    /// New creates have no published entry yet; retry takeover removed its
+    /// entry under that same claim before attempting another launch.
+    /// `preserve_current_entry` is for failed writes: an existing entry may
+    /// contain a newer observation and must survive the fallback unchanged.
+    async fn publish_retained_stored_session(
+        &self,
+        row: &StoredSession,
+        preserve_current_entry: bool,
+    ) {
+        let snapshot = IntegrationSnapshot {
+            kind: row.agent_kind,
+            resume_template: row.resume_template.clone(),
+        };
+        let info = SessionInfo {
+            parent: row.parent.clone(),
+            archived: row.archived,
+            id: row.id.clone(),
+            title: row.title.clone(),
+            created_at: row.created_at,
+            last_activity_at: row.last_activity_at,
+            last_work_started_at: row.last_work_started_at,
+            creation_seq: Some(row.creation_seq),
+            cwd: row.cwd.clone(),
+            canonical_cwd: row.canonical_cwd.clone(),
+            invocation: row.invocation.clone(),
+            resume_template: row.resume_template.clone(),
+            launch: row.launch.clone(),
+            status: SessionStatus::Unknown,
+            annotation: None,
+            tabs: Vec::new(),
+            source_profile: row.source_profile.clone().map(|profile| SourceProfile {
+                id: profile.id,
+                name: profile.name,
+                existence: ProfileExistence::Present,
+            }),
+            restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
+            github_repo: None,
+            working_copy: None,
+        };
+        let capture = if row.capture_ambiguous {
+            CaptureState::Ambiguous { durable: true }
+        } else {
+            match (
+                row.captured_conversation.as_deref(),
+                row.conversation_source.as_deref(),
+            ) {
+                (Some(conversation), Some("hook")) => CaptureState::Reported {
+                    conversation: conversation.to_string(),
+                },
+                (Some(conversation), _) => CaptureState::Captured {
+                    conversation: conversation.to_string(),
+                    record: row
+                        .captured_record
+                        .clone()
+                        .map(PathBuf::from)
+                        .unwrap_or_default(),
+                    stamp: RecordStamp {
+                        len: 0,
+                        mtime_unix: None,
+                    },
+                },
+                (None, _) => CaptureState::Unclaimed,
+            }
+        };
+        let mut sessions = self.sessions.lock().await;
+        // A validation refusal holds this session's lifecycle claim. If a
+        // current entry already survived to that point, it is newer than the
+        // fallback snapshot and must not be replaced after a failed write.
+        if preserve_current_entry && sessions.contains_key(&row.id) {
+            return;
+        }
+        sessions.insert(
+            row.id.clone(),
+            Arc::new(SessionEntry {
+                info,
+                terminal: None,
+                outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
+                snapshot,
+                canonical_cwd: row.canonical_cwd.clone(),
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                    at: row.first_input_at,
+                    durable: row.first_input_at.is_some(),
+                })),
+                capture: Arc::new(std::sync::Mutex::new(capture)),
+                hooked: hook_flag(false),
+                hook_warned: hook_flag(false),
+                activity: ActivitySample::unsampled(),
+                last_activity_at: activity_stamp(row.last_activity_at),
+                last_work_started_at: activity_stamp(row.last_work_started_at),
+                generation: row.generation,
+                scope: launch_scope_unit(&row.id, row.generation, row.launch_scoped),
+            }),
+        );
+    }
+
+    /// The durable NotStarted publication (Design D): the preparation
+    /// state file must exist before tmux admission. The registry claims
+    /// this one publication first; after that claim a missing file is an
+    /// ambiguous loss, including a crash during publication itself. Only
+    /// an intact NotStarted or Ready record can be reused on pending retry.
+    async fn publish_preparation_not_started(
+        &self,
+        working_copy_id: &str,
+        state_path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let first_publication = self
+            .store
+            .claim_preparation_publication(working_copy_id)
+            .await?;
+        match (
+            first_publication,
+            crate::launch::read_preparation_state(state_path, working_copy_id)?,
+        ) {
+            (true, None) => {}
+            (false, Some(record))
+                if matches!(
+                    record.state,
+                    crate::launch::PreparationState::NotStarted
+                        | crate::launch::PreparationState::Ready
+                ) =>
+            {
+                return Ok(());
+            }
+            _ => anyhow::bail!(
+                "checkout preparation evidence is missing or inconsistent; refusing to initialize it again"
+            ),
+        }
+        let dir = state_path
+            .parent()
+            .expect("a preparation state path always has a parent directory")
+            .to_path_buf();
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .with_context(|| format!("creating {}", dir.display()))?;
+        // R1.6's new-child durability gap, closed for the preparation
+        // directory itself: `write_durable_sync` fsyncs the state FILE's
+        // parent, but the `checkout-preparation` directory's own entry
+        // under the state dir rides on the state dir's directory entry, so
+        // THAT is the parent this fsync covers. An fsync failure here is
+        // propagated (R1.6): publishing NotStarted without a durable
+        // directory entry would let clone/hook side effects survive a
+        // crash without their state evidence.
+        std::fs::File::open(&self.state_dir)
+            .and_then(|file| match &self.seams.preparation_parent_sync {
+                Some(sync) => sync(&file),
+                None => file.sync_all(),
+            })
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "fsyncing the state dir {} after creating the preparation directory: {error}",
+                    self.state_dir.display()
+                )
+            })?;
+        crate::launch::write_preparation_state(
+            state_path,
+            working_copy_id,
+            &crate::launch::PreparationState::NotStarted,
+            &crate::files::RealFs,
+        )
+        .context("publishing the NotStarted preparation state")
     }
 
     /// The answer a SETTLED reservation gives: the session it created (or
@@ -12138,6 +14155,12 @@ pub(crate) mod tests {
             DIRECTORY_BROWSE_WORKER_PERMITS * 2,
             "only the held and post-release workers may ever enter blocking work"
         );
+    }
+
+    /// The directory-admission guard `teardown_session` requires (R1.1):
+    /// tests simulate the delete handler's outer acquisition directly.
+    pub(crate) async fn test_admission(sup: &Supervisor) -> tokio::sync::OwnedMutexGuard<()> {
+        Arc::clone(&sup.working_copy_operations).lock_owned().await
     }
 
     /// A session entry with the given terminal and recorded outcome, for
@@ -13886,7 +15909,9 @@ pub(crate) mod tests {
         // `TeardownError` carries no `Debug`, so the assertion says what
         // was expected rather than unwrapping.
         assert!(
-            sup.teardown_session(&entry, doomed).await.is_ok(),
+            sup.teardown_session(&entry, doomed, test_admission(&sup).await)
+                .await
+                .is_ok(),
             "a terminal-less session tears down without tmux"
         );
 
@@ -13966,7 +15991,9 @@ pub(crate) mod tests {
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.to_string();
         assert!(
-            sup.teardown_session(&entry, id).await.is_ok(),
+            sup.teardown_session(&entry, id, test_admission(&sup).await)
+                .await
+                .is_ok(),
             "a missing hook trace is the ordinary case, not a failure"
         );
         assert!(sup.store.session(id).await.unwrap().is_none());
@@ -14273,10 +16300,19 @@ pub(crate) mod tests {
     /// Both halves are checked: the row must be untouched, and the
     /// candidate must still have CLASSIFIED it — "wrote nothing" must not
     /// be achieved by "computed nothing".
+    /// A pending checkout archive also stays untouched, then recovers when
+    /// the incumbent releases the claim. That positive control proves the
+    /// read-only result came from ownership fencing, not an invalid journal.
     #[farhelm_testtrace::test]
     async fn a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably() {
+        use std::os::unix::fs::MetadataExt;
         let state = StateDir::new();
         let db_path = state.path().join("supervisor.db");
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let source = root.join("pending-checkout");
+        let archive_root = root.join(crate::working_copies::ARCHIVE_DIR_NAME);
+        let destination = archive_root.join("pending-checkout-journaled");
         let store = SessionStore::open(&db_path, true).await.expect("store");
         store
             .insert_session(
@@ -14285,12 +16321,12 @@ pub(crate) mod tests {
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
-                    title: "t".to_string(),
+                    title: "pending archive".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
                     last_work_started_at: 0,
                     creation_seq: 0,
-                    cwd: "/tmp".to_string(),
+                    cwd: source.to_str().unwrap().to_owned(),
                     invocation: "agent".to_string(),
                     launch: None,
                     tmux_name: "fh-does-not-exist".to_string(),
@@ -14311,6 +16347,42 @@ pub(crate) mod tests {
             )
             .await
             .expect("insert");
+        let checkout_id = uuid::Uuid::new_v4().to_string();
+        let identity = {
+            let conn = store.conn.lock().unwrap();
+            crate::working_copies::record_planned(
+                &conn,
+                &crate::working_copies::PlannedWorkingCopy {
+                    id: checkout_id.clone(),
+                    canonical_root: root.to_str().unwrap().into(),
+                    repo_owner: "acme".into(),
+                    repo_name: "checkout".into(),
+                    original_basename: "pending-checkout".into(),
+                    origin_session_id: "s1".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                },
+            )
+            .unwrap();
+            let allocated = crate::working_copies::allocate(&conn, &checkout_id, None).unwrap();
+            assert_eq!(conn.execute(
+                "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = ?2 WHERE id = ?1",
+                rusqlite::params![checkout_id, "pending-checkout-journaled"],
+            ).unwrap(), 1);
+            allocated.identity
+        };
+        std::fs::write(source.join("sentinel"), b"retained checkout").unwrap();
+        let before = store.working_copy_rows().await.unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(
+            before[0].allocation_state,
+            crate::working_copies::AllocationState::ArchivePending
+        );
+        assert_eq!(
+            store.working_copy_member_count(&checkout_id).await.unwrap(),
+            1
+        );
+        assert!(!archive_root.exists());
         drop(store);
 
         let incumbent = std::fs::OpenOptions::new()
@@ -14372,6 +16444,63 @@ pub(crate) mod tests {
             SessionStatus::Exited { exit_code: None },
             "it still classifies honestly for its own replies"
         );
+        let after = store.working_copy_rows().await.unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, checkout_id);
+        assert_eq!(after[0].allocation_state, before[0].allocation_state);
+        assert_eq!(after[0].archive_destination, before[0].archive_destination);
+        assert_eq!(after[0].canonical_path, before[0].canonical_path);
+        assert_eq!(after[0].path_identity, before[0].path_identity);
+        assert_eq!(after[0].root_identity, before[0].root_identity);
+        assert_eq!(
+            store.working_copy_member_count(&checkout_id).await.unwrap(),
+            1
+        );
+        let unchanged = std::fs::metadata(&source).unwrap();
+        assert_eq!((unchanged.dev(), unchanged.ino()), identity);
+        assert_eq!(
+            std::fs::read(source.join("sentinel")).unwrap(),
+            b"retained checkout"
+        );
+        assert!(
+            !archive_root.exists(),
+            "a claimless constructor must not even create the archive parent"
+        );
+
+        // Reuse the exact pending journal after ownership changes. A fixture
+        // rejected for some unrelated reason would fail this positive control.
+        drop(entry);
+        drop(candidate);
+        drop(store);
+        drop(incumbent);
+        let owner = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert!(owner.ownership.is_some());
+        assert!(!source.exists());
+        let moved = std::fs::metadata(&destination).unwrap();
+        assert_eq!((moved.dev(), moved.ino()), identity);
+        assert_eq!(
+            std::fs::read(destination.join("sentinel")).unwrap(),
+            b"retained checkout"
+        );
+        assert_eq!(
+            owner
+                .store
+                .working_copy_member_count(&checkout_id)
+                .await
+                .unwrap(),
+            1
+        );
+        let recovered = owner.store.working_copy_rows().await.unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].id, checkout_id);
+        assert_eq!(recovered[0].allocation_state, before[0].allocation_state);
+        assert_eq!(
+            recovered[0].archive_destination,
+            before[0].archive_destination
+        );
+        assert_eq!(recovered[0].path_identity, Some(identity));
     }
 
     /// Stale-socket cleanup must distinguish an absent socket from a real
@@ -14586,6 +16715,7 @@ pub(crate) mod tests {
             (
                 create_fingerprint(
                     None,
+                    None,
                     "/work",
                     &CreateMode::Raw {
                         invocation: "agent --flag".to_string(),
@@ -14603,6 +16733,7 @@ pub(crate) mod tests {
             ),
             (
                 create_fingerprint(
+                    None,
                     Some("parent-1"),
                     "/work",
                     &CreateMode::Raw {
@@ -14656,6 +16787,7 @@ pub(crate) mod tests {
         );
         assert_ne!(
             create_fingerprint(
+                None,
                 Some("parent-1"),
                 "/work",
                 &CreateMode::Raw {
@@ -14668,6 +16800,7 @@ pub(crate) mod tests {
                 None,
             ),
             create_fingerprint(
+                None,
                 Some("parent-2"),
                 "/work",
                 &CreateMode::Raw {
@@ -14683,6 +16816,7 @@ pub(crate) mod tests {
         );
         assert_ne!(
             create_fingerprint(
+                None,
                 Some("parent-1"),
                 "/work",
                 &CreateMode::Raw {
@@ -14698,6 +16832,7 @@ pub(crate) mod tests {
                 None,
             ),
             create_fingerprint(
+                None,
                 Some("parent-2"),
                 "/work",
                 &CreateMode::Raw {
@@ -14732,6 +16867,7 @@ pub(crate) mod tests {
     ) -> String {
         create_fingerprint(
             None,
+            None,
             cwd,
             &CreateMode::Raw {
                 invocation: invocation.to_string(),
@@ -14757,6 +16893,7 @@ pub(crate) mod tests {
         title: Option<&str>,
     ) -> String {
         create_fingerprint(
+            None,
             None,
             cwd,
             &CreateMode::Raw {
@@ -14816,6 +16953,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             create_fingerprint(
+                None,
                 Some("parent-1"),
                 "/work",
                 &CreateMode::Raw {
@@ -14843,6 +16981,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             create_fingerprint(
+                None,
                 Some("parent-1"),
                 "/work",
                 &CreateMode::Structured {
@@ -14901,6 +17040,211 @@ pub(crate) mod tests {
     /// not produce, and computing both sides would prove only that the
     /// function agrees with itself.
     const V9_STORED_FINGERPRINT: &str = r#"["/","agent",null,null,null]"#;
+
+    /// B2/R1.4: upgrading a populated historical database must preserve all
+    /// old session columns and literal request fingerprints. Successful keys
+    /// still replay their original session, deleted-session keys stay spent,
+    /// and migration invents no checkout origin or membership for either.
+    /// The OMP row is literal historical data: a stale-base release once
+    /// migrated this schema successfully, then failed startup decoding `omp`.
+    /// Starting a supervisor here guards that boundary beyond schema opening.
+    #[farhelm_testtrace::test]
+    async fn populated_v17_upgrade_preserves_sessions_and_literal_key_semantics() {
+        use rusqlite::{Connection, types::Value};
+
+        /// Capture every historical column without deriving the fixture's
+        /// schema from current code. The same named projection after migration
+        /// detects loss in fields outside the narrower wire reply assertions.
+        fn historical_rows(conn: &Connection, columns: &str) -> Vec<Vec<Value>> {
+            let mut stmt = conn
+                .prepare(&format!("SELECT {columns} FROM sessions ORDER BY id"))
+                .unwrap();
+            let count = stmt.column_count();
+            stmt.query_map([], |row| {
+                (0..count)
+                    .map(|i| row.get(i))
+                    .collect::<rusqlite::Result<Vec<Value>>>()
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+        }
+
+        let state = StateDir::new();
+        let db = state.path().join("supervisor.db");
+        let (columns, before) = {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(include_str!("../../tests/fixtures/supervisor-v17.sql"))
+                .unwrap();
+            conn.execute_batch(
+                r#"INSERT INTO supervisor_meta (id, host_identity, last_creation_seq)
+                   VALUES (0, 'historical-installation', 21);
+                   INSERT INTO sessions
+                     (id,title,cwd,invocation,tmux_name,pane,created_at,outcome_state,
+                      agent_kind,canonical_cwd,generation,creation_seq,archived,
+                      last_activity_at,last_work_started_at)
+                   VALUES ('old-replay','old title','/','agent','fh-old-replay','',100,'exited',
+                           'generic','/',4,7,1,180,179001);
+                   INSERT INTO sessions
+                     (id,title,cwd,invocation,tmux_name,pane,created_at,outcome_state,
+                      exit_code,annotation,error_detail,agent_kind,resume_template,canonical_cwd,
+                      captured_conversation,captured_record,capture_ambiguous,first_input_at,
+                      generation,launch_scoped,source_profile_id,source_profile_name,parent,
+                      session_token,creation_seq,archived,last_activity_at,conversation_source,
+                      launch,last_work_started_at)
+                   VALUES ('old-rich','rich title','/work/project','codex','fh-old-rich','%17',
+                           101,'exited',23,'historical annotation',NULL,'codex',
+                           '["codex","resume","{conversation}"]','/work/project',
+                           'conversation-17','/records/example.jsonl',0,120,8,1,
+                           NULL,NULL,'old-replay','private-fixture-token',
+                           19,1,181,'scan',
+                           '{"harness":"codex","model":"example-model","effort":"high","permissions":"yolo"}',
+                           180001);
+                   INSERT INTO sessions
+                     (id,title,cwd,invocation,tmux_name,pane,created_at,outcome_state,error_detail,
+                      source_profile_id,source_profile_name,creation_seq,archived)
+                   VALUES ('old-profile','profile title','/','agent','fh-old-profile','',102,'error',
+                           'historical detail','profile-17','Historical profile',20,1);
+                   INSERT INTO sessions
+                     (id,title,cwd,invocation,tmux_name,pane,created_at,outcome_state,
+                      agent_kind,resume_template,captured_conversation,conversation_source,
+                      launch,creation_seq,archived)
+                   VALUES ('old-omp','OMP session','/','omp','fh-old-omp','',103,'exited',
+                           'omp','["omp","--resume","{conversation}"]',
+                           'omp:{"version":1,"session_id":"historical-omp","session_file":"/work/conversation.jsonl"}',
+                           'hook','{"harness":"omp","model":"x-ai/grok-4.6","effort":"high","permissions":"approve"}',
+                           21,1);
+                   INSERT INTO create_reservations
+                     (intent_key,fingerprint,state,session_id,tmux_name,created_at)
+                   VALUES ('old-success','["/","agent",null,null,null]','created','old-replay','fh-old-replay',100),
+                          ('old-spent','["/","agent",null,null,null]','created','old-deleted','fh-old-deleted',99);"#,
+            ).unwrap();
+            assert_eq!(
+                conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                17
+            );
+            let columns = conn
+                .prepare("PRAGMA table_info(sessions)")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .join(",");
+            let rows = historical_rows(&conn, &columns);
+            assert_eq!(rows.len(), 4);
+            (columns, rows)
+        };
+        let store = SessionStore::open(&db, true).await.unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            assert_eq!(historical_rows(&conn, &columns), before);
+            assert_eq!(
+                conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                18
+            );
+            assert_eq!(
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE fresh_checkout_id IS NOT NULL",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                conn.query_row("SELECT COUNT(*) FROM working_copy_members", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+                0
+            );
+        }
+        assert!(store.working_copy_rows().await.unwrap().is_empty());
+        for key in ["old-success", "old-spent"] {
+            assert_eq!(
+                store.reservation(key).await.unwrap().unwrap().fingerprint,
+                V9_STORED_FINGERPRINT
+            );
+        }
+        drop(store);
+
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let replay = sup
+            .create_session_without_overrides(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "old-success".into(),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
+                }),
+            )
+            .await
+            .expect("a migrated successful key must replay");
+        assert_eq!(replay.id, "old-replay");
+        assert_eq!(replay.title, "old title");
+        assert_eq!(replay.last_activity_at, 180);
+        assert_eq!(replay.last_work_started_at, 179001);
+        assert!(replay.github_repo.is_none());
+        assert!(replay.working_copy.is_none());
+        let error = sup
+            .create_session_without_overrides(
+                "/",
+                "agent",
+                None,
+                80,
+                24,
+                Some(IntentClaim {
+                    intent_key: "old-spent".into(),
+                    fingerprint: raw_fingerprint("/", "agent", None, None, None),
+                    dedup_scope: DedupScope::Permanent,
+                }),
+            )
+            .await
+            .expect_err("a migrated deleted-session key must stay spent");
+        assert_eq!(
+            error.downcast_ref::<RequestError>().unwrap().kind,
+            ErrorKind::Conflict
+        );
+        assert!(format!("{error:#}").contains("since been deleted"));
+        assert_eq!(sup.store.load_all().await.unwrap().len(), 4);
+        let omp = sup.session_snapshot("old-omp").await.unwrap().unwrap();
+        assert_eq!(omp.kind, AgentKind::Omp);
+        let sessions = sup.sessions.lock().await;
+        let omp = &sessions
+            .get("old-omp")
+            .expect("OMP reloaded into live state")
+            .info;
+        assert_eq!(
+            omp.launch.as_ref(),
+            Some(&farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Omp,
+                model: Some("x-ai/grok-4.6".into()),
+                effort: Some(farhelm_proto::LaunchEffort::High),
+                permissions: Some(farhelm_proto::LaunchPermission::Approve),
+            })
+        );
+        drop(sessions);
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert_eq!(
+            sup.store
+                .session("old-replay")
+                .await
+                .unwrap()
+                .unwrap()
+                .generation,
+            4
+        );
+    }
 
     /// A SETTLED reservation written before the upgrade still replays.
     ///
@@ -15185,6 +17529,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    github_checkout: None,
                     cwd: &cwd,
                     parent: None,
                     mode: CreateMode::Raw {
@@ -15235,6 +17580,7 @@ pub(crate) mod tests {
         let refused = sup
             .create_session(
                 CreateInputs {
+                    github_checkout: None,
                     cwd: &cwd,
                     parent: None,
                     mode: CreateMode::Raw {
@@ -15279,6 +17625,7 @@ pub(crate) mod tests {
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                github_checkout: None,
                 cwd: &cwd,
                 parent: None,
                 mode: CreateMode::Raw {
@@ -15332,6 +17679,7 @@ pub(crate) mod tests {
             .expect("supervisor");
         let resolved = sup
             .validate_create(CreateInputs {
+                github_checkout: None,
                 cwd: &cwd,
                 parent: None,
                 mode: CreateMode::Raw {
@@ -15409,6 +17757,7 @@ pub(crate) mod tests {
             let created = sup
                 .create_session(
                     CreateInputs {
+                        github_checkout: None,
                         cwd: &cwd,
                         parent: None,
                         mode: CreateMode::Raw {
@@ -16949,6 +19298,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    github_checkout: None,
                     cwd: &cwd,
                     parent: None,
                     mode: CreateMode::Raw {
@@ -17210,6 +19560,7 @@ pub(crate) mod tests {
             .launch_reserved(
                 LaunchRequest {
                     parent: None,
+                    destination: DestinationResolution::Existing,
                     cwd: cwd.clone(),
                     launch_cwd: cwd.clone(),
                     invocation: "agent".to_string(),
@@ -17223,11 +19574,14 @@ pub(crate) mod tests {
                         kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    canonical_cwd: cwd.clone(),
+                    canonical_cwd: Some(cwd.clone()),
                     source_profile: None,
                     launch: None,
                 },
                 &Reserved::Retry(Box::new(reservation)),
+                &sup.admit_create(Some("key"), None)
+                    .await
+                    .expect("admission"),
             )
             .await
             .expect("the retry performs the create under the reserved identity");
@@ -18978,6 +21332,3501 @@ pub(crate) mod tests {
                 .hooked
                 .load(std::sync::atomic::Ordering::Relaxed),
             "a hooked launch must raise the entry flag the liveness tripwire reads"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fresh GitHub-checkout creates (Design C): acceptance C1/C2. Every test
+    // here drives the REAL create path — validation, the atomic
+    // row+plan+claim transaction, the exclusive mkdir, and the fault seams —
+    // because the invariants under test (one directory per intent, no
+    // adoption of foreign content, ownership surviving failures) are
+    // properties of that whole pipeline, not of any single function.
+    // -------------------------------------------------------------------------
+
+    /// A helm-resolved checkout payload aimed at a REAL temporary root
+    /// (canonicalized, since `validate_destination` compares the resolved
+    /// root against the preview binding's). It represents an untitled preview
+    /// from an empty root, so its lowest-free name is `bar-1`. Collision tests
+    /// occupy that exact accepted name after constructing the same binding.
+    fn checkout_fixture(root: &Path) -> farhelm_proto::ResolvedGithubCheckout {
+        let canonical_root = root.canonicalize().expect("fixture root canonicalizes");
+        farhelm_proto::ResolvedGithubCheckout {
+            client_identity: "fixture-request".into(),
+            repo: farhelm_proto::GithubRepo {
+                owner: "acme".to_string(),
+                name: "bar".to_string(),
+            },
+            root: canonical_root.to_string_lossy().into_owned(),
+            post_clone: None,
+            preview: farhelm_proto::CheckoutPreviewBinding {
+                canonical_root: canonical_root.to_string_lossy().into_owned(),
+                basename: "bar-1".to_string(),
+                cwd: format!("{}/bar-1", canonical_root.display()),
+                config_revision: 1,
+            },
+        }
+    }
+
+    /// Preview and create must agree on target-host home expansion and usable
+    /// symlink roots. Titles, including explicit numeric names, determine
+    /// naming intent; absent/empty titles get repo-N and that display title.
+    /// Validation must leave the real root empty throughout.
+    #[farhelm_testtrace::test]
+    async fn checkout_preview_and_create_share_root_and_title_semantics() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("work");
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, home.path().join("alias")).unwrap();
+        assert_eq!(
+            root.canonicalize().unwrap(),
+            home.path().join("alias").canonicalize().unwrap()
+        );
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                user_home: Some(home.path().to_path_buf()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        for (title, basename, display) in [
+            (None, "bar-1", "bar-1"),
+            (Some(""), "bar-1", "bar-1"),
+            (Some("Fix parser"), "bar-fix-parser", "Fix parser"),
+            (Some("bar-fix"), "bar-fix", "bar-fix"),
+            (Some("bar-7"), "bar-7", "bar-7"),
+        ] {
+            for configured_root in ["~/work", "~/alias"] {
+                let preview = Supervisor::github_checkout_preview(
+                    &sup,
+                    "acme/bar",
+                    title,
+                    Some(configured_root.into()),
+                    Some(1),
+                )
+                .await
+                .unwrap();
+                assert_eq!(preview.basename, basename);
+                assert_eq!(
+                    preview.canonical_root,
+                    root.canonicalize().unwrap().to_str().unwrap()
+                );
+                let mut checkout = checkout_fixture(&root);
+                checkout.root = configured_root.into();
+                checkout.preview.basename = preview.basename;
+                checkout.preview.cwd = preview.cwd.clone();
+                let launch = sup
+                    .validate_create(CreateInputs {
+                        cwd: "",
+                        parent: None,
+                        github_checkout: Some(checkout),
+                        mode: CreateMode::Raw {
+                            invocation: "agent".into(),
+                            agent_kind: None,
+                            resume_template: None,
+                            source_profile: None,
+                            launch: None,
+                        },
+                        title: title.map(str::to_owned),
+                        cols: 80,
+                        rows: 24,
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(launch.title, display);
+                assert_eq!(launch.cwd, preview.cwd);
+                assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+                assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+            }
+        }
+    }
+
+    /// The binding cannot choose a different name than the requested intent,
+    /// and a newly occupied preview may never allocate an alternative. Dangling
+    /// links occupy names too. These refusals leave every fixture object intact.
+    #[farhelm_testtrace::test]
+    async fn checkout_binding_rejects_forged_names_and_changed_occupancy() {
+        let state = StateDir::new();
+        let root = tempfile::tempdir().unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        for name in ["bar", "bar-2", "../escaped", "unrelated"] {
+            let mut checkout = checkout_fixture(root.path());
+            checkout.preview.basename = name.into();
+            checkout.preview.cwd = root
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join(name)
+                .to_str()
+                .unwrap()
+                .into();
+            let error = sup
+                .validate_destination(&checkout, None)
+                .await
+                .err()
+                .expect("forged name refused");
+            assert_eq!(
+                error.downcast_ref::<RequestError>().unwrap().kind,
+                ErrorKind::Conflict
+            );
+        }
+        let checkout = checkout_fixture(root.path());
+        std::fs::write(root.path().join("bar-1"), "foreign-file").unwrap();
+        assert!(root.path().join("bar-1").is_file());
+        let error = sup
+            .validate_destination(&checkout, None)
+            .await
+            .err()
+            .expect("stale binding refused");
+        assert_eq!(
+            error.downcast_ref::<RequestError>().unwrap().kind,
+            ErrorKind::Conflict
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("bar-1")).unwrap(),
+            "foreign-file"
+        );
+        let missing = root.path().join("missing-target");
+        assert!(!missing.exists());
+        std::os::unix::fs::symlink(&missing, root.path().join("bar-fix")).unwrap();
+        assert!(
+            std::fs::symlink_metadata(root.path().join("bar-fix"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            Supervisor::github_checkout_preview(
+                &sup,
+                "acme/bar",
+                Some("Fix"),
+                Some(root.path().to_str().unwrap().into()),
+                Some(1)
+            )
+            .await
+            .is_err()
+        );
+        let mut titled = checkout_fixture(root.path());
+        titled.preview.basename = "bar-fix".into();
+        titled.preview.cwd = format!("{}/bar-fix", titled.root);
+        let error = sup
+            .validate_destination(&titled, Some("Fix"))
+            .await
+            .err()
+            .expect("occupied title refused");
+        assert_eq!(
+            error.downcast_ref::<RequestError>().unwrap().kind,
+            ErrorKind::Conflict
+        );
+        assert_eq!(
+            std::fs::read_link(root.path().join("bar-fix")).unwrap(),
+            missing
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+    }
+
+    /// Root resolution must never replace invalid UTF-8 with a different path,
+    /// or interpret a relative root against the supervisor process. Preview
+    /// bounds and label validation must refuse before scanning or allocation.
+    #[farhelm_testtrace::test]
+    async fn checkout_roots_and_preview_fields_fail_closed() {
+        use std::os::unix::ffi::OsStringExt;
+        let state = StateDir::new();
+        let root = tempfile::tempdir().unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let invalid = root
+            .path()
+            .join(std::ffi::OsString::from_vec(vec![b'x', 0xff]));
+        std::fs::create_dir(&invalid).unwrap();
+        let alias = root.path().join("valid-alias");
+        std::os::unix::fs::symlink(&invalid, &alias).unwrap();
+        assert!(alias.canonicalize().unwrap().to_str().is_none());
+        let error = sup
+            .resolve_checkout_root(alias.to_str().unwrap())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"));
+        assert!(
+            sup.resolve_checkout_root("relative-root")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("absolute")
+        );
+        assert!(
+            sup.resolve_checkout_root(&"x".repeat(4097))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("4096-byte")
+        );
+        for title in ["\n".to_string(), "x".repeat(65537)] {
+            assert!(
+                Supervisor::github_checkout_preview(
+                    &sup,
+                    "acme/bar",
+                    Some(&title),
+                    Some(root.path().to_str().unwrap().into()),
+                    Some(1)
+                )
+                .await
+                .is_err()
+            );
+        }
+        let checkout = checkout_fixture(root.path());
+        let error = sup
+            .validate_destination(&checkout, Some("\n"))
+            .await
+            .err()
+            .expect("control-only title refused");
+        assert_eq!(
+            error.downcast_ref::<RequestError>().unwrap().kind,
+            ErrorKind::InvalidRequest
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+    }
+
+    /// Fresh intent must retain launch selection even when two selections
+    /// compile to identical commands. Otherwise a reused key could replay a
+    /// different saved setup. This includes inherited metadata on Raw mode;
+    /// the frozen Existing encodings remain covered by their literal tests.
+    #[farhelm_testtrace::test]
+    fn fresh_fingerprint_binds_launch_selection_without_changing_existing() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(root.path());
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        let mut explicit = selection.clone();
+        explicit.model = Some("explicit-model".into());
+        for structured in [false, true] {
+            let mode = |selection: farhelm_proto::LaunchSelection| {
+                if structured {
+                    CreateMode::Structured {
+                        invocation: "same-command".into(),
+                        agent_kind: AgentKind::Codex,
+                        resume_template: None,
+                        selection,
+                    }
+                } else {
+                    CreateMode::Raw {
+                        invocation: "same-command".into(),
+                        agent_kind: Some(AgentKind::Codex),
+                        resume_template: None,
+                        source_profile: None,
+                        launch: Some(selection),
+                    }
+                }
+            };
+            let implicit_mode = mode(selection.clone());
+            let explicit_mode = mode(explicit.clone());
+            let original = create_fingerprint(Some(&checkout), None, "", &implicit_mode, None);
+            assert_ne!(
+                original,
+                create_fingerprint(Some(&checkout), None, "", &explicit_mode, None)
+            );
+            assert_eq!(
+                original,
+                create_fingerprint(Some(&checkout), None, "", &implicit_mode, None)
+            );
+            let FreshCreateFingerprint::GithubCheckout {
+                parent,
+                requested_cwd,
+                mode: recovered_mode,
+                title,
+                checkout: recovered_checkout,
+            } = serde_json::from_str(&original).expect("decode durable launch snapshot");
+            assert_eq!(
+                original,
+                create_fingerprint(
+                    Some(&recovered_checkout),
+                    parent.as_deref(),
+                    &requested_cwd,
+                    &recovered_mode,
+                    title.as_deref(),
+                ),
+                "recovery must reconstruct all accepted inputs without a catalog lookup"
+            );
+            if !structured {
+                assert_eq!(
+                    create_fingerprint(None, None, "/work", &implicit_mode, None),
+                    r#"["/work","same-command",null,"codex",null]"#,
+                );
+            }
+        }
+    }
+
+    /// A deleted profile must not erase the accepted launch bundle from a
+    /// permanent reservation. Recovery needs its provenance and resume args,
+    /// including parent/title inputs, even when no live session remains.
+    #[farhelm_testtrace::test]
+    fn fresh_fingerprint_recovers_profile_snapshot_and_rejects_other_versions() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(root.path());
+        let mode = CreateMode::Raw {
+            invocation: "accepted-command".into(),
+            agent_kind: Some(AgentKind::Codex),
+            resume_template: Some(vec!["accepted-resume".into(), "{session_id}".into()]),
+            source_profile: Some(ProfileSnapshot {
+                id: "old-profile-id".into(),
+                name: "old-profile-name".into(),
+            }),
+            launch: None,
+        };
+        let encoded = create_fingerprint(
+            Some(&checkout),
+            Some("parent-id"),
+            "requested-cwd",
+            &mode,
+            Some("accepted-title"),
+        );
+        let FreshCreateFingerprint::GithubCheckout {
+            parent,
+            requested_cwd,
+            mode: recovered,
+            title,
+            checkout: resolved,
+        } = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(parent.as_deref(), Some("parent-id"));
+        assert_eq!(requested_cwd, "requested-cwd");
+        assert_eq!(title.as_deref(), Some("accepted-title"));
+        assert_eq!(resolved, checkout);
+        let CreateMode::Raw {
+            invocation,
+            agent_kind,
+            resume_template,
+            source_profile,
+            launch,
+        } = recovered
+        else {
+            panic!("profile-backed launch must retain raw mode");
+        };
+        assert_eq!(invocation, "accepted-command");
+        assert_eq!(agent_kind, Some(AgentKind::Codex));
+        assert_eq!(
+            resume_template,
+            Some(vec!["accepted-resume".into(), "{session_id}".into()])
+        );
+        assert_eq!(
+            source_profile,
+            Some(ProfileSnapshot {
+                id: "old-profile-id".into(),
+                name: "old-profile-name".into()
+            })
+        );
+        assert!(launch.is_none());
+        let mut unknown: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        unknown["kind"] = serde_json::json!("github_checkout_future");
+        assert!(serde_json::from_value::<FreshCreateFingerprint>(unknown).is_err());
+        let existing = create_fingerprint(None, None, "/work", &mode, None);
+        assert!(serde_json::from_str::<FreshCreateFingerprint>(&existing).is_err());
+    }
+
+    /// Lookup must distinguish unknown keys from recorded refusals without
+    /// needing a live session or a currently usable checkout root. Changed
+    /// identities cannot turn either case into another allocation.
+    #[farhelm_testtrace::test]
+    async fn fresh_reconciliation_preserves_unknown_and_failed_reservations() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(root.path());
+        let key = "lookup-only-key";
+        assert!(
+            sup.reconcile_github_checkout(key.into(), &checkout.client_identity, 80, 24)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(sup.store.reservation(key).await.unwrap().is_none());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+
+        let claim = IntentClaim {
+            intent_key: key.into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        sup.store
+            .record_failed_intent(
+                claim,
+                "never-launched",
+                "never-launched-tmux",
+                ErrorKind::InvalidRequest,
+                "original refusal",
+            )
+            .await
+            .unwrap();
+        let original = sup.store.reservation(key).await.unwrap().unwrap();
+        assert!(matches!(
+            original.outcome,
+            ReservationOutcome::Failed { .. }
+        ));
+        root.close().unwrap();
+        for (identity, kind, message) in [
+            (
+                checkout.client_identity.as_str(),
+                ErrorKind::InvalidRequest,
+                "original refusal",
+            ),
+            (
+                "different-request",
+                ErrorKind::Conflict,
+                "different create request",
+            ),
+        ] {
+            let error = sup
+                .reconcile_github_checkout(key.into(), identity, 80, 24)
+                .await
+                .expect_err("known refusal or mismatch must not become unknown");
+            let error = error.downcast_ref::<RequestError>().unwrap();
+            assert_eq!(error.kind, kind);
+            assert!(error.to_string().contains(message));
+            assert_eq!(sup.store.reservation(key).await.unwrap().unwrap(), original);
+        }
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert!(sup.store.session("never-launched").await.unwrap().is_none());
+    }
+
+    /// The fingerprint a keyed fresh-checkout create carries — computed
+    /// with the SAME function the create handler uses, so a test's claim
+    /// is indistinguishable from a real client's.
+    fn checkout_fingerprint(checkout: &farhelm_proto::ResolvedGithubCheckout) -> String {
+        create_fingerprint(
+            Some(checkout),
+            None,
+            "",
+            &CreateMode::Raw {
+                invocation: "agent".to_string(),
+                agent_kind: None,
+                resume_template: None,
+                source_profile: None,
+                launch: None,
+            },
+            None,
+        )
+    }
+
+    /// Drive `Supervisor::create_session` exactly as the create handler
+    /// would for a fresh GitHub checkout: empty cwd, resolved payload,
+    /// the caller's idempotency claim.
+    async fn fresh_create(
+        sup: &Arc<Supervisor>,
+        checkout: &farhelm_proto::ResolvedGithubCheckout,
+        claim: Option<IntentClaim>,
+    ) -> anyhow::Result<SessionInfo> {
+        sup.create_session(
+            CreateInputs {
+                cwd: "",
+                parent: None,
+                github_checkout: Some(checkout.clone()),
+                mode: CreateMode::Raw {
+                    invocation: "agent".to_string(),
+                    agent_kind: None,
+                    resume_template: None,
+                    source_profile: None,
+                    launch: None,
+                },
+                title: None,
+                cols: 80,
+                rows: 24,
+            },
+            claim,
+        )
+        .await
+    }
+
+    /// How many checkout directories the root now holds (any `bar*`
+    /// entry) — the duplicate-allocation oracle: a replay or a retry must
+    /// never raise it.
+    fn checkout_directories(root: &Path) -> usize {
+        std::fs::read_dir(root)
+            .expect("fixture root readable")
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("bar"))
+                    && entry.path().is_dir()
+            })
+            .count()
+    }
+
+    /// C1, the success contract: one keyed fresh create allocates exactly
+    /// ONE directory, records the registry row as `allocated` with the
+    /// session's accepted canonical cwd, publishes the durable NotStarted
+    /// preparation state, and a same-key replay returns the SAME session
+    /// without re-allocating anything.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_fresh_checkout_creates_exactly_one_directory_and_replays() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "gh-key".to_string(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+
+        let info = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect("the fresh create succeeds");
+        let plan = sup
+            .store
+            .member_working_copy(&info.id)
+            .await
+            .expect("registry read")
+            .expect("a fresh create records a registry row");
+        assert_eq!(
+            plan.allocation_state,
+            crate::working_copies::AllocationState::Allocated,
+            "a completed create's checkout is allocated"
+        );
+        assert_eq!(
+            info.canonical_cwd.as_deref(),
+            plan.canonical_path.as_deref(),
+            "the reply's canonical cwd IS the allocated directory"
+        );
+        assert!(
+            std::fs::metadata(plan.canonical_path.as_deref().unwrap())
+                .expect("allocated directory")
+                .is_dir(),
+            "the allocated directory exists on disk"
+        );
+        let preparation = crate::launch::read_preparation_state(
+            &state
+                .path()
+                .join("checkout-preparation")
+                .join(format!("{}.json", plan.id)),
+            &plan.id,
+        )
+        .expect("preparation state readable")
+        .expect("NotStarted was published before the spawn");
+        assert_eq!(
+            preparation.state,
+            crate::launch::PreparationState::NotStarted,
+            "the create publishes NotStarted; only the shim advances it"
+        );
+        assert_eq!(checkout_directories(&root), 1, "exactly one checkout");
+
+        let replay = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect("the same-key replay succeeds");
+        assert_eq!(replay.id, info.id, "the replay is the SAME session");
+        assert_eq!(
+            checkout_directories(&root),
+            1,
+            "the replay allocated no second directory"
+        );
+        assert!(
+            sup.store
+                .member_working_copy(&info.id)
+                .await
+                .expect("registry read")
+                .is_some(),
+            "the original registry row stands; no second row was minted"
+        );
+    }
+
+    /// Wire provenance belongs only to the fresh origin, while ordinary
+    /// borrowers expose their managed association. Create, replay and listing
+    /// after reload must agree; cached placeholder fields cannot erase it.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn checkout_reply_metadata_survives_replay_borrowing_and_reload() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "metadata-origin".into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let origin = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .unwrap();
+        let association = origin
+            .working_copy
+            .clone()
+            .expect("create exposes allocation");
+        assert_eq!(origin.github_repo, Some(checkout.repo.clone()));
+        assert_eq!(association.repo, checkout.repo);
+        assert_eq!(association.canonical_path, origin.cwd);
+        assert_eq!(association.origin_session_id, origin.id);
+        let replay = fresh_create(&sup, &checkout, Some(claim)).await.unwrap();
+        assert_eq!(replay.working_copy, Some(association.clone()));
+        assert_eq!(replay.github_repo, origin.github_repo);
+        let borrower = sup
+            .create_session_without_overrides(&origin.cwd, "agent", None, 80, 24, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            borrower.github_repo, None,
+            "membership cannot become repo intent"
+        );
+        assert_eq!(borrower.working_copy, Some(association.clone()));
+        let ordinary = sup
+            .create_session_without_overrides(root.to_str().unwrap(), "agent", None, 80, 24, None)
+            .await
+            .unwrap();
+        assert!(ordinary.github_repo.is_none() && ordinary.working_copy.is_none());
+        for supervisor in [
+            Arc::clone(&sup),
+            Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap(),
+        ] {
+            let listed = super::super::listing::list_all(&supervisor).await.unwrap();
+            let fresh = listed
+                .sessions
+                .iter()
+                .find(|row| row.id == origin.id)
+                .unwrap();
+            assert_eq!(fresh.github_repo, origin.github_repo);
+            assert_eq!(fresh.working_copy, Some(association.clone()));
+            let borrowed = listed
+                .sessions
+                .iter()
+                .find(|row| row.id == borrower.id)
+                .unwrap();
+            assert_eq!(borrowed.github_repo, None);
+            assert_eq!(borrowed.working_copy, Some(association.clone()));
+            let unmanaged = listed
+                .sessions
+                .iter()
+                .find(|row| row.id == ordinary.id)
+                .unwrap();
+            assert!(unmanaged.github_repo.is_none() && unmanaged.working_copy.is_none());
+        }
+    }
+
+    /// A retry refusal must finish its durable-to-live publication before a
+    /// concurrent rename can use that entry. Both a committed Error and a
+    /// rolled-back refusal must preserve the rename that follows them.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn retained_retry_refusal_serializes_publication_with_rename() {
+        for fail_settlement in [false, true] {
+            let state = StateDir::new();
+            let root = state.path().join("checkouts");
+            std::fs::create_dir(&root).unwrap();
+            let checkout = checkout_fixture(&root);
+            let claim = IntentClaim {
+                intent_key: "rename-during-refusal".into(),
+                fingerprint: checkout_fingerprint(&checkout),
+                dedup_scope: DedupScope::Permanent,
+            };
+            let original = checkout_crash_supervisor(&state, CreateStage::AfterRecord).await;
+            let crash = fresh_create(&original, &checkout, Some(claim.clone()))
+                .await
+                .unwrap_err();
+            assert!(crash.is::<SimulatedCrash>());
+            let reservation = original
+                .store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap();
+            let plan = original
+                .store
+                .origin_working_copy(&reservation.session_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                plan.allocation_state,
+                crate::working_copies::AllocationState::Planned
+            );
+            drop(original);
+            // The unknown occupant makes retry refuse before launch takeover,
+            // while the reloaded entry remains available to a real rename.
+            std::fs::create_dir(&checkout.preview.cwd).unwrap();
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+            let gate = Arc::new(tokio::sync::Semaphore::new(1));
+            // Releasing on unwind too keeps the blocking SQL hook bounded
+            // even when an ordering assertion detects a regression.
+            let release = Arc::clone(&gate).acquire_owned().await.unwrap();
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    retained_refusal_fault: Some(Arc::new(move || {
+                        entered_tx
+                            .lock()
+                            .unwrap()
+                            .take()
+                            .expect("one settlement")
+                            .send(())
+                            .unwrap();
+                        let _permit = tokio::runtime::Handle::current().block_on(async {
+                            tokio::time::timeout(Duration::from_secs(5), gate.acquire())
+                                .await
+                                .expect("the test must release its settlement gate")
+                                .expect("the settlement gate remains open")
+                        });
+                        if fail_settlement {
+                            anyhow::bail!("fixture retained settlement failure");
+                        }
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .unwrap();
+            assert!(
+                sup.sessions
+                    .lock()
+                    .await
+                    .contains_key(&reservation.session_id)
+            );
+            let retry = {
+                let sup = Arc::clone(&sup);
+                let checkout = checkout.clone();
+                let claim = claim.clone();
+                tokio::spawn(async move { fresh_create(&sup, &checkout, Some(claim)).await })
+            };
+            tokio::time::timeout(Duration::from_secs(5), entered_rx)
+                .await
+                .expect("retry must reach the retained-refusal transaction")
+                .unwrap();
+            assert!(
+                sup.lifecycle_locks
+                    .claimed_for_test(&reservation.session_id),
+                "refusal must own publication before any rename contender exists"
+            );
+            let rename = {
+                let sup = Arc::clone(&sup);
+                let id = reservation.session_id.clone();
+                tokio::spawn(async move {
+                    let permit = Arc::clone(&sup.admission).acquire_owned().await.unwrap();
+                    sup.rename_session(&id, "renamed during refusal".into(), None, permit)
+                        .await
+                        .0
+                })
+            };
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                sup.lifecycle_locks
+                    .claims_reached_for_test(&reservation.session_id, 2),
+            )
+            .await
+            .expect("rename must reach the lifecycle claim held by refusal");
+            assert!(
+                !rename.is_finished(),
+                "rename is queued behind the paused refusal"
+            );
+            drop(release);
+            let refusal = tokio::time::timeout(Duration::from_secs(5), retry)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert!(format!("{refusal:#}").contains("planned"), "{refusal:#}");
+            let renamed = tokio::time::timeout(Duration::from_secs(5), rename)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(renamed.info.title, "renamed during refusal");
+            let durable = sup
+                .store
+                .session(&reservation.session_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let live = sup.sessions.lock().await[&reservation.session_id].clone();
+            assert_eq!(live.info.title, durable.title);
+            assert_eq!(durable.title, "renamed during refusal");
+            assert_eq!(live.info.creation_seq, Some(durable.creation_seq));
+            assert_eq!(*live.outcome.lock().unwrap(), durable.outcome);
+            assert_eq!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome
+                    == ReservationOutcome::Pending,
+                fail_settlement,
+                "only the failed transaction keeps its reservation pending"
+            );
+        }
+    }
+
+    /// The accepted-before-confirmation boundary whose only surviving proof
+    /// will be the shim's sentinel. The fixture owns its private terminal and
+    /// database; no system scope may supply a second source of acceptance.
+    struct PendingSentinelFixture {
+        state: StateDir,
+        sup: Arc<Supervisor>,
+        claim: IntentClaim,
+        checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
+        row: StoredSession,
+    }
+
+    /// Pin startup identity and exclude cgroup evidence so these tests prove
+    /// sentinel preservation rather than succeeding through another witness.
+    fn sentinel_recovery_seams() -> SupervisorSeams {
+        SupervisorSeams {
+            boot_id: Arc::new(|| Ok(Some("sentinel-test-boot".into()))),
+            scopes: Arc::new(crate::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        }
+    }
+
+    /// Accept a real tmux terminal but interrupt before durable confirmation.
+    /// Callers choose which physical evidence survives; the dummy executable
+    /// cannot itself write a shim report or run checkout preparation.
+    async fn accepted_pending_launch_fixture(fresh: bool) -> PendingSentinelFixture {
+        let state = StateDir::new();
+        let checkout = if fresh {
+            let root = state.path().join("checkouts");
+            std::fs::create_dir(&root).unwrap();
+            Some(checkout_fixture(&root))
+        } else {
+            None
+        };
+        let claim = IntentClaim {
+            intent_key: "sentinel-recovery".into(),
+            fingerprint: checkout.as_ref().map_or_else(
+                || raw_fingerprint("/", "agent", None, None, None),
+                checkout_fingerprint,
+            ),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_crash: Some(Arc::new(|stage| {
+                    if stage == CreateStage::DuringLaunch {
+                        anyhow::bail!("interrupt after terminal acceptance");
+                    }
+                    Ok(())
+                })),
+                ..sentinel_recovery_seams()
+            },
+        )
+        .await
+        .unwrap();
+        let error = match &checkout {
+            Some(checkout) => fresh_create(&sup, checkout, Some(claim.clone())).await,
+            None => {
+                sup.create_session_without_overrides(
+                    "/",
+                    "agent",
+                    None,
+                    80,
+                    24,
+                    Some(claim.clone()),
+                )
+                .await
+            }
+        }
+        .expect_err("the fixture must reach accepted-before-confirmation");
+        assert!(error.is::<SimulatedCrash>(), "{error:#}");
+        let reservation = sup
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reservation.outcome, ReservationOutcome::Pending);
+        let row = sup
+            .store
+            .session(&reservation.session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.generation, 0);
+        assert_eq!(row.outcome, LastOutcome::Launching);
+        assert!(row.pane.is_empty());
+        assert!(!row.launch_scoped);
+        assert!(
+            sup.tmux
+                .pane_states()
+                .await
+                .unwrap()
+                .values()
+                .any(|p| p.session_name == row.tmux_name),
+            "premise: tmux actually accepted this session before its durable pane was recorded"
+        );
+        PendingSentinelFixture {
+            state,
+            sup,
+            claim,
+            checkout,
+            row,
+        }
+    }
+
+    /// Leave the fixture sentinel as the accepted launch's only witness.
+    /// The report is supplied at its production path after actual terminal
+    /// acceptance, so this tests evidence consumption rather than shim exec.
+    async fn pending_sentinel_fixture(fresh: bool) -> PendingSentinelFixture {
+        let PendingSentinelFixture {
+            state,
+            sup,
+            claim,
+            checkout,
+            row,
+        } = accepted_pending_launch_fixture(fresh).await;
+        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        assert!(
+            !sup.tmux
+                .pane_states()
+                .await
+                .unwrap()
+                .values()
+                .any(|p| p.session_name == row.tmux_name),
+            "premise: the sentinel must become the only remaining launch witness"
+        );
+        let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+        assert!(spec.exists(), "the dummy shim leaves its spec unconsumed");
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        assert!(
+            !sentinel.exists(),
+            "the dummy shim cannot manufacture the fixture report"
+        );
+        std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+        PendingSentinelFixture {
+            state,
+            sup,
+            claim,
+            checkout,
+            row,
+        }
+    }
+
+    /// An identical retry must replay the retained Error without creating a
+    /// terminal or a new spec after cleanup has removed all physical proof.
+    async fn assert_sentinel_replay(
+        sup: &Arc<Supervisor>,
+        claim: &IntentClaim,
+        checkout: Option<&farhelm_proto::ResolvedGithubCheckout>,
+        row: &StoredSession,
+    ) {
+        assert_eq!(
+            sup.store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome,
+            ReservationOutcome::Created
+        );
+        let reply = match checkout {
+            Some(checkout) => fresh_create(sup, checkout, Some(claim.clone())).await,
+            None => {
+                sup.create_session_without_overrides(
+                    "/",
+                    "agent",
+                    None,
+                    80,
+                    24,
+                    Some(claim.clone()),
+                )
+                .await
+            }
+        }
+        .expect("the accepted create replays despite its launch error");
+        assert_eq!(reply.id, row.id);
+        let durable = sup.store.session(&row.id).await.unwrap().unwrap();
+        assert!(matches!(durable.outcome, LastOutcome::Error { .. }));
+        assert_eq!(durable.generation, 0);
+        assert!(durable.pane.is_empty());
+        assert!(!crate::launch::spec_path_for_launch(&sup.state_dir, &row.id, 0).exists());
+        assert!(
+            !sup.tmux
+                .pane_states()
+                .await
+                .unwrap()
+                .values()
+                .any(|p| p.session_name == row.tmux_name)
+        );
+    }
+
+    /// Neither Error alone nor a stale generation's sentinel authorizes
+    /// acceptance. Cleanup must also wait for Error itself to commit before
+    /// consuming a genuine first-launch witness.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn cleanup_never_infers_acceptance_from_error_or_a_stale_sentinel() {
+        for condition in ["uncommitted-error", "stale-generation", "absent-sentinel"] {
+            let PendingSentinelFixture {
+                state,
+                sup,
+                claim,
+                row,
+                ..
+            } = pending_sentinel_fixture(false).await;
+            let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+            let sentinel = crate::launch::status_path_for_spec(&spec);
+            if condition != "uncommitted-error" {
+                sup.store
+                    .transition_many(vec![(
+                        row.id.clone(),
+                        0,
+                        Transition::SentinelError {
+                            detail: "fixture durable error".into(),
+                            pane: None,
+                        },
+                    )])
+                    .await
+                    .unwrap();
+            }
+            if condition == "stale-generation" {
+                let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+                assert_eq!(
+                    conn.execute(
+                        "UPDATE sessions SET generation = 1 WHERE id = ?1",
+                        [&row.id]
+                    )
+                    .unwrap(),
+                    1
+                );
+            } else if condition == "absent-sentinel" {
+                std::fs::remove_file(&sentinel).unwrap();
+            }
+            cleanup_launch_artifacts(state.path(), &sup.store, &row.id, 0).await;
+            assert_eq!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome,
+                ReservationOutcome::Pending,
+                "{condition}: cleanup cannot invent accepted provenance"
+            );
+            assert_eq!(sentinel.exists(), condition != "absent-sentinel");
+            assert_eq!(spec.exists(), condition != "absent-sentinel");
+        }
+    }
+
+    /// A known Terminal may precede its durable pane record. When the
+    /// wrapper-failure classifier has no sentinel, persisting that accepted
+    /// pane with Error is what keeps replay safe after tmux disappears.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn wrapper_error_observation_preserves_unconfirmed_terminal_provenance() {
+        let PendingSentinelFixture {
+            state,
+            sup,
+            claim,
+            row,
+            ..
+        } = accepted_pending_launch_fixture(false).await;
+        wait_for_dead_fixture_pane(&sup, "unconfirmed wrapper-shaped launch", |_, state| {
+            state.session_name == row.tmux_name
+        })
+        .await;
+        let states = sup.tmux.pane_states().await.unwrap();
+        let (pane, observed) = states
+            .iter()
+            .find(|(_, state)| state.session_name == row.tmux_name)
+            .unwrap();
+        assert!(observed.dead);
+        assert!(row.pane.is_empty());
+        let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+        assert!(spec.exists());
+        assert!(!crate::launch::status_path_for_spec(&spec).exists());
+        let mut entry = entry_with(
+            Some(Terminal {
+                tmux_name: row.tmux_name.clone(),
+                pane: pane.clone(),
+            }),
+            LastOutcome::Launching,
+        );
+        entry.info.id = row.id.clone();
+        // Supply the scoped-wrapper classification input explicitly. This
+        // fixture tests the observer's evidence contract, not systemd-run.
+        entry.scope = Some("fixture-scoped-launch".into());
+        let observed = super::super::status::observe_entry(&sup, &Arc::new(entry), &states)
+            .await
+            .unwrap();
+        assert!(
+            observed
+                .sentinel
+                .as_ref()
+                .is_some_and(|detail| detail.contains("never reached"))
+        );
+        sup.store
+            .transition_many(vec![(
+                row.id.clone(),
+                0,
+                observed.transition.expect("recordable wrapper failure"),
+            )])
+            .await
+            .unwrap();
+        let durable = sup.store.session(&row.id).await.unwrap().unwrap();
+        assert_eq!(
+            durable.pane, *pane,
+            "the known accepted pane must survive classification"
+        );
+        assert!(matches!(durable.outcome, LastOutcome::Error { .. }));
+        sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+        assert!(!sup.tmux.pane_states().await.unwrap().contains_key(pane));
+        drop(sup);
+        let reopened = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            sentinel_recovery_seams(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reopened
+                .store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome,
+            ReservationOutcome::Created
+        );
+        let replay = reopened
+            .create_session_without_overrides("/", "agent", None, 80, 24, Some(claim))
+            .await
+            .unwrap();
+        assert_eq!(replay.id, row.id);
+        assert!(!spec.exists());
+        assert!(
+            !reopened
+                .tmux
+                .pane_states()
+                .await
+                .unwrap()
+                .values()
+                .any(|state| state.session_name == row.tmux_name)
+        );
+    }
+
+    /// Startup must durably preserve acceptance before deleting its last
+    /// physical witness. Same-boot classification, reboot override and a
+    /// previous Error commit all have distinct cleanup paths. Fresh Ready
+    /// and Failed records cannot cause a duplicate clone or agent launch.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn generation_zero_error_cleanup_preserves_create_replay() {
+        for kind in ["existing", "fresh-ready", "fresh-failed"] {
+            for recovery in ["same-boot", "reboot", "already-error"] {
+                let PendingSentinelFixture {
+                    state,
+                    sup,
+                    claim,
+                    checkout,
+                    row,
+                } = pending_sentinel_fixture(kind != "existing").await;
+                if checkout.is_some() {
+                    let origin = sup
+                        .store
+                        .origin_working_copy(&row.id)
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    let preparation = state
+                        .path()
+                        .join("checkout-preparation")
+                        .join(format!("{}.json", origin.id));
+                    let prepared = if kind == "fresh-ready" {
+                        crate::launch::PreparationState::Ready
+                    } else {
+                        crate::launch::PreparationState::Failed {
+                            stage: "clone".into(),
+                            detail: "fixture failure".into(),
+                        }
+                    };
+                    crate::launch::write_preparation_state(
+                        &preparation,
+                        &origin.id,
+                        &prepared,
+                        &crate::files::RealFs,
+                    )
+                    .unwrap();
+                }
+                if recovery == "already-error" {
+                    sup.store
+                        .transition_many(vec![(
+                            row.id.clone(),
+                            0,
+                            Transition::SentinelError {
+                                detail: "previous durable classification".into(),
+                                pane: None,
+                            },
+                        )])
+                        .await
+                        .unwrap();
+                }
+                let mut seams = sentinel_recovery_seams();
+                if recovery == "reboot" {
+                    seams.boot_id = Arc::new(|| Ok(Some("sentinel-next-boot".into())));
+                }
+                Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    sup.store
+                        .reservation(&claim.intent_key)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .outcome,
+                    ReservationOutcome::Created,
+                    "{kind}/{recovery}: cleanup must preserve acceptance first"
+                );
+                let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+                assert!(!crate::launch::status_path_for_spec(&spec).exists());
+                assert!(!spec.exists());
+                drop(sup);
+                for _ in 0..2 {
+                    let reopened = Supervisor::new_with_seams(
+                        state.path(),
+                        dummy_exe(),
+                        SupervisorTimeouts::default(),
+                        seams.clone(),
+                    )
+                    .await
+                    .unwrap();
+                    assert_sentinel_replay(&reopened, &claim, checkout.as_ref(), &row).await;
+                    drop(reopened);
+                }
+            }
+        }
+    }
+
+    /// List must preserve accepted-create evidence through both initial Error
+    /// classification and an already-Error retry. A read-only observer may
+    /// report the failure but cannot settle the key or remove its artifacts.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn list_error_cleanup_preserves_replay_and_read_only_artifacts() {
+        for already_error in [false, true] {
+            let PendingSentinelFixture {
+                state,
+                sup,
+                claim,
+                checkout,
+                mut row,
+            } = pending_sentinel_fixture(false).await;
+            if already_error {
+                sup.store
+                    .transition_many(vec![(
+                        row.id.clone(),
+                        0,
+                        Transition::SentinelError {
+                            detail: "prior classification".into(),
+                            pane: None,
+                        },
+                    )])
+                    .await
+                    .unwrap();
+                row = sup.store.session(&row.id).await.unwrap().unwrap();
+            }
+            sup.publish_retained_stored_session(&row, false).await;
+            assert!(sup.sessions.lock().await[&row.id].terminal.is_none());
+            let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+            let sentinel = crate::launch::status_path_for_spec(&spec);
+            sup.may_record
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            let listed = crate::service::listing::list_all(&sup).await.unwrap();
+            assert!(listed.sessions.iter().any(|info| info.id == row.id));
+            assert!(
+                sentinel.exists() && spec.exists(),
+                "read-only List must retain launch artifacts"
+            );
+            assert_eq!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome,
+                ReservationOutcome::Pending
+            );
+            sup.may_record
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            crate::service::listing::list_all(&sup).await.unwrap();
+            assert!(!sentinel.exists());
+            assert_sentinel_replay(&sup, &claim, checkout.as_ref(), &row).await;
+        }
+    }
+
+    /// Stop still reaps processes when observation recording is disabled,
+    /// but must retain the pending key and its last launch witness. Driving
+    /// the dispatcher catches cleanup that escapes `record`'s no-write gate.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn stop_error_cleanup_respects_recording_authority() {
+        let PendingSentinelFixture {
+            state,
+            sup,
+            claim,
+            checkout,
+            row,
+        } = pending_sentinel_fixture(false).await;
+        sup.store
+            .transition_many(vec![(
+                row.id.clone(),
+                0,
+                Transition::SentinelError {
+                    detail: "durable error awaiting create settlement".into(),
+                    pane: None,
+                },
+            )])
+            .await
+            .unwrap();
+        let row = sup.store.session(&row.id).await.unwrap().unwrap();
+        sup.publish_retained_stored_session(&row, false).await;
+        assert!(sup.sessions.lock().await[&row.id].terminal.is_none());
+        let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+        let sentinel = crate::launch::status_path_for_spec(&spec);
+        assert!(spec.exists() && sentinel.exists());
+        assert_eq!(
+            sup.store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome,
+            ReservationOutcome::Pending,
+        );
+
+        for may_record in [false, true] {
+            sup.may_record
+                .store(may_record, std::sync::atomic::Ordering::SeqCst);
+            let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+            let mut input_routes = HashMap::new();
+            let mut tasks = tokio::task::JoinSet::new();
+            handle_control(
+                &sup,
+                ControlMsg::StopSession {
+                    req_id: 42,
+                    session_id: row.id.clone(),
+                },
+                ConnectionCtx {
+                    tx: &tx,
+                    priority: &tx,
+                    input_routes: &mut input_routes,
+                    upload_routes: &mut no_uploads(),
+                    tasks: &mut tasks,
+                },
+            )
+            .await;
+            let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("Stop must finish its owned mutation")
+                .expect("Stop reply channel");
+            let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
+            assert!(
+                matches!(decoded, ControlMsg::SessionStopped { req_id: 42 }),
+                "{decoded:?}"
+            );
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(result) = tasks.join_next().await {
+                    result.expect("Stop task must finish without panicking");
+                }
+            })
+            .await
+            .expect("Stop dispatcher must reap its task");
+            assert_eq!(spec.exists(), !may_record);
+            assert_eq!(sentinel.exists(), !may_record);
+            assert_eq!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome,
+                if may_record {
+                    ReservationOutcome::Created
+                } else {
+                    ReservationOutcome::Pending
+                },
+                "Stop cleanup must obey the same recording authority as its observation",
+            );
+        }
+        assert_sentinel_replay(&sup, &claim, checkout.as_ref(), &row).await;
+    }
+
+    /// Error durability and create settlement are separate writes. A failed
+    /// second write must retain the sentinel so another startup can finish
+    /// recovery, rather than permanently forgetting an accepted launch.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn failed_error_settlement_retains_sentinel_until_retry() {
+        let PendingSentinelFixture {
+            state,
+            sup,
+            claim,
+            checkout,
+            row,
+        } = pending_sentinel_fixture(true).await;
+        let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+        conn.execute_batch("CREATE TRIGGER refuse_sentinel_settlement BEFORE UPDATE OF state ON create_reservations
+            WHEN NEW.state = 'created' BEGIN SELECT RAISE(ABORT, 'fixture settlement failure'); END;").unwrap();
+        let seams = sentinel_recovery_seams();
+        Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                sup.store.session(&row.id).await.unwrap().unwrap().outcome,
+                LastOutcome::Error { .. }
+            ),
+            "premise: Error committed before reservation settlement failed"
+        );
+        assert_eq!(
+            sup.store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap()
+                .outcome,
+            ReservationOutcome::Pending
+        );
+        let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+        assert!(
+            crate::launch::status_path_for_spec(&spec).exists(),
+            "failed settlement must retain the last witness"
+        );
+        assert!(spec.exists(), "deferred cleanup retains both artifacts");
+        conn.execute_batch("DROP TRIGGER refuse_sentinel_settlement;")
+            .unwrap();
+        drop(conn);
+        Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
+            .await
+            .unwrap();
+        assert!(!crate::launch::status_path_for_spec(&spec).exists());
+        drop(sup);
+        let reopened = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            seams,
+        )
+        .await
+        .unwrap();
+        assert_sentinel_replay(&reopened, &claim, checkout.as_ref(), &row).await;
+    }
+
+    /// Interrupt one actual create boundary once, leaving the same supervisor
+    /// usable for an in-process retry. Reopening tests drop it and reconstruct
+    /// the supervisor from the private state directory instead.
+    async fn checkout_crash_supervisor(state: &StateDir, boundary: CreateStage) -> Arc<Supervisor> {
+        let fired = std::sync::atomic::AtomicBool::new(false);
+        Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_crash: Some(Arc::new(move |stage| {
+                    if stage == boundary && !fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        anyhow::bail!("interrupt checkout create at its durable boundary");
+                    }
+                    Ok(())
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor")
+    }
+
+    /// Each unambiguous pending boundary recovers the exact original plan,
+    /// including after supervisor reconstruction. No changed configuration is
+    /// consulted and one accepted intent still allocates only one directory.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn fresh_checkout_pending_boundaries_recover_original_snapshot() {
+        for reopen in [false, true] {
+            for boundary in [
+                CreateStage::AfterRecord,
+                CreateStage::AfterCheckoutAllocation,
+                CreateStage::AfterPreparationPublication,
+            ] {
+                let state = StateDir::new();
+                let root = state.path().join("checkouts");
+                std::fs::create_dir(&root).unwrap();
+                let mut checkout = checkout_fixture(&root);
+                checkout.post_clone = Some("printf original-hook".into());
+                let claim = IntentClaim {
+                    intent_key: "recover-original".into(),
+                    fingerprint: checkout_fingerprint(&checkout),
+                    dedup_scope: DedupScope::Permanent,
+                };
+                let mut sup = checkout_crash_supervisor(&state, boundary).await;
+                let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
+                    .await
+                    .expect_err("crash boundary");
+                assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+                let reservation = sup
+                    .store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(reservation.outcome, ReservationOutcome::Pending);
+                let original = sup
+                    .store
+                    .origin_working_copy(&reservation.session_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(original.root_identity.is_some());
+                let snapshot: crate::working_copies::PreparationSnapshot =
+                    serde_json::from_str(original.preparation_snapshot.as_deref().unwrap())
+                        .unwrap();
+                assert_eq!(snapshot.resolved, checkout);
+                assert_eq!(
+                    snapshot.publication_started,
+                    boundary == CreateStage::AfterPreparationPublication
+                );
+                assert_eq!(
+                    checkout_directories(&root),
+                    usize::from(boundary != CreateStage::AfterRecord)
+                );
+                if reopen {
+                    drop(sup);
+                    sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                        .await
+                        .unwrap();
+                }
+                // The retry supplies only the original client identity, not
+                // the root/hook or compiled mode that recovery must restore.
+                let info = sup
+                    .reconcile_github_checkout(
+                        claim.intent_key.clone(),
+                        &checkout.client_identity,
+                        80,
+                        24,
+                    )
+                    .await
+                    .expect("recover recorded checkout")
+                    .expect("recorded key cannot become unknown");
+                assert_eq!(info.id, reservation.session_id);
+                let replay = sup
+                    .reconcile_github_checkout(
+                        claim.intent_key.clone(),
+                        &checkout.client_identity,
+                        100,
+                        30,
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(replay.id, info.id);
+                let recovered = sup
+                    .store
+                    .origin_working_copy(&info.id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(recovered.id, original.id);
+                assert_eq!(checkout_directories(&root), 1);
+                let row = sup.store.session(&info.id).await.unwrap().unwrap();
+                let spec: LaunchSpec = serde_json::from_slice(
+                    &std::fs::read(crate::launch::spec_path_for_launch(
+                        state.path(),
+                        &info.id,
+                        row.generation,
+                    ))
+                    .unwrap(),
+                )
+                .unwrap();
+                let preparation = spec.preparation.expect("fresh origin retains preparation");
+                assert_eq!(preparation.post_clone, checkout.post_clone);
+                assert_eq!(preparation.shell, snapshot.shell);
+                assert_eq!(preparation.working_copy_id, original.id);
+            }
+        }
+    }
+
+    /// Canonical spelling can change while both captured inodes still match.
+    /// A late cwd refusal must settle the original Error/Failed pair even when
+    /// a borrower would make ordinary session rollback legal. Restoring paths
+    /// and reopening must replay that refusal without publishing preparation.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn fresh_checkout_late_retry_refusal_retains_origin_with_or_without_borrower() {
+        for with_borrower in [false, true] {
+            let state = StateDir::new();
+            let ancestor = state.path().join("ancestor");
+            let parked = state.path().join("parked");
+            let root = ancestor.join("checkouts");
+            std::fs::create_dir_all(&root).unwrap();
+            let checkout = checkout_fixture(&root);
+            let claim = IntentClaim {
+                intent_key: "late-retry-refusal".into(),
+                fingerprint: checkout_fingerprint(&checkout),
+                dedup_scope: DedupScope::Permanent,
+            };
+            let sup = checkout_crash_supervisor(&state, CreateStage::AfterCheckoutAllocation).await;
+            let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
+                .await
+                .expect_err("allocation crash");
+            assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+            let reservation = sup
+                .store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(reservation.outcome, ReservationOutcome::Pending);
+            let original = sup
+                .store
+                .session(&reservation.session_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let plan = sup
+                .store
+                .origin_working_copy(&original.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let preparation = state
+                .path()
+                .join("checkout-preparation")
+                .join(format!("{}.json", plan.id));
+            let spec = crate::launch::spec_path_for_launch(
+                state.path(),
+                &original.id,
+                original.generation,
+            );
+            assert!(!preparation.exists());
+            assert!(!spec.exists());
+            std::fs::write(
+                std::path::Path::new(&original.cwd).join("payload"),
+                b"owned",
+            )
+            .unwrap();
+            let borrower = if with_borrower {
+                Some(
+                    sup.create_session_without_overrides(
+                        &original.cwd,
+                        "agent",
+                        None,
+                        80,
+                        24,
+                        None,
+                    )
+                    .await
+                    .unwrap(),
+                )
+            } else {
+                None
+            };
+            let member_count = if with_borrower { 2 } else { 1 };
+            assert_eq!(
+                sup.store.working_copy_member_count(&plan.id).await.unwrap(),
+                member_count
+            );
+            std::fs::rename(&ancestor, &parked).unwrap();
+            std::os::unix::fs::symlink(&parked, &ancestor).unwrap();
+            assert!(crate::working_copies::verified_root(&plan).is_ok());
+            assert_eq!(
+                crate::working_copies::verify_identity(&plan).unwrap(),
+                crate::working_copies::IdentityStatus::Matches
+            );
+            assert_ne!(
+                std::fs::canonicalize(&original.cwd)
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                original.canonical_cwd.as_deref().unwrap()
+            );
+            assert!(
+                sup.recover_checkout_destination(&plan, &original.cwd)
+                    .is_ok(),
+                "the fixture must reach validation after recovery"
+            );
+
+            let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+                .await
+                .expect_err("canonical cwd moved");
+            assert!(
+                refusal.downcast_ref::<RetainedCreateRefusal>().is_some(),
+                "{refusal:#}"
+            );
+            let retained = sup
+                .store
+                .session(&original.id)
+                .await
+                .unwrap()
+                .expect("origin retained");
+            assert!(matches!(retained.outcome, LastOutcome::Error { .. }));
+            assert!(retained.pane.is_empty());
+            assert_eq!(retained.generation, original.generation);
+            let failed = sup
+                .store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(failed.outcome, ReservationOutcome::Failed { .. }));
+            assert_eq!(
+                sup.store.working_copy_member_count(&plan.id).await.unwrap(),
+                member_count
+            );
+            assert_eq!(
+                sup.store
+                    .member_working_copies_all(&original.id)
+                    .await
+                    .unwrap()
+                    .len(),
+                1
+            );
+            if let Some(borrower) = &borrower {
+                assert!(sup.store.session(&borrower.id).await.unwrap().is_some());
+                assert_eq!(
+                    sup.store
+                        .member_working_copies_all(&borrower.id)
+                        .await
+                        .unwrap()
+                        .len(),
+                    1
+                );
+            }
+            assert!(!preparation.exists());
+            assert!(!spec.exists());
+            assert_eq!(
+                std::fs::read(std::path::Path::new(&original.cwd).join("payload")).unwrap(),
+                b"owned"
+            );
+            std::fs::remove_file(&ancestor).unwrap();
+            std::fs::rename(&parked, &ancestor).unwrap();
+            drop(sup);
+            let reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let replay = fresh_create(&reopened, &checkout, Some(claim.clone()))
+                .await
+                .expect_err("replay durable refusal");
+            assert_eq!(format!("{replay:#}"), format!("{refusal:#}"));
+            assert_eq!(
+                reopened
+                    .store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome,
+                failed.outcome
+            );
+            assert!(matches!(
+                reopened
+                    .store
+                    .session(&original.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .outcome,
+                LastOutcome::Error { .. }
+            ));
+            assert_eq!(
+                reopened
+                    .store
+                    .working_copy_member_count(&plan.id)
+                    .await
+                    .unwrap(),
+                member_count
+            );
+            let after = reopened
+                .store
+                .origin_working_copy(&original.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(after.id, plan.id);
+            assert_eq!(after.path_identity, plan.path_identity);
+            assert_eq!(after.preparation_snapshot, plan.preparation_snapshot);
+            assert!(!preparation.exists());
+            assert!(!spec.exists());
+        }
+    }
+
+    /// Losing published evidence, corrupting provenance, or observing a
+    /// started hook cannot authorize another preparation. The original
+    /// pending create settles as a retained refusal before and after reopen.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn fresh_checkout_recovery_refuses_lost_or_started_evidence() {
+        for reopen in [false, true] {
+            for damage in [
+                "missing-state",
+                "hook-started",
+                "missing-registry",
+                "missing-provenance",
+                "publication-claim",
+                "corrupt-state",
+            ] {
+                let state = StateDir::new();
+                let root = state.path().join("checkouts");
+                std::fs::create_dir(&root).unwrap();
+                let checkout = checkout_fixture(&root);
+                let claim = IntentClaim {
+                    intent_key: "refuse-damaged".into(),
+                    fingerprint: checkout_fingerprint(&checkout),
+                    dedup_scope: DedupScope::Permanent,
+                };
+                let mut sup = checkout_crash_supervisor(
+                    &state,
+                    if damage == "publication-claim" {
+                        CreateStage::AfterCheckoutAllocation
+                    } else {
+                        CreateStage::AfterPreparationPublication
+                    },
+                )
+                .await;
+                let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
+                    .await
+                    .expect_err("crash boundary");
+                assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+                let reservation = sup
+                    .store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let plan = sup
+                    .store
+                    .origin_working_copy(&reservation.session_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let path = state
+                    .path()
+                    .join("checkout-preparation")
+                    .join(format!("{}.json", plan.id));
+                let state_before = crate::launch::read_preparation_state(&path, &plan.id).unwrap();
+                if damage == "publication-claim" {
+                    assert!(state_before.is_none());
+                } else {
+                    assert_eq!(
+                        state_before.unwrap().state,
+                        crate::launch::PreparationState::NotStarted
+                    );
+                }
+                match damage {
+                    "missing-state" => std::fs::remove_file(&path).unwrap(),
+                    "publication-claim" => assert!(
+                        sup.store
+                            .claim_preparation_publication(&plan.id)
+                            .await
+                            .unwrap()
+                    ),
+                    "corrupt-state" => std::fs::write(&path, b"{broken").unwrap(),
+                    "hook-started" => crate::launch::write_preparation_state(
+                        &path,
+                        &plan.id,
+                        &crate::launch::PreparationState::HookStarted,
+                        &crate::files::RealFs,
+                    )
+                    .unwrap(),
+                    "missing-registry" => {
+                        sup.store
+                            .conn
+                            .lock()
+                            .unwrap()
+                            .execute("DELETE FROM working_copies WHERE id = ?1", [&plan.id])
+                            .unwrap();
+                    }
+                    "missing-provenance" => {
+                        let conn = sup.store.conn.lock().unwrap();
+                        conn.execute("DELETE FROM working_copies WHERE id = ?1", [&plan.id])
+                            .unwrap();
+                        conn.execute(
+                            "UPDATE sessions SET fresh_checkout_id = NULL WHERE id = ?1",
+                            [&reservation.session_id],
+                        )
+                        .unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                let before_state = std::fs::read(&path).ok();
+                if reopen {
+                    drop(sup);
+                    sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                        .await
+                        .unwrap();
+                }
+                let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+                    .await
+                    .expect_err("uncertain preparation cannot repeat");
+                assert!(
+                    format!("{refusal:#}").contains(
+                        if matches!(damage, "missing-registry" | "missing-provenance") {
+                            "provenance"
+                        } else {
+                            "preparation"
+                        }
+                    ),
+                    "{damage}: {refusal:#}"
+                );
+                assert_eq!(std::fs::read(&path).ok(), before_state);
+                assert_eq!(checkout_directories(&root), 1);
+                let retained = sup
+                    .store
+                    .session(&reservation.session_id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(matches!(retained.outcome, LastOutcome::Error { .. }));
+                assert!(matches!(
+                    sup.store
+                        .reservation(&claim.intent_key)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .outcome,
+                    ReservationOutcome::Failed { .. }
+                ));
+                assert_eq!(
+                    sup.store.working_copy_member_count(&plan.id).await.unwrap(),
+                    1
+                );
+            }
+        }
+    }
+
+    /// Before mkdir, neither a replacement root nor a lost session record
+    /// grants permission to allocate. The recorded plan remains evidence;
+    /// retry must not reconstruct a new destination from current inputs.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn fresh_checkout_pending_refuses_missing_session_or_replaced_root() {
+        for damage in ["missing-session", "replaced-root"] {
+            let state = StateDir::new();
+            let root = state.path().join("checkouts");
+            std::fs::create_dir(&root).unwrap();
+            let checkout = checkout_fixture(&root);
+            let claim = IntentClaim {
+                intent_key: "before-mkdir".into(),
+                fingerprint: checkout_fingerprint(&checkout),
+                dedup_scope: DedupScope::Permanent,
+            };
+            let sup = checkout_crash_supervisor(&state, CreateStage::AfterRecord).await;
+            let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
+                .await
+                .expect_err("pre-mkdir crash");
+            assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+            let reservation = sup
+                .store
+                .reservation(&claim.intent_key)
+                .await
+                .unwrap()
+                .unwrap();
+            let plan = sup
+                .store
+                .origin_working_copy(&reservation.session_id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                plan.allocation_state,
+                crate::working_copies::AllocationState::Planned
+            );
+            assert_eq!(checkout_directories(&root), 0);
+            match damage {
+                "missing-session" => {
+                    sup.store
+                        .conn
+                        .lock()
+                        .unwrap()
+                        .execute(
+                            "DELETE FROM sessions WHERE id = ?1",
+                            [&reservation.session_id],
+                        )
+                        .unwrap();
+                }
+                "replaced-root" => {
+                    std::fs::rename(&root, state.path().join("old-root")).unwrap();
+                    std::fs::create_dir(&root).unwrap();
+                    assert!(crate::working_copies::verified_root(&plan).is_err());
+                }
+                _ => unreachable!(),
+            }
+            fresh_create(&sup, &checkout, Some(claim))
+                .await
+                .expect_err("cannot recover authority to allocate");
+            assert_eq!(checkout_directories(&root), 0);
+            let rows = sup.store.working_copy_rows().await.unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, plan.id);
+            assert_eq!(
+                rows[0].allocation_state,
+                crate::working_copies::AllocationState::Planned
+            );
+        }
+    }
+
+    /// A stopped accepted terminal with incomplete setup must not look like
+    /// an ordinary agent exit. Polling and startup use the same evidence;
+    /// Ready and borrower sessions retain ordinary exit classification.
+    /// The dummy shim is deliberately not an at-most-once execution oracle:
+    /// this test supplies preparation records and consumes its spec explicitly.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn checkout_interruption_status_matches_reload() {
+        for evidence in [
+            "not-started",
+            "hook-started",
+            "missing",
+            "corrupt",
+            "ready",
+            "borrower",
+        ] {
+            let state = StateDir::new();
+            let root = state.path().join("checkouts");
+            std::fs::create_dir(&root).unwrap();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let origin = fresh_create(&sup, &checkout_fixture(&root), None)
+                .await
+                .unwrap();
+            let plan = sup
+                .store
+                .origin_working_copy(&origin.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let path = state
+                .path()
+                .join("checkout-preparation")
+                .join(format!("{}.json", plan.id));
+            let info = if evidence == "borrower" {
+                sup.create_session_without_overrides(&origin.cwd, "agent", None, 80, 24, None)
+                    .await
+                    .unwrap()
+            } else {
+                origin
+            };
+            match evidence {
+                "missing" => std::fs::remove_file(&path).unwrap(),
+                "corrupt" => std::fs::write(&path, b"invalid JSON").unwrap(),
+                "hook-started" | "ready" => crate::launch::write_preparation_state(
+                    &path,
+                    &plan.id,
+                    &if evidence == "ready" {
+                        crate::launch::PreparationState::Ready
+                    } else {
+                        crate::launch::PreparationState::HookStarted
+                    },
+                    &crate::files::RealFs,
+                )
+                .unwrap(),
+                _ => {}
+            }
+            let row = sup.store.session(&info.id).await.unwrap().unwrap();
+            assert!(!row.pane.is_empty(), "premise: terminal was accepted");
+            assert!(
+                super::super::status::interrupted_preparation_detail(
+                    state.path(),
+                    &sup.store,
+                    &info.id,
+                    row.generation + 1,
+                )
+                .await
+                .unwrap()
+                .is_none(),
+                "another generation cannot supply acceptance evidence"
+            );
+            let spec = crate::launch::spec_path_for_launch(state.path(), &info.id, row.generation);
+            assert!(spec.exists(), "dummy shim leaves the spec unconsumed");
+            std::fs::remove_file(spec).unwrap();
+            assert!(
+                read_launch_sentinel(state.path(), &info.id, row.generation)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            let entry = sup.sessions.lock().await[&info.id].clone();
+            let mut live = sup.tmux.pane_states().await.unwrap();
+            let pane = live.get_mut(&row.pane).expect("accepted pane exists");
+            assert_eq!(pane.session_name, row.tmux_name);
+            // This supplied observation tests the classifier's liveness gate,
+            // not the dummy process's lifetime or preparation execution.
+            pane.dead = false;
+            assert!(
+                super::super::status::observe_entry(&sup, &entry, &live)
+                    .await
+                    .unwrap()
+                    .sentinel
+                    .is_none()
+            );
+            sup.tmux.kill_session(&row.tmux_name).await.unwrap();
+            let absent = sup.tmux.pane_states().await.unwrap();
+            assert!(!absent.contains_key(&row.pane), "premise: terminal is gone");
+            let observed = super::super::status::observe_entry(&sup, &entry, &absent)
+                .await
+                .unwrap();
+            let should_error = !matches!(evidence, "ready" | "borrower");
+            assert_eq!(observed.sentinel.is_some(), should_error, "{evidence}");
+            if let Some(detail) = observed.sentinel {
+                assert!(detail.contains("checkout preparation"), "{detail}");
+            }
+            let (reloaded, _) = Supervisor::reload_sessions(
+                state.path(),
+                &sup.store,
+                &sup.tmux,
+                &SupervisorSeams::default(),
+                true,
+            )
+            .await
+            .unwrap();
+            let outcome = reloaded[&info.id].outcome.lock().unwrap().clone();
+            assert_eq!(
+                matches!(outcome, LastOutcome::Error { .. }),
+                should_error,
+                "{evidence}: {outcome:?}"
+            );
+            assert_eq!(
+                sup.store.session(&info.id).await.unwrap().unwrap().outcome,
+                outcome
+            );
+        }
+    }
+
+    /// Ordinary restart requires Ready only for the original fresh session.
+    /// Borrowers restart against the contents explicitly selected by the user;
+    /// neither path may repeat preparation. Ready survives supervisor reopen
+    /// but does not waive inode checks, including after a successful restart.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn checkout_restart_requires_ready_only_for_origin() {
+        use crate::launch::PreparationState;
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let origin = fresh_create(&sup, &checkout_fixture(&root), None)
+            .await
+            .unwrap();
+        let plan = sup
+            .store
+            .origin_working_copy(&origin.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let path = state
+            .path()
+            .join("checkout-preparation")
+            .join(format!("{}.json", plan.id));
+        let generation = sup
+            .store
+            .session(&origin.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .generation;
+        for incomplete in [
+            PreparationState::NotStarted,
+            PreparationState::CloneStarted,
+            PreparationState::HookStarted,
+        ] {
+            crate::launch::write_preparation_state(
+                &path,
+                &plan.id,
+                &incomplete,
+                &crate::files::RealFs,
+            )
+            .unwrap();
+            assert_eq!(
+                crate::launch::read_preparation_state(&path, &plan.id)
+                    .unwrap()
+                    .unwrap()
+                    .state,
+                incomplete
+            );
+            sup.restart_session(&origin.id, RestartMode::Fresh, true)
+                .await
+                .expect_err("origin setup must finish first");
+            assert_eq!(
+                sup.store
+                    .session(&origin.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .generation,
+                generation
+            );
+        }
+        let borrower = sup
+            .create_session_without_overrides(&origin.cwd, "agent", None, 80, 24, None)
+            .await
+            .unwrap();
+        assert!(
+            sup.store
+                .origin_working_copy(&borrower.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        sup.restart_session(&borrower.id, RestartMode::Fresh, true)
+            .await
+            .expect("borrower does not inherit incomplete setup");
+        let borrower_row = sup.store.session(&borrower.id).await.unwrap().unwrap();
+        assert_eq!(borrower_row.generation, 1);
+        let borrower_spec: LaunchSpec = serde_json::from_slice(
+            &std::fs::read(crate::launch::spec_path_for_launch(
+                state.path(),
+                &borrower.id,
+                1,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(borrower_spec.preparation.is_none());
+        crate::launch::write_preparation_state(
+            &path,
+            &plan.id,
+            &PreparationState::Ready,
+            &crate::files::RealFs,
+        )
+        .unwrap();
+        let ready_bytes = std::fs::read(&path).unwrap();
+        sup.restart_session(&origin.id, RestartMode::Fresh, true)
+            .await
+            .expect("Ready permits ordinary restart");
+        let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
+        assert_eq!(restarted.generation, generation + 1);
+        let spec: LaunchSpec = serde_json::from_slice(
+            &std::fs::read(crate::launch::spec_path_for_launch(
+                state.path(),
+                &origin.id,
+                restarted.generation,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(spec.preparation.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), ready_bytes);
+
+        // Reconstruct the service, rather than calling reload in place: the
+        // next restart must derive its authority from durable state alone.
+        drop(sup);
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::launch::read_preparation_state(&path, &plan.id)
+                .unwrap()
+                .unwrap()
+                .state,
+            PreparationState::Ready,
+        );
+        sup.restart_session(&origin.id, RestartMode::Fresh, true)
+            .await
+            .expect("Ready permits restart after supervisor reopen");
+        let restarted = sup.store.session(&origin.id).await.unwrap().unwrap();
+        assert_eq!(restarted.generation, generation + 2);
+        let spec: LaunchSpec = serde_json::from_slice(
+            &std::fs::read(crate::launch::spec_path_for_launch(
+                state.path(),
+                &origin.id,
+                restarted.generation,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(spec.preparation.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), ready_bytes);
+
+        let saved = root.join("saved");
+        std::fs::rename(&origin.cwd, &saved).unwrap();
+        std::fs::create_dir(&origin.cwd).unwrap();
+        std::fs::write(
+            std::path::Path::new(&origin.cwd).join("foreign"),
+            b"untouched",
+        )
+        .unwrap();
+        assert_eq!(
+            crate::working_copies::verify_identity(&plan).unwrap(),
+            crate::working_copies::IdentityStatus::DifferentObject
+        );
+        let refusal = sup
+            .restart_session(&origin.id, RestartMode::Fresh, true)
+            .await
+            .expect_err("Ready cannot authorize a foreign path");
+        assert!(format!("{refusal:#}").contains("identity"));
+        assert_eq!(
+            sup.store
+                .session(&origin.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .generation,
+            restarted.generation
+        );
+        assert_eq!(
+            std::fs::read(std::path::Path::new(&origin.cwd).join("foreign")).unwrap(),
+            b"untouched"
+        );
+        assert!(saved.is_dir());
+    }
+
+    /// Retrying an interrupted Existing create inside a managed checkout
+    /// must not inherit its owner's preparation. The real create path must
+    /// recover the borrower without panic, allocation, or a preparation spec.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn interrupted_borrower_retries_without_checkout_preparation() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let records = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&records);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_crash: Some(Arc::new(move |stage| {
+                    if stage == CreateStage::AfterRecord
+                        && counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1
+                    {
+                        anyhow::bail!("interrupt the borrower after its durable record");
+                    }
+                    Ok(())
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let owner = fresh_create(&sup, &checkout_fixture(&root), None)
+            .await
+            .unwrap();
+        let plan = sup
+            .store
+            .origin_working_copy(&owner.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let state_path = state
+            .path()
+            .join("checkout-preparation")
+            .join(format!("{}.json", plan.id));
+        let original_preparation = std::fs::read(&state_path).unwrap();
+        let claim = IntentClaim {
+            intent_key: "borrower-retry".into(),
+            fingerprint: raw_fingerprint(&owner.cwd, "agent", None, None, None),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let failure = sup
+            .create_session_without_overrides(
+                &owner.cwd,
+                "agent",
+                None,
+                80,
+                24,
+                Some(claim.clone()),
+            )
+            .await
+            .expect_err("borrower interrupted before terminal admission");
+        assert!(failure.is::<SimulatedCrash>(), "{failure:#}");
+        let borrower = sup
+            .store
+            .load_all()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id != owner.id)
+            .expect("durable borrower");
+        assert!(borrower.pane.is_empty());
+        assert_eq!(
+            sup.store
+                .member_working_copies_all(&borrower.id)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            sup.store
+                .origin_working_copy(&borrower.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(checkout_directories(&root), 1);
+
+        let recovered = sup
+            .create_session_without_overrides(&owner.cwd, "agent", None, 80, 24, Some(claim))
+            .await
+            .expect("recover the Existing borrower");
+        assert_eq!(recovered.id, borrower.id);
+        let durable = sup.store.session(&recovered.id).await.unwrap().unwrap();
+        let spec: LaunchSpec = serde_json::from_slice(
+            &std::fs::read(crate::launch::spec_path_for_launch(
+                state.path(),
+                &recovered.id,
+                durable.generation,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(spec.preparation.is_none());
+        assert_eq!(std::fs::read(&state_path).unwrap(), original_preparation);
+        assert_eq!(checkout_directories(&root), 1);
+        assert_eq!(
+            sup.store.working_copy_member_count(&plan.id).await.unwrap(),
+            2
+        );
+    }
+
+    /// A journaled archive owns the source even while it still exists. An
+    /// Existing create at that source or a canonical descendant must refuse
+    /// before inserting a borrower; filesystem existence alone cannot admit it.
+    #[farhelm_testtrace::test]
+    async fn existing_create_refuses_a_pending_archive_with_its_source_present() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_crash: Some(Arc::new(|stage| {
+                    if stage == CreateStage::AfterRecord {
+                        anyhow::bail!("fixture stops before allocation");
+                    }
+                    Ok(())
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        fresh_create(&sup, &checkout, None)
+            .await
+            .expect_err("retain the plan");
+        let planned = sup.store.working_copy_rows().await.unwrap();
+        assert_eq!(planned.len(), 1);
+        let accepted = sup
+            .store
+            .allocate_working_copy(&planned[0].id, None, None)
+            .await
+            .unwrap();
+        let source = accepted.canonical_path;
+        let descendant = source.join("subdir");
+        std::fs::create_dir(&descendant).unwrap();
+        std::fs::write(source.join("sentinel"), b"keep").unwrap();
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+            assert_eq!(conn.execute(
+                "UPDATE working_copies SET allocation_state = 'archive_pending', archive_destination = ?2 WHERE id = ?1",
+                rusqlite::params![planned[0].id, root.join("farhelm-archived-working-copies/pending").to_str().unwrap()],
+            ).unwrap(), 1);
+        }
+        assert_eq!(
+            sup.store.working_copy_rows().await.unwrap()[0].allocation_state,
+            crate::working_copies::AllocationState::ArchivePending
+        );
+        assert_eq!(
+            sup.store
+                .working_copy_member_count(&planned[0].id)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(source.is_dir() && descendant.is_dir());
+        for cwd in [&source, &descendant] {
+            let refusal = sup
+                .create_session(
+                    CreateInputs {
+                        cwd: cwd.to_str().unwrap(),
+                        parent: None,
+                        github_checkout: None,
+                        mode: CreateMode::Raw {
+                            invocation: "agent".into(),
+                            agent_kind: None,
+                            resume_template: None,
+                            source_profile: None,
+                            launch: None,
+                        },
+                        title: None,
+                        cols: 80,
+                        rows: 24,
+                    },
+                    None,
+                )
+                .await
+                .expect_err("pending source cannot admit a borrower");
+            assert_eq!(error_kind(&refusal), ErrorKind::Conflict);
+            assert!(format!("{refusal:#}").contains("unresolved checkout archive"));
+            assert_eq!(sup.store.load_all().await.unwrap().len(), 1);
+            assert_eq!(
+                sup.store
+                    .working_copy_member_count(&planned[0].id)
+                    .await
+                    .unwrap(),
+                1
+            );
+            assert_eq!(std::fs::read(source.join("sentinel")).unwrap(), b"keep");
+        }
+    }
+
+    /// C1/C2, the ambiguous-Planned crash window: an interrupted attempt
+    /// leaves a `planned` registry row, a stranger's directory then
+    /// occupies the planned path, and the same-key retry must (a) refuse
+    /// WITHOUT adopting or touching the foreign content, (b) retain a
+    /// visible Error session row with the registry row and membership as
+    /// diagnostic evidence, (c) settle the intent `Failed` so further
+    /// retries replay the SAME refusal without re-allocating, and (d)
+    /// leave the plan retired only by an explicit Delete (the teardown
+    /// slice's contract — asserted here as the state that teardown will
+    /// consume).
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn an_ambiguous_planned_checkout_never_adopts_a_foreign_directory() {
+        let state = StateDir::new();
+        let db = state.path().join("supervisor.db");
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "gh-key".to_string(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        // Crash between the record and the mkdir: the launching row, its
+        // intent claim, and the planned registry row survive; no directory
+        // exists.
+        let sup = {
+            Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    create_crash: Some(Arc::new(|stage| {
+                        if stage == CreateStage::AfterRecord {
+                            anyhow::bail!("simulated crash after the record");
+                        }
+                        Ok(())
+                    })),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+        fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("the simulated crash fails the create");
+        drop(sup);
+
+        // Reopen on the SAME store, and plant a FOREIGN directory at the
+        // planned path — the ambiguity is now real: the registry row
+        // recorded no identity, so nothing can prove whose directory this
+        // is.
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let row = sup
+            .store
+            .load_all()
+            .await
+            .expect("load")
+            .into_iter()
+            .next()
+            .expect("the interrupted attempt's launching row survives the reopen");
+        assert_eq!(row.pane, "", "nothing was ever launched");
+        let planted = root.join("bar-1");
+        std::fs::create_dir_all(&planted).expect("plant the foreign directory");
+        std::fs::write(planted.join("foreign-marker"), b"not ours").expect("marker");
+
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("the ambiguous plan must refuse, never adopt");
+        assert!(
+            format!("{refusal:#}").contains("occupied but its registry row"),
+            "the refusal must name the ambiguity: {refusal:#}"
+        );
+        // The foreign directory is untouched, and the plan stays as
+        // diagnostic evidence.
+        assert_eq!(
+            std::fs::read(planted.join("foreign-marker")).expect("marker readable"),
+            b"not ours",
+            "the foreign directory must not be adopted, moved, or cleared"
+        );
+        let plan = sup
+            .store
+            .member_working_copy(&row.id)
+            .await
+            .expect("registry read")
+            .expect("the plan is retained as evidence");
+        assert_eq!(
+            plan.allocation_state,
+            crate::working_copies::AllocationState::Planned,
+            "a refusal never converts a plan into an allocation"
+        );
+        let row = sup
+            .store
+            .session(&row.id)
+            .await
+            .expect("session read")
+            .expect("the refusal RETAINS the session row");
+        assert!(
+            matches!(row.outcome, LastOutcome::Error { .. }),
+            "the retained refusal is a visible error row with an empty pane"
+        );
+        // The intent settled `Failed` with the same refusal: a further
+        // retry replays THAT answer, without re-attempting the mkdir and
+        // without minting a second plan.
+        let replay = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect_err("the spent key replays the refusal");
+        assert!(
+            format!("{replay:#}").contains("occupied but its registry row"),
+            "the replay is the SAME refusal, not a fresh attempt: {replay:#}"
+        );
+        assert_eq!(
+            checkout_directories(&root),
+            1,
+            "still only the foreign directory"
+        );
+        assert!(
+            sup.store
+                .member_working_copy(&row.id)
+                .await
+                .expect("registry read")
+                .is_some(),
+            "no second plan row was minted"
+        );
+        let listed = crate::service::listing::list_all(&sup)
+            .await
+            .expect("the committed Error refusal is listed without another store read");
+        assert!(
+            listed.sessions.iter().any(|session| session.id == row.id),
+            "the successful refusal is immediately visible to List"
+        );
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&row.id)
+            .cloned()
+            .expect("the listed Error row supplies Delete's live handle");
+        assert!(
+            sup.teardown_session(&entry, &row.id, test_admission(&sup).await)
+                .await
+                .is_ok(),
+            "Delete retires the committed refusal without a restart"
+        );
+        assert!(
+            sup.store
+                .session(&row.id)
+                .await
+                .expect("read deleted refusal")
+                .is_none(),
+            "Delete removes the successful refusal's session row"
+        );
+        assert_eq!(
+            std::fs::read(planted.join("foreign-marker")).expect("foreign marker after Delete"),
+            b"not ours",
+            "Delete retires the unknown plan without moving the foreign directory"
+        );
+        let _ = db; // the reopening used the same store through the state dir
+    }
+
+    /// C2, the before-mkdir collision: a directory already occupying the
+    /// planned basename is a NORMAL refusal. Nothing is recorded about the
+    /// colliding object — no session row (the never-launched rollback),
+    /// no registry row, no membership — and the intent replays the same
+    /// conflict on retry.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_collision_before_mkdir_never_records_ownership_of_the_existing_directory() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        std::fs::create_dir_all(root.join("bar-1")).expect("the colliding directory");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "gh-key".to_string(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("the occupied basename is refused before any side effect");
+        assert!(
+            format!("{refusal:#}").contains("no longer the free name"),
+            "the refusal names the collision: {refusal:#}"
+        );
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty(),
+            "a pre-mkdir collision leaves no session row at all"
+        );
+        assert_eq!(
+            std::fs::read_dir(&root).expect("root readable").count(),
+            1,
+            "the colliding directory is the only entry; nothing else was created"
+        );
+        let replay = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect_err("the replay answers the same conflict");
+        assert!(
+            format!("{replay:#}").contains("no longer the free name"),
+            "the spent key replays the conflict: {replay:#}"
+        );
+    }
+
+    /// C2, the post-mkdir launch failure: a tmux that refuses the session
+    /// AFTER the checkout was allocated leaves a LISTED retained error
+    /// session, keeps the registry row and its membership (the last
+    /// ownership record after an allocation is never dropped), settles the
+    /// intent `Failed`, and a reopen preserves all of it — a same-key
+    /// retry replays the refusal without a second mkdir.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_tmux_failure_after_allocation_retains_the_error_session_and_ownership() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "gh-key".to_string(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let failing_tmux = state.path().join("failing-tmux");
+        // The fake tmux answers the version probe (every supervisor asks
+        // it once at startup) and refuses EVERYTHING else — new-session,
+        // has-session — which is the post-allocation failure class. The
+        // driver prefixes its own socket/config arguments, so the flags
+        // are matched anywhere in the argument list, not at $1.
+        std::fs::write(
+            &failing_tmux,
+            b"#!/bin/sh\n# The supervisor's STARTUP and preflight run several benign commands\n# (-V, display-message version probes, start-server, set-option) that must\n# succeed before the create path runs. Only the session-shaped commands\n# are refused: new-session -- the command the create path itself issues --\n# fails, and has-session reports absence (exit 1), so the failure\n# classifies as a genuine session-creation failure, the post-allocation\n# class this test exists for.\nfor arg in \"$@\"; do\n  if [ \"$arg\" = -V ]; then echo \"tmux 3.7c\"; exit 0; fi\n  if [ \"$arg\" = \"#{version}\" ]; then echo \"3.7c\"; exit 0; fi\n  if [ \"$arg\" = new-session ]; then exit 1; fi\n  if [ \"$arg\" = has-session ]; then echo \"no current target\" >&2; exit 1; fi\ndone\nexit 0\n",
+        )
+        .expect("failing tmux fixture");
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&failing_tmux, std::fs::Permissions::from_mode(0o755))
+                .expect("executable fixture");
+        }
+        let sup = {
+            Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    tmux_program: failing_tmux.clone(),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor")
+        };
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("the tmux failure fails the create");
+        eprintln!("DEBUG refusal: {refusal:#}");
+        assert!(
+            format!("{refusal:#}").contains("allocated and is kept for inspection"),
+            "the refusal must say the checkout itself survived: {refusal:#}"
+        );
+        let row = sup
+            .store
+            .load_all()
+            .await
+            .expect("load")
+            .into_iter()
+            .next()
+            .expect("the error session row is retained, listed");
+        assert_eq!(row.pane, "", "nothing was ever launched");
+        assert!(
+            matches!(row.outcome, LastOutcome::Error { .. }),
+            "the retained refusal is a visible error row"
+        );
+        let plan = sup
+            .store
+            .member_working_copy(&row.id)
+            .await
+            .expect("registry read")
+            .expect("the registry ownership record survives the failure");
+        assert_eq!(
+            plan.allocation_state,
+            crate::working_copies::AllocationState::Allocated,
+            "the allocated checkout is durable ownership evidence"
+        );
+        assert!(
+            std::fs::metadata(plan.canonical_path.as_deref().unwrap())
+                .expect("allocated directory")
+                .is_dir(),
+            "the allocated directory exists"
+        );
+        drop(sup);
+
+        // Reopen: the retained error session, the registry row, and the
+        // membership all survive a supervisor restart, and the same key
+        // replays the refusal without re-allocating.
+        let sup = Supervisor::new(state.path()).await.expect("supervisor");
+        let replay = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect_err("the reopened supervisor replays the refusal");
+        assert!(
+            format!("{replay:#}").contains("allocated and is kept for inspection"),
+            "the replay is the SAME refusal: {replay:#}"
+        );
+        assert_eq!(
+            sup.store
+                .member_working_copy(&row.id)
+                .await
+                .expect("registry read")
+                .map(|p| p.allocation_state),
+            Some(crate::working_copies::AllocationState::Allocated),
+            "the ownership record is intact after the restart; no second checkout exists"
+        );
+        assert_eq!(
+            checkout_directories(&root),
+            1,
+            "exactly one checkout directory, ever"
+        );
+    }
+
+    /// Drives a post-mkdir allocation fault through the real create path and
+    /// proves its refusal remains durable across reopen. Both parent-fsync
+    /// and identity-write faults use this contract: neither has enough
+    /// identity evidence to mark the row Allocated, but each may have left
+    /// the directory on disk and must therefore retain the Planned record.
+    async fn assert_post_mkdir_allocation_fault_retains_evidence(
+        stage: Option<crate::working_copies::AllocationStage>,
+        fault_name: &'static str,
+        sql_identity_trigger: bool,
+        retained_refusal_fails: bool,
+        keyed: bool,
+    ) {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: format!("{fault_name}-key"),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let fault_name_for_seam = fault_name;
+        let allocation_fault = stage.map(|stage| {
+            Arc::new(move |actual| {
+                if actual == stage {
+                    anyhow::bail!("injected {fault_name_for_seam} allocation failure");
+                }
+                Ok(())
+            }) as crate::working_copies::AllocationFault
+        });
+        let db = state.path().join("supervisor.db");
+        let create_crash = sql_identity_trigger.then(|| {
+            Arc::new(move |stage| {
+                if stage == CreateStage::AfterRecord {
+                    let conn = rusqlite::Connection::open(&db)
+                        .context("opening the private supervisor database for the trigger")?;
+                    conn.execute_batch(
+                        "CREATE TRIGGER fail_identity_write \
+                         BEFORE UPDATE OF allocation_state ON working_copies \
+                         WHEN NEW.allocation_state = 'allocated' \
+                         BEGIN SELECT RAISE(FAIL, 'injected identity-write allocation failure'); END;",
+                    )
+                    .context("installing the actual identity-write failure trigger")?;
+                }
+                Ok(())
+            }) as CreateCrashSeam
+        });
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_crash,
+                allocation_fault,
+                retained_refusal_fault: retained_refusal_fails.then(|| {
+                    Arc::new(|| anyhow::bail!("injected retained-refusal transaction failure"))
+                        as crate::store::RetainedRefusalFault
+                }),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+
+        let refusal = fresh_create(&sup, &checkout, keyed.then_some(claim.clone()))
+            .await
+            .expect_err("the post-mkdir allocation effect refuses creation");
+        assert!(
+            format!("{refusal:#}").contains(fault_name),
+            "the response preserves the actual fault: {refusal:#}"
+        );
+        assert!(
+            root.join("bar-1").is_dir(),
+            "the directory created before the fault remains available for inspection"
+        );
+        let row = sup
+            .store
+            .load_all()
+            .await
+            .expect("load retained session")
+            .into_iter()
+            .next()
+            .expect("post-mkdir refusal retains a visible session");
+        if retained_refusal_fails {
+            assert!(
+                matches!(row.outcome, LastOutcome::Launching),
+                "a failed refusal transaction rolls Error back to the original launching evidence"
+            );
+            assert!(
+                format!("{refusal:#}").contains("NOT spent"),
+                "the response reports unresolved durability: {refusal:#}"
+            );
+        } else {
+            assert!(
+                matches!(row.outcome, LastOutcome::Error { .. }),
+                "a retained refusal is visible Error, never a created session"
+            );
+        }
+        let plan = sup
+            .store
+            .member_working_copy(&row.id)
+            .await
+            .expect("read retained plan")
+            .expect("post-mkdir refusal retains membership and plan");
+        assert_eq!(
+            plan.allocation_state,
+            crate::working_copies::AllocationState::Planned,
+            "without complete identity, retention must not invent Allocated ownership"
+        );
+        assert!(
+            plan.path_identity.is_none() && plan.canonical_path.is_none(),
+            "the retained Planned row carries no partial identity"
+        );
+        if retained_refusal_fails {
+            if keyed {
+                assert!(
+                    matches!(
+                        sup.store
+                            .reservation(&claim.intent_key)
+                            .await
+                            .expect("read pending intent")
+                            .expect("key survives failed settlement")
+                            .outcome,
+                        ReservationOutcome::Pending
+                    ),
+                    "failed settlement leaves the key pending with its original evidence"
+                );
+            }
+
+            let listed = crate::service::listing::list_all(&sup)
+                .await
+                .expect("the retained launching row is listed without reopening");
+            assert!(
+                listed.sessions.iter().any(|session| session.id == row.id),
+                "the same live supervisor lists the durable launching row so Delete has a handle"
+            );
+            let entry = sup
+                .sessions
+                .lock()
+                .await
+                .get(&row.id)
+                .cloned()
+                .expect("the listed session has a live entry for Delete");
+            assert!(
+                sup.teardown_session(&entry, &row.id, test_admission(&sup).await)
+                    .await
+                    .is_ok(),
+                "Delete reaches conservative cleanup without a restart or keyed replay"
+            );
+            assert!(
+                sup.store
+                    .session(&row.id)
+                    .await
+                    .expect("read deleted row")
+                    .is_none(),
+                "Delete removes the retained session after reaching its live handle"
+            );
+            assert!(
+                root.join("bar-1").is_dir(),
+                "Delete retires an unknown Planned path without moving its directory"
+            );
+            return;
+        }
+        drop(sup);
+
+        let reopened = Supervisor::new(state.path())
+            .await
+            .expect("reopen supervisor");
+        let replay = fresh_create(&reopened, &checkout, Some(claim))
+            .await
+            .expect_err("the same key replays refusal after reopen");
+        assert!(
+            format!("{replay:#}").contains(fault_name),
+            "a replay reports refusal rather than SessionCreated: {replay:#}"
+        );
+        assert!(
+            root.join("bar-1").is_dir(),
+            "replay never removes or replaces the retained directory"
+        );
+        assert_eq!(
+            reopened
+                .store
+                .load_all()
+                .await
+                .expect("load reopened evidence")
+                .len(),
+            1,
+            "replay does not create a second session"
+        );
+    }
+
+    /// F9/R1.6: the preparation directory needs its own parent barrier,
+    /// distinct from the checkout allocation barrier. A failure must retain
+    /// the allocated checkout and spent refusal without publishing NotStarted
+    /// or allowing a later retry to run clone/hook from missing evidence.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn preparation_parent_fsync_failure_retains_checkout_without_launch() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "preparation-parent-fsync".into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let observed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls = observed.clone();
+        let preparation_dir = state.path().join("checkout-preparation");
+        let expected_parent = std::fs::metadata(state.path()).unwrap();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                preparation_parent_sync: Some(Arc::new(move |file| {
+                    use std::os::unix::fs::MetadataExt;
+                    let actual = file.metadata()?;
+                    assert_eq!(
+                        (actual.dev(), actual.ino()),
+                        (expected_parent.dev(), expected_parent.ino())
+                    );
+                    assert!(
+                        preparation_dir.is_dir(),
+                        "the child directory exists before its parent barrier"
+                    );
+                    assert_eq!(
+                        std::fs::read_dir(&preparation_dir)?.count(),
+                        0,
+                        "NotStarted must not precede this barrier"
+                    );
+                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err(std::io::Error::other(
+                        "injected preparation parent fsync failure",
+                    ))
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .unwrap_err();
+        assert!(format!("{refusal:#}").contains("injected preparation parent fsync failure"));
+        assert_eq!(observed.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(error_kind(&refusal), ErrorKind::Internal);
+        let rows = sup.store.load_all().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(rows[0].outcome, LastOutcome::Error { .. }));
+        let plan = sup
+            .store
+            .origin_working_copy(&rows[0].id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            plan.allocation_state,
+            crate::working_copies::AllocationState::Allocated
+        );
+        assert_eq!(
+            sup.store.working_copy_member_count(&plan.id).await.unwrap(),
+            1
+        );
+        assert!(root.join("bar-1").is_dir());
+        assert!(
+            !state
+                .path()
+                .join("checkout-preparation")
+                .join(format!("{}.json", plan.id))
+                .exists()
+        );
+        assert!(!crate::launch::spec_path_for_launch(&sup.state_dir, &rows[0].id, 0).exists());
+        let replay = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .unwrap_err();
+        assert_eq!(format!("{replay:#}"), format!("{refusal:#}"));
+        assert_eq!(
+            observed.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "replay never republishes preparation"
+        );
+        assert_eq!(sup.store.load_all().await.unwrap().len(), 1);
+    }
+
+    /// C2/R1.6: parent-fsync failure follows mkdir, so the existing
+    /// directory and all Planned ownership evidence must remain visible.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn parent_fsync_failure_after_mkdir_retains_planned_evidence() {
+        assert_post_mkdir_allocation_fault_retains_evidence(
+            Some(crate::working_copies::AllocationStage::BeforeParentFsync),
+            "parent-fsync",
+            false,
+            false,
+            true,
+        )
+        .await;
+    }
+
+    /// C2: an identity-write failure follows mkdir but cannot safely
+    /// promote the registry row, so the durable refusal keeps it Planned.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn identity_write_failure_after_mkdir_retains_planned_evidence() {
+        assert_post_mkdir_allocation_fault_retains_evidence(
+            None,
+            "identity-write",
+            true,
+            false,
+            true,
+        )
+        .await;
+    }
+
+    /// A failed Error-plus-Failed transaction after mkdir preserves the
+    /// original session, planned membership, and pending key, then tells
+    /// the caller that durable refusal evidence is unresolved.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn failed_retained_refusal_after_mkdir_preserves_pending_evidence() {
+        assert_post_mkdir_allocation_fault_retains_evidence(
+            Some(crate::working_copies::AllocationStage::BeforeParentFsync),
+            "parent-fsync",
+            false,
+            true,
+            true,
+        )
+        .await;
+    }
+
+    /// A failed retained-refusal settlement is still listed and deletable for
+    /// an unkeyed fresh create. The missing reservation must not hide the
+    /// durable launching row: delete is the user's recovery handle either way.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn failed_retained_refusal_after_mkdir_is_visible_for_unkeyed_create() {
+        assert_post_mkdir_allocation_fault_retains_evidence(
+            Some(crate::working_copies::AllocationStage::BeforeParentFsync),
+            "unkeyed-parent-fsync",
+            false,
+            true,
+            false,
+        )
+        .await;
+    }
+
+    /// A failed pre-mkdir rollback must leave its session, plan, membership,
+    /// and pending key together. The fault fires after the real membership
+    /// deletion inside SQLite's transaction, so surviving evidence proves
+    /// rollback rather than merely a failure before cleanup started.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn failed_pre_mkdir_rollback_preserves_every_record() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "rollback-failure-key".to_string(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let collision_root = root.clone();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                // Validation deliberately runs before a plan exists, so a
+                // pre-existing collision would only prove that preview
+                // refusal. Creating the foreign directory after the real
+                // plan record establishes the allocator's EEXIST premise
+                // without bypassing its allocation or cleanup path.
+                create_crash: Some(Arc::new(move |stage| {
+                    if stage == CreateStage::AfterRecord {
+                        std::fs::create_dir(collision_root.join("bar-1"))
+                            .context("planting the allocator collision after plan record")?;
+                    }
+                    Ok(())
+                })),
+                pre_mkdir_rollback_fault: Some(Arc::new(|stage| {
+                    assert_eq!(
+                        stage,
+                        crate::store::PreMkdirRollbackStage::AfterMemberRemoval,
+                        "the fault must exercise the transaction after its first deletion"
+                    );
+                    anyhow::bail!("injected pre-mkdir rollback failure")
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("collision with failed rollback refuses the create");
+        assert_eq!(
+            error_kind(&refusal),
+            ErrorKind::Internal,
+            "failed settlement must suppress the never-allocated wire proof"
+        );
+        assert!(
+            format!("{refusal:#}").contains("NOT spent"),
+            "the reply reports that rollback durability is unresolved: {refusal:#}"
+        );
+        let row = sup
+            .store
+            .load_all()
+            .await
+            .expect("load preserved session")
+            .into_iter()
+            .next()
+            .expect("failed transaction leaves the launching session");
+        assert!(
+            sup.store
+                .member_working_copy(&row.id)
+                .await
+                .expect("read preserved membership")
+                .is_some(),
+            "membership rollback preserves the planned ownership evidence"
+        );
+        assert!(
+            matches!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .expect("read preserved key")
+                    .expect("failed rollback keeps the key")
+                    .outcome,
+                ReservationOutcome::Pending
+            ),
+            "failed rollback does not falsely settle the keyed refusal"
+        );
+        assert!(
+            root.join("bar-1").is_dir(),
+            "the foreign colliding directory is never touched by rollback"
+        );
+        let listed = crate::service::listing::list_all(&sup)
+            .await
+            .expect("the retained rollback row is listed without reopening");
+        assert!(
+            listed.sessions.iter().any(|session| session.id == row.id),
+            "the same live supervisor lists the durable launching row so Delete has a handle"
+        );
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&row.id)
+            .cloned()
+            .expect("the listed session has a live entry for Delete");
+        assert!(
+            sup.teardown_session(&entry, &row.id, test_admission(&sup).await)
+                .await
+                .is_ok(),
+            "Delete reaches conservative cleanup without a restart or keyed replay"
+        );
+        assert!(
+            sup.store
+                .session(&row.id)
+                .await
+                .expect("read deleted row")
+                .is_none(),
+            "Delete removes the retained session after reaching its live handle"
+        );
+        assert!(
+            root.join("bar-1").is_dir(),
+            "Delete never moves the foreign collision that the failed rollback left alone"
+        );
+    }
+
+    /// A stale preview rejected before a plan exists is a spent, unallocated
+    /// intent. Removing the external collision cannot make replay allocate;
+    /// only a new explicit submission may use a newly accepted preview.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn stale_checkout_preview_records_unallocated_conflict_for_replay() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "stale-preview-key".into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        std::fs::write(root.join("bar-1"), b"foreign").unwrap();
+        assert!(root.join("bar-1").is_file());
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("occupied preview must refuse before planning");
+        assert_eq!(error_kind(&refusal), ErrorKind::CheckoutConflict);
+        assert_eq!(std::fs::read(root.join("bar-1")).unwrap(), b"foreign");
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        std::fs::remove_file(root.join("bar-1")).unwrap();
+        assert!(!root.join("bar-1").exists());
+        let replay = sup
+            .reconcile_github_checkout(claim.intent_key, &checkout.client_identity, 80, 24)
+            .await
+            .expect_err("lookup uses the recorded refusal rather than new occupancy");
+        assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);
+        assert_eq!(format!("{replay:#}"), format!("{refusal:#}"));
+        assert!(!root.join("bar-1").exists());
+    }
+
+    /// Proof cannot be reconstructed from the Conflict spelling alone. Retry
+    /// validation may run after allocation, and a failed durable settlement
+    /// must override a stronger inner kind with an unresolved Internal reply.
+    #[farhelm_testtrace::test]
+    fn checkout_conflict_proof_requires_new_intent_and_durable_settlement() {
+        let conflict = || anyhow::Error::new(RequestError::new(ErrorKind::Conflict, "conflict"));
+        assert_eq!(
+            error_kind(&classify_unallocated_checkout_conflict(conflict(), false)),
+            ErrorKind::Conflict
+        );
+        let proof = classify_unallocated_checkout_conflict(conflict(), true);
+        assert_eq!(error_kind(&proof), ErrorKind::CheckoutConflict);
+        let unsettled = unrecorded_outcome(proof, anyhow::anyhow!("database unavailable"));
+        assert_eq!(error_kind(&unsettled), ErrorKind::Internal);
+    }
+
+    /// A collision that arrives after planning reaches the allocator's real
+    /// rollback transaction: Farhelm removes only its own plan/session
+    /// evidence, settles the permanent key Failed, and leaves the foreign
+    /// sentinel exactly as it found it.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn allocator_collision_rolls_back_its_plan_without_touching_foreign_content() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).expect("fixture root");
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "allocator-collision-key".to_string(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let collision_root = root.clone();
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_crash: Some(Arc::new(move |stage| {
+                    if stage == CreateStage::AfterRecord {
+                        let foreign = collision_root.join("bar-1");
+                        std::fs::create_dir(&foreign)?;
+                        std::fs::write(foreign.join("foreign-sentinel"), b"foreign")?;
+                    }
+                    Ok(())
+                })),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("the allocator collision refuses creation");
+        assert_eq!(error_kind(&refusal), ErrorKind::CheckoutConflict);
+        assert!(
+            sup.store.load_all().await.expect("load").is_empty()
+                && sup
+                    .store
+                    .working_copy_rows()
+                    .await
+                    .expect("plans")
+                    .is_empty(),
+            "successful rollback removes its session, membership, and planned row together"
+        );
+        assert_eq!(
+            std::fs::read(root.join("bar-1").join("foreign-sentinel"))
+                .expect("foreign sentinel survives"),
+            b"foreign",
+            "rollback never alters foreign collision content"
+        );
+        let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+            .expect("inspect the private fixture's membership table");
+        let remaining_members: i64 = conn
+            .query_row("SELECT COUNT(*) FROM working_copy_members", [], |row| {
+                row.get(0)
+            })
+            .expect("read membership count");
+        assert_eq!(remaining_members, 0, "rollback leaves no orphan membership");
+        drop(conn);
+        assert!(
+            matches!(
+                sup.store
+                    .reservation(&claim.intent_key)
+                    .await
+                    .expect("read key")
+                    .expect("permanent key survives rollback")
+                    .outcome,
+                ReservationOutcome::Failed {
+                    kind: ErrorKind::CheckoutConflict,
+                    ..
+                }
+            ),
+            "the permanent key replays the recorded refusal"
+        );
+        let replay = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("same key replays the collision refusal");
+        assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);
+        assert_eq!(format!("{replay:#}"), format!("{refusal:#}"));
+
+        // Reopen after removing the external collision: replay must use the
+        // durable answer even when a new create would now be able to allocate.
+        drop(sup);
+        std::fs::remove_file(root.join("bar-1/foreign-sentinel")).unwrap();
+        std::fs::remove_dir(root.join("bar-1")).unwrap();
+        assert!(!root.join("bar-1").exists());
+        let reopened = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let replay = reopened
+            .reconcile_github_checkout(claim.intent_key, &checkout.client_identity, 80, 24)
+            .await
+            .expect_err("authenticated lookup replays the settled conflict after reopen");
+        assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);
+        assert_eq!(format!("{replay:#}"), format!("{refusal:#}"));
+        assert!(
+            !root.join("bar-1").exists(),
+            "replay cannot allocate a now-free path"
         );
     }
 }

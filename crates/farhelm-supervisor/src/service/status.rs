@@ -62,13 +62,14 @@ use super::launch_artifacts::{
     read_launch_sentinel, sentinel_could_still_apply, wrapper_failure_detail,
 };
 use super::terminals::{Terminal, tabs_from_pane_states};
-use crate::store::{LastOutcome, Transition};
+use crate::store::{LastOutcome, SessionStore, Transition};
 use crate::tmux::PaneState;
 use anyhow::Context;
 use farhelm_proto::{
     ProfileExistence, RestartOffer, SessionInfo, SessionStatus, SourceProfile, TabInfo,
 };
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -523,7 +524,7 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
 /// item 3's `SessionRenamed`, whose `SessionInfo` must be built the
 /// way a list builds one).
 pub(crate) struct EntryObservation {
-    /// A launch-sentinel or wrapper-failure detail found for this
+    /// A launch-sentinel, wrapper-failure or interrupted-preparation detail found for this
     /// entry NOW. Outranks whatever `session_status` would compute,
     /// whether or not the matching transition also commits — see
     /// [`entry_info`]'s `sentinel` parameter.
@@ -536,6 +537,45 @@ pub(crate) struct EntryObservation {
     /// cleanup a crash between an earlier commit and its cleanup can
     /// leave behind.
     pub(crate) settled_error: bool,
+}
+
+/// Explain incomplete setup only after an accepted terminal has stopped.
+/// Callers establish dead-or-absent liveness first; an in-progress state is
+/// normal while Git or the hook still runs. Durable pane provenance keeps
+/// a preterminal pending create from becoming launch evidence merely because
+/// its preparation has not run yet. Membership alone gives no setup duty:
+/// borrowers deliberately use the checkout's current contents.
+/// Generation matching also prevents a stale polling entry from borrowing a
+/// newer restart's accepted pane as evidence about the old launch.
+pub(crate) async fn interrupted_preparation_detail(
+    state_dir: &Path,
+    store: &SessionStore,
+    session_id: &str,
+    generation: i64,
+) -> anyhow::Result<Option<String>> {
+    let Some(row) = store.session(session_id).await? else {
+        return Ok(None);
+    };
+    if row.generation != generation || row.pane.is_empty() || row.archived {
+        return Ok(None);
+    }
+    let Some(origin) = store.origin_working_copy(session_id).await? else {
+        return Ok(None);
+    };
+    let path = state_dir
+        .join("checkout-preparation")
+        .join(format!("{}.json", origin.id));
+    let detail = match crate::launch::read_preparation_state(&path, &origin.id) {
+        Ok(Some(record)) if record.state == crate::launch::PreparationState::Ready => {
+            return Ok(None);
+        }
+        Ok(Some(_)) => "checkout preparation did not finish before its terminal stopped",
+        Ok(None) => "checkout preparation evidence is missing after its terminal stopped",
+        Err(_) => "checkout preparation evidence is unreadable after its terminal stopped",
+    };
+    Ok(Some(format!(
+        "{detail}; clone and post-clone hook will not be repeated automatically"
+    )))
 }
 
 /// Look at one entry the way a `ListSessions` pass looks at it:
@@ -551,7 +591,9 @@ pub(crate) struct EntryObservation {
 /// or the wrapper-failure shape that stands in for one — outranks
 /// every inference, because a failed exec leaves an ordinary dead
 /// pane that no probe can tell from a command that ran and finished;
-/// only then does the plain pane observation apply.
+/// A stopped accepted fresh terminal also requires durable Ready setup;
+/// only then does the plain pane observation apply. Incomplete preparation
+/// never overrides a live pane or supplies launch evidence for a pending create.
 ///
 /// Deliberately does NOT commit: the list pass batches every entry's
 /// transition into ONE transaction, and taking that apart per entry
@@ -607,7 +649,7 @@ pub(crate) async fn observe_entry(
             .with_context(|| {
                 format!("could not read session {}'s launch sentinel", entry.info.id)
             })?;
-        let detail = match found {
+        let mut detail = match found {
             Some(detail) => Some(detail),
             // The wrapper-failure shape: no sentinel, a pane that is
             // present and dead, and a launch spec nothing consumed.
@@ -622,15 +664,26 @@ pub(crate) async fn observe_entry(
                 .await
             }
         };
+        if detail.is_none() {
+            detail = interrupted_preparation_detail(
+                &sup.state_dir,
+                &sup.store,
+                &entry.info.id,
+                entry.generation,
+            )
+            .await?;
+        }
         if let Some(detail) = detail {
-            // No pane to rediscover here (unlike `reload_sessions`'s
-            // by-name search): callers only visit sessions this
-            // process already tracks a `Terminal` for or explicitly
-            // does not, so there is nothing new for this transition
-            // to record beyond the outcome itself.
+            // An in-memory Terminal can precede durable confirmation when
+            // create's confirmation write fails. Preserve its accepted pane
+            // with the error: wrapper failures have no sentinel to keep that
+            // provenance alive after the physical terminal disappears.
             let transition = sup.may_record().then(|| Transition::SentinelError {
                 detail: detail.clone(),
-                pane: None,
+                pane: entry
+                    .terminal
+                    .as_ref()
+                    .map(|terminal| terminal.pane.clone()),
             });
             return Ok(EntryObservation {
                 sentinel: Some(detail),

@@ -1896,6 +1896,7 @@ mod tests {
         let parent = sup
             .create_session(
                 CreateInputs {
+                    github_checkout: None,
                     cwd: &cwd,
                     parent: None,
                     mode: CreateMode::Raw {
@@ -2077,6 +2078,7 @@ mod tests {
         let parent = sup
             .create_session(
                 CreateInputs {
+                    github_checkout: None,
                     cwd: &cwd,
                     parent: None,
                     mode: CreateMode::Raw {

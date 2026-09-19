@@ -120,7 +120,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -366,6 +366,9 @@ pub enum Transition {
     /// `detail` is the shim's own recorded report, carried straight
     /// through to [`LastOutcome::Error`] and from there to the wire's
     /// `SessionStatus::Error` (PLAN_M3.md item 3).
+    /// Also used for interrupted checkout preparation after an accepted
+    /// terminal stops: its durable non-Ready evidence outranks an inferred
+    /// ordinary exit, under the same monotonic transition rules.
     ///
     /// `pane`, when `Some`, is whatever pane the CALLER already had in
     /// hand for this row at the moment it read the sentinel — mirrors
@@ -693,6 +696,29 @@ pub struct Settlement {
     pub outcome: ReservationOutcome,
 }
 
+/// The one rollback boundary whose transaction atomicity needs direct
+/// evidence: the membership deletion has been attempted, but no durable
+/// row may disappear until the plan, session, and keyed refusal can commit
+/// together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreMkdirRollbackStage {
+    /// Immediately after the transaction removed the plan's membership.
+    /// An injected failure must roll that removal back with every later
+    /// change, leaving the original evidence intact.
+    AfterMemberRemoval,
+}
+
+/// Optional fault at the pre-mkdir rollback transaction's real membership
+/// deletion. Production supplies none; the seam proves SQLite rollback
+/// rather than a hand-written best-effort cleanup sequence.
+pub type PreMkdirRollbackFault =
+    Arc<dyn Fn(PreMkdirRollbackStage) -> anyhow::Result<()> + Send + Sync>;
+
+/// A fault after a retained-refusal transaction updates the session but
+/// before it can settle the key. Transaction rollback must preserve the
+/// original launching evidence and pending reservation together.
+pub type RetainedRefusalFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
+
 /// What [`SessionStore::insert_session`] found when it tried to claim an
 /// intent key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -753,6 +779,10 @@ pub enum RetryClaim {
     /// transition, and in-memory fence must use the value this transaction
     /// preserved rather than an independently assumed zero.
     Acquired {
+        /// The full launching row committed by the takeover. Retention
+        /// failures publish this rather than reconstructing metadata from
+        /// the retry request or issuing a second fallible read.
+        snapshot: Box<StoredSession>,
         created_at: i64,
         creation_seq: u64,
         title: String,
@@ -1137,7 +1167,7 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// storable when a status is not, and it is also why a restart RESTORES it
 /// rather than re-minting it — a fresh supervisor did not witness that
 /// moment, but the record of it is still the best answer anyone has.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredSession {
     pub id: String,
     /// Direct parent metadata, or `None` for an ordinary root session.
@@ -1410,7 +1440,7 @@ pub struct StoredSession {
 /// lives in code: one writer ([`insert_session_row`]) sets both or neither,
 /// and [`decode_session_row`] refuses a half-written row rather than
 /// guessing at the missing side.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProfileSnapshot {
     /// The profile's immutable id — the key existence is derived by, and
     /// the key a client filters on. Never re-resolved to a name.
@@ -1437,7 +1467,10 @@ pub struct ProfileSnapshot {
 /// async workers.
 #[derive(Clone, Debug)]
 pub struct SessionStore {
-    conn: Arc<Mutex<Connection>>,
+    // pub(crate) for the service-layer tests that plant registry fixtures
+    // directly through `working_copies`' `&Connection` primitives (no FKs,
+    // no counter columns — tests compose the same helpers production does).
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 /// Bring the database up to [`SCHEMA_VERSION`], creating it from scratch
@@ -1532,6 +1565,12 @@ pub struct SessionStore {
 ///   enforcer of. The column exists so a report can dominate and fence out
 ///   the scan (see that method) without the two writers racing each other
 ///   on disk.
+/// - 18: the working-copy registry — `working_copies` (one row per
+///   supervisor-managed directory under a canonical repo root) and
+///   `working_copy_members` (which sessions currently own its lifetime).
+///   Storage only; the state machine that drives it lives in
+///   `crate::working_copies`. See the version-17→18 rung below for why the
+///   pair is additive and why membership is a table.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1591,7 +1630,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  last_activity_at      INTEGER NOT NULL DEFAULT 0,
                  conversation_source   TEXT,
                  launch                TEXT,
-                 last_work_started_at  INTEGER NOT NULL DEFAULT 0
+                 last_work_started_at  INTEGER NOT NULL DEFAULT 0,
+                 fresh_checkout_id     TEXT
              ) STRICT;
              CREATE TABLE supervisor_meta (
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
@@ -1612,7 +1652,29 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              ) STRICT;
              CREATE INDEX create_reservations_pending
                  ON create_reservations (session_id) WHERE state = 'pending';
-             PRAGMA user_version = 17;
+             CREATE TABLE working_copies (
+                 id                   TEXT PRIMARY KEY,
+                 canonical_root       TEXT NOT NULL,
+                 canonical_path       TEXT,
+                 repo_owner           TEXT NOT NULL,
+                 repo_name            TEXT NOT NULL,
+                 original_basename    TEXT NOT NULL,
+                 origin_session_id    TEXT NOT NULL,
+                 root_device          INTEGER,
+                 root_inode           INTEGER,
+                 path_device          INTEGER,
+                 path_inode           INTEGER,
+                 allocation_state     TEXT NOT NULL,
+                 archive_destination  TEXT,
+                 preparation_snapshot TEXT,
+                 created_at           INTEGER NOT NULL
+             ) STRICT;
+             CREATE TABLE working_copy_members (
+                 session_id      TEXT NOT NULL,
+                 working_copy_id TEXT NOT NULL,
+                 PRIMARY KEY (session_id, working_copy_id)
+             ) STRICT;
+             PRAGMA user_version = 18;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2041,6 +2103,62 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         )
         .context("migrating schema from version 16 to 17")?;
         version = 17;
+    }
+    if version == 17 {
+        // The supervisor-side durable working-copy registry (the storage
+        // half of Design C for owned GitHub checkouts). Both tables are
+        // purely additive: no pre-18 session ever allocated a managed
+        // working copy, so there is nothing to backfill and no honest
+        // value to invent.
+        //
+        // `working_copy_members` is a membership TABLE rather than a
+        // column on `sessions` because the association's lifetime is the
+        // working copy's, not the session's: a session can end (its row
+        // deleted) while the directory it allocated must survive teardown
+        // and cleanup diagnostics, and several sessions can share one
+        // working copy. The repo's no-foreign-keys convention holds —
+        // inserts and removals are explicit and transactional, and the
+        // callers that touch session rows use the `*_within` helpers in
+        // `crate::working_copies` to keep membership and session writes
+        // in ONE SQLite transaction.
+        //
+        // The session's separate fresh_checkout_id survives a missing or
+        // corrupt registry row: recovery must refuse instead of silently
+        // reclassifying the original fresh create as an Existing borrower.
+        // `origin_session_id` is provenance and immutable: which session
+        // first allocated the directory. Membership, by contrast, is the
+        // CURRENT lifetime association and changes as sessions attach
+        // and detach — that separation is the reason both exist.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN fresh_checkout_id TEXT;
+             CREATE TABLE working_copies (
+                 id                   TEXT PRIMARY KEY,
+                 canonical_root       TEXT NOT NULL,
+                 canonical_path       TEXT,
+                 repo_owner           TEXT NOT NULL,
+                 repo_name            TEXT NOT NULL,
+                 original_basename    TEXT NOT NULL,
+                 origin_session_id    TEXT NOT NULL,
+                 root_device          INTEGER,
+                 root_inode           INTEGER,
+                 path_device          INTEGER,
+                 path_inode           INTEGER,
+                 allocation_state     TEXT NOT NULL,
+                 archive_destination  TEXT,
+                 preparation_snapshot TEXT,
+                 created_at           INTEGER NOT NULL
+             ) STRICT;
+             CREATE TABLE working_copy_members (
+                 session_id      TEXT NOT NULL,
+                 working_copy_id TEXT NOT NULL,
+                 PRIMARY KEY (session_id, working_copy_id)
+             ) STRICT;
+             PRAGMA user_version = 18;
+             COMMIT;",
+        )
+        .context("migrating schema from version 17 to 18")?;
+        version = 18;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -2596,6 +2714,29 @@ impl SessionStore {
         row: StoredSession,
         claim: Option<IntentClaim>,
     ) -> anyhow::Result<Claimed> {
+        self.insert_session_with_plan(row, claim, None).await
+    }
+
+    /// [`SessionStore::insert_session`] for a FRESH GitHub-checkout create:
+    /// the planned registry row and the origin-session membership are
+    /// inserted in the SAME transaction as the launching row and the intent
+    /// claim. Splitting them across commits would let a crash leave a
+    /// launching session with no plan (the checkout destination is then
+    /// unrecoverable — only the registry row knows where it was going) or
+    /// a planned checkout with no session (an unowned planned row nothing
+    /// will ever allocate). The plan is inserted in the `planned` state:
+    /// no filesystem claim or checkout identity — the exclusive mkdir
+    /// happens later, under directory admission, via
+    /// `working_copies::allocate`. Without a plan, an existing-directory
+    /// session joins every managed ancestor in this same transaction. Callers
+    /// hold directory admission through validation and this commit so the
+    /// ancestor set cannot race last-reference archival.
+    pub async fn insert_session_with_plan(
+        &self,
+        row: StoredSession,
+        claim: Option<IntentClaim>,
+        plan: Option<crate::working_copies::PlannedWorkingCopy>,
+    ) -> anyhow::Result<Claimed> {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || -> anyhow::Result<Claimed> {
             let mut conn = conn.lock().expect("session db mutex poisoned");
@@ -2641,6 +2782,27 @@ impl SessionStore {
                 }
             }
             let inserted = insert_session_row(&tx, &row, None)?;
+            if let Some(plan) = &plan {
+                crate::working_copies::record_planned(&tx, plan)
+                    .context("recording the planned working-copy row with the launching session")?;
+                tx.execute(
+                    "UPDATE sessions SET fresh_checkout_id = ?2 WHERE id = ?1",
+                    rusqlite::params![row.id, plan.id],
+                )
+                .context("recording independent fresh-create provenance")?;
+                // Origin-session membership, committed with the plan. It
+                // duplicates `allocate`'s own origin insert (which no-ops
+                // on conflict) so that a crash BETWEEN the plan and the
+                // allocation still leaves the ownership link in place —
+                // the ambiguous-Planned recovery reads it.
+                crate::working_copies::add_member(&tx, &row.id, &plan.id)
+                    .context("recording the origin-session membership")?;
+            } else if let Some(cwd) = row.canonical_cwd.as_deref() {
+                // A crash must not expose the session without the reference
+                // that prevents last-member deletion from archiving its cwd.
+                crate::working_copies::attach_existing_ancestors(&tx, &row.id, cwd)
+                    .context("recording managed ancestors with the session")?;
+            }
             tx.commit().context("committing the session insert")?;
             Ok(Claimed::Ours {
                 session_token: inserted.session_token,
@@ -2649,6 +2811,579 @@ impl SessionStore {
         })
         .await
         .context("session insert task panicked")?
+    }
+
+    /// [`working_copies::allocate`] through the store's connection: the
+    /// exclusive mkdir, identity capture, and origin membership commit as
+    /// one step on the connection every other session write serializes
+    /// through. Only the create path calls this, under directory
+    /// admission.
+    pub async fn allocate_working_copy(
+        &self,
+        working_copy_id: &str,
+        expected_root_identity: Option<crate::working_copies::DirectoryIdentity>,
+        fault: Option<crate::working_copies::AllocationFault>,
+    ) -> std::result::Result<
+        crate::working_copies::AcceptedDirectory,
+        crate::working_copies::AllocationFailure,
+    > {
+        let conn = Arc::clone(&self.conn);
+        let working_copy_id = working_copy_id.to_string();
+        tokio::task::spawn_blocking(
+            move || -> std::result::Result<
+                crate::working_copies::AcceptedDirectory,
+                crate::working_copies::AllocationFailure,
+            > {
+                let conn = conn.lock().expect("session db mutex poisoned");
+                crate::working_copies::allocate_with_fault(
+                    &conn,
+                    &working_copy_id,
+                    expected_root_identity,
+                    fault.as_ref(),
+                )
+            },
+        )
+        .await
+        .map_err(|error| {
+            crate::working_copies::AllocationFailure::Uncertain(
+                anyhow::Error::new(error).context("working-copy allocation task panicked"),
+            )
+        })?
+    }
+
+    /// Original allocation provenance, independent of lifetime membership.
+    /// A borrower has no origin record even when its cwd is a managed
+    /// checkout. Recovery must never treat that membership as a fresh plan.
+    pub async fn origin_working_copy(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let recorded: Option<String> = conn
+                .query_row(
+                    "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
+                    [&session_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            let origin = crate::working_copies::origin_working_copy(&conn, &session_id)
+                .context("reading the session's original checkout")?;
+            match (recorded, origin) {
+                (None, None) => Ok(None),
+                (Some(id), Some(origin)) if id == origin.id => Ok(Some(origin)),
+                _ => anyhow::bail!(
+                    "the session's fresh-checkout provenance does not match its registry evidence"
+                ),
+            }
+        })
+        .await
+        .context("working-copy origin read task panicked")?
+    }
+
+    /// Claim the only initial preparation publication before touching its
+    /// file. A crash after this commit may refuse recovery, but can never
+    /// authorize a second clone because its earlier state file disappeared.
+    /// Returns false when an earlier attempt already crossed this boundary.
+    pub async fn claim_preparation_publication(&self, id: &str) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let row = crate::working_copies::get_working_copy(&conn, &id)?
+                .context("missing checkout registry evidence")?;
+            let mut snapshot: crate::working_copies::PreparationSnapshot = serde_json::from_str(
+                row.preparation_snapshot
+                    .as_deref()
+                    .context("missing checkout preparation snapshot")?,
+            )
+            .context("invalid checkout preparation snapshot")?;
+            if snapshot.publication_started {
+                return Ok(false);
+            }
+            snapshot.publication_started = true;
+            let updated = conn.execute(
+                "UPDATE working_copies SET preparation_snapshot = ?2 WHERE id = ?1",
+                rusqlite::params![id, serde_json::to_string(&snapshot)?],
+            )?;
+            anyhow::ensure!(
+                updated == 1,
+                "checkout vanished before preparation publication"
+            );
+            Ok(true)
+        })
+        .await
+        .context("preparation publication claim task panicked")?
+    }
+
+    /// First lifetime membership in stable creation order. This does not
+    /// identify an origin; use `origin_working_copy` for fresh recovery and
+    /// `member_working_copies_all` for lifetime or archive decisions.
+    pub async fn member_working_copy(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<Option<crate::working_copies::WorkingCopyRow>> {
+                let conn = conn.lock().expect("session db mutex poisoned");
+                let mut rows = crate::working_copies::member_working_copies(&conn, &session_id)
+                    .context("reading the session's working-copy membership")?;
+                Ok(if rows.is_empty() {
+                    None
+                } else {
+                    Some(rows.remove(0))
+                })
+            },
+        )
+        .await
+        .context("working-copy membership read task panicked")?
+    }
+
+    /// Project checkout provenance and current membership from one database
+    /// snapshot onto wire replies. Entry caches cannot own these fields:
+    /// allocating a managed ancestor can attach an already-existing session.
+    ///
+    /// Only the origin receives `github_repo`. A borrower receives association
+    /// metadata without acquiring fresh-create intent. Where memberships nest,
+    /// the innermost allocated checkout is the singular display association;
+    /// lifetime decisions still enumerate every membership. An unresolved plan
+    /// has no canonical allocated path and therefore no display association.
+    pub async fn project_checkout_metadata(
+        &self,
+        mut sessions: Vec<farhelm_proto::SessionInfo>,
+    ) -> anyhow::Result<Vec<farhelm_proto::SessionInfo>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn.transaction()?;
+            for session in &mut sessions {
+                let origin = crate::working_copies::origin_working_copy(&tx, &session.id)?;
+                session.github_repo = origin.map(|row| farhelm_proto::GithubRepo {
+                    owner: row.repo_owner,
+                    name: row.repo_name,
+                });
+                session.working_copy =
+                    crate::working_copies::member_working_copies(&tx, &session.id)?
+                        .into_iter()
+                        .filter_map(|row| {
+                            row.canonical_path.map(|canonical_path| {
+                                farhelm_proto::WorkingCopyInfo {
+                                    id: row.id,
+                                    repo: farhelm_proto::GithubRepo {
+                                        owner: row.repo_owner,
+                                        name: row.repo_name,
+                                    },
+                                    canonical_path,
+                                    origin_session_id: row.origin_session_id,
+                                }
+                            })
+                        })
+                        .max_by(|a, b| {
+                            std::path::Path::new(&a.canonical_path)
+                                .components()
+                                .count()
+                                .cmp(&std::path::Path::new(&b.canonical_path).components().count())
+                                .then_with(|| a.id.cmp(&b.id))
+                        });
+            }
+            tx.commit()?;
+            Ok(sessions)
+        })
+        .await
+        .context("checkout reply projection task panicked")?
+    }
+
+    /// Atomically undo a fresh create that positively failed before mkdir.
+    ///
+    /// The plan, its origin membership, session row, and keyed refusal are
+    /// one decision: splitting them could leave an uncounted session or a
+    /// reservation replaying an outcome that no longer has matching
+    /// evidence. A failed transaction leaves every original row intact for
+    /// explicit inspection instead of deleting a subset.
+    pub async fn rollback_pre_mkdir_create(
+        &self,
+        session_id: &str,
+        working_copy_id: &str,
+        settlement: Option<Settlement>,
+        fault: Option<PreMkdirRollbackFault>,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        let working_copy_id = working_copy_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the pre-mkdir create rollback transaction")?;
+            crate::working_copies::remove_member(&tx, &session_id, &working_copy_id)
+                .context("removing the refused plan's origin membership")?;
+            if let Some(fault) = fault {
+                fault(PreMkdirRollbackStage::AfterMemberRemoval)?;
+            }
+            crate::working_copies::delete_planned(&tx, &working_copy_id)
+                .context("deleting the refused create's planned checkout row")?;
+            tx.execute(
+                "DELETE FROM sessions WHERE id = ?1",
+                rusqlite::params![session_id],
+            )
+            .context("deleting the pre-mkdir refused session row")?;
+            if let Some(settlement) = &settlement {
+                settle_within(&tx, settlement)?;
+            }
+            tx.commit()
+                .context("committing the pre-mkdir create rollback transaction")?;
+            Ok(())
+        })
+        .await
+        .context("pre-mkdir create rollback task panicked")?
+    }
+
+    /// Every registry row this session is a member of — the delete path's
+    /// membership enumeration (Design E: the teardown decides per row
+    /// whether this session is the checkout's last reference). Unlike
+    /// [`SessionStore::member_working_copy`] this returns ALL memberships,
+    /// which ancestor attachment (working_copies::attach_existing_ancestors)
+    /// makes plural.
+    pub async fn member_working_copies_all(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
+                let conn = conn.lock().expect("session db mutex poisoned");
+                crate::working_copies::member_working_copies(&conn, &session_id)
+                    .context("reading the session's working-copy memberships")
+            },
+        )
+        .await
+        .context("working-copy membership read task panicked")?
+    }
+
+    /// Every registry row, any state. Startup reconciliation filters for
+    /// `archive_pending`; delete-time archival filters for the
+    /// corrupt-evidence overlap check. Read-only.
+    pub async fn working_copy_rows(
+        &self,
+    ) -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<Vec<crate::working_copies::WorkingCopyRow>> {
+                let conn = conn.lock().expect("session db mutex poisoned");
+                crate::working_copies::all_working_copies(&conn)
+                    .context("reading the working-copy registry")
+            },
+        )
+        .await
+        .context("working-copy registry read task panicked")?
+    }
+
+    /// [`working_copies::archive_move`] through the store's connection:
+    /// the delete path's last-reference move (journal, rename, fsync).
+    pub async fn archive_move_working_copy(
+        &self,
+        working_copy_id: &str,
+        parent_sync: Option<crate::working_copies::ArchiveParentSync>,
+    ) -> anyhow::Result<crate::working_copies::ArchiveOutcome> {
+        let conn = Arc::clone(&self.conn);
+        let working_copy_id = working_copy_id.to_string();
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<crate::working_copies::ArchiveOutcome> {
+                let conn = conn.lock().expect("session db mutex poisoned");
+                crate::working_copies::archive_move_with_parent_sync(
+                    &conn,
+                    &working_copy_id,
+                    parent_sync.as_ref(),
+                )
+                .context("archiving the checkout directory")
+            },
+        )
+        .await
+        .context("archive-move task panicked")?
+    }
+
+    /// [`working_copies::reconcile_archive`] through the store's
+    /// connection: startup recovery and the delete retry's resolution of a
+    /// row left `archive_pending` by a crash.
+    pub async fn reconcile_working_copy_archive(
+        &self,
+        working_copy_id: &str,
+        parent_sync: Option<crate::working_copies::ArchiveParentSync>,
+    ) -> anyhow::Result<crate::working_copies::ReconcileOutcome> {
+        let conn = Arc::clone(&self.conn);
+        let working_copy_id = working_copy_id.to_string();
+        tokio::task::spawn_blocking(
+            move || -> anyhow::Result<crate::working_copies::ReconcileOutcome> {
+                let conn = conn.lock().expect("session db mutex poisoned");
+                crate::working_copies::reconcile_archive_with_parent_sync(
+                    &conn,
+                    &working_copy_id,
+                    parent_sync.as_ref(),
+                )
+                .context("reconciling the pending archive")
+            },
+        )
+        .await
+        .context("archive-reconcile task panicked")?
+    }
+
+    /// [`working_copies::attach_existing_ancestors`] through the store's
+    /// connection: the create path's membership attachment for a session
+    /// accepted into (or under) an active managed checkout. MUST be called
+    /// under directory admission (Design C's `working_copy_operations`) —
+    /// that is what makes the ancestor read and the inserts one decision
+    /// rather than a race with a concurrent last-reference archive.
+    pub async fn attach_working_copy_ancestors(
+        &self,
+        session_id: &str,
+        canonical_cwd: &str,
+    ) -> anyhow::Result<usize> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        let canonical_cwd = canonical_cwd.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            crate::working_copies::attach_existing_ancestors(&conn, &session_id, &canonical_cwd)
+                .context("attaching the create to its managed ancestor checkouts")
+        })
+        .await
+        .context("ancestor-attachment task panicked")?
+    }
+
+    /// [`working_copies::member_count`] through the store's connection:
+    /// the delete path's last-reference check, counted from ACTUAL
+    /// membership rows (never a counter column).
+    pub async fn working_copy_member_count(&self, working_copy_id: &str) -> anyhow::Result<i64> {
+        let conn = Arc::clone(&self.conn);
+        let working_copy_id = working_copy_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<i64> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            crate::working_copies::member_count(&conn, &working_copy_id)
+                .context("counting the checkout's membership rows")
+        })
+        .await
+        .context("member-count task panicked")?
+    }
+
+    /// The delete path's FINAL transaction (Design E step 5), one commit
+    /// for: this session's create-reservation settlement, the session row
+    /// itself, every membership the session held, and the retirement of
+    /// any membership's registry row left with zero members AND a settled
+    /// archive outcome. Per-row settlement:
+    ///
+    /// - `archive_pending` → [`working_copies::retire`] (the rename
+    ///   committed and is durable; the journal may die).
+    /// - `planned` → [`working_copies::delete_planned`] (the ambiguous
+    ///   unresolved plan an explicit Delete retires without touching the
+    ///   unknown directory).
+    /// - `allocated` → [`working_copies::retire_missing`], which re-proves
+    ///   the source absent before deleting. A zero-member `allocated` row
+    ///   that still HAS its directory can only be reached by a caller that
+    ///   skipped the archival decision, so `retire_missing`'s own
+    ///   identity re-check fails the transaction closed rather than
+    ///   dropping live ownership evidence.
+    ///
+    /// Any row error rolls the WHOLE transaction back: the session row is
+    /// retained (partial deletion is the accepted contract) and a retry
+    /// re-decides everything.
+    /// Returns only checkout IDs whose last membership and ownership record
+    /// were settled by this commit. After process teardown, the caller may
+    /// remove their private preparation files; a failed transaction returns
+    /// no cleanup authority, including for confirmed-missing directories.
+    pub async fn delete_session_archiving_memberships(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the session delete transaction")?;
+            tx.execute(
+                "DELETE FROM create_reservations \
+                 WHERE session_id = ?1 AND dedup_scope = 'session_lifetime'",
+                rusqlite::params![id],
+            )
+            .context("pruning the deleted spawn's bounded reservation")?;
+            tx.execute(
+                "UPDATE create_reservations SET state = 'created' \
+                 WHERE session_id = ?1 AND state = 'pending' \
+                 AND dedup_scope = 'permanent'",
+                rusqlite::params![id],
+            )
+            .context("settling the deleted interactive session's reservations")?;
+            let membership_ids: Vec<String> = {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT working_copy_id FROM working_copy_members WHERE session_id = ?1",
+                    )
+                    .context("listing the deleted session's memberships")?;
+                stmt.query_map(rusqlite::params![id], |row| row.get(0))
+                    .context("reading the deleted session's memberships")?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .context("reading the deleted session's memberships")?
+            };
+            let mut retired = Vec::new();
+            for working_copy_id in membership_ids {
+                crate::working_copies::remove_member(&tx, &id, &working_copy_id)
+                    .context("removing the deleted session's membership")?;
+                if crate::working_copies::member_count(&tx, &working_copy_id)
+                    .context("counting the checkout's remaining members")?
+                    == 0
+                {
+                    let state = crate::working_copies::get_working_copy(&tx, &working_copy_id)
+                        .context("reading the zero-member registry row")?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "membership {working_copy_id} names a missing registry row"
+                            )
+                        })?;
+                    match state.allocation_state {
+                        crate::working_copies::AllocationState::ArchivePending => {
+                            crate::working_copies::retire(&tx, &working_copy_id)
+                                .context("retiring the archived checkout's record")?;
+                        }
+                        crate::working_copies::AllocationState::Planned => {
+                            crate::working_copies::delete_planned(&tx, &working_copy_id)
+                                .context("retiring the unresolved plan's record")?;
+                        }
+                        crate::working_copies::AllocationState::Allocated => {
+                            crate::working_copies::retire_missing(&tx, &working_copy_id)
+                                .context("retiring the confirmed-missing checkout's record")?;
+                        }
+                        crate::working_copies::AllocationState::Retired => {}
+                    }
+                    retired.push(working_copy_id);
+                }
+            }
+            tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
+                .context("deleting session row")?;
+            tx.commit().context("committing the session delete")?;
+            Ok(retired)
+        })
+        .await
+        .context("session delete task panicked")?
+    }
+
+    /// Record a fresh create's ACCEPTED directory on its launching row:
+    /// the exclusive mkdir won, so the session's working directory moves
+    /// from the planned candidate to the allocated, identity-captured
+    /// path. Gated on `outcome_state = 'launching'` so it can only ever
+    /// advance a row that is still mid-create — a settled, deleted, or
+    /// already-confirmed row is refused (zero rows updated) rather than
+    /// silently rewritten.
+    pub async fn accept_working_directory(
+        &self,
+        session_id: &str,
+        cwd: &str,
+        canonical_cwd: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        let cwd = cwd.to_string();
+        let canonical_cwd = canonical_cwd.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let updated = conn
+                .execute(
+                    "UPDATE sessions SET cwd = ?2, canonical_cwd = ?3 \
+                     WHERE id = ?1 AND outcome_state = 'launching'",
+                    rusqlite::params![session_id, cwd, canonical_cwd],
+                )
+                .context("recording the accepted working directory")?;
+            if updated == 0 {
+                anyhow::bail!(
+                    "session {session_id} is not launching; its accepted working directory \
+                     cannot be recorded"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .context("accept-working-directory task panicked")?
+    }
+
+    /// The R1.2 retained-create-refusal settlement: ONE transaction that
+    /// (a) turns the launching row into a VISIBLE Error row (retained, not
+    /// deleted — the user's handle for inspecting/deleting the checkout),
+    /// (b) leaves the working-copy registry rows and memberships exactly
+    /// as they are (this session may be the last ownership record of an
+    /// allocated checkout), and (c) settles the pending intent as `Failed`
+    /// with the same refusal, so a retry replays the error instead of
+    /// relaunching. Used for failures AFTER an allocation (spec write, tmux
+    /// spawn, confirmation) and for the ambiguous-Planned refusal on
+    /// recovery — never for a launch that may still be running (those stay
+    /// `Launching` and pending, exactly as before).
+    ///
+    /// The row update is gated on `outcome_state IN ('launching',
+    /// 'interrupted')` and must affect exactly one row: a row that has
+    /// already moved on is not ours to fail. The session row is left with
+    /// an empty pane, which the launch-evidence predicates read as
+    /// NOT-launch-evidence for Error rows (see `reserved_launch_evidence`):
+    /// a separately written Error must never imply Created.
+    /// Returns the exact row committed by this transaction so the caller can
+    /// publish its live Delete handle without another fallible database read.
+    pub async fn settle_create_refusal_retaining_session(
+        &self,
+        session_id: &str,
+        refusal_detail: &str,
+        settlement: Option<Settlement>,
+        fault: Option<RetainedRefusalFault>,
+    ) -> anyhow::Result<StoredSession> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        let refusal_detail = refusal_detail.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<StoredSession> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning the retained-create-refusal transaction")?;
+            let updated = tx
+                .execute(
+                    "UPDATE sessions SET outcome_state = 'error', error_detail = ?2 \
+                     WHERE id = ?1 AND outcome_state IN ('launching', 'interrupted')",
+                    rusqlite::params![session_id, refusal_detail],
+                )
+                .context("retaining the refused create's session row as a visible error")?;
+            if updated == 0 {
+                anyhow::bail!(
+                    "session {session_id} is not an un-launched launching row; refusing to \
+                     turn it into a retained error"
+                );
+            }
+            if let Some(fault) = fault {
+                fault()?;
+            }
+            if let Some(settlement) = &settlement {
+                settle_within(&tx, settlement)?;
+            }
+            // Read through the transaction before committing. The caller
+            // needs the exact row this decision made visible, while a later
+            // independent read could fail and leave that durable row absent
+            // from this supervisor's live session map.
+            let raw = tx
+                .query_row(
+                    &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
+                    rusqlite::params![session_id],
+                    read_session_columns,
+                )
+                .context("reading the retained-create-refusal session snapshot")?;
+            let row = decode_session_row(raw)
+                .context("decoding the committed retained-create-refusal session snapshot")?;
+            tx.commit()
+                .context("committing the retained-create-refusal transaction")?;
+            Ok(row)
+        })
+        .await
+        .context("retained-create-refusal task panicked")?
     }
 
     /// Record an intent that failed BEFORE it ever had a session row —
@@ -2745,9 +3480,9 @@ impl SessionStore {
     /// would leave every list this process serves showing the old label
     /// until the next reload. Generation survives too, because only
     /// `begin_relaunch` allocates it and a create retry must not move that
-    /// fence backwards. Those three are the whole of what survives — every
-    /// other column on the replaced row describes a launch that provably
-    /// never happened.
+    /// fence backwards. Fresh-checkout provenance also survives independently
+    /// of registry membership: deleting it here would let a later damaged
+    /// registry silently change this session's recovery and Restart contract.
     pub async fn restart_pending_launch(
         &self,
         row: StoredSession,
@@ -2800,6 +3535,15 @@ impl SessionStore {
             // its own. Anything showing evidence refuses the takeover, so
             // the caller replays instead of starting a second agent.
             //
+            // R1.2's retained-create-refusal rows are the one exception:
+            // an `error` outcome with an EMPTY pane (and no conversation
+            // report) is a refusal the refusal transaction wrote over a
+            // launch that provably never reached tmux — it is NOT launch
+            // evidence, and a retry whose durability was unresolved may
+            // still take the launch over. Anything the shim actually ran
+            // leaves a pane, a sentinel, a scope, or a conversation report
+            // behind, and those all still refuse the takeover below.
+            //
             // A non-NULL `conversation_source` is evidence of the same
             // kind, arriving by a different road: only the launch hook
             // writes it, and that hook runs INSIDE the agent process this
@@ -2838,7 +3582,7 @@ impl SessionStore {
                     conversation_source,
                 )) => {
                     if !pane.is_empty()
-                        || !matches!(state.as_str(), "launching" | "interrupted")
+                        || !matches!(state.as_str(), "launching" | "interrupted" | "error")
                         || conversation_source.is_some()
                     {
                         return Ok(RetryClaim::Launched);
@@ -2877,6 +3621,16 @@ impl SessionStore {
                     row.generation,
                 ),
             };
+            // Provenance belongs to the original create, not this launch
+            // generation. Preserve it even when its registry is damaged.
+            let preserved_checkout: Option<String> = tx
+                .query_row(
+                    "SELECT fresh_checkout_id FROM sessions WHERE id = ?1",
+                    [&row.id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
             tx.execute(
                 "DELETE FROM sessions WHERE id = ?1",
                 rusqlite::params![row.id],
@@ -2920,9 +3674,23 @@ impl SessionStore {
                 preserved_token.as_deref().zip(preserved_sequence),
             )
             .context("re-inserting the launching row for a relaunch")?;
+            tx.execute(
+                "UPDATE sessions SET fresh_checkout_id = ?2 WHERE id = ?1",
+                rusqlite::params![row.id, preserved_checkout],
+            )
+            .context("preserving fresh-create provenance during takeover")?;
+            if let Some(cwd) = row.canonical_cwd.as_deref() {
+                crate::working_copies::attach_existing_ancestors(&tx, &row.id, cwd)
+                    .context("preserving managed ancestors during launch takeover")?;
+            }
             tx.commit().context("committing the relaunch takeover")?;
+            // Insertion assigns the ordering key independently of the input
+            // placeholder. Retention must mirror that committed value too.
+            row.creation_seq = inserted.creation_seq;
+            let snapshot = row.clone();
             let preserved_title = std::mem::take(&mut row.title);
             Ok(RetryClaim::Acquired {
+                snapshot: Box::new(snapshot),
                 created_at: preserved_created_at,
                 creation_seq: inserted.creation_seq,
                 title: preserved_title,
@@ -3385,6 +4153,55 @@ impl SessionStore {
         })
         .await
         .context("reservation settlement task panicked")?
+    }
+
+    /// Preserve a generation-zero sentinel's accepted-create evidence before
+    /// the service removes the file.
+    ///
+    /// The caller must have read the actual sentinel for this session's first
+    /// launch. An Error row alone is not acceptance evidence: preterminal
+    /// refusals also retain Error rows. The transaction checks that the same
+    /// generation is durably Error, then closes only Pending reservations for
+    /// that session. Already-settled outcomes remain final.
+    ///
+    /// `false` means the row disappeared, moved to a later generation, or has
+    /// not durably recorded the error. The caller must retain its sentinel in
+    /// those cases, and on any write failure. After `true`, a crash before
+    /// unlink is harmless because replay no longer depends on the file.
+    pub(crate) async fn settle_sentinel_create_before_cleanup(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let session_id = session_id.to_string();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let mut conn = conn.lock().expect("session db mutex poisoned");
+            let tx = conn
+                .transaction()
+                .context("beginning sentinel create settlement")?;
+            let matches: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sessions \
+                     WHERE id = ?1 AND generation = 0 AND outcome_state = 'error')",
+                    [&session_id],
+                    |row| row.get(0),
+                )
+                .context("checking the sentinel's durable error generation")?;
+            if !matches {
+                return Ok(false);
+            }
+            tx.execute(
+                "UPDATE create_reservations SET state = 'created' \
+                 WHERE session_id = ?1 AND state = 'pending'",
+                [&session_id],
+            )
+            .context("preserving the sentinel's accepted create before cleanup")?;
+            tx.commit()
+                .context("committing sentinel create settlement")?;
+            Ok(true)
+        })
+        .await
+        .context("sentinel create settlement task panicked")?
     }
 
     /// [`SessionStore::delete_session`] for the user-visible DELETE path.
@@ -4355,6 +5172,10 @@ impl SessionStore {
     ///
     /// The reservation change rides the SAME transaction as the removal.
     /// `None` is an unkeyed rollback and touches no reservation.
+    /// Memberships are removed atomically too, but a last reference to a
+    /// non-retired checkout refuses the entire rollback. Such a row is evidence
+    /// for explicit cleanup; removing it would orphan the allocation. Proven
+    /// pre-mkdir failures use `rollback_pre_mkdir_create` instead.
     pub async fn delete_session(
         &self,
         id: &str,
@@ -4367,6 +5188,22 @@ impl SessionStore {
             let tx = conn
                 .transaction()
                 .context("beginning the launch rollback transaction")?;
+            // Ordinary rollback may remove a borrower, but cannot discard
+            // the last reference to an allocation whose filesystem outcome
+            // still needs explicit archival or reconciliation.
+            let last_reference: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM working_copy_members m \
+                 JOIN working_copies w ON w.id = m.working_copy_id \
+                 WHERE m.session_id = ?1 AND w.allocation_state != 'retired' \
+                 AND NOT EXISTS(SELECT 1 FROM working_copy_members other \
+                   WHERE other.working_copy_id = m.working_copy_id AND other.session_id != ?1))",
+                [&id], |row| row.get(0),
+            ).context("checking ownership evidence before launch rollback")?;
+            if last_reference {
+                anyhow::bail!("launch rollback would discard the checkout's last reference; retained for explicit cleanup");
+            }
+            tx.execute("DELETE FROM working_copy_members WHERE session_id = ?1", [&id])
+                .context("removing the rolled-back session's memberships")?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![id])
                 .context("deleting session row")?;
             if let Some(settlement) = &settlement {
@@ -6996,10 +7833,12 @@ mod tests {
                 farhelm_proto::ErrorKind::Unauthorized,
                 farhelm_proto::ErrorKind::Unavailable,
                 farhelm_proto::ErrorKind::Timeout,
+                farhelm_proto::ErrorKind::CheckoutConflict,
             ]
             .into_iter()
             .zip([
                 "failed-0", "failed-1", "failed-2", "failed-3", "failed-4", "failed-5", "failed-6",
+                "failed-7",
             ])
             .map(|(kind, key)| {
                 (
@@ -7433,6 +8272,139 @@ mod tests {
         );
         assert_eq!(store.reservation("bounded").await.unwrap(), None);
         assert!(store.load_all().await.expect("load").is_empty());
+    }
+
+    /// Allocate a real checkout with one durable origin member. Store tests
+    /// use the same plan/allocate path as production so ancestor attachment
+    /// operates on captured identity and a real canonical directory.
+    async fn allocated_membership_fixture(store: &SessionStore, root: &Path) -> String {
+        let root = root.canonicalize().expect("canonical fixture root");
+        let claimed = store
+            .insert_session_with_plan(
+                launching_row("origin"),
+                Some(IntentClaim {
+                    intent_key: "origin-key".into(),
+                    fingerprint: "origin-fingerprint".into(),
+                    dedup_scope: DedupScope::Permanent,
+                }),
+                Some(crate::working_copies::PlannedWorkingCopy {
+                    id: "checkout".into(),
+                    canonical_root: root.to_str().expect("UTF-8 fixture root").into(),
+                    repo_owner: "example".into(),
+                    repo_name: "repo".into(),
+                    original_basename: "repo-1".into(),
+                    origin_session_id: "origin".into(),
+                    root_identity: None,
+                    preparation_snapshot: None,
+                }),
+            )
+            .await
+            .expect("insert origin and plan");
+        assert!(matches!(claimed, Claimed::Ours { .. }));
+        let allocated = store
+            .allocate_working_copy("checkout", None, None)
+            .await
+            .expect("allocate checkout");
+        assert!(allocated.canonical_path.is_dir());
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            1
+        );
+        allocated.canonical_path.to_str().unwrap().to_owned()
+    }
+
+    /// A rejected membership insert must roll back the session and its intent
+    /// too. Otherwise a retry can find a launch whose cwd is unprotected from
+    /// last-reference Delete, even though create reported failure.
+    #[farhelm_testtrace::test]
+    async fn membership_failure_rolls_back_session_and_reservation() {
+        let (dir, store) = fresh_store().await;
+        let cwd = allocated_membership_fixture(&store, dir.path()).await;
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER refuse_borrower BEFORE INSERT ON working_copy_members
+                 WHEN NEW.session_id = 'borrower'
+                 BEGIN SELECT RAISE(ABORT, 'injected membership refusal'); END;",
+            )
+            .expect("install membership fault");
+        }
+        let mut row = launching_row("borrower");
+        row.cwd = cwd.clone();
+        row.canonical_cwd = Some(cwd);
+        let error = store
+            .insert_session(
+                row,
+                Some(IntentClaim {
+                    intent_key: "borrower-key".into(),
+                    fingerprint: "borrower-fingerprint".into(),
+                    dedup_scope: DedupScope::Permanent,
+                }),
+            )
+            .await
+            .expect_err("membership fault must reject the entire insert");
+        assert!(format!("{error:#}").contains("injected membership refusal"));
+        assert!(store.session("borrower").await.unwrap().is_none());
+        assert!(store.reservation("borrower-key").await.unwrap().is_none());
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            1
+        );
+        assert!(store.session("origin").await.unwrap().is_some());
+    }
+
+    /// Ordinary failed-launch cleanup removes a borrower's reference with its
+    /// row, but preserves the last member and its pending intent. The latter
+    /// is the only durable link to an allocation still needing cleanup.
+    #[farhelm_testtrace::test]
+    async fn rollback_removes_borrowers_but_retains_the_last_reference() {
+        let (dir, store) = fresh_store().await;
+        let cwd = allocated_membership_fixture(&store, dir.path()).await;
+        let mut row = launching_row("borrower");
+        row.cwd = cwd.clone();
+        row.canonical_cwd = Some(cwd.clone());
+        let claimed = store.insert_session(row, None).await.unwrap();
+        assert!(matches!(claimed, Claimed::Ours { .. }));
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            2
+        );
+
+        store.delete_session("borrower", None).await.unwrap();
+        assert!(store.session("borrower").await.unwrap().is_none());
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            1
+        );
+        assert_eq!(
+            reservation_of(&store, "origin-key").await.outcome,
+            ReservationOutcome::Pending
+        );
+        let error = store
+            .delete_session(
+                "origin",
+                Some(settlement(
+                    "origin-key",
+                    "origin",
+                    ReservationOutcome::Failed {
+                        kind: farhelm_proto::ErrorKind::Internal,
+                        message: "failed launch".into(),
+                    },
+                )),
+            )
+            .await
+            .expect_err("retain last reference");
+        assert!(error.to_string().contains("last reference"));
+        assert!(store.session("origin").await.unwrap().is_some());
+        assert_eq!(
+            reservation_of(&store, "origin-key").await.outcome,
+            ReservationOutcome::Pending
+        );
+        assert_eq!(
+            store.working_copy_member_count("checkout").await.unwrap(),
+            1
+        );
+        assert!(Path::new(&cwd).is_dir());
     }
 
     /// A refused intent is recorded with no session row at all — the shape
@@ -8796,6 +9768,9 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
              ALTER TABLE sessions DROP COLUMN last_work_started_at;
+             ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
+             DROP TABLE working_copies;
+             DROP TABLE working_copy_members;
              PRAGMA user_version = 11;",
         )
         .expect("downgrade the fixture to the pre-archive schema");
@@ -8921,9 +9896,12 @@ mod tests {
             let conn = Connection::open(&db_path).expect("open raw v17 fixture");
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN last_work_started_at;
+                 ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
+                 DROP TABLE working_copies;
+                 DROP TABLE working_copy_members;
                  PRAGMA user_version = 16;",
             )
-            .expect("downgrade only the additive v17 step");
+            .expect("remove the v17 and v18 additions from the fixture");
         }
 
         let migrated = SessionStore::open(&db_path, true)
@@ -9021,6 +9999,9 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
              ALTER TABLE sessions DROP COLUMN last_work_started_at;
+             ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
+             DROP TABLE working_copies;
+             DROP TABLE working_copy_members;
              PRAGMA user_version = 12;",
         )
         .expect("downgrade the fixture to the pre-activity schema");
@@ -9095,12 +10076,15 @@ mod tests {
         let conn = Connection::open(&db_path).expect("open fixture");
         restore_pre_v15_profiles_table(&conn);
         // Remove every column added after v13 before replaying the ladder.
-        // Leaving the v17 work-start column behind would make its own
+        // Leaving a work-start or checkout-origin column behind would make its own
         // migration fail on a duplicate instead of exercising provenance.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
              ALTER TABLE sessions DROP COLUMN last_work_started_at;
+             ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
+             DROP TABLE working_copies;
+             DROP TABLE working_copy_members;
              PRAGMA user_version = 13;",
         )
         .expect("downgrade the fixture to the pre-report schema");
@@ -9946,6 +10930,9 @@ mod tests {
     ///
     /// The rename is applied through the ordinary writer rather than by
     /// hand, so this exercises the real interleaving of the two paths.
+    /// The returned retention snapshot must also carry the assigned ordering
+    /// key: publishing the insert's zero placeholder would reorder a retry
+    /// only until the next supervisor reload.
     #[farhelm_testtrace::test]
     async fn a_relaunch_takeover_preserves_a_rename_that_landed_between_the_attempts() {
         let (_dir, store) = fresh_store().await;
@@ -10000,7 +10987,10 @@ mod tests {
             .restart_pending_launch(stranded("as created"), "key")
             .await
             .expect("takeover");
-        let RetryClaim::Acquired { title, .. } = &claim else {
+        let RetryClaim::Acquired {
+            title, snapshot, ..
+        } = &claim
+        else {
             panic!("premise: the retry takes the reservation over, got {claim:?}");
         };
         assert_eq!(
@@ -10011,6 +11001,14 @@ mod tests {
              this process serves showing the old label until the next reload"
         );
         let row = store.session("s1").await.expect("read").expect("present");
+        assert!(
+            row.creation_seq > 0,
+            "the insert allocated a real ordering key"
+        );
+        assert_eq!(
+            snapshot.creation_seq, row.creation_seq,
+            "a retained retry must publish the assigned ordering key, not the insert placeholder"
+        );
         assert_eq!(
             row.title, "as renamed",
             "the retry must not revert a rename it knew nothing about"
