@@ -22,8 +22,4 @@ playwright terminal-flood.spec.ts a client that stops draining is detached with 
 nextest farhelm::e2e session_lifecycle::non_utf8_terminal_output_survives_live_stream  # non-utf8-marker-missing
 nextest farhelm::e2e terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled  # backpressure-rss-attribution
 nextest farhelm::e2e launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail  # sentinel-unlink-surviving-file
-nextest farhelm::e2e replay_marker::a_tmux_pause_catch_up_replays_without_a_marker  # forced-pause-client-parsing
-nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment  # forced-pause-client-parsing
-nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane  # forced-pause-client-parsing
-nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state  # forced-pause-client-parsing
 playwright profiles.spec.ts profile CRUD round-trips from the app-bar popup to the helm  # profile-crud-edit-timeout
