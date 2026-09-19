@@ -55,6 +55,7 @@ pub mod scope;
 pub mod service;
 pub mod store;
 pub mod tmux;
+pub mod working_copies;
 
 // Re-exported at the crate root so `crate::write_private_file` reads
 // naturally at its call site: it keeps `service.rs`'s pre-existing

@@ -10070,6 +10070,9 @@ impl Supervisor {
         let spec = LaunchSpec {
             argv,
             status_file: status_path.clone(),
+            // Ordinary launches have no checkout preparation. Fresh creates
+            // remain refused until admission can record durable ownership.
+            preparation: None,
             // The kill machinery's environment-marker sweep (see
             // `kill_process_tree`) is keyed on this exact value reaching
             // the agent's process and everything it forks.
