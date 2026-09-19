@@ -101,7 +101,10 @@
 - Completion criteria: malformed verbs are refused without waiting for the asking session's fence; valid mutations
   retain the claim-before-credential-check ordering and existing mutation-lifetime protection. Verify the contention
   boundary with a focused regression. Remove the feedback file and its index entry in the same execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/762/changes. jj change:
+  `woqnkkunnsuunnznmwqlsovrxyuymknl`; bookmark: `fix-agent-validation-before-fence`. The occupied-fence regression times
+  out before the fix and passes after it. Four agent-request checks and the separate claim-before-credential-check
+  regression pass.
 
 ## agentrequest-refusals-hold-fence-across-reply.md
 

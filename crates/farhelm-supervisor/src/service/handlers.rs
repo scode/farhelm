@@ -3552,21 +3552,41 @@ pub(crate) async fn handle_restricted_control(
             // they return is durable, so a delete racing a listing has
             // nothing to protect against.
             //
+            // Shape validation comes first because it never observes or
+            // changes shared state. A malformed mutating request must not
+            // wait behind an earlier mutation merely to receive a local
+            // refusal. This intentionally gives malformed shape precedence
+            // over credential revalidation; only a request that could reach
+            // the relay needs the deletion fence below.
+            if let Err(message) = validate_agent_verb(&request) {
+                send_reply(
+                    tx,
+                    &ControlMsg::AgentResponse {
+                        req_id,
+                        outcome: farhelm_proto::AgentOutcome::Err {
+                            kind: ErrorKind::InvalidRequest,
+                            message,
+                        },
+                    },
+                )
+                .await;
+                return;
+            }
             // CLAIMED BEFORE THE CREDENTIAL IS CHECKED, not after, and that
-            // order is the whole guarantee rather than a stylistic
-            // preference. Claiming afterwards leaves a gap the fence cannot
-            // see: a `DeleteSession` for this same id can take the key,
-            // finish the entire teardown, and drop it again between
+            // order is the whole guarantee for every shape-valid mutation.
+            // Claiming afterwards leaves a gap the fence cannot see: a
+            // `DeleteSession` for this same id can take the key, finish the
+            // entire teardown, and drop it again between
             // `authenticates_session` returning `true` and this handler
             // reaching for the key — after which the claim succeeds
             // immediately against a session that no longer exists, and the
-            // mutation is relayed on an identity the delete already
-            // revoked. `relay_agent_request` re-authorizes nothing, so
-            // nothing downstream would catch it. Claiming first makes the
-            // credential check itself happen under the fence: either the
-            // delete got there first and the check fails honestly, or it is
-            // parked behind this claim and cannot revoke anything until the
-            // mutation it is racing has finished.
+            // mutation is relayed on an identity the delete already revoked.
+            // `relay_agent_request` re-authorizes nothing, so nothing
+            // downstream would catch it. Claiming first makes the credential
+            // check itself happen under the fence: either the delete got
+            // there first and the check fails honestly, or it is parked
+            // behind this claim and cannot revoke anything until the mutation
+            // it is racing has finished.
             //
             // The claim is keyed by this connection's OWN session id, so a
             // peer holding an invalid or already-revoked credential can
@@ -3602,16 +3622,12 @@ pub(crate) async fn handle_restricted_control(
                 .authenticates_session(&auth.session_id, &auth.token)
                 .await
             {
-                Ok(true) if session_id == auth.session_id => match validate_agent_verb(&request) {
-                    // The fence moves into the relay, which releases it
-                    // when the mutation is really over rather than when
-                    // this call returns — see `HelmLink::upcall`.
-                    Ok(()) => sup.relay_agent_request(session_id, request, fence).await,
-                    Err(message) => farhelm_proto::AgentOutcome::Err {
-                        kind: ErrorKind::InvalidRequest,
-                        message,
-                    },
-                },
+                // The fence moves into the relay, which releases it when the
+                // mutation is really over rather than when this call returns
+                // — see `HelmLink::upcall`.
+                Ok(true) if session_id == auth.session_id => {
+                    sup.relay_agent_request(session_id, request, fence).await
+                }
                 // A credential for one session is not authority to speak AS
                 // another. The check is here rather than at the far end
                 // because the helm never sees the credential: by the time
@@ -5863,6 +5879,71 @@ mod tests {
             message.contains("control character"),
             "the refusal must name what was wrong: {message}"
         );
+    }
+
+    /// A malformed mutating verb must not wait for an earlier mutation's
+    /// deletion fence before dispatch can tell its caller to correct it.
+    ///
+    /// The held guard establishes the only premise this regression needs:
+    /// an otherwise-eligible mutating request would be parked. Receiving the
+    /// local refusal while that guard remains held distinguishes validation
+    /// before the fence from validation after it without depending on
+    /// scheduler turns or an attached helm.
+    #[farhelm_testtrace::test]
+    async fn invalid_mutating_agent_request_bypasses_an_occupied_fence() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let auth = authenticated_parent(&sup, state.path(), "asker").await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let fence = sup.agent_request_locks.claim("asker").await;
+
+        let dispatch = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let tx = tx.clone();
+            let auth = auth.clone();
+            async move {
+                handle_restricted_control(
+                    &sup,
+                    ControlMsg::AgentRequest {
+                        req_id: 10,
+                        session_id: "asker".to_string(),
+                        request: AgentVerb::Rename {
+                            session_id: Some("invalid\nid".to_string()),
+                            expected_title: Some("old".to_string()),
+                            title: "new".to_string(),
+                        },
+                    },
+                    &tx,
+                    &auth,
+                )
+                .await;
+            }
+        });
+
+        let frame = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("invalid dispatch must not wait for the occupied fence")
+            .expect("invalid dispatch must send its refusal");
+        let reply: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
+        assert!(
+            matches!(
+                reply,
+                ControlMsg::AgentResponse {
+                    req_id: 10,
+                    outcome: farhelm_proto::AgentOutcome::Err {
+                        kind: ErrorKind::InvalidRequest,
+                        ..
+                    },
+                }
+            ),
+            "a malformed verb must be refused locally while the fence is occupied: {reply:?}"
+        );
+        drop(fence);
+        dispatch
+            .await
+            .expect("invalid dispatch finishes after its refusal");
     }
 
     /// Spec: the `agent_request_locks` fence and a session's own
