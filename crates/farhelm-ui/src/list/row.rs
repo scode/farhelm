@@ -754,7 +754,7 @@ std::thread_local! {
 /// way back to normal, never an implicit click on open (see `confirming`
 /// in `ListView`).
 ///
-/// The prompt itself is TWO separate elements, not one combined sentence:
+/// The session identity prompt uses two separate elements, not one combined sentence:
 /// `.confirm-consequence` (from `confirm_consequence`, fixed wording with
 /// no title in it at all) and `.confirm-title` (the title alone, quoted).
 /// Both are ordinary Dioxus text interpolation, never `document::eval` —
@@ -772,6 +772,10 @@ std::thread_local! {
 /// consequence element FIRST is what makes "read the risk before the
 /// title" the actual reading order, not just an incidental visual
 /// side effect that a later DOM-order change could quietly undo.
+/// A managed checkout adds its lifetime consequence separately: ordinary
+/// borrowers need the same warning as the originating session, and the
+/// wording must remain conditional because only the supervisor can decide
+/// whether this Delete removes the final durable reference.
 ///
 /// ## Rename ownership
 ///
@@ -1843,6 +1847,15 @@ pub(super) fn SessionRow(
                                 "{confirm_consequence(&session.status)}"
                             }
                             span { class: "confirm-title", "\"{session.title}\"" }
+                            if session.working_copy.is_some() {
+                                // Membership includes ordinary borrowers. Do not
+                                // promise a move from a stale client-side count;
+                                // Delete decides from durable references.
+                                span {
+                                    class: "confirm-consequence confirm-checkout-consequence",
+                                    "The checkout stays while another session uses it. Deleting its last session moves it into the working-copy archive; no files are deleted."
+                                }
+                            }
                             button {
                                 r#type: "button",
                                 class: "btn confirm-delete",
@@ -2383,6 +2396,8 @@ pub(super) fn row_specimen(id: &str) -> Session {
         host_name: None,
         stale: false,
         source_profile: None,
+        github_repo: None,
+        working_copy: None,
         // Old-helm default: most existing row tests predate this field and
         // must keep seeing no toggle and the pre-plan colours unless a test
         // overrides it via `..row_specimen(id)`.

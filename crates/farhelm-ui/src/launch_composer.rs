@@ -139,6 +139,8 @@ pub(crate) enum ComposerSearchResult {
     BrowsePath(String),
     /// Reuse a directory that has succeeded on this selected host before.
     Folder(String),
+    /// Explicitly request a new checkout, preserving the agent selection.
+    Github(crate::github_checkout::GithubRepo),
     Recent(LaunchHistoryEntry),
 }
 
@@ -291,6 +293,7 @@ pub(crate) enum ComposerSearchGroup {
     /// Reasoning-effort words valid for the selected harness and model.
     Efforts,
     Folders,
+    Repositories,
     RecentSetups,
 }
 
@@ -302,6 +305,7 @@ impl ComposerSearchGroup {
             Self::Models => "Models",
             Self::Efforts => "Efforts",
             Self::Folders => "Folders",
+            Self::Repositories => "GitHub repositories",
             Self::RecentSetups => "Recent setups",
         }
     }
@@ -319,6 +323,7 @@ pub(crate) fn grouped_search_results(
     let mut models = Vec::new();
     let mut efforts = Vec::new();
     let mut folders = Vec::new();
+    let mut repositories = Vec::new();
     let mut recents = Vec::new();
     for result in results {
         match result {
@@ -330,6 +335,7 @@ pub(crate) fn grouped_search_results(
             | ComposerSearchResult::BrowsePath(_)
             | ComposerSearchResult::Folder(_) => folders.push(result),
             ComposerSearchResult::Recent(_) => recents.push(result),
+            ComposerSearchResult::Github(_) => repositories.push(result),
         }
     }
     [
@@ -337,6 +343,7 @@ pub(crate) fn grouped_search_results(
         (ComposerSearchGroup::Models, models),
         (ComposerSearchGroup::Efforts, efforts),
         (ComposerSearchGroup::Folders, folders),
+        (ComposerSearchGroup::Repositories, repositories),
         (ComposerSearchGroup::RecentSetups, recents),
     ]
     .into_iter()
@@ -393,6 +400,51 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
     )
 }
 
+/// The bounded kinds understood by composer search.
+///
+/// All preserves the existing unlabelled search surface. The GitHub scope
+/// is recognized here so the renderer can reserve that query for independently
+/// fetched repository suggestions without allowing local rows to leak into it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SearchScope {
+    All,
+    Harness,
+    Model,
+    Effort,
+    Folder,
+    Recent,
+    Github,
+}
+
+/// Trim a composer query and split one recognized leading scope label.
+///
+/// Only the first colon can be a delimiter. Unknown labels remain complete
+/// ordinary queries, which preserves custom model identifiers containing
+/// colons. The returned value is borrowed from the trimmed input.
+pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
+    let query = query.trim();
+    let Some(colon) = query.find(':') else {
+        return (SearchScope::All, query);
+    };
+    let (label, value) = query.split_at(colon);
+    let scope = if label.eq_ignore_ascii_case("harness") {
+        SearchScope::Harness
+    } else if label.eq_ignore_ascii_case("model") {
+        SearchScope::Model
+    } else if label.eq_ignore_ascii_case("effort") {
+        SearchScope::Effort
+    } else if label.eq_ignore_ascii_case("folder") {
+        SearchScope::Folder
+    } else if label.eq_ignore_ascii_case("recent") {
+        SearchScope::Recent
+    } else if label.eq_ignore_ascii_case("gh") {
+        SearchScope::Github
+    } else {
+        return (SearchScope::All, query);
+    };
+    (scope, value[1..].trim())
+}
+
 /// Find composer choices whose visible value matches a deliberate query.
 ///
 /// The server owns history ordering, so the result preserves it. This does
@@ -401,6 +453,8 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
 /// exposes explicit use and browse actions, but does not invoke either. A
 /// selected harness narrows catalog and custom-history models; absent a
 /// harness, model ownership remains discoverable and effort words are absent.
+/// A recognized leading label limits the result kinds to its scope, while
+/// unlabelled input retains the combined search surface for compatibility.
 pub(crate) fn search_results(
     history: &LaunchHistory,
     catalog: &[LaunchCatalogModel],
@@ -408,111 +462,116 @@ pub(crate) fn search_results(
     harness: Option<LaunchHarness>,
     model: Option<&str>,
 ) -> Vec<ComposerSearchResult> {
-    let query = query.trim();
-    if query.is_empty() {
+    let (scope, query) = scoped_query(query);
+    if scope == SearchScope::Github || (scope == SearchScope::All && query.is_empty()) {
         return Vec::new();
     }
     let folded_query = query.to_ascii_lowercase();
     let mut results = Vec::new();
-    for harness in [
-        LaunchHarness::Codex,
-        LaunchHarness::Claude,
-        LaunchHarness::Muse,
-        LaunchHarness::Goose,
-        LaunchHarness::Pi,
-        LaunchHarness::Omp,
-        LaunchHarness::OpenCode,
-    ] {
-        if harness_word(harness).contains(&folded_query) {
-            results.push(ComposerSearchResult::Harness(harness));
+
+    if matches!(scope, SearchScope::All | SearchScope::Harness) {
+        for harness in [
+            LaunchHarness::Codex,
+            LaunchHarness::Claude,
+            LaunchHarness::Muse,
+            LaunchHarness::Goose,
+            LaunchHarness::Pi,
+            LaunchHarness::Omp,
+            LaunchHarness::OpenCode,
+        ] {
+            if query.is_empty() || harness_word(harness).contains(&folded_query) {
+                results.push(ComposerSearchResult::Harness(harness));
+            }
+        }
+        if query.is_empty() || "other / command".contains(&folded_query) {
+            results.push(ComposerSearchResult::Command);
         }
     }
-    if "other / command".contains(&folded_query) {
-        results.push(ComposerSearchResult::Command);
-    }
-    for candidate in catalog {
-        if harness.is_some_and(|selected| selected != candidate.harness) {
-            continue;
+
+    if matches!(scope, SearchScope::All | SearchScope::Model) {
+        for candidate in catalog {
+            if harness.is_some_and(|selected| selected != candidate.harness) {
+                continue;
+            }
+            if query.is_empty() || candidate.id.to_ascii_lowercase().contains(&folded_query) {
+                results.push(ComposerSearchResult::Model {
+                    id: candidate.id.clone(),
+                    harness: candidate.harness,
+                });
+            }
         }
-        if candidate.id.to_ascii_lowercase().contains(&folded_query) {
+        // A custom model is a complete history fact, not a catalog omission.
+        // Reuse ranked history so scoped and ordinary model search preserve
+        // the same frequency and recency order.
+        for launch in ranked_recents(history, &ComposerFilter::default(), None) {
+            let Some(id) = launch.selection.model.as_ref() else {
+                continue;
+            };
+            if harness.is_some_and(|selected| selected != launch.selection.harness) {
+                continue;
+            }
+            if (!query.is_empty() && !id.to_ascii_lowercase().contains(&folded_query))
+                || catalog.iter().any(|model| model.id == *id)
+                || results.iter().any(|result| {
+                    matches!(
+                        result,
+                        ComposerSearchResult::Model {
+                            id: existing,
+                            harness,
+                        } if existing == id && *harness == launch.selection.harness
+                    )
+                })
+            {
+                continue;
+            }
             results.push(ComposerSearchResult::Model {
-                id: candidate.id.clone(),
-                harness: candidate.harness,
+                id: id.clone(),
+                harness: launch.selection.harness,
             });
         }
     }
-    // A custom model is a complete history fact, not a catalog omission to
-    // hide. Offer it as a model choice with the harness that actually ran
-    // it, while keeping it out of the release-owned catalog list above.
-    // Reuse the ordinary aggregation and ranking before search filters its
-    // labels. Otherwise a text query quietly reordered the same saved setups
-    // by raw arrival order instead of their advertised frequency/recency.
-    for launch in ranked_recents(history, &ComposerFilter::default(), None) {
-        let Some(id) = launch.selection.model.as_ref() else {
-            continue;
-        };
-        if harness.is_some_and(|selected| selected != launch.selection.harness) {
-            continue;
-        }
-        if !id.to_ascii_lowercase().contains(&folded_query)
-            || catalog.iter().any(|model| model.id == *id)
-            || results.iter().any(|result| {
-                matches!(
-                    result,
-                    ComposerSearchResult::Model {
-                        id: existing,
-                        harness,
-                    } if existing == id && *harness == launch.selection.harness
-                )
-            })
-        {
-            continue;
-        }
-        results.push(ComposerSearchResult::Model {
-            id: id.clone(),
-            harness: launch.selection.harness,
-        });
-    }
-    // Models can be searched without a selected harness because a known model
-    // carries its owner. Efforts are different: without a harness, there is no
-    // safe vocabulary to offer, and with one selected they must follow the
-    // selected model's compatibility list rather than the raw enum.
-    if let Some(harness) = harness {
-        for effort in compatible_efforts(harness, model, catalog) {
-            if effort_value(effort).contains(&folded_query) {
-                results.push(ComposerSearchResult::Effort(effort));
+
+    if matches!(scope, SearchScope::All | SearchScope::Effort) {
+        // Without a harness there is no safe effort vocabulary to offer.
+        if let Some(harness) = harness {
+            for effort in compatible_efforts(harness, model, catalog) {
+                if query.is_empty() || effort_value(effort).contains(&folded_query) {
+                    results.push(ComposerSearchResult::Effort(effort));
+                }
             }
         }
     }
-    // Paths are an explicit opt-in boundary. Plain language queries should
-    // search the known choices only; a path-shaped query offers deliberate
-    // use and browse actions without turning typing into filesystem work.
-    if is_path_query(query) {
-        results.push(ComposerSearchResult::UsePath(query.to_string()));
-        results.push(ComposerSearchResult::BrowsePath(query.to_string()));
-    }
-    for folder in &history.folders {
-        if folder
-            .display_cwd
-            .to_ascii_lowercase()
-            .contains(&folded_query)
-        {
-            results.push(ComposerSearchResult::Folder(folder.display_cwd.clone()));
+
+    if matches!(scope, SearchScope::All | SearchScope::Folder) {
+        if is_path_query(query) {
+            results.push(ComposerSearchResult::UsePath(query.to_string()));
+            results.push(ComposerSearchResult::BrowsePath(query.to_string()));
+        }
+        for folder in &history.folders {
+            if query.is_empty()
+                || folder
+                    .display_cwd
+                    .to_ascii_lowercase()
+                    .contains(&folded_query)
+            {
+                results.push(ComposerSearchResult::Folder(folder.display_cwd.clone()));
+            }
         }
     }
-    // Search applies its text predicate after the same complete-selection
-    // aggregation that feeds ordinary recents. The two surfaces therefore
-    // keep one frequency and recency order for identical saved setups.
-    for launch in ranked_recents(history, &ComposerFilter::default(), None) {
-        let haystack = format!(
-            "{} {:?} {}",
-            launch.cwd,
-            launch.selection.harness,
-            launch.selection.model.as_deref().unwrap_or_default()
-        )
-        .to_ascii_lowercase();
-        if haystack.contains(&folded_query) {
-            results.push(ComposerSearchResult::Recent(launch.clone()));
+
+    if matches!(scope, SearchScope::All | SearchScope::Recent) {
+        // Search applies its text predicate after complete-selection ranking.
+        for launch in ranked_recents(history, &ComposerFilter::default(), None) {
+            let haystack = format!(
+                "{} {:?} {}",
+                recent_destination_label(launch),
+                launch.selection.harness,
+                launch.selection.model.as_deref().unwrap_or_default()
+            )
+            .to_ascii_lowercase();
+            if query.is_empty() || haystack.contains(&folded_query) {
+                results.push(ComposerSearchResult::Recent(launch.clone()));
+            }
         }
     }
     results
@@ -522,14 +581,16 @@ pub(crate) fn search_results(
 ///
 /// Exact words win over broader substring matches without changing the fixed
 /// group order. Efforts outrank exact model ids, which outrank exact harness
-/// names; this keeps `medium` from landing on a model such as
-/// `medium-context`, and keeps a model id from losing to a harness substring.
-/// Paths and recent setup descriptions deliberately do not participate.
+/// names; this keeps medium from landing on a model such as medium-context,
+/// and keeps a model id from losing to a harness substring. A recognized label
+/// narrows exact matching to its corresponding group; paths, recent setup
+/// descriptions, and the GitHub scope do not participate.
 pub(crate) fn default_search_index(
     grouped_results: &[(ComposerSearchGroup, Vec<ComposerSearchResult>)],
     query: &str,
 ) -> usize {
-    let folded_query = query.trim().to_ascii_lowercase();
+    let (scope, query) = scoped_query(query);
+    let folded_query = query.to_ascii_lowercase();
     if folded_query.is_empty() {
         return 0;
     }
@@ -537,11 +598,18 @@ pub(crate) fn default_search_index(
         .iter()
         .flat_map(|(_, results)| results)
         .collect::<Vec<_>>();
-    for kind in [
-        ComposerSearchGroup::Efforts,
-        ComposerSearchGroup::Models,
-        ComposerSearchGroup::Harnesses,
-    ] {
+    let kinds = match scope {
+        SearchScope::All => vec![
+            ComposerSearchGroup::Efforts,
+            ComposerSearchGroup::Models,
+            ComposerSearchGroup::Harnesses,
+        ],
+        SearchScope::Harness => vec![ComposerSearchGroup::Harnesses],
+        SearchScope::Model => vec![ComposerSearchGroup::Models],
+        SearchScope::Effort => vec![ComposerSearchGroup::Efforts],
+        SearchScope::Folder | SearchScope::Recent | SearchScope::Github => Vec::new(),
+    };
+    for kind in kinds {
         if let Some(index) = flat_results
             .iter()
             .position(|result| exact_word_group(result, &folded_query) == Some(kind))
@@ -567,6 +635,9 @@ fn exact_word_group(
 ) -> Option<ComposerSearchGroup> {
     match result {
         ComposerSearchResult::Harness(harness) if harness_word(*harness) == folded_query => {
+            Some(ComposerSearchGroup::Harnesses)
+        }
+        ComposerSearchResult::Command if folded_query == "command" => {
             Some(ComposerSearchGroup::Harnesses)
         }
         ComposerSearchResult::Model { id, .. } if id.eq_ignore_ascii_case(folded_query) => {
@@ -625,7 +696,8 @@ fn ranked_recents<'a>(
     filter: &ComposerFilter,
     cwd: Option<&str>,
 ) -> Vec<&'a LaunchHistoryEntry> {
-    let selected_destination = cwd.map(|cwd| canonical_destination(history, cwd));
+    let selected_destination =
+        cwd.map(|cwd| RecentDestination::Existing(canonical_destination(history, cwd)));
     let candidates = history
         .launches
         .iter()
@@ -679,6 +751,38 @@ pub(crate) fn matching_recents<'a>(
         .collect()
 }
 
+/// Keep ordinary recents scoped to the selected directory while also offering
+/// reusable repo setups, whose old allocation paths are irrelevant. Once a
+/// repo is selected, only that repo's compatible setups belong in this strip.
+pub(crate) fn destination_recents<'a>(
+    history: &'a LaunchHistory,
+    filter: &ComposerFilter,
+    destination: &crate::github_checkout::DestinationDraft,
+) -> Vec<&'a LaunchHistoryEntry> {
+    use crate::github_checkout::DestinationDraft;
+    // Old peers and ordinary-only histories keep the existing compact path.
+    if let DestinationDraft::Existing { cwd } = destination
+        && history
+            .launches
+            .iter()
+            .all(|entry| entry.github_repo.is_none())
+    {
+        return matching_recents(history, filter, Some(cwd));
+    }
+    ranked_recents(history, filter, None)
+        .into_iter()
+        .filter(|entry| match destination {
+            DestinationDraft::Existing { cwd } => {
+                entry.github_repo.is_some()
+                    || launch_destination(entry)
+                        == RecentDestination::Existing(canonical_destination(history, cwd))
+            }
+            DestinationDraft::Github { repo, .. } => entry.github_repo.as_ref() == Some(repo),
+        })
+        .take(3)
+        .collect()
+}
+
 /// Return the destination identity recorded for a displayed path.
 ///
 /// Folder history is where the helm keeps canonical path identity while a
@@ -698,9 +802,31 @@ fn canonical_destination<'a>(history: &'a LaunchHistory, display_cwd: &'a str) -
 /// Folder history deliberately remains a mutable, bounded browse suggestion.
 /// It cannot reconstruct a launch's historical identity after another alias
 /// or a repointed symlink uses the same spelling, so old rows fall back only
-/// to their own display fact.
-fn launch_destination(entry: &LaunchHistoryEntry) -> &str {
-    entry.canonical_cwd.as_deref().unwrap_or(&entry.cwd)
+/// to their own display fact. Fresh launches instead group by accepted repo
+/// intent; their actual cwd is diagnostic, never a reusable destination.
+fn launch_destination(entry: &LaunchHistoryEntry) -> RecentDestination<'_> {
+    match &entry.github_repo {
+        Some(repo) => RecentDestination::Github(repo),
+        None => RecentDestination::Existing(entry.canonical_cwd.as_deref().unwrap_or(&entry.cwd)),
+    }
+}
+
+/// Name the destination a saved setup will request, rather than the path a
+/// previous fresh allocation happened to receive.
+pub(crate) fn recent_destination_label(entry: &LaunchHistoryEntry) -> String {
+    entry.github_repo.as_ref().map_or_else(
+        || entry.cwd.clone(),
+        |repo| format!("gh:{}", repo.identifier()),
+    )
+}
+
+/// Fresh intent and an existing path remain different setups even when their
+/// last launches used the same directory. Repo identity also groups separate
+/// fresh allocations without treating their numbered paths as new setups.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecentDestination<'a> {
+    Existing(&'a str),
+    Github(&'a crate::github_checkout::GithubRepo),
 }
 
 /// Apply a recent setup as a complete explicit selection.
@@ -907,6 +1033,8 @@ mod tests {
     use crate::api::{FolderHistoryEntry, LaunchCatalogModel};
     use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission};
 
+    /// Build an explicit structured setup; omitted optional choices stay
+    /// omitted so grouping tests can distinguish defaults from explicit values.
     fn selection(
         harness: LaunchHarness,
         model: Option<&str>,
@@ -918,6 +1046,79 @@ mod tests {
             effort,
             permissions: None,
         }
+    }
+
+    /// Repeated fresh allocations are one reusable repo setup. An explicit
+    /// existing launch into its old cwd and a different permission choice are
+    /// separate setups, and cwd filtering must never select fresh intent.
+    #[test]
+    fn repo_recents_group_intent_instead_of_previous_allocation_paths() {
+        let fresh = LaunchHistoryEntry {
+            host: HostId::default(),
+            github_repo: Some(crate::github_checkout::GithubRepo::parse("acme/bar").unwrap()),
+            canonical_cwd: Some("/work/bar-2".into()),
+            cwd: "/work/bar-2".into(),
+            selection: selection(LaunchHarness::Codex, None, None),
+            created_at: 4,
+            creation_seq: Some(4),
+        };
+        let previous = LaunchHistoryEntry {
+            canonical_cwd: Some("/work/bar-1".into()),
+            cwd: "/work/bar-1".into(),
+            created_at: 1,
+            creation_seq: Some(1),
+            ..fresh.clone()
+        };
+        let existing = LaunchHistoryEntry {
+            github_repo: None,
+            created_at: 3,
+            creation_seq: Some(3),
+            ..fresh.clone()
+        };
+        let mut different_permissions = fresh.clone();
+        different_permissions.selection.permissions = Some(LaunchPermission::Yolo);
+        different_permissions.created_at = 2;
+        different_permissions.creation_seq = Some(2);
+        let history = LaunchHistory {
+            checkout_config_revision: 0,
+            launches: vec![
+                fresh.clone(),
+                existing.clone(),
+                different_permissions.clone(),
+                previous,
+            ],
+            folders: Vec::new(),
+        };
+        assert_eq!(
+            ranked_recents(&history, &ComposerFilter::default(), None),
+            vec![&fresh, &existing, &different_permissions]
+        );
+        assert_eq!(
+            ranked_recents(&history, &ComposerFilter::default(), Some("/work/bar-2")),
+            vec![&existing]
+        );
+        assert_eq!(
+            destination_recents(
+                &history,
+                &ComposerFilter::default(),
+                &crate::github_checkout::DestinationDraft::Existing {
+                    cwd: "/work/bar-2".into()
+                }
+            ),
+            vec![&fresh, &existing, &different_permissions]
+        );
+        assert_eq!(
+            destination_recents(
+                &history,
+                &ComposerFilter::default(),
+                &crate::github_checkout::DestinationDraft::github(
+                    fresh.github_repo.clone().unwrap()
+                )
+            ),
+            vec![&fresh, &different_permissions]
+        );
+        assert_eq!(recent_destination_label(&fresh), "gh:acme/bar");
+        assert_eq!(recent_destination_label(&existing), "/work/bar-2");
     }
 
     /// The compact row presents its harness separately and spells the
@@ -957,8 +1158,10 @@ mod tests {
     #[test]
     fn absent_fields_do_not_filter_explicit_recent_choices() {
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             launches: vec![LaunchHistoryEntry {
                 host: HostId::default(),
+                github_repo: None,
                 canonical_cwd: None,
                 cwd: "/work".into(),
                 selection: selection(
@@ -987,9 +1190,11 @@ mod tests {
         let codex = selection(LaunchHarness::Codex, Some("gpt-6-astra"), None);
         let claude = selection(LaunchHarness::Claude, Some("claude-opus-4-6"), None);
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             launches: vec![
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/other".into(),
                     selection: codex.clone(),
@@ -998,6 +1203,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: codex.clone(),
@@ -1006,6 +1212,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: codex.clone(),
@@ -1014,6 +1221,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: claude.clone(),
@@ -1040,9 +1248,11 @@ mod tests {
         let newest_one_off = selection(LaunchHarness::Claude, Some("claude-opus-4-6"), None);
         let frequent = selection(LaunchHarness::Codex, Some("gpt-6-astra"), None);
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             launches: vec![
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: newest_one_off.clone(),
@@ -1051,6 +1261,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: frequent.clone(),
@@ -1059,6 +1270,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: frequent.clone(),
@@ -1091,6 +1303,7 @@ mod tests {
             Some(LaunchEffort::High),
         );
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             folders: vec![
                 FolderHistoryEntry {
                     host: HostId::default(),
@@ -1112,6 +1325,7 @@ mod tests {
             launches: vec![
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/one/project".into()),
                     cwd: "/one-link".into(),
                     selection: default.clone(),
@@ -1120,6 +1334,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/one/project".into()),
                     cwd: "/one-link".into(),
                     selection: explicit.clone(),
@@ -1128,6 +1343,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/two/project".into()),
                     cwd: "/two-link".into(),
                     selection: default.clone(),
@@ -1742,9 +1958,11 @@ mod tests {
     #[test]
     fn search_models_follow_the_selected_harness() {
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             launches: vec![
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: selection(LaunchHarness::Claude, Some("claude-private"), None),
@@ -1753,6 +1971,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: None,
                     cwd: "/work".into(),
                     selection: selection(LaunchHarness::Codex, Some("codex-private"), None),
@@ -1869,6 +2088,7 @@ mod tests {
     #[test]
     fn search_keeps_choice_kinds_separate() {
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             folders: vec![FolderHistoryEntry {
                 host: HostId::default(),
                 canonical_cwd: "/work/helm".into(),
@@ -1879,6 +2099,7 @@ mod tests {
             }],
             launches: vec![LaunchHistoryEntry {
                 host: HostId::default(),
+                github_repo: None,
                 canonical_cwd: None,
                 cwd: "~/work/helm".into(),
                 selection: selection(LaunchHarness::Claude, None, None),
@@ -1934,6 +2155,7 @@ mod tests {
     fn search_and_recents_group_aliases_by_canonical_destination() {
         let setup = selection(LaunchHarness::Codex, None, None);
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             folders: vec![
                 FolderHistoryEntry {
                     host: HostId::default(),
@@ -1955,6 +2177,7 @@ mod tests {
             launches: vec![
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/real/project".into()),
                     cwd: "/alias/project".into(),
                     selection: setup.clone(),
@@ -1963,6 +2186,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/real/project".into()),
                     cwd: "/real/project".into(),
                     selection: setup,
@@ -1999,10 +2223,12 @@ mod tests {
         );
         let other = selection(LaunchHarness::Claude, None, None);
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             folders: Vec::new(),
             launches: vec![
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/one".into()),
                     cwd: "/one/work".into(),
                     selection: explicit.clone(),
@@ -2011,6 +2237,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/two".into()),
                     cwd: "/two/work".into(),
                     selection: default.clone(),
@@ -2019,6 +2246,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/one".into()),
                     cwd: "/one/work".into(),
                     selection: default.clone(),
@@ -2027,6 +2255,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/one".into()),
                     cwd: "/one/work".into(),
                     selection: explicit.clone(),
@@ -2035,6 +2264,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/one".into()),
                     cwd: "/one/work".into(),
                     selection: default.clone(),
@@ -2043,6 +2273,7 @@ mod tests {
                 },
                 LaunchHistoryEntry {
                     host: HostId::default(),
+                    github_repo: None,
                     canonical_cwd: Some("/three".into()),
                     cwd: "/three/work".into(),
                     selection: other.clone(),
@@ -2082,6 +2313,7 @@ mod tests {
     #[test]
     fn path_search_groups_explicit_actions_before_folder_history() {
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             folders: vec![FolderHistoryEntry {
                 host: HostId::default(),
                 canonical_cwd: "/work/helm".into(),
@@ -2092,6 +2324,7 @@ mod tests {
             }],
             launches: vec![LaunchHistoryEntry {
                 host: HostId::default(),
+                github_repo: None,
                 canonical_cwd: None,
                 cwd: "~/work/helm".into(),
                 selection: selection(LaunchHarness::Claude, Some("claude-fable-5"), None),
@@ -2128,9 +2361,11 @@ mod tests {
     #[test]
     fn search_offers_a_used_custom_model_with_its_harness() {
         let history = LaunchHistory {
+            checkout_config_revision: 0,
             folders: Vec::new(),
             launches: vec![LaunchHistoryEntry {
                 host: HostId::default(),
+                github_repo: None,
                 canonical_cwd: None,
                 cwd: "/work".into(),
                 selection: selection(LaunchHarness::Codex, Some("release/candidate.42"), None),
@@ -2145,6 +2380,239 @@ mod tests {
                     harness: LaunchHarness::Codex,
                 }
             )
+        );
+    }
+
+    /// Known labels are case-insensitive and trim only the query boundaries;
+    /// unknown labels remain ordinary text so provider IDs containing colons
+    /// cannot be accidentally narrowed to a suffix.
+    #[test]
+    fn scoped_query_recognizes_known_labels_without_reparsing_unknown_ones() {
+        assert_eq!(
+            scoped_query("  MoDeL: provider/model:v2  "),
+            (SearchScope::Model, "provider/model:v2")
+        );
+        assert_eq!(scoped_query("GH:"), (SearchScope::Github, ""));
+        assert_eq!(
+            scoped_query("folder : /tmp"),
+            (SearchScope::All, "folder : /tmp")
+        );
+        assert_eq!(
+            scoped_query("vendor:model:v2"),
+            (SearchScope::All, "vendor:model:v2")
+        );
+    }
+
+    /// Empty known scopes expose only their bounded kind, while GitHub queries
+    /// never fall through to a local cwd or ordinary saved setup.
+    #[test]
+    fn scoped_search_empty_kinds_are_bounded_and_gh_is_local_free() {
+        let history = LaunchHistory {
+            checkout_config_revision: 0,
+            folders: vec![FolderHistoryEntry {
+                host: HostId::default(),
+                canonical_cwd: "/tmp/gh:owner/repo".into(),
+                canonical_proven: true,
+                display_cwd: "/tmp/gh:owner/repo".into(),
+                created_at: 1,
+                creation_seq: Some(1),
+            }],
+            launches: vec![LaunchHistoryEntry {
+                host: HostId::default(),
+                canonical_cwd: None,
+                github_repo: None,
+                cwd: "/tmp/gh:owner/repo".into(),
+                selection: selection(LaunchHarness::Claude, Some("claude-v2"), None),
+                created_at: 1,
+                creation_seq: Some(1),
+            }],
+        };
+        let catalog = vec![LaunchCatalogModel {
+            id: "claude-v2".into(),
+            harness: LaunchHarness::Claude,
+            efforts: vec![LaunchEffort::Medium],
+        }];
+
+        let harnesses = search_results(&history, &catalog, "harness:", None, None);
+        assert_eq!(harnesses.len(), 8);
+        assert!(harnesses.iter().all(|result| {
+            matches!(
+                result,
+                ComposerSearchResult::Harness(_) | ComposerSearchResult::Command
+            )
+        }));
+        assert!(harnesses.contains(&ComposerSearchResult::Command));
+        assert_eq!(
+            search_results(&history, &catalog, "harness:other", None, None),
+            vec![ComposerSearchResult::Command]
+        );
+        let models = search_results(&history, &catalog, "model:", None, None);
+        assert_eq!(models.len(), 1);
+        assert!(models.contains(&ComposerSearchResult::Model {
+            id: "claude-v2".into(),
+            harness: LaunchHarness::Claude,
+        }));
+        assert!(
+            models
+                .iter()
+                .all(|result| matches!(result, ComposerSearchResult::Model { .. }))
+        );
+        let efforts = search_results(
+            &history,
+            &catalog,
+            "effort:",
+            Some(LaunchHarness::Claude),
+            Some("claude-v2"),
+        );
+        assert_eq!(efforts.len(), 1);
+        assert!(efforts.contains(&ComposerSearchResult::Effort(LaunchEffort::Medium)));
+        assert!(
+            efforts
+                .iter()
+                .all(|result| matches!(result, ComposerSearchResult::Effort(_)))
+        );
+        let folders = search_results(&history, &catalog, "folder:", None, None);
+        assert_eq!(folders.len(), 1);
+        assert!(folders.contains(&ComposerSearchResult::Folder("/tmp/gh:owner/repo".into())));
+        assert!(folders.iter().all(|result| matches!(
+            result,
+            ComposerSearchResult::UsePath(_)
+                | ComposerSearchResult::BrowsePath(_)
+                | ComposerSearchResult::Folder(_)
+        )));
+        let recents = search_results(&history, &catalog, "recent:", None, None);
+        assert_eq!(recents.len(), 1);
+        assert!(recents.contains(&ComposerSearchResult::Recent(history.launches[0].clone())));
+        assert!(
+            recents
+                .iter()
+                .all(|result| matches!(result, ComposerSearchResult::Recent(_)))
+        );
+        assert!(search_results(&history, &catalog, "gh:gh:owner/repo", None, None).is_empty());
+    }
+
+    /// Folder scope excludes complete setup rows, while unlabelled search
+    /// retains both folder and recent matches for the same text.
+    #[test]
+    fn folder_scope_does_not_broaden_into_unlabelled_recent_search() {
+        let history = LaunchHistory {
+            checkout_config_revision: 0,
+            folders: vec![FolderHistoryEntry {
+                host: HostId::default(),
+                canonical_cwd: "/work/project".into(),
+                canonical_proven: true,
+                display_cwd: "/work/project".into(),
+                created_at: 1,
+                creation_seq: Some(1),
+            }],
+            launches: vec![LaunchHistoryEntry {
+                host: HostId::default(),
+                canonical_cwd: None,
+                github_repo: None,
+                cwd: "/work/project".into(),
+                selection: selection(LaunchHarness::Codex, None, None),
+                created_at: 1,
+                creation_seq: Some(1),
+            }],
+        };
+        let scoped = search_results(&history, &[], "folder:project", None, None);
+        assert_eq!(
+            scoped,
+            vec![ComposerSearchResult::Folder("/work/project".into())]
+        );
+        assert!(
+            scoped
+                .iter()
+                .all(|result| matches!(result, ComposerSearchResult::Folder(_)))
+        );
+        assert!(
+            search_results(&history, &[], "project", None, None)
+                .iter()
+                .any(|result| matches!(result, ComposerSearchResult::Recent(_)))
+        );
+    }
+
+    /// Adding scoped search must retain harnesses introduced independently
+    /// of the destination feature. OMP was lost when the checkout stack
+    /// shipped from an older base; both discovery routes must offer it.
+    #[test]
+    fn scoped_and_unscoped_search_offer_omp() {
+        for query in ["omp", "harness:omp", "harness:"] {
+            let results = search_results(&LaunchHistory::default(), &[], query, None, None);
+            assert!(
+                results.contains(&ComposerSearchResult::Harness(LaunchHarness::Omp)),
+                "OMP must remain discoverable through {query:?}"
+            );
+        }
+    }
+
+    /// Harness scope includes the legacy Other/Command action, and exact
+    /// selection compares the value after a label, including model colons.
+    #[test]
+    fn scoped_harness_and_model_exact_words_select_the_matching_row() {
+        let command = search_results(
+            &LaunchHistory::default(),
+            &[],
+            "HARNESS:command",
+            None,
+            None,
+        );
+        let command_groups = grouped_search_results(command);
+        assert_eq!(
+            command_groups,
+            vec![(
+                ComposerSearchGroup::Harnesses,
+                vec![ComposerSearchResult::Command]
+            )]
+        );
+        assert_eq!(default_search_index(&command_groups, "harness:command"), 0);
+
+        let catalog = vec![
+            LaunchCatalogModel {
+                id: "provider/model:v2-preview".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![],
+            },
+            LaunchCatalogModel {
+                id: "provider/model:v2".into(),
+                harness: LaunchHarness::Claude,
+                efforts: vec![],
+            },
+        ];
+        let model_groups = grouped_search_results(search_results(
+            &LaunchHistory::default(),
+            &catalog,
+            "model:provider/model:v2",
+            None,
+            None,
+        ));
+        assert_eq!(model_groups[0].1.len(), 2);
+        assert!(model_groups[0].1.contains(&ComposerSearchResult::Model {
+            id: "provider/model:v2".into(),
+            harness: LaunchHarness::Claude,
+        }));
+        assert_eq!(
+            default_search_index(&model_groups, "MODEL: provider/model:v2"),
+            1
+        );
+
+        let unknown_colon = vec![LaunchCatalogModel {
+            id: "vendor:model:v2".into(),
+            harness: LaunchHarness::Claude,
+            efforts: vec![],
+        }];
+        assert!(
+            search_results(
+                &LaunchHistory::default(),
+                &unknown_colon,
+                "vendor:model:v2",
+                None,
+                None,
+            )
+            .contains(&ComposerSearchResult::Model {
+                id: "vendor:model:v2".into(),
+                harness: LaunchHarness::Claude,
+            })
         );
     }
 }
