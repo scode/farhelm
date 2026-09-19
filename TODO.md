@@ -176,21 +176,6 @@ on the frozen baseline; the menu failure appears pre-existing but did not reprod
 stall failure recurred from the existing entry. Their evidence and remaining uncertainty are below. Neither full command
 is a clean gate.
 
-- Investigate the remaining profiles startup/bridge symptoms in `e2e/tests/profiles.spec.ts` from the loaded 0.3.0-rc.1
-  runs on 2026-09-03. `stale focus-out classifiers cannot clear newer obligations` failed inside `stubFeed`
-  (`e2e/tests/helpers/fleet.ts`) with "the page never opened feed socket #1 (saw 0)", before exercising classifiers. The
-  focus-and-Escape case was also diagnosed then as an exhausted Unknown classification leaving the popup mounted; that
-  product diagnosis remains unproven. Against the baseline above, exact runs reproduced different harness focus races,
-  corrected in #385: a reopened popup was visible before focus entered it, and the Unknown fixture produced known
-  Missing instead. Those corrections passed six initial cases and 120 repetitions (20 per case per engine) with two
-  CPU-load children; the later explicit Unknown oracle passed another twenty per engine without extra load. Neither
-  older fingerprint recurred. The previous event-driven retry/classification-ordinal attempt made pending focus failures
-  more frequent and did not settle Escape dismissal; do not revive it as a proven solution. On recurrence, retain the
-  full browser/bridge trace and feed open/close timestamps, separating no socket request from a late request and a
-  classifier exhausting observations. The controlled regressions for retaining unresolved obligations and honoring later
-  focus events do not establish the cause of these older startup/bridge failures. Assessed 2026-09-17 and left parked:
-  neither fingerprint has recurred since the corrections, and the named instrumentation only pays on a fresh
-  reproduction; the 2026-09-17 focus-budget raise (#707) also changed the focus machinery these symptoms raced against.
 - Deflake `a client that stops draining is detached with the stall reason after the full stall interval` in
   `e2e/tests/terminal-flood.spec.ts`, WebKit. The loaded 2026-09-03 failure saw zero pauses after thirty seconds, before
   the sixty-second stall interval could start. Thirty prior loaded repetitions passed; ten gate-to-first-pause
