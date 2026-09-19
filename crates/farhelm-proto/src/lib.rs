@@ -2416,14 +2416,21 @@ pub enum ControlMsg {
     /// identity before consulting current configuration or launch catalogs.
     /// Full-authority helm connections only. An unknown key never allocates;
     /// a matching pending attempt recovers under its recorded snapshot.
+    /// `refuse_unknown` spends an unknown key permanently under create
+    /// admission. Its durable CheckoutConflict permits a new explicit user
+    /// submission; a concurrent accepted request instead replays its outcome.
     ReconcileGithubCheckout {
         req_id: u64,
         intent_key: String,
         client_identity: String,
         cols: u16,
         rows: u16,
+        #[serde(default)]
+        refuse_unknown: bool,
     },
-    /// `None` proves that this supervisor has no reservation for the key.
+    /// `None` observes no reservation at lookup time; it does not prevent
+    /// a concurrent create from accepting the key afterward. A refusal
+    /// request must never treat None as durable non-acceptance proof.
     /// Settled refusals, spent keys, and identity mismatches use `Error`;
     /// they must never be interpreted as permission to allocate again.
     GithubCheckoutReconciled {
@@ -3530,6 +3537,40 @@ impl ControlMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Existing lookup requests must stay non-mutating when the new refusal
+    /// field is absent. An explicit flag survives the wire round trip, so
+    /// mutation authority is never inferred from an unknown-key response.
+    #[test]
+    fn fresh_reconciliation_defaults_to_lookup_without_refusal() {
+        let request = ControlMsg::ReconcileGithubCheckout {
+            req_id: 1,
+            intent_key: "key".into(),
+            client_identity: "request".into(),
+            cols: 80,
+            rows: 24,
+            refuse_unknown: true,
+        };
+        let mut value = serde_json::to_value(request).unwrap();
+        assert!(matches!(
+            serde_json::from_value::<ControlMsg>(value.clone()).unwrap(),
+            ControlMsg::ReconcileGithubCheckout {
+                refuse_unknown: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            value.as_object_mut().unwrap().remove("refuse_unknown"),
+            Some(serde_json::json!(true))
+        );
+        assert!(matches!(
+            serde_json::from_value::<ControlMsg>(value).unwrap(),
+            ControlMsg::ReconcileGithubCheckout {
+                refuse_unknown: false,
+                ..
+            }
+        ));
+    }
 
     /// Round-trip through the real encoder/decoder: any drift between
     /// encode and decode shows up here before it shows up between a helm

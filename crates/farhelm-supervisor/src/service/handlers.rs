@@ -2976,9 +2976,10 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             client_identity,
             cols,
             rows,
+            refuse_unknown,
         } => {
             let reply = match sup
-                .reconcile_github_checkout(intent_key, &client_identity, cols, rows)
+                .reconcile_github_checkout(intent_key, &client_identity, cols, rows, refuse_unknown)
                 .await
             {
                 Ok(session) => ControlMsg::GithubCheckoutReconciled { req_id, session },
@@ -6501,37 +6502,42 @@ mod tests {
         };
 
         // Restricted peers cannot use lookup to discover or recover another
-        // caller's intent, even when the supplied key is unknown.
-        handle_restricted_control(
-            &sup,
-            ControlMsg::ReconcileGithubCheckout {
-                req_id: 60,
-                intent_key: "unknown-checkout-key".into(),
-                client_identity: "fixture-request".into(),
-                cols: 80,
-                rows: 24,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("reconciliation refusal").body).unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 60,
-                kind: ErrorKind::Unauthorized,
-                ..
-            }
-        ));
-        assert!(
-            sup.store
-                .reservation("unknown-checkout-key")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        // caller's intent or permanently refuse its key. Both lookup-only
+        // and refusal modes must stop before reservation access.
+        for refuse_unknown in [false, true] {
+            handle_restricted_control(
+                &sup,
+                ControlMsg::ReconcileGithubCheckout {
+                    req_id: 60,
+                    intent_key: "unknown-checkout-key".into(),
+                    client_identity: "fixture-request".into(),
+                    cols: 80,
+                    rows: 24,
+                    refuse_unknown,
+                },
+                &tx,
+                &auth,
+            )
+            .await;
+            let reply: ControlMsg =
+                serde_json::from_slice(&rx.recv().await.expect("reconciliation refusal").body)
+                    .unwrap();
+            assert!(matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 60,
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ));
+            assert!(
+                sup.store
+                    .reservation("unknown-checkout-key")
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
 
         handle_restricted_control(
             &sup,

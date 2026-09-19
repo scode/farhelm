@@ -82,12 +82,24 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
     let (history_status, history) =
         get_json(&harness, &format!("/api/launch-history?host={local}")).await;
     assert_eq!(history_status, axum::http::StatusCode::OK);
+    assert_eq!(history["checkout_config_revision"], 0);
+    harness
+        .store
+        .set_checkout_root(None, "/new-checkouts")
+        .await
+        .unwrap();
+    let (_, refreshed) = get_json(&harness, &format!("/api/launch-history?host={local}")).await;
+    assert_eq!(
+        refreshed["checkout_config_revision"], 1,
+        "feed-driven history readers must observe externally editable checkout configuration"
+    );
     assert_eq!(
         history["launches"],
         serde_json::json!([{
             "host": local,
             "cwd": "/composer-history",
             "canonical_cwd": null,
+            "github_repo": null,
             "selection": {
                 "harness": "codex",
                 "model": "gpt-6-astra",
@@ -4582,6 +4594,17 @@ async fn post_text(
     uri: &str,
     body: serde_json::Value,
 ) -> (axum::http::StatusCode, String) {
+    let (status, _, text) = post_text_headers(harness, uri, body).await;
+    (status, text)
+}
+
+/// Retain outcome headers as well as prose: a Conflict's text cannot prove
+/// whether a fresh create was rejected before dispatch or already accepted.
+async fn post_text_headers(
+    harness: &rest_harness::Harness,
+    uri: &str,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
     let request = axum::http::Request::builder()
         .method("POST")
         .uri(uri)
@@ -4593,10 +4616,11 @@ async fn post_text(
         .await
         .unwrap();
     let status = response.status();
+    let headers = response.headers().clone();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    (status, String::from_utf8_lossy(&body).into_owned())
+    (status, headers, String::from_utf8_lossy(&body).into_owned())
 }
 
 /// PUT with a JSON body, returning the status and the body — mirroring
@@ -7741,22 +7765,15 @@ async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
     );
 }
 
-/// A create body carrying `github_checkout` is refused at the helm before
-/// any host contact, and an unparseable repository text is reported as the
-/// parse error rather than as the not-supported-yet refusal.
-///
-/// The order matters because the two failures answer different questions:
-/// the parse error names what the USER typed (per `GithubCheckoutRequest`'s
-/// own contract, parsing happens against raw text so the refusal can be
-/// specific), while the not-supported-yet refusal is this slice's
-/// deliberate rejection of every fresh create until the supervisor backend
-/// exists. This test pins the first half of that order; the valid-repo test
-/// below pins the second.
+/// Malformed repository text is refused before preview or launch validation.
+/// A connected silent peer proves that neither lookup nor create reaches the
+/// supervisor, while the error still names the user's malformed identifier.
 #[farhelm_testtrace::test]
 async fn create_with_invalid_github_repo_names_the_parse_error() {
     use tower::ServiceExt;
 
-    let (client_side, _peer_side) = tokio::io::duplex(64 * 1024);
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(silent_supervisor(peer_side));
     let harness = rest_harness::spliced_helm(client_side).await;
     let app = harness.router();
 
@@ -7785,23 +7802,33 @@ async fn create_with_invalid_github_repo_names_the_parse_error() {
         text.contains("invalid GitHub repository"),
         "the refusal must be the parse error, not the backend refusal: {text}"
     );
+    peer.await.unwrap();
 }
 
-/// A create body with a WELL-FORMED `github_checkout` is refused wholesale:
-/// the fresh-checkout create pipeline arrives in a later unit, and refusing
-/// before any host contact, history write, or supervisor frame is the
-/// blueprint's contract for this slice.
+/// A create body with a valid repository and accepted preview proceeds to the
+/// fresh-checkout resolution, and with no checkout root configured the
+/// refusal names the exact CLI command that fixes it — the operator-gap
+/// message, not a generic failure, and still before any host contact,
+/// history write, or supervisor frame.
 ///
-/// The harness's scripted peer deliberately asserts nothing: the whole
-/// point is that no create frame is ever sent. The duplex peer is dropped
-/// with the harness, which is the same shape the refusal tests in
-/// `agent_requests.rs` use for a request that must not reach a responder.
+/// No intent key is supplied, so no reconciliation lookup is needed. The
+/// connected silent peer is joined to prove that no create frame is sent.
 #[farhelm_testtrace::test]
-async fn create_with_valid_github_repo_is_refused_as_not_supported_yet() {
+async fn create_with_valid_github_repo_without_a_root_names_the_set_root_command() {
     use tower::ServiceExt;
 
-    let (client_side, _peer_side) = tokio::io::duplex(64 * 1024);
+    // A CONNECTED silent supervisor, not a dropped peer: the refusal must
+    // fire at the helm's resolution (before any create frame reaches the
+    // host), which needs the host dial to succeed first.
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(silent_supervisor(peer_side));
     let harness = rest_harness::spliced_helm(client_side).await;
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    let preview = serde_json::json!({
+        "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
+        "config_revision": 1, "host": claim.host.to_string(), "incarnation": claim.incarnation,
+        "installation_identity": claim.identity,
+    });
     let app = harness.router();
 
     let request = axum::http::Request::builder()
@@ -7811,9 +7838,9 @@ async fn create_with_valid_github_repo_is_refused_as_not_supported_yet() {
         .header("content-type", "application/json")
         .body(axum::body::Body::from(
             serde_json::json!({
-                "cwd": "/tmp/whatever",
+                "cwd": "",
                 "invocation": "some-agent",
-                "github_checkout": {"repo": "acme/bar", "title": null}
+                "github_checkout": {"repo": "acme/bar", "title": null, "preview": preview}
             })
             .to_string(),
         ))
@@ -7826,7 +7853,1613 @@ async fn create_with_valid_github_repo_is_refused_as_not_supported_yet() {
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(
-        text.contains("fresh GitHub checkouts are not supported yet"),
-        "a valid repository must hit the explicit not-supported-yet refusal: {text}"
+        text.contains("no checkout root is configured")
+            && text.contains("checkout-config set-root"),
+        "a valid repository without a configured root must hit the actionable \
+         set-root refusal: {text}"
     );
+    // The refusal happened at the helm: the connected silent supervisor
+    // proves no create frame reached it. (It panics inside its own task on
+    // a leaked frame; joining asserts it stayed silent for the window.)
+    peer.await.unwrap();
+}
+
+/// A recorded fresh request must reach lookup before stale settings or a
+/// deleted launch profile can refuse it. Unknown keys still face current
+/// preconditions; a different installation must not receive even the lookup.
+/// The scripted peer observes the actual frame sequence and stays open until
+/// both REST calls finish, so an accidental create cannot hide behind EOF.
+#[farhelm_testtrace::test]
+async fn fresh_rest_reconciliation_precedes_mutable_resolution_and_binds_installation() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ProfileExistence, SourceProfile};
+
+    for by_name in [false, true] {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            for expected_key in ["recorded-key", "unknown-key", "unknown-stale-config"] {
+                let frame = reader.read_frame().await.unwrap().expect("lookup frame");
+                let ControlMsg::ReconcileGithubCheckout {
+                    req_id,
+                    intent_key,
+                    client_identity,
+                    refuse_unknown,
+                    ..
+                } = parse_control(&frame).unwrap()
+                else {
+                    panic!("expected lookup, never create");
+                };
+                assert_eq!(intent_key, expected_key);
+                assert!(
+                    !refuse_unknown,
+                    "the initial lookup must not spend an unknown key"
+                );
+                let identity: serde_json::Value = serde_json::from_str(&client_identity).unwrap();
+                assert_eq!(
+                    identity[0],
+                    if by_name {
+                        "github_named_profile_v1"
+                    } else {
+                        "github_create_request_v1"
+                    }
+                );
+                assert!(client_identity.contains("removed-profile"));
+                assert!(client_identity.contains("local-identity"));
+                let session = if expected_key == "recorded-key" {
+                    let mut session = rest_harness::session("recorded-session", 12);
+                    session.source_profile = Some(SourceProfile {
+                        id: "removed-profile".into(),
+                        name: "original profile".into(),
+                        existence: ProfileExistence::Unresolved,
+                    });
+                    Some(session)
+                } else {
+                    None
+                };
+                writer
+                    .write_control(&ControlMsg::GithubCheckoutReconciled { req_id, session })
+                    .await
+                    .unwrap();
+                if expected_key != "recorded-key" {
+                    let frame = reader
+                        .read_frame()
+                        .await
+                        .unwrap()
+                        .expect("durable refusal request");
+                    let ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        intent_key,
+                        client_identity: refused_identity,
+                        refuse_unknown: true,
+                        ..
+                    } = parse_control(&frame).unwrap()
+                    else {
+                        panic!("a local keyed refusal must be settled, never dispatched as create");
+                    };
+                    assert_eq!(intent_key, expected_key);
+                    assert_eq!(refused_identity, client_identity);
+                    writer
+                        .write_control(&ControlMsg::Error {
+                            req_id,
+                            kind: farhelm_proto::ErrorKind::CheckoutConflict,
+                            message: "fixture durable refusal".into(),
+                        })
+                        .await
+                        .unwrap();
+                }
+            }
+            tokio::select! {
+                biased;
+                frame = reader.read_frame() => panic!("unexpected frame after lookup: {frame:?}"),
+                result = &mut finished_rx => result.unwrap(),
+            }
+        });
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let (claim, _) = super::create_target(&harness.state, None).unwrap();
+        assert!(
+            !harness
+                .store
+                .profiles()
+                .await
+                .unwrap()
+                .iter()
+                .any(|p| p.id == "removed-profile")
+        );
+        harness
+            .store
+            .set_checkout_root(None, "/current-root")
+            .await
+            .unwrap();
+        let current = harness.store.resolve_checkout_config(None).await.unwrap();
+        let mut body = serde_json::json!({
+            "cwd": "", "profile_id": "removed-profile", "intent_key": "recorded-key",
+            "expected_incarnation": claim.incarnation + 100,
+            "github_checkout": { "repo": "acme/bar", "title": null, "preview": {
+                "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
+                "config_revision": current.config_revision - 1,
+                "host": claim.host.to_string(), "incarnation": claim.incarnation + 100,
+                "installation_identity": "local-identity"
+            }}
+        });
+        if by_name {
+            body.as_object_mut().unwrap().remove("profile_id");
+            body["profile_name"] = serde_json::json!("removed-profile");
+        }
+        let (status, text) = post_text(&harness, "/api/sessions", body.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+        let returned: farhelm_proto::SessionInfo = serde_json::from_str(&text).unwrap();
+        assert_eq!(returned.id, "recorded-session");
+        assert_eq!(
+            returned.source_profile.unwrap().existence,
+            ProfileExistence::Deleted
+        );
+
+        body["intent_key"] = serde_json::json!("unknown-key");
+        let (status, text) = post_text(&harness, "/api/sessions", body.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+        assert!(
+            text.contains(crate::precondition::INCARNATION_MARKER),
+            "{text}"
+        );
+
+        body["intent_key"] = serde_json::json!("unknown-stale-config");
+        body["expected_incarnation"] = serde_json::json!(claim.incarnation);
+        body["github_checkout"]["preview"]["incarnation"] = serde_json::json!(claim.incarnation);
+        let (status, headers, text) =
+            post_text_headers(&harness, "/api/sessions", body.clone()).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+        assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
+        assert!(text.contains("checkout settings changed"), "{text}");
+
+        body["github_checkout"]["preview"]["installation_identity"] =
+            serde_json::json!("different-installation");
+        let (status, text) = post_text(&harness, "/api/sessions", body).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+        assert!(text.contains("different host installation"), "{text}");
+        finished_tx.send(()).unwrap();
+        peer.await.unwrap();
+    }
+}
+
+/// Local resolution failures need a second, atomic supervisor decision. This
+/// covers late profile-ID lookup as well as stale settings, and proves that
+/// unknown/transport/ordinary failure replies cannot acquire the durable-proof
+/// marker. A source-id winner is vetoed before history/default side effects.
+#[farhelm_testtrace::test]
+async fn fresh_local_refusals_require_durable_proof_on_both_routes() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind};
+
+    for replacing in [false, true] {
+        for cause in ["settings", "profile-id"] {
+            for disposition in [
+                "refused",
+                "unknown",
+                "unavailable",
+                "stored-failure",
+                "source-veto",
+            ] {
+                if disposition == "source-veto" && !replacing {
+                    continue;
+                }
+                let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+                let (harness, local) =
+                    spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)])
+                        .await;
+                let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+                let peer = tokio::spawn(async move {
+                    let (r, w) = tokio::io::split(peer_side);
+                    let mut reader = FrameReader::new(r);
+                    let mut writer = FrameWriter::new(w);
+                    handshake(&mut reader, &mut writer, "supervisor")
+                        .await
+                        .unwrap();
+                    let message =
+                        parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                    let ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        intent_key,
+                        client_identity,
+                        refuse_unknown: false,
+                        ..
+                    } = message
+                    else {
+                        panic!("expected non-mutating lookup: {message:?}")
+                    };
+                    assert_eq!(intent_key, "failed-local-resolution");
+                    writer
+                        .write_control(&ControlMsg::GithubCheckoutReconciled {
+                            req_id,
+                            session: None,
+                        })
+                        .await
+                        .unwrap();
+                    let message =
+                        parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                    let ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        intent_key: refused_key,
+                        client_identity: refused_identity,
+                        refuse_unknown: true,
+                        ..
+                    } = message
+                    else {
+                        panic!("expected atomic refusal, never create: {message:?}")
+                    };
+                    assert_eq!(refused_key, intent_key);
+                    assert_eq!(
+                        refused_identity, client_identity,
+                        "selector consumption must not change the original identity"
+                    );
+                    let reply = match disposition {
+                        "refused" => ControlMsg::Error {
+                            req_id,
+                            kind: ErrorKind::CheckoutConflict,
+                            message: "stored durable refusal".into(),
+                        },
+                        "unknown" => ControlMsg::GithubCheckoutReconciled {
+                            req_id,
+                            session: None,
+                        },
+                        "unavailable" => ControlMsg::Error {
+                            req_id,
+                            kind: ErrorKind::Unavailable,
+                            message: "refusal outcome unavailable".into(),
+                        },
+                        "stored-failure" => ControlMsg::Error {
+                            req_id,
+                            kind: ErrorKind::InvalidRequest,
+                            message: "original stored failure".into(),
+                        },
+                        "source-veto" => ControlMsg::GithubCheckoutReconciled {
+                            req_id,
+                            session: Some(rest_harness::session("sess-1", 12)),
+                        },
+                        _ => unreachable!(),
+                    };
+                    writer.write_control(&reply).await.unwrap();
+                    tokio::select! {
+                        biased;
+                        frame = reader.read_frame() => panic!("refusal or source veto sent a mutation: {frame:?}"),
+                        result = &mut finished_rx => result.unwrap(),
+                    }
+                });
+                harness.await_refreshed(local).await;
+                harness
+                    .store
+                    .set_checkout_root(None, "/configured-root")
+                    .await
+                    .unwrap();
+                harness
+                    .store
+                    .remember_profile_default("builtin-codex")
+                    .await
+                    .unwrap();
+                let profiles = harness.store.profiles().await.unwrap();
+                assert!(
+                    !profiles
+                        .iter()
+                        .any(|profile| profile.id == "removed-profile")
+                );
+                let config = harness.store.resolve_checkout_config(None).await.unwrap();
+                let (claim, _) = super::create_target(&harness.state, None).unwrap();
+                assert!(
+                    harness
+                        .store
+                        .github_repository_history(local, "local-identity")
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+                let mut request = serde_json::json!({
+                    "cwd": "", "profile_id": if cause == "profile-id" { "removed-profile" } else { "builtin-claude" },
+                    "github_checkout": {"repo": "acme/bar", "preview": {
+                        "canonical_root": "/configured-root", "basename": "bar-1", "cwd": "/configured-root/bar-1",
+                        "config_revision": config.config_revision - i64::from(cause == "settings"),
+                        "host": claim.host.to_string(), "incarnation": claim.incarnation,
+                        "installation_identity": "local-identity"
+                    }}
+                });
+                let (route, body) = if replacing {
+                    (
+                        "/api/sessions/sess-1/replace",
+                        serde_json::json!({"intent_key": "failed-local-resolution", "with": request}),
+                    )
+                } else {
+                    request["intent_key"] = serde_json::json!("failed-local-resolution");
+                    ("/api/sessions", request)
+                };
+                let (status, headers, text) = post_text_headers(&harness, route, body).await;
+                let expected = match disposition {
+                    "refused" | "source-veto" => axum::http::StatusCode::CONFLICT,
+                    "unavailable" => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "stored-failure" => axum::http::StatusCode::BAD_REQUEST,
+                    "unknown" if cause == "profile-id" => axum::http::StatusCode::NOT_FOUND,
+                    _ => axum::http::StatusCode::CONFLICT,
+                };
+                assert_eq!(
+                    status, expected,
+                    "{replacing}/{cause}/{disposition}: {text}"
+                );
+                assert_eq!(
+                    headers.contains_key("x-farhelm-create-outcome"),
+                    disposition == "refused",
+                    "{text}"
+                );
+                if disposition == "stored-failure" {
+                    assert!(text.contains("original stored failure"), "{text}");
+                }
+                if disposition != "source-veto" {
+                    assert!(
+                        text.contains(if cause == "settings" {
+                            "checkout settings changed"
+                        } else {
+                            "profile not found"
+                        }),
+                        "{text}"
+                    );
+                }
+                assert!(
+                    harness
+                        .store
+                        .github_repository_history(local, "local-identity")
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+                assert_eq!(
+                    harness.store.remembered_profile().await.unwrap().as_deref(),
+                    Some("builtin-codex")
+                );
+                finished_tx.send(()).unwrap();
+                peer.await.unwrap();
+            }
+        }
+    }
+}
+
+/// Two identical submissions can both observe an unknown key before one wins.
+/// The first reaches CreateSession under the original settings; a latch then
+/// changes configuration and deletes its named profile before the second
+/// resolves locally. Atomic refusal must return the accepted winner, including
+/// on replacement, without another create or a false non-acceptance marker.
+#[farhelm_testtrace::test]
+async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, ProfileExistence, SourceProfile};
+
+    for replacing in [false, true] {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (harness, local) =
+            spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)]).await;
+        let (create_seen_tx, create_seen_rx) = tokio::sync::oneshot::channel();
+        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ReconcileGithubCheckout {
+                req_id,
+                client_identity,
+                refuse_unknown: false,
+                ..
+            } = message
+            else {
+                panic!("first request must begin with lookup: {message:?}")
+            };
+            writer
+                .write_control(&ControlMsg::GithubCheckoutReconciled {
+                    req_id,
+                    session: None,
+                })
+                .await
+                .unwrap();
+            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::CreateSession {
+                req_id: create_id,
+                github_checkout: Some(checkout),
+                source_profile: Some(profile),
+                ..
+            } = message
+            else {
+                panic!("first request must reach one fresh create: {message:?}")
+            };
+            assert_eq!(checkout.root, "/original-root");
+            assert_eq!(checkout.client_identity, client_identity);
+            let mut winner = rest_harness::session("concurrent-winner", 13);
+            winner.cwd = checkout.preview.cwd;
+            winner.canonical_cwd = Some(winner.cwd.clone());
+            winner.source_profile = Some(SourceProfile {
+                id: profile.id,
+                name: profile.name,
+                existence: ProfileExistence::Unresolved,
+            });
+            create_seen_tx.send(()).unwrap();
+            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ReconcileGithubCheckout {
+                req_id,
+                client_identity: second_identity,
+                refuse_unknown: false,
+                ..
+            } = message
+            else {
+                panic!("second request must observe unknown before the winner commits: {message:?}")
+            };
+            assert_eq!(second_identity, client_identity);
+            writer
+                .write_control(&ControlMsg::GithubCheckoutReconciled {
+                    req_id,
+                    session: None,
+                })
+                .await
+                .unwrap();
+            // Acceptance occurs after both unknown observations. The first
+            // response and second local-resolution failure may now interleave.
+            writer
+                .write_control(&ControlMsg::SessionCreated {
+                    req_id: create_id,
+                    session: winner.clone(),
+                })
+                .await
+                .unwrap();
+            let mut refusals = 0;
+            let mut deletes = 0;
+            for _ in 0..if replacing { 3 } else { 1 } {
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                match message {
+                    ControlMsg::ReconcileGithubCheckout {
+                        req_id,
+                        client_identity: refused_identity,
+                        refuse_unknown: true,
+                        ..
+                    } => {
+                        assert_eq!(refused_identity, client_identity);
+                        refusals += 1;
+                        writer
+                            .write_control(&ControlMsg::GithubCheckoutReconciled {
+                                req_id,
+                                session: Some(winner.clone()),
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    ControlMsg::DeleteSession { req_id, session_id } if replacing => {
+                        assert_eq!(session_id, "sess-1");
+                        deletes += 1;
+                        writer
+                            .write_control(&ControlMsg::Error {
+                                req_id,
+                                kind: ErrorKind::Conflict,
+                                message: "retain source".into(),
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    other => {
+                        panic!("only winner recovery and source deletion may follow: {other:?}")
+                    }
+                }
+            }
+            assert_eq!(refusals, 1);
+            assert_eq!(deletes, if replacing { 2 } else { 0 });
+            tokio::select! {
+                biased;
+                frame = reader.read_frame() => panic!("unexpected duplicate mutation: {frame:?}"),
+                result = &mut finished_rx => result.unwrap(),
+            }
+        });
+        harness.await_refreshed(local).await;
+        harness
+            .store
+            .set_checkout_root(None, "/original-root")
+            .await
+            .unwrap();
+        let crate::store::ProfileCreation::Created(profile) = harness
+            .store
+            .create_profile(
+                "race-profile".into(),
+                "agent".into(),
+                farhelm_proto::AgentKind::Generic,
+                None,
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("fixture needs a uniquely named profile")
+        };
+        assert_eq!(
+            harness
+                .store
+                .profiles()
+                .await
+                .unwrap()
+                .iter()
+                .filter(|p| p.name == "race-profile")
+                .count(),
+            1
+        );
+        let config = harness.store.resolve_checkout_config(None).await.unwrap();
+        let (claim, _) = super::create_target(&harness.state, None).unwrap();
+        let mut request = serde_json::json!({
+            "cwd": "", "profile_name": "race-profile",
+            "github_checkout": {"repo": "acme/bar", "preview": {
+                "canonical_root": "/original-root", "basename": "bar-1", "cwd": "/original-root/bar-1",
+                "config_revision": config.config_revision, "host": claim.host.to_string(),
+                "incarnation": claim.incarnation, "installation_identity": "local-identity"
+            }}
+        });
+        let (route, body) = if replacing {
+            (
+                "/api/sessions/sess-1/replace",
+                serde_json::json!({"intent_key": "concurrent-key", "with": request}),
+            )
+        } else {
+            request["intent_key"] = serde_json::json!("concurrent-key");
+            ("/api/sessions", request)
+        };
+        let first = post_text_headers(&harness, route, body.clone());
+        let second = async {
+            create_seen_rx
+                .await
+                .expect("first request must reach dispatch before settings change");
+            harness
+                .store
+                .set_checkout_root(None, "/changed-root")
+                .await
+                .unwrap();
+            assert!(harness.store.delete_profile(&profile.id).await.unwrap());
+            assert!(
+                harness
+                    .store
+                    .resolve_checkout_config(None)
+                    .await
+                    .unwrap()
+                    .config_revision
+                    > config.config_revision
+            );
+            post_text_headers(&harness, route, body).await
+        };
+        let (first, second) = tokio::join!(first, second);
+        for (status, headers, text) in [&first, &second] {
+            assert_eq!(
+                *status,
+                if replacing {
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    axum::http::StatusCode::OK
+                },
+                "{text}"
+            );
+            assert!(
+                !headers.contains_key("x-farhelm-create-outcome"),
+                "an accepted winner is not a refusal"
+            );
+            assert!(text.contains("concurrent-winner"), "{text}");
+            if replacing {
+                assert!(text.contains("both sessions still exist"), "{text}");
+            }
+        }
+        if !replacing {
+            let returned: farhelm_proto::SessionInfo = serde_json::from_str(&second.2).unwrap();
+            assert_eq!(
+                returned.source_profile.unwrap().existence,
+                ProfileExistence::Deleted
+            );
+        }
+        assert_eq!(
+            harness.store.remembered_profile().await.unwrap().as_deref(),
+            Some(profile.id.as_str())
+        );
+        assert_eq!(
+            harness
+                .store
+                .github_repository_history(local, "local-identity")
+                .await
+                .unwrap(),
+            vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()]
+        );
+        finished_tx.send(()).unwrap();
+        peer.await.unwrap();
+    }
+}
+
+/// Fresh destination validation must reject a contradictory folder before any
+/// create or delete reaches the host. Both public entry points share this
+/// contract, independently of which agent selector the request uses.
+#[farhelm_testtrace::test]
+async fn fresh_create_and_replace_refuse_a_contradictory_cwd() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+
+    for replacing in [false, true] {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (harness, local) =
+            spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)]).await;
+        let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            tokio::select! {
+                biased;
+                frame = reader.read_frame() => panic!("contradictory destination contacted peer: {frame:?}"),
+                result = &mut finished_rx => result.unwrap(),
+            }
+        });
+        harness.await_refreshed(local).await;
+        harness
+            .store
+            .set_checkout_root(None, "/fresh-root")
+            .await
+            .unwrap();
+        let config = harness.store.resolve_checkout_config(None).await.unwrap();
+        let (claim, _) = super::create_target(&harness.state, None).unwrap();
+        for (selector, value) in [
+            ("invocation", serde_json::json!("agent")),
+            ("profile_id", serde_json::json!("builtin-claude")),
+            ("profile_name", serde_json::json!("claude")),
+            ("launch", serde_json::json!({"harness": "codex"})),
+        ] {
+            let mut request = serde_json::json!({
+                "cwd": "/unrelated-existing-directory",
+                "github_checkout": {"repo": "acme/bar", "preview": {
+                    "canonical_root": "/fresh-root", "basename": "bar-1", "cwd": "/fresh-root/bar-1",
+                    "config_revision": config.config_revision, "host": claim.host.to_string(),
+                    "incarnation": claim.incarnation, "installation_identity": "local-identity"
+                }}
+            });
+            request[selector] = value;
+            let (route, body) = if replacing {
+                (
+                    "/api/sessions/sess-1/replace",
+                    serde_json::json!({"with": request}),
+                )
+            } else {
+                ("/api/sessions", request)
+            };
+            let (status, headers, text) = post_text_headers(&harness, route, body).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::BAD_REQUEST,
+                "{selector}: {text}"
+            );
+            assert!(
+                text.contains("cwd must be empty or match the accepted preview"),
+                "{selector}: {text}"
+            );
+            assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
+        }
+        finished_tx.send(()).unwrap();
+        peer.await.unwrap();
+    }
+}
+
+/// A peer can forge profile provenance even on a matching-key reply. Named
+/// replays must not let that metadata choose the helm-wide default; an
+/// explicit client-selected id remains authoritative. Exercise both entry
+/// points because replacement has its own reconciliation acceptance path.
+#[farhelm_testtrace::test]
+async fn fresh_reconciliation_does_not_trust_remote_profile_defaults() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, ProfileExistence, SourceProfile};
+
+    for replacing in [false, true] {
+        for by_name in [true, false] {
+            let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+            let (harness, local) =
+                spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)])
+                    .await;
+            let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+            let peer = tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer_side);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .unwrap();
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::ReconcileGithubCheckout { req_id, .. } = message else {
+                    panic!("expected reconciliation: {message:?}");
+                };
+                let mut session = rest_harness::session("reconciled", 13);
+                session.source_profile = Some(SourceProfile {
+                    id: "builtin-codex".into(),
+                    name: "codex".into(),
+                    existence: ProfileExistence::Unresolved,
+                });
+                writer
+                    .write_control(&ControlMsg::GithubCheckoutReconciled {
+                        req_id,
+                        session: Some(session),
+                    })
+                    .await
+                    .unwrap();
+                if replacing {
+                    let message =
+                        parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                    let ControlMsg::DeleteSession { req_id, session_id } = message else {
+                        panic!("expected source deletion: {message:?}");
+                    };
+                    assert_eq!(session_id, "sess-1");
+                    // A definite delete refusal leaves both sessions visible
+                    // without changing which create has been accepted.
+                    writer
+                        .write_control(&ControlMsg::Error {
+                            req_id,
+                            kind: ErrorKind::Conflict,
+                            message: "retain source".into(),
+                        })
+                        .await
+                        .unwrap();
+                }
+                tokio::select! {
+                    biased;
+                    frame = reader.read_frame() => panic!("unexpected frame: {frame:?}"),
+                    result = &mut finished_rx => result.unwrap(),
+                }
+            });
+            harness.await_refreshed(local).await;
+            let profiles = harness.store.profiles().await.unwrap();
+            for id in ["builtin-claude", "builtin-codex", "builtin-codex-yolo"] {
+                assert!(profiles.iter().any(|profile| profile.id == id));
+            }
+            harness
+                .store
+                .remember_profile_default("builtin-codex-yolo")
+                .await
+                .unwrap();
+            assert_eq!(
+                harness.store.remembered_profile().await.unwrap().as_deref(),
+                Some("builtin-codex-yolo")
+            );
+            let (claim, _) = super::create_target(&harness.state, None).unwrap();
+            let mut request = serde_json::json!({
+                "cwd": "", "github_checkout": {"repo": "acme/bar", "preview": {
+                    "canonical_root": "/old-root", "basename": "bar-1", "cwd": "/old-root/bar-1",
+                    "config_revision": 0, "host": claim.host.to_string(),
+                    "incarnation": claim.incarnation, "installation_identity": "local-identity"
+                }}
+            });
+            if by_name {
+                request["profile_name"] = serde_json::json!("claude");
+            } else {
+                request["profile_id"] = serde_json::json!("builtin-claude");
+            }
+            let (route, body) = if replacing {
+                (
+                    "/api/sessions/sess-1/replace",
+                    serde_json::json!({"intent_key": "recorded", "with": request}),
+                )
+            } else {
+                request["intent_key"] = serde_json::json!("recorded");
+                ("/api/sessions", request)
+            };
+            let (status, text) = post_text(&harness, route, body).await;
+            assert_eq!(
+                status,
+                if replacing {
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    axum::http::StatusCode::OK
+                },
+                "{text}"
+            );
+            assert!(text.contains("reconciled"), "{text}");
+            assert_eq!(
+                harness.store.remembered_profile().await.unwrap().as_deref(),
+                Some(if by_name {
+                    "builtin-codex-yolo"
+                } else {
+                    "builtin-claude"
+                }),
+                "remote profile metadata must not select the default"
+            );
+            finished_tx.send(()).unwrap();
+            peer.await.unwrap();
+        }
+    }
+}
+
+/// Name selection must resolve exactly once before fresh allocation, and
+/// malformed or ambiguous selectors must never reach the supervisor. The
+/// single observed frame is the positive control after all local refusals.
+#[farhelm_testtrace::test]
+async fn named_profile_fresh_create_resolves_exactly_and_refuses_ambiguous_selectors() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ProfileExistence, SourceProfile};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            invocation,
+            source_profile: Some(profile),
+            github_checkout: Some(checkout),
+            cwd,
+            ..
+        } = message
+        else {
+            panic!("expected the one valid named fresh create: {message:?}");
+        };
+        assert_eq!(profile.id, "builtin-claude");
+        assert!(
+            cwd.is_empty(),
+            "preview cwd is not an ordinary supervisor destination"
+        );
+        assert_eq!(profile.name, "claude");
+        assert_eq!(invocation.as_deref(), Some("claude"));
+        assert_eq!(checkout.root, "/named-root");
+        assert!(checkout.client_identity.contains("github_named_profile_v1"));
+        let mut session = rest_harness::session("named-fresh", 100);
+        session.cwd = "/named-root/bar-1".into();
+        session.canonical_cwd = Some(session.cwd.clone());
+        session.source_profile = Some(SourceProfile {
+            id: profile.id,
+            name: profile.name,
+            existence: ProfileExistence::Unresolved,
+        });
+        writer
+            .write_control(&ControlMsg::SessionCreated { req_id, session })
+            .await
+            .unwrap();
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let profiles = harness.store.profiles().await.unwrap();
+    assert_eq!(profiles.iter().filter(|p| p.name == "claude").count(), 1);
+    let base = serde_json::json!({ "cwd": "/tmp", "profile_name": "claude" });
+    for (field, value) in [
+        ("invocation", serde_json::json!("agent")),
+        ("profile_id", serde_json::json!("builtin-claude")),
+        ("launch", serde_json::json!({"harness": "codex"})),
+        ("agent_kind", serde_json::json!("generic")),
+        ("resume_template", serde_json::json!(["agent"])),
+    ] {
+        let mut body = base.clone();
+        body[field] = value;
+        let (status, text) = post_text(&harness, "/api/sessions", body).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::BAD_REQUEST,
+            "{field}: {text}"
+        );
+    }
+    let (status, text) = post_text(
+        &harness,
+        "/api/sessions",
+        serde_json::json!({"cwd": "/tmp", "profile_name": "CLAUDE"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{text}");
+    let crate::store::ProfileCreation::Created(duplicate) = harness
+        .store
+        .create_profile(
+            "claude".into(),
+            "other-command".into(),
+            farhelm_proto::AgentKind::Generic,
+            None,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("fixture catalog must have capacity");
+    };
+    assert_eq!(
+        harness
+            .store
+            .profiles()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|p| p.name == "claude")
+            .count(),
+        2
+    );
+    let (status, text) = post_text(&harness, "/api/sessions", base).await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{text}");
+    assert!(harness.store.delete_profile(&duplicate.id).await.unwrap());
+    harness
+        .store
+        .set_checkout_root(None, "/named-root")
+        .await
+        .unwrap();
+    let settings = harness.store.resolve_checkout_config(None).await.unwrap();
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    let body = serde_json::json!({
+        "cwd": "/named-root/bar-1", "profile_name": "claude", "expected_incarnation": claim.incarnation,
+        "github_checkout": {"repo": "acme/bar", "title": null, "preview": {
+            "canonical_root": "/named-root", "basename": "bar-1", "cwd": "/named-root/bar-1",
+            "config_revision": settings.config_revision, "host": claim.host.to_string(),
+            "incarnation": claim.incarnation, "installation_identity": claim.identity,
+        }},
+    });
+    let (status, text) = post_text(&harness, "/api/sessions", body).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let session: farhelm_proto::SessionInfo = serde_json::from_str(&text).unwrap();
+    assert_eq!(session.source_profile.unwrap().id, "builtin-claude");
+    peer.await.unwrap();
+}
+
+/// Fresh replacement forwards the accepted payload once, then reconciles the
+/// same request after configuration changes. A delete refusal retains both
+/// sessions. Source-id replays and unknown stale intents must send no delete
+/// or create and must not change history; a foreign installation gets no lookup.
+/// The peer remains live until an explicit completion signal, so unexpected
+/// mutation frames cannot be mistaken for a harmless closed connection.
+#[farhelm_testtrace::test]
+async fn fresh_replace_reconciles_original_payload_and_vetoes_source_replays() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind};
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (harness, local) =
+        spliced_replace_harness(client_side, vec![rest_harness::session("sess-1", 12)]).await;
+    let fleet = harness.fleet.clone();
+    let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let mut original_identity = None;
+        let mut replacement = rest_harness::session("replacement", 13);
+        replacement.cwd = "/original-root/bar-fix".into();
+        replacement.canonical_cwd = Some(replacement.cwd.clone());
+        for (attempt, key) in ["original", "original", "source-replay", "unknown"]
+            .into_iter()
+            .enumerate()
+        {
+            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::ReconcileGithubCheckout {
+                req_id,
+                intent_key,
+                client_identity,
+                refuse_unknown,
+                ..
+            } = message
+            else {
+                panic!("expected reconciliation, got {message:?}");
+            };
+            assert_eq!(intent_key, key);
+            assert!(!refuse_unknown);
+            let identity: serde_json::Value = serde_json::from_str(&client_identity).unwrap();
+            assert_eq!(identity[0], "github_replace_request_v1");
+            assert_eq!(identity[1], "sess-1");
+            if let Some(original) = &original_identity {
+                assert_eq!(
+                    &client_identity, original,
+                    "retry must retain the original request"
+                );
+            } else {
+                original_identity = Some(client_identity.clone());
+            }
+            let session = match attempt {
+                1 => Some(replacement.clone()),
+                2 => Some(rest_harness::session("sess-1", 999)),
+                _ => None,
+            };
+            writer
+                .write_control(&ControlMsg::GithubCheckoutReconciled { req_id, session })
+                .await
+                .unwrap();
+            if attempt == 3 {
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::ReconcileGithubCheckout {
+                    req_id,
+                    intent_key,
+                    client_identity: refused_identity,
+                    refuse_unknown: true,
+                    ..
+                } = message
+                else {
+                    panic!("expected durable refusal, got {message:?}")
+                };
+                assert_eq!(intent_key, key);
+                assert_eq!(refused_identity, client_identity);
+                writer
+                    .write_control(&ControlMsg::Error {
+                        req_id,
+                        kind: ErrorKind::CheckoutConflict,
+                        message: "fixture durable refusal".into(),
+                    })
+                    .await
+                    .unwrap();
+            }
+            if attempt == 0 {
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::CreateSession {
+                    req_id,
+                    cwd,
+                    title,
+                    github_checkout: Some(checkout),
+                    ..
+                } = message
+                else {
+                    panic!("expected fresh create, got {message:?}");
+                };
+                assert!(cwd.is_empty());
+                assert_eq!(title.as_deref(), Some("Fix"));
+                assert_eq!(checkout.root, "/original-root");
+                assert_eq!(checkout.preview.cwd, "/original-root/bar-fix");
+                assert_eq!(checkout.post_clone.as_deref(), Some("original-hook"));
+                assert_eq!(checkout.client_identity, client_identity);
+                fleet.edit(local, |script| script.sessions.push(replacement.clone()));
+                writer
+                    .write_control(&ControlMsg::SessionCreated {
+                        req_id,
+                        session: replacement.clone(),
+                    })
+                    .await
+                    .unwrap();
+            }
+            if attempt < 2 {
+                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::DeleteSession { req_id, session_id } = message else {
+                    panic!("expected deletion of original, got {message:?}");
+                };
+                assert_eq!(session_id, "sess-1");
+                writer
+                    .write_control(&ControlMsg::Error {
+                        req_id,
+                        kind: ErrorKind::Conflict,
+                        message: "fixture retains source".into(),
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+        tokio::select! {
+            biased;
+            frame = reader.read_frame() => panic!("unexpected mutation after refusals: {frame:?}"),
+            result = &mut finished_rx => result.unwrap(),
+        }
+    });
+    harness.await_refreshed(local).await;
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    harness
+        .store
+        .set_checkout_root(None, "/original-root")
+        .await
+        .unwrap();
+    harness
+        .store
+        .set_checkout_post_clone(None, "original-hook")
+        .await
+        .unwrap();
+    let revision = harness
+        .store
+        .resolve_checkout_config(None)
+        .await
+        .unwrap()
+        .config_revision;
+    let mut body = serde_json::json!({
+        "intent_key": "original",
+        "with": { "cwd": "/original-root/bar-fix", "invocation": "agent", "expected_incarnation": claim.incarnation,
+            "github_checkout": { "repo": "acme/bar", "title": "Fix", "preview": {
+                "canonical_root": "/original-root", "basename": "bar-fix", "cwd": "/original-root/bar-fix",
+                "config_revision": revision, "host": claim.host.to_string(), "incarnation": claim.incarnation,
+                "installation_identity": "local-identity"
+            }}
+        }
+    });
+    let route = "/api/sessions/sess-1/replace";
+    for attempt in 0..2 {
+        let (status, text) = post_text(&harness, route, body.clone()).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "{text}"
+        );
+        assert!(text.contains("both sessions still exist"), "{text}");
+        assert!(
+            text.contains("replacement") && text.contains("sess-1"),
+            "{text}"
+        );
+        if attempt == 0 {
+            harness
+                .store
+                .set_checkout_root(None, "/changed-root")
+                .await
+                .unwrap();
+            harness
+                .store
+                .set_checkout_post_clone(None, "changed-hook")
+                .await
+                .unwrap();
+        }
+    }
+    let history = harness
+        .store
+        .folder_history(local, "local-identity")
+        .await
+        .unwrap();
+    assert!(
+        history.is_empty(),
+        "fresh replacement paths are not folder intent"
+    );
+    assert_eq!(
+        harness
+            .store
+            .github_repository_history(local, "local-identity")
+            .await
+            .unwrap(),
+        vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()]
+    );
+    body["intent_key"] = serde_json::json!("source-replay");
+    let (status, headers, text) = post_text_headers(&harness, route, body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert!(
+        !headers.contains_key("x-farhelm-create-outcome"),
+        "a known-key source veto is not an unknown-key refusal"
+    );
+    assert!(text.contains("no replacement was made"), "{text}");
+    assert_eq!(
+        harness
+            .store
+            .folder_history(local, "local-identity")
+            .await
+            .unwrap(),
+        history
+    );
+    body["intent_key"] = serde_json::json!("unknown");
+    let (status, headers, text) = post_text_headers(&harness, route, body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert_eq!(headers["x-farhelm-create-outcome"], "definitely-unaccepted");
+    assert!(text.contains("checkout settings changed"), "{text}");
+    body["with"]["github_checkout"]["preview"]["installation_identity"] =
+        serde_json::json!("foreign-installation");
+    let (status, text) = post_text(&harness, route, body).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert!(text.contains("different host installation"), "{text}");
+    finished_tx.send(()).unwrap();
+    peer.await.unwrap();
+}
+
+/// Repository completion resolves only helm-owned root settings and returns
+/// installation-scoped, validated identities. Missing configuration, a failed
+/// scan and partial results remain distinguishable from a complete empty scan;
+/// malformed remote identities are never reflected into suggestions. Recent
+/// intent ranks before scan results, dedupes with them and survives scan failure.
+#[farhelm_testtrace::test]
+async fn github_repository_rest_routes_config_and_preserves_incomplete_status() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{ControlMsg, ErrorKind, GithubRepo};
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        for attempt in 0..2 {
+            let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::GithubRepoSearch {
+                req_id,
+                claim,
+                query,
+                root,
+            } = message
+            else {
+                panic!("expected repository search, got {message:?}");
+            };
+            assert_eq!(root.as_deref(), Some("~/target-checkouts"));
+            assert_eq!(query, "acme");
+            assert!(!claim.host.is_empty());
+            assert!(claim.incarnation > 0);
+            let reply = if attempt == 0 {
+                ControlMsg::GithubRepoResults {
+                    req_id,
+                    truncated: false,
+                    repos: vec![
+                        farhelm_proto::parse_github_repo("acme/bar").unwrap(),
+                        farhelm_proto::parse_github_repo("acme/bar").unwrap(),
+                        GithubRepo {
+                            owner: "user:secret@github.com".into(),
+                            name: "bad".into(),
+                        },
+                    ],
+                }
+            } else {
+                ControlMsg::Error {
+                    req_id,
+                    kind: ErrorKind::Internal,
+                    message: "Git failed inspecting https://user:secret@github.com/acme/bar".into(),
+                }
+            };
+            writer.write_control(&reply).await.unwrap();
+        }
+        tokio::select! {
+            biased;
+            frame = reader.read_frame() => panic!("unexpected discovery request: {frame:?}"),
+            result = &mut finished_rx => result.unwrap(),
+        }
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let (claim, _) = super::create_target(&harness.state, None).unwrap();
+    // The most recent matching repo sorts after the scanned name, proving
+    // accepted-create order wins. An unrelated recent must be filtered.
+    for (index, name) in ["acme/bar", "acme/zebra", "unrelated/repo"]
+        .iter()
+        .enumerate()
+    {
+        let repo = farhelm_proto::parse_github_repo(name).unwrap();
+        harness
+            .store
+            .record_create_history_with_destination(
+                claim.host,
+                "local-identity",
+                &rest_harness::session(&format!("recent-{index}"), index as i64),
+                ("/ephemeral", "/ephemeral"),
+                Some(&repo),
+                false,
+            )
+            .await
+            .unwrap();
+    }
+    let body = serde_json::json!({ "host": claim.host, "expected_incarnation": claim.incarnation, "query": "acme" });
+    assert!(
+        harness
+            .store
+            .resolve_checkout_config(Some(claim.host))
+            .await
+            .unwrap()
+            .root
+            .is_none()
+    );
+    let route = "/api/github-repositories";
+    let (status, text) = post_text(&harness, route, body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let missing: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(missing["truncated"], true);
+    let expected = serde_json::json!([
+        { "owner": "acme", "name": "zebra" },
+        { "owner": "acme", "name": "bar" }
+    ]);
+    assert_eq!(
+        missing["repos"], expected,
+        "missing config retains accepted suggestions"
+    );
+    assert!(
+        missing["scan_error"]
+            .as_str()
+            .unwrap()
+            .contains("checkout-config set-root")
+    );
+    harness
+        .store
+        .set_checkout_root(None, "~/target-checkouts")
+        .await
+        .unwrap();
+    let (status, text) = post_text(&harness, route, body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let result: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(result["repos"], expected);
+    assert_eq!(
+        result["truncated"], true,
+        "discarded invalid identity makes the result incomplete"
+    );
+    assert!(result["scan_error"].is_null());
+    assert_eq!(result["installation_identity"], "local-identity");
+    assert_eq!(result["incarnation"], claim.incarnation);
+    assert_eq!(result["host"], claim.host.to_string());
+    assert!(!text.contains("secret"));
+    let (status, text) = post_text(&harness, route, body.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let failed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(failed["repos"], expected);
+    assert_eq!(failed["truncated"], true);
+    assert!(
+        failed["scan_error"]
+            .as_str()
+            .unwrap()
+            .contains("verify Git")
+    );
+    assert!(!text.contains("secret"));
+    let mut stale = body;
+    stale["expected_incarnation"] = serde_json::json!(claim.incarnation + 1);
+    let (status, text) = post_text(&harness, route, stale).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+    assert!(text.contains(crate::precondition::INCARNATION_MARKER));
+    finished_tx.send(()).unwrap();
+    peer.await.unwrap();
+}
+
+/// Losing the supervisor must not erase installation-scoped repo recents.
+/// The fixture waits until routing actually refuses that host, so success
+/// proves the endpoint reads durable intent without a live scan connection.
+#[farhelm_testtrace::test]
+async fn github_repository_rest_preserves_recents_offline() {
+    let (builder, host) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "offline.example",
+            rest_harness::HostScript {
+                identity: Some("repo-installation".into()),
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(host).await;
+    harness
+        .store
+        .set_checkout_root(None, "/checkouts")
+        .await
+        .unwrap();
+    let repo = farhelm_proto::parse_github_repo("acme/bar").unwrap();
+    harness
+        .store
+        .record_create_history_with_destination(
+            host,
+            "repo-installation",
+            &rest_harness::session("fresh", 1),
+            ("/checkouts/bar-1", "/checkouts/bar-1"),
+            Some(&repo),
+            false,
+        )
+        .await
+        .unwrap();
+    harness.fleet.take_down(host);
+    harness
+        .await_state(host, |state| state.phase() == "unreachable-reprobing")
+        .await;
+    assert!(super::host_client(&harness.state, host).is_err());
+    let incarnation = harness.manager.status(host).unwrap().incarnation;
+    let (status, text) = post_text(
+        &harness,
+        "/api/github-repositories",
+        serde_json::json!({
+            "host": host, "expected_incarnation": incarnation, "query": "acme"
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+    let response: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(response["repos"], serde_json::json!([repo]));
+    assert_eq!(response["installation_identity"], "repo-installation");
+    assert_eq!(response["incarnation"], incarnation);
+    assert_eq!(response["truncated"], true);
+    assert!(response["scan_error"].as_str().unwrap().contains("offline"));
+}
+
+/// A3, the preview contract at the helm's REST edge: the composer asks for
+/// a preview of `acme/bar` with a root stored UNEXPANDED as `~/work`, and
+/// the answer must prove the expansion happened on the SUPERVISOR's home —
+/// the scripted peer answers with an absent child of an owned temporary root,
+/// deliberately distinct from the stored home-relative spelling —
+/// and the helm must pass that through verbatim alongside its OWN
+/// authoritative claim (host id + incarnation) and the config revision it
+/// resolved. NOTHING may be created by a preview: no mkdir on the helm's
+/// fixture tree, and the scripted peer creates nothing either.
+///
+/// Configuration revision is checked by the helm on unknown creates; the
+/// supervisor checks the actual root and occupancy. This preview test pins
+/// the stored revision and unexpanded root sent to that supervisor.
+#[farhelm_testtrace::test]
+async fn a_preview_resolves_the_stored_root_and_passes_the_supervisor_answer_through() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    let remote_home = tempfile::tempdir().unwrap();
+    let remote_root = remote_home.path().join("work");
+    assert!(!remote_root.exists(), "preview target must start absent");
+    let canonical_root = remote_root.to_str().unwrap().to_owned();
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let seen_root = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    let seen_revision = std::sync::Arc::new(std::sync::Mutex::new(None::<i64>));
+    // Not joined: the peer loops answering previews until the harness drop
+    // closes the stream, and the harness keeps the manager connection open
+    // by design, so the peer task's exit is not observable here.
+    let _peer = tokio::spawn({
+        let seen_root = seen_root.clone();
+        let seen_revision = seen_revision.clone();
+        let canonical_root = canonical_root.clone();
+        async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            loop {
+                let Ok(Some(frame)) = reader.read_frame().await else {
+                    return;
+                };
+                match parse_control(&frame) {
+                    Ok(ControlMsg::GithubCheckoutPreview {
+                        req_id,
+                        request:
+                            farhelm_proto::GithubPreviewRequest {
+                                root,
+                                config_revision,
+                                ..
+                            },
+                    }) => {
+                        *seen_root.lock().unwrap() = root.clone();
+                        *seen_revision.lock().unwrap() = config_revision;
+                        // The supervisor's answer uses ITS OWN home's
+                        // canonical form — deliberately different from
+                        // anything the helm could derive locally.
+                        writer
+                            .write_control(&ControlMsg::GithubCheckoutPreviewed {
+                                req_id,
+                                preview: farhelm_proto::GithubPreviewResponse {
+                                    canonical_root: canonical_root.clone(),
+                                    basename: "bar".to_string(),
+                                    cwd: canonical_root.clone(),
+                                    config_revision: config_revision.unwrap_or(0),
+                                    claim_context: farhelm_proto::ClaimContext {
+                                        host: String::new(),
+                                        incarnation: 0,
+                                    },
+                                },
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    _ => return,
+                }
+            }
+        }
+    });
+
+    let harness = rest_harness::spliced_helm_listing(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    // The stored root is UNEXPANDED — exactly what the CLI stores.
+    harness
+        .store
+        .set_checkout_root(None, "~/work")
+        .await
+        .expect("store the checkout root");
+    let revision = harness
+        .store
+        .resolve_checkout_config(None)
+        .await
+        .unwrap()
+        .config_revision;
+
+    let app = harness.router();
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/github-checkout-preview")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "host": local,
+                "repo": "acme/bar",
+                "title": null
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // The helm sent the root UNEXPANDED; expansion is the supervisor's job.
+    assert_eq!(
+        seen_root.lock().unwrap().as_deref(),
+        Some("~/work"),
+        "the helm must send the stored root unexpanded"
+    );
+    assert_eq!(
+        *seen_revision.lock().unwrap(),
+        Some(revision),
+        "the binding carries the revision the root was resolved under"
+    );
+    // The supervisor's answer passes through, and the helm stamps its own
+    // authoritative claim over the placeholder.
+    assert_eq!(body["canonical_root"], canonical_root);
+    assert_eq!(body["basename"], "bar");
+    assert_eq!(body["cwd"], canonical_root);
+    assert_eq!(body["config_revision"], revision);
+    assert_eq!(body["host"], local.to_string());
+    assert!(body["incarnation"].as_u64().unwrap() >= 1);
+    assert_eq!(body["installation_identity"], "local-identity");
+    // The parent is owned and the child was absent before the request, so
+    // this oracle cannot fail because of an unrelated directory on the host.
+    assert!(
+        !remote_root.exists(),
+        "a preview must not create the checkout directory"
+    );
+    // The scripted peer loops answering previews until the harness drop
+    // closes the stream; it is NOT joined (the harness keeps the manager
+    // connection open by design, so the peer task's exit is not observable
+    // here).
+}
+
+/// The stale-incarnation half of the preview contract: a preview prepared
+/// against one incarnation is refused when the connection's incarnation
+/// has moved on, BEFORE any frame reaches the host — the same precondition
+/// ordering the browse/create routes use.
+#[farhelm_testtrace::test]
+async fn a_preview_with_a_stale_incarnation_is_refused_before_any_frame() {
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    // Keep the peer alive until the response completes. A fixed silence
+    // window can expire during setup under load and cannot prove that the
+    // whole request stayed on the helm side of the boundary.
+    let (finished_tx, mut finished_rx) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn({
+        async move {
+            use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            tokio::select! {
+                biased;
+                leaked = reader.read_frame() => {
+                    panic!("stale-incarnation preview contacted or lost its peer: {leaked:?}");
+                }
+                result = &mut finished_rx => result.unwrap(),
+            }
+        }
+    });
+    let harness = rest_harness::spliced_helm_listing(
+        client_side,
+        vec![rest_harness::session("sess-1", 1_700_000_000)],
+    )
+    .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness
+        .store
+        .set_checkout_root(None, "~/work")
+        .await
+        .expect("store the checkout root");
+
+    let app = harness.router();
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/github-checkout-preview")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "host": local,
+                "expected_incarnation": 999,
+                "repo": "acme/bar"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    finished_tx.send(()).expect("preview peer must remain live");
+    peer.await.expect("preview peer must observe no frame");
 }

@@ -4,9 +4,10 @@
 //!
 //! The shape is a global setting with optional per-host overrides, stored in
 //! helm.db (schema version 27 — see [`crate::store::CHECKOUT_CONFIG_SCHEMA`]
-//! for the tables). Each read resolves current persisted settings without a
-//! process-local cache. This module touches no host, creates no directories,
-//! and never runs the configured hook.
+//! for the tables). Preview and create consume the same resolved snapshot.
+//! The running helm observes CLI writes and invalidates browser readers; this
+//! module deliberately touches no host, creates no directories, and never
+//! runs the configured hook.
 //!
 //! ## Inheritance semantics (binding)
 //!
@@ -30,6 +31,51 @@ use crate::store::{HelmStore, HostId, HostRow};
 use anyhow::Context;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
+
+/// Publish committed external configuration changes through the ordinary
+/// invalidation feed. The CLI writes SQLite directly, so an in-process setter
+/// callback would miss precisely the edits an open composer needs to observe.
+///
+/// The serving future owns this loop in its select: shutdown drops it, rather
+/// than leaving a detached watcher holding the database open. Reads are serial
+/// and the interval starts after each read; a slow database cannot accumulate
+/// work or cause catch-up bursts. A failed read preserves the last observation.
+pub(crate) async fn watch_revision(
+    store: HelmStore,
+    events: std::sync::Arc<crate::feed::FleetEvents>,
+    mut observed: i64,
+) {
+    let mut read_failed = false;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        match publish_revision_change(&store, &events, &mut observed).await {
+            Ok(_) => read_failed = false,
+            Err(error) => {
+                if !read_failed {
+                    tracing::warn!(%error, "cannot observe checkout configuration changes");
+                }
+                read_failed = true;
+            }
+        }
+    }
+}
+
+/// Advance only after a successful database read and notify only on a change.
+/// The caller establishes its baseline before serving browsers, closing the
+/// startup gap in which a preview could otherwise precede the first observation.
+async fn publish_revision_change(
+    store: &HelmStore,
+    events: &crate::feed::FleetEvents,
+    observed: &mut i64,
+) -> anyhow::Result<bool> {
+    let revision = store.checkout_config_snapshot(None).await?.revision;
+    if revision == *observed {
+        return Ok(false);
+    }
+    *observed = revision;
+    events.bump();
+    Ok(true)
+}
 
 /// Longest configured checkout root accepted, bytes (Design A's cap).
 ///
@@ -604,6 +650,86 @@ mod tests {
             .await
             .expect("create fixture helm.db");
         (dir, store)
+    }
+
+    /// CLI writes use a separate database connection. Only committed revision
+    /// changes may invalidate browsers; failed reads must leave the observation
+    /// pending so a later successful read can still publish it.
+    #[tokio::test]
+    async fn checkout_revision_feed_observes_external_changes_and_preserves_failed_reads() {
+        let (dir, reader) = fresh_store().await;
+        let writer = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        let events = crate::feed::FleetEvents::new();
+        let mut observed = reader
+            .checkout_config_snapshot(None)
+            .await
+            .unwrap()
+            .revision;
+        assert_eq!(observed, 0);
+        assert!(
+            !publish_revision_change(&reader, &events, &mut observed)
+                .await
+                .unwrap()
+        );
+        assert_eq!(events.revision(), 0);
+
+        writer.set_checkout_root(None, "/first-root").await.unwrap();
+        assert_eq!(
+            writer
+                .checkout_config_snapshot(None)
+                .await
+                .unwrap()
+                .revision,
+            1
+        );
+        assert!(
+            publish_revision_change(&reader, &events, &mut observed)
+                .await
+                .unwrap()
+        );
+        assert_eq!((observed, events.revision()), (1, 1));
+        writer.set_checkout_root(None, "/first-root").await.unwrap();
+        assert!(
+            !publish_revision_change(&reader, &events, &mut observed)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            events.revision(),
+            1,
+            "no-op CLI writes must not wake every browser"
+        );
+
+        writer
+            .set_checkout_root(None, "/second-root")
+            .await
+            .unwrap();
+        // Make the reader fail after a real unseen commit. Restoring this
+        // private fixture's table must not erase the pending notification.
+        writer
+            .conn()
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE checkout_config RENAME TO checkout_config_unavailable")
+            .unwrap();
+        assert!(
+            publish_revision_change(&reader, &events, &mut observed)
+                .await
+                .is_err()
+        );
+        assert_eq!((observed, events.revision()), (1, 1));
+        writer
+            .conn()
+            .lock()
+            .unwrap()
+            .execute_batch("ALTER TABLE checkout_config_unavailable RENAME TO checkout_config")
+            .unwrap();
+        assert!(
+            publish_revision_change(&reader, &events, &mut observed)
+                .await
+                .unwrap()
+        );
+        assert_eq!((observed, events.revision()), (2, 2));
     }
 
     /// Register an ssh host and return its id — a stable registered HostId,
@@ -1189,9 +1315,9 @@ mod tests {
     // ---- R1.5: the never-create, never-migrate opening mode ----------
 
     /// Rewind a current-schema database to the exact shape schema 26 had:
-    /// Remove both additive config tables before stamping the old version.
-    /// Compare the resulting constraints with frozen historical DDL so a
-    /// mislabeled current database cannot masquerade as migration coverage.
+    /// Remove both later config tables and repository-history provenance
+    /// before stamping the old version, so opening exercises the actual
+    /// additive migrations rather than a current schema with an old label.
     async fn rewind_to_v26(path: &Path) {
         let store = HelmStore::open(path).await.expect("open to rewind");
         let conn = store.conn();
@@ -1200,6 +1326,7 @@ mod tests {
             conn.execute_batch(
                 "DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
+                 ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  PRAGMA user_version = 26;",
             )
             .unwrap();
