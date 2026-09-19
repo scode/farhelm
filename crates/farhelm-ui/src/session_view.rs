@@ -2298,6 +2298,8 @@ mod tests {
             host_name: Some("this machine".to_string()),
             stale: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
             seen_activity_at: None,
         }
     }
@@ -2500,6 +2502,8 @@ mod tests {
                 host_name: None,
                 stale: false,
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
                 seen_activity_at: None,
             }
         }
@@ -2719,6 +2723,8 @@ mod tests {
                 host_name: None,
                 stale,
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
                 seen_activity_at: None,
             }
         }
@@ -2809,6 +2815,8 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
             seen_activity_at: None,
         };
         assert_eq!(
@@ -2903,6 +2911,8 @@ mod tests {
                 host_name: None,
                 stale: false,
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
                 seen_activity_at: Some(None),
             }
         }
@@ -2960,6 +2970,8 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
             seen_activity_at: Some(Some(1_700_000_000)),
         };
         assert!(seen_effect_eligible(&already_seen));
