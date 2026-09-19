@@ -140,13 +140,6 @@ The 2026-09-08 browser gate added these follow-ups, with retained evidence in FL
   distinguish paste contamination from an independent failure; do not infer a cause from a retry. Assessed 2026-09-17
   and left parked: no recurrence since the recorded sightings, and the next step needs a fresh FULL-RUN failure's
   deletion response to inspect — the narrow sequences that can be run cheaply have all passed.
-- Stabilize the intended boundaries of `an outside click overrides a delayed opening focus commit` and
-  `a profile edited in another browser reaches this one over the real feed` in `e2e/tests/profiles.spec.ts`. WebKit
-  missed the held commit's deadline or popup focus readiness before the behavior under test. A baseline pass does not
-  establish that the new layout is uninvolved. Preserve trusted-pointer, unexpired-release, and focus assertions.
-  Assessed 2026-09-17 and left parked: no recurrence since the sightings, and the 2026-09-17 focus-budget raise (#707)
-  changed the very timings these focus premises race against — a recurrence under the current stack is the evidence to
-  stage for, not a hunt on the old timings.
 
 The earlier entries below remain unresolved after targeted investigation; clean repetitions are non-reproduction
 evidence, not fixes. Their 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM.
