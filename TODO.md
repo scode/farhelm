@@ -198,16 +198,6 @@ reproduction since, no suspected mechanism to chase. What parks an entry here is
 about any other bucket. On recurrence, move the entry back to the regular bucket with the new evidence rather than
 hunting blind from here.
 
-- Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
-  `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
-  `.host-details-toggle`. Moved here from the regular bucket on 2026-09-16: forty more clean executions (20 per engine,
-  runs `5d900ad2-9c84-4560-a5d6-c28502ba6418` and `b1fbf426-49b3-465e-9fb7-9206b4d334c4`) joined the earlier batch
-  `fca9d4df-ed2a-4dbd-9665-630d11d2f6f7` (twenty attempts, both engines each, forty clean) without a reproduction —
-  eighty executions total, all clean — and there is still no suspected mechanism to chase. The run's sibling failure,
-  the sidebar aliasing test's disposed `route.fetch` response, was the WebKit navigation-disposal mechanism and is
-  fixed. Preserve host-row state evidence before changing product behavior; the single failure alone establishes neither
-  a composer regression nor a confirmed pre-composer cause.
-
 ### Systematic deflake
 
 Deferred work, with its original triggers:
