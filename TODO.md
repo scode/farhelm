@@ -256,17 +256,6 @@ hunting blind from here.
   fixed. Preserve host-row state evidence before changing product behavior; the single failure alone establishes neither
   a composer regression nor a confirmed pre-composer cause.
 
-- Investigate `the profiles popup border box stays inside a constrained viewport`, in `e2e/tests/profiles.spec.ts`.
-  WebKit failed its focus premise (`toBeFocused` received inactive) once in browser run
-  `ed375214-fa16-4b8f-bcad-00117ff59e97`. Moved here from the regular bucket on 2026-09-16: forty more clean executions
-  (20 per engine, runs `b722d4d2-0ce6-46bf-b579-060c304a6b2a` and `eb431d86-6b48-48eb-a0f6-28eaf72194fe`) joined batch
-  `addd38f4-a637-49b0-86f6-b1bd947876de` (twenty attempts, both engines each, forty clean) without a reproduction —
-  eighty verified executions total. An older isolated twenty is claimed in the hunt history but its evidence was not
-  located, so it stays out of the arithmetic. The family attribution (same WebKit initial-focus cluster as the focus
-  entries) is still unproven — the launcher change in the failing run touches only the spec's name-field label, which
-  argues against a composer regression without establishing what it was. Retain focus-event traces before changing the
-  test.
-
 ### Systematic deflake
 
 Deferred work, with its original triggers:
