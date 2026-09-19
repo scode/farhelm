@@ -93,7 +93,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   geometry contract should change. Assessed 2026-09-17 and left parked: no failing trace exists and the twenty isolated
   repetitions have stood; a recurrence carrying the named epochs is the only lead.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
-  above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
+  above are fixed. #382 restored the helm-death test. Binary output was un-ignored on 2026-09-19; it and the stalled
   viewer RSS, degenerate-size READY, and malformed-sentinel cases still block restoring the entire `farhelm` integration
   target in `.github/dist-build-setup.yml`. The replacement-claim case is fixed by the 2026-09-17 deflake stack (#711),
   and the forced-pause helper mismatch was closed as not reproducible on the verified pin (#710) — their status here
