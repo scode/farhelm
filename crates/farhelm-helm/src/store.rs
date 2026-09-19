@@ -2619,6 +2619,14 @@ fn claimant_of(
 }
 
 impl HelmStore {
+    /// Access the real connection to gate store work or inject database
+    /// failures in tests. Release the mutex before awaiting store work:
+    /// its blocking tasks acquire the same mutex.
+    #[cfg(test)]
+    pub(crate) fn connection_for_test(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
     /// Open (or create) `helm.db` at `path`, applying the schema and
     /// minting the reserved local row if either is missing.
     ///

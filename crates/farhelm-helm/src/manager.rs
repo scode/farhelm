@@ -2276,7 +2276,9 @@ impl ConnectionManager {
     /// everything else that described the superseded connection: its client,
     /// its in-memory sessions, its contested claims, and its incarnation
     /// token (which must not survive, or a mutation reply from the old
-    /// connection could still present a claim that validates).
+    /// connection could still present a claim that validates). A concurrent
+    /// retirement is preserved: only a successful revival below can replace
+    /// it with a status backed by a new actor.
     pub async fn adopt(&self, host: HostId, approved: &str) -> anyhow::Result<()> {
         let (state, row, status) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
@@ -2329,6 +2331,11 @@ impl ConnectionManager {
         // `retire_withdrawn`).
         let mut withdrawn = None;
         status.send_modify(|status| {
+            // The supervisor may have retired the actor during the commit.
+            // A failed revival must not leave it claiming to be connecting.
+            if matches!(status.state, HostState::Retired { .. }) {
+                return;
+            }
             status.state = HostState::Connecting {
                 attempt: 0,
                 last_error: None,
@@ -2347,8 +2354,8 @@ impl ConnectionManager {
         self.events.bump();
         // The adoption is already durable; reconnecting is how it takes
         // effect. A failure to do so is worth saying out loud but must not
-        // undo the decision the user just made — the actor reconnects on
-        // its own cadence regardless.
+        // undo the decision the user just made. A live actor reconnects on
+        // its own cadence; a retired entry still needs a successful revival.
         if let Err(error) = self.retry_now(host).await {
             warn!(
                 host,
@@ -5516,6 +5523,169 @@ mod tests {
             vec!["live".to_string()],
             "the dead install's cached sessions must be gone, not merged with the new one's"
         );
+    }
+
+    /// Adoption must not hide a supervisor's retirement when the registry
+    /// read needed to revive the actor fails. The store mutex gates the real
+    /// adoption before commit; manual polling then keeps its post-await
+    /// publication pending until the scripted actor has actually panicked.
+    #[farhelm_testtrace::test]
+    async fn adoption_preserves_concurrent_retirement_when_revival_fails() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("recycled.example", None, None)
+                .await
+                .unwrap();
+            record_contact(&store, host, "identity-original").await;
+            store
+                .replace_host_sessions(
+                    host,
+                    "identity-original",
+                    vec![session("ghost", 100)],
+                    false,
+                )
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    identity: Some("identity-reinstalled".to_string()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let rows = fixture.store.list_hosts().await.unwrap();
+        let host = rows[1].id;
+        // No unrelated actor may bump the revision used below as the
+        // adoption's post-commit boundary.
+        assert!(fixture.manager.stop_actor(rows[0].id).await);
+        let mismatch = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            }),
+        )
+        .await
+        .expect("the scripted peer must reach the adoption boundary")
+        .expect("actor is registered");
+        assert_eq!(
+            mismatch,
+            HostState::IdentityMismatch {
+                recorded: "identity-original".to_string(),
+                reported: "identity-reinstalled".to_string(),
+            }
+        );
+
+        let connection = fixture.store.connection_for_test();
+        let mut adoption = std::pin::pin!(fixture.manager.adopt(host, "identity-reinstalled"));
+        {
+            let _commit_gate = connection.lock().expect("store mutex");
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(
+                adoption.as_mut().poll(&mut cx).is_pending(),
+                "adoption must capture the mismatch and await the gated store write"
+            );
+        }
+        // Do not poll adoption again yet. Its snapshot is now fixed, but
+        // its post-store publication cannot run, even if commit finishes.
+        fixture
+            .transport
+            .edit(host, |script| script.panic_on_dial = true);
+        assert!(fixture.manager.retry_now(host).await.unwrap());
+        let retired = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture
+                .manager
+                .wait_for_state(host, |state| matches!(state, HostState::Retired { .. })),
+        )
+        .await
+        .expect("the scripted panic must retire the actor")
+        .expect("the retired entry remains registered");
+        assert!(
+            matches!(&retired, HostState::Retired { reason } if reason.contains("panicked")),
+            "the supervisor must publish the scripted failure: {retired:?}"
+        );
+
+        // Let adoption publish, but hold its revival before the registry
+        // read. Only then damage that read: adoption itself must commit.
+        let revival_gate = fixture.manager.reconcile.lock().await;
+        let revision = fixture.manager.events().revision();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            std::future::poll_fn(|cx| {
+                assert!(
+                    adoption.as_mut().poll(cx).is_pending(),
+                    "adoption must await revival while reconciliation is locked"
+                );
+                if fixture.manager.events().revision() != revision {
+                    std::task::Poll::Ready(())
+                } else {
+                    std::task::Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("adoption must commit and publish before attempting revival");
+        assert_eq!(
+            recorded_identity(&fixture.store, host).await,
+            Some("identity-reinstalled".to_string()),
+            "the adoption must be durable before the registry read is broken"
+        );
+        assert!(cached_ids(&fixture.store, host).await.is_empty());
+        connection
+            .lock()
+            .expect("store mutex")
+            .execute_batch("ALTER TABLE hosts RENAME COLUMN kind TO unavailable_kind")
+            .unwrap();
+        assert!(
+            fixture.store.list_hosts().await.is_err(),
+            "revival's registry read must fail, not merely miss the host"
+        );
+        drop(revival_gate);
+        tokio::time::timeout(Duration::from_secs(10), adoption.as_mut())
+            .await
+            .expect("failed revival must not hang adoption")
+            .expect("failed revival must not undo committed adoption");
+
+        let snapshot = fixture
+            .manager
+            .snapshots()
+            .into_iter()
+            .find(|snapshot| snapshot.id == host)
+            .expect("the host remains visible");
+        assert_eq!(
+            snapshot.state, retired,
+            "a committed adoption must not conceal retirement behind Connecting"
+        );
+        assert!(status_client(&fixture.manager, host).is_none());
+
+        // Once the registry works again, an explicit retry must replace
+        // retirement with a real connection using the adopted identity.
+        connection
+            .lock()
+            .expect("store mutex")
+            .execute_batch("ALTER TABLE hosts RENAME COLUMN unavailable_kind TO kind")
+            .unwrap();
+        fixture
+            .transport
+            .edit(host, |script| script.panic_on_dial = false);
+        assert!(fixture.manager.retry_now(host).await.unwrap());
+        let connected = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture
+                .manager
+                .wait_for_state(host, HostState::is_connected),
+        )
+        .await
+        .expect("the replacement actor must connect")
+        .expect("the replacement actor is registered");
+        assert!(
+            matches!(&connected, HostState::Connected { identity, .. }
+                if identity.as_deref() == Some("identity-reinstalled")),
+            "revival must use the committed identity: {connected:?}"
+        );
+        assert!(status_client(&fixture.manager, host).is_some());
     }
 
     /// Adoption is refused for a host that is not actually awaiting a

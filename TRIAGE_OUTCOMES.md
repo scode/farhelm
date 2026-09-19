@@ -45,3 +45,26 @@
   publication, retention through Archive, retry copies, and session deletion. Specs and code comments now distinguish
   failed publication from unknown completion; no rollback machinery was added. The feedback file and index entry were
   removed.
+
+## adopt-publishes-unconditionally-after-commit.md
+
+- Outcome: `fix code`.
+- Assessment: the unconditional post-commit status overwrite is confirmed by current-code inspection, not runtime
+  reproduction. Adoption can replace a concurrently published `Retired` status with `Connecting`. Its subsequent retry
+  also checks task completion and channel closure, so it normally revives the dead actor despite the overwritten status.
+  A persistent misleading state additionally requires revival to fail. No concrete trigger for the initial actor panic
+  was established. `SPEC_impl.md` requires stopped actors to be represented as retired; the healthy-filesystem
+  assumption does not exempt arbitrary actor failures.
+- Decision: the user chose the small, isolated code fix after discussing the existing recovery guard. Preserve a
+  concurrently published `Retired` status inside `HostManager::adopt`'s status-update closure rather than replacing it
+  with `Connecting`. Keep the subsequent retry/revival path unchanged. This addresses the retained finding, not a
+  broader redesign of adoption concurrency.
+- Completion criteria: normal adoption still reconnects; concurrent retirement remains visible if revival fails, while
+  successful revival publishes the replacement actor's state. Verify this boundary with a focused regression test.
+  Delete the feedback file and its `review_feedback_queue/INDEX.md` entry in the same execution PR.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/749/changes. jj change:
+  `lqpvyzvsnxnkzrlwywwyznzrrxkqlpmt`; bookmark: `triage-adoption-retirement`. The regression failed without the guard
+  and passed with it. It gates the adoption commit, observes real actor retirement after an injected panic, forces
+  revival to fail, and verifies the durable adoption and preserved retired state before a later retry reconnects. This
+  is a controlled reproduction of the ordering, not evidence of a natural actor-panic trigger. The full manager test
+  module passed, including ordinary adoption. The feedback file and index entry were removed.
