@@ -10,7 +10,7 @@
 //! `service::sweep` for the process-tree side of a launch's failure
 //! classification.
 
-use crate::store::LastOutcome;
+use crate::store::{LastOutcome, SessionStore};
 use anyhow::Context;
 use std::path::Path;
 use tracing::{debug, warn};
@@ -138,21 +138,56 @@ pub(crate) fn sentinel_could_still_apply(outcome: &LastOutcome) -> bool {
     )
 }
 
-/// Remove both files a launch's `Error` classification can leave behind:
-/// the sentinel itself, and the per-launch SPEC file the shim's own
-/// missing/malformed-spec early-return paths (or a failed unlink partway
-/// through one) can leave stranded holding the agent's full command line,
-/// credentials included. Called once a launch's `Error` outcome is
-/// confirmed durably committed — nothing ever needs either file again
-/// once the classification is settled — and also, idempotently, on every
-/// row already found to be `Error` on load: a crash between an EARLIER
-/// pass's commit and the cleanup that should have followed it can leave
-/// one or both files behind for an arbitrary number of startups, and this
-/// is what finally sweeps them. Best-effort throughout
-/// (`best_effort_remove`): a failure here is logged, never fatal, and
-/// never blocks a reply — both files are cosmetic once the DURABLE
-/// outcome already says what happened.
-pub(crate) async fn cleanup_launch_artifacts(state_dir: &Path, id: &str, generation: i64) {
+/// Remove a durably classified launch's artifacts after preserving create
+/// replay evidence. Callers must own durable-write authority.
+///
+/// The sentinel and credential-bearing spec can survive a crash after Error
+/// commits. For generation zero, the sentinel may also be the last proof
+/// that the original create reached a terminal: Error alone proves nothing,
+/// because preterminal refusals use that outcome too. Settle matching Pending
+/// creates before unlinking an actual sentinel; retain both files if its read
+/// or settlement fails, or its durable generation no longer matches.
+///
+/// Startup and ordinary status observers share this gate, including their
+/// already-Error paths. Repeating it is harmless: settlement is monotonic,
+/// and file removal remains best effort. A later generation cannot settle
+/// the original create from its own sentinel.
+pub(crate) async fn cleanup_launch_artifacts(
+    state_dir: &Path,
+    store: &SessionStore,
+    id: &str,
+    generation: i64,
+) {
+    // Only the first launch can settle its original create. A real sentinel
+    // may be its last acceptance evidence after tmux and its scope vanish;
+    // Error alone cannot replace that proof because preterminal refusals use
+    // the same outcome. Keep both files if preservation cannot commit.
+    if generation == 0 {
+        let preserve = async {
+            if read_launch_sentinel(state_dir, id, generation)
+                .await?
+                .is_some()
+            {
+                store.settle_sentinel_create_before_cleanup(id).await
+            } else {
+                Ok(true)
+            }
+        }
+        .await;
+        match preserve {
+            Ok(true) => {}
+            Ok(false) => {
+                debug!(session = %id, generation,
+                    "deferring launch cleanup: the sentinel's error generation is not durable");
+                return;
+            }
+            Err(error) => {
+                warn!(session = %id, generation, error = %format!("{error:#}"),
+                    "retaining launch artifacts until accepted-create evidence is durable");
+                return;
+            }
+        }
+    }
     let spec_path = crate::launch::spec_path_for_launch(state_dir, id, generation);
     let status_path = crate::launch::status_path_for_spec(&spec_path);
     best_effort_remove(&status_path, "consumed launch sentinel").await;
