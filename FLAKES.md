@@ -1007,3 +1007,22 @@ left the working copy, so none remains to remove.
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-09-19 — `stalling one tab's writes pauses only that tab; the agent and a sibling stay live` (e2e/tests/terminal-tabs.spec.ts)
+
+Third sighting of the never-paused shape TODO.md watches. Under 9 busy-loop children (about half of an 18-core host),
+repeat 3 of 20 loaded WebKit executions failed: the stalled tab's `pauseCount` stayed at 0 for the full 60 s HIGH_WATER
+poll ("the stalled tab must cross HIGH_WATER and pause"), while the other 19 repeats in the same batch passed. The
+retained console carries no product receipts — detach reasons and queue states are not instrumented — and the retained
+trace and error context preserve only the page state, so whether this occurrence also had the recorded early socket
+close from run `7fd44a19` is not established. Tested tree: commit `74910dca` (main plus seven earlier doc-only sweep
+commits) with pending doc-only sweep edits; recorder run `4c1de15e-9977-482f-a9c7-e02bfd79df0f` (playwright artifacts of
+the failing repeat copied beside it). Selection: `--project=webkit-terminal-tabs` with `-g` on the test title,
+`--repeat-each=20`; concurrency `one browser worker; retries 0`. Pinned tmux 3.7c, executable SHA256
+`b3f11c4f45d7672243ad0a1e0e5a60ba7e335c4a56c2e3ddf48582aa28de6de6` (this checkout's own `.ci-tmux` build),
+`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` in the test process). Disposition: open
+(TODO.md's watch entry updated with this evidence in the same PR).
+
+Class: ambiguous-observable
+
+Cause: unknown

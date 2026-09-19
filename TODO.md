@@ -75,7 +75,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   1.2s after the flood started, before any HIGH_WATER crossing — is still not explained by any of this, and if it recurs
   it re-enters with its own evidence (detach-reason and queue receipts alongside gate send, received bytes, pending
   writes, pauses, replay state, and FLOOD-DONE). Keep all of these distinct from the existing single-client stall entry,
-  and do not weaken liveness assertions based on a later passing run.
+  and do not weaken liveness assertions based on a later passing run. It did recur on 2026-09-19: repeat 3 of 20 loaded
+  WebKit executions (9 busy-loop children, about half of 18 cores) failed with `pauseCount` still 0 at the end of the 60
+  s HIGH_WATER poll, 19 of 20 passing in the same batch (recorder run `4c1de15e-9977-482f-a9c7-e02bfd79df0f`; trace and
+  error context retained beside it; FLAKES.md entry of the same date). No product receipts exist to compare against the
+  recorded early-socket-close shape, so the instrumentation named above remains the next step and nothing here narrows
+  the cause.
 
 ### Difficult deflake
 
