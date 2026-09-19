@@ -220,6 +220,8 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             }))
             .await
@@ -334,6 +336,8 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
                         source_profile: None,
+                        github_repo: None,
+                        working_copy: None,
                     },
                 }))
                 .await
@@ -477,6 +481,8 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
                         source_profile: None,
+                        github_repo: None,
+                        working_copy: None,
                     },
                 }))
                 .await
@@ -604,6 +610,8 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             }))
             .await
@@ -1382,6 +1390,8 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         // See `spliced_replace_harness`'s doc: the fixture is updated BEFORE
         // the reply that tells the client about it, matching what a REAL
@@ -1502,6 +1512,8 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             }))
             .await
@@ -1616,6 +1628,8 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
                 name: "claude".to_string(),
                 existence: farhelm_proto::ProfileExistence::Unresolved,
             }),
+            github_repo: None,
+            working_copy: None,
         };
         // See `spliced_replace_harness`'s doc: fixture updated before reply.
         fleet.edit(local, |script| script.sessions.push(created.clone()));
@@ -1827,6 +1841,8 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         // See `spliced_replace_harness`'s doc: fixture updated before reply.
         fleet.edit(local, |script| script.sessions.push(created.clone()));
@@ -1912,6 +1928,8 @@ async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         // See `spliced_replace_harness`'s doc: fixture updated before reply.
         fleet.edit(local, |script| script.sessions.push(created.clone()));
@@ -2047,6 +2065,8 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         // See `spliced_replace_harness`'s doc: this test's whole point is
         // what the LIST shows after the failure below, so the fixture must
@@ -2178,6 +2198,8 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         fleet.edit(local, |script| script.sessions.push(created.clone()));
         writer
@@ -2328,6 +2350,8 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         let created_reply = |req_id| {
             Frame::control(&ControlMsg::SessionCreated {
@@ -2515,6 +2539,8 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         fleet.edit(local, |script| script.sessions.push(created.clone()));
         writer
@@ -2624,6 +2650,8 @@ async fn a_replace_with_override_of_an_archived_source_creates_it_and_removes_th
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         fleet.edit(local, |script| script.sessions.push(created.clone()));
         writer
@@ -2819,6 +2847,8 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         // See `spliced_replace_harness`'s doc: fixture updated before the
         // reply, matching every other successful create in this file.
@@ -3041,6 +3071,8 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             }))
             .await
@@ -3556,6 +3588,8 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
                     restart_offer: farhelm_proto::RestartOffer::Resume,
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             })
             .await
@@ -3703,6 +3737,8 @@ async fn rename_session_forwards_the_title_verbatim() {
             restart_offer: RestartOffer::Resume,
             tabs: vec![TabInfo { id: "tab-1".into() }],
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         let reply_session = expected_session.clone();
         let peer = tokio::spawn(async move {
@@ -3879,6 +3915,8 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                         restart_offer: farhelm_proto::RestartOffer::default(),
                         tabs: Vec::new(),
                         source_profile: None,
+                        github_repo: None,
+                        working_copy: None,
                     },
                 })
                 .await
@@ -4312,6 +4350,8 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                     restart_offer: farhelm_proto::RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             }))
             .await
@@ -4480,6 +4520,8 @@ async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
         restart_offer: farhelm_proto::RestartOffer::default(),
         tabs: Vec::new(),
         source_profile: None,
+        github_repo: None,
+        working_copy: None,
     };
 
     assert!(
@@ -7696,5 +7738,95 @@ async fn an_identity_less_hosts_rows_are_reordered_into_the_requested_order() {
         vec!["memory-quiet", "memory-busy", "cached-mid"],
         "and the title order is a third sequence again: the cached row's own title puts it last, \
          behind two in-memory rows that neither of the other orders puts together"
+    );
+}
+
+/// A create body carrying `github_checkout` is refused at the helm before
+/// any host contact, and an unparseable repository text is reported as the
+/// parse error rather than as the not-supported-yet refusal.
+///
+/// The order matters because the two failures answer different questions:
+/// the parse error names what the USER typed (per `GithubCheckoutRequest`'s
+/// own contract, parsing happens against raw text so the refusal can be
+/// specific), while the not-supported-yet refusal is this slice's
+/// deliberate rejection of every fresh create until the supervisor backend
+/// exists. This test pins the first half of that order; the valid-repo test
+/// below pins the second.
+#[farhelm_testtrace::test]
+async fn create_with_invalid_github_repo_names_the_parse_error() {
+    use tower::ServiceExt;
+
+    let (client_side, _peer_side) = tokio::io::duplex(64 * 1024);
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let app = harness.router();
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/sessions")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "cwd": "/tmp/whatever",
+                "invocation": "some-agent",
+                "github_checkout": {"repo": "no separator here", "title": null}
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        text.contains("invalid GitHub repository"),
+        "the refusal must be the parse error, not the backend refusal: {text}"
+    );
+}
+
+/// A create body with a WELL-FORMED `github_checkout` is refused wholesale:
+/// the fresh-checkout create pipeline arrives in a later unit, and refusing
+/// before any host contact, history write, or supervisor frame is the
+/// blueprint's contract for this slice.
+///
+/// The harness's scripted peer deliberately asserts nothing: the whole
+/// point is that no create frame is ever sent. The duplex peer is dropped
+/// with the harness, which is the same shape the refusal tests in
+/// `agent_requests.rs` use for a request that must not reach a responder.
+#[farhelm_testtrace::test]
+async fn create_with_valid_github_repo_is_refused_as_not_supported_yet() {
+    use tower::ServiceExt;
+
+    let (client_side, _peer_side) = tokio::io::duplex(64 * 1024);
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let app = harness.router();
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/sessions")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "cwd": "/tmp/whatever",
+                "invocation": "some-agent",
+                "github_checkout": {"repo": "acme/bar", "title": null}
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        text.contains("fresh GitHub checkouts are not supported yet"),
+        "a valid repository must hit the explicit not-supported-yet refusal: {text}"
     );
 }

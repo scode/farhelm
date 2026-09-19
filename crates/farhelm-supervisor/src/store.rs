@@ -969,6 +969,7 @@ fn error_kind_column(kind: farhelm_proto::ErrorKind) -> &'static str {
         K::InvalidRequest => "invalid_request",
         K::Internal => "internal",
         K::Conflict => "conflict",
+        K::CheckoutConflict => "checkout_conflict",
         K::Unauthorized => "unauthorized",
         // Reachable only if a create ever starts producing them. Neither
         // is a create outcome today: both belong to the agent relay, which
@@ -990,6 +991,7 @@ fn error_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::ErrorKind
         "invalid_request" => K::InvalidRequest,
         "internal" => K::Internal,
         "conflict" => K::Conflict,
+        "checkout_conflict" => K::CheckoutConflict,
         "unauthorized" => K::Unauthorized,
         "unavailable" => K::Unavailable,
         "timeout" => K::Timeout,

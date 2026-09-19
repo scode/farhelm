@@ -844,6 +844,7 @@ async fn a_named_spawn_resolves_and_stores_the_attached_helms_bundle() {
             resume_template: None,
             launch: None,
             source_profile: None,
+            github_checkout: None,
         })
         .await;
     let ControlMsg::SessionCreated {
@@ -918,6 +919,7 @@ async fn a_restricted_create_cannot_supply_source_profile() {
                 id: "starter-codex".to_string(),
                 name: "codex".to_string(),
             }),
+            github_checkout: None,
         })
         .await;
     let ControlMsg::Error {

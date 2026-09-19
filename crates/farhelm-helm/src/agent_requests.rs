@@ -1649,6 +1649,8 @@ mod tests {
             tabs: Vec::new(),
             archived: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         }
     }
 

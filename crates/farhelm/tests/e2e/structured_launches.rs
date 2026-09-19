@@ -743,6 +743,7 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
             agent_kind: None,
             resume_template: None,
             source_profile: None,
+            github_checkout: None,
             launch: None,
         })
         .await;
@@ -807,6 +808,7 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
             resume_template: None,
             source_profile: None,
             launch: None,
+            github_checkout: None,
         })
         .await;
     let ControlMsg::Error {
@@ -862,6 +864,7 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
             resume_template: None,
             source_profile: None,
             launch: None,
+            github_checkout: None,
         })
         .await;
     let ControlMsg::SessionCreated {

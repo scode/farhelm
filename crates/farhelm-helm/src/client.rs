@@ -2509,6 +2509,16 @@ impl SupervisorClient {
                     resume_template: extras.resume_template,
                     source_profile: extras.source_profile,
                     launch: extras.launch,
+                    // The helm never sends a fresh-checkout payload on the
+                    // wire: a create carrying `github_checkout` is refused
+                    // at the helm's REST edge before any connection is
+                    // chosen, because the resolved payload is helm-supplied
+                    // (configuration plus hook) and the supervisor backend
+                    // that would accept it does not exist yet (protocol 22's
+                    // plumbing slice). This wrapper's `None` is the
+                    // vocabulary-level statement of that posture, not a
+                    // missing feature.
+                    github_checkout: None,
                 },
             )
             .await?
@@ -2577,6 +2587,69 @@ impl SupervisorClient {
                 ..
             } => Ok((cwd, parent, children, truncated)),
             other => Err(wrong_reply("BrowseDirectory", &other)),
+        }
+    }
+
+    /// Ask the connected supervisor where a fresh GitHub checkout of one
+    /// repository would land, as [`ControlMsg::GithubCheckoutPreview`]
+    /// carries it.
+    ///
+    /// Plumbing-only in protocol 22's first slice: the supervisor's
+    /// dispatch answers this request with an explicit "not supported yet"
+    /// error until the checkout backend lands in a later unit, so a call
+    /// today surfaces that refusal as a [`SupervisorError`] — which is
+    /// exactly what the wrapper should do rather than guessing at a
+    /// preview itself. The reply's canonical paths are
+    /// supervisor-resolved values; this client expands nothing locally.
+    pub async fn github_checkout_preview(
+        &self,
+        request: farhelm_proto::GithubPreviewRequest,
+    ) -> anyhow::Result<farhelm_proto::GithubPreviewResponse> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::GithubCheckoutPreview { req_id, request },
+            )
+            .await?
+        {
+            ControlMsg::GithubCheckoutPreviewed { preview, .. } => Ok(preview),
+            other => Err(wrong_reply("GithubCheckoutPreview", &other)),
+        }
+    }
+
+    /// Ask the connected supervisor which GitHub repositories match a
+    /// completion query, as [`ControlMsg::GithubRepoSearch`] carries it,
+    /// returning the bounded identity list plus its `truncated` flag.
+    ///
+    /// Like [`SupervisorClient::github_checkout_preview`], this is
+    /// plumbing ahead of the backend: the supervisor refuses explicitly
+    /// until the search lands in a later unit. The reply carries
+    /// validated [`GithubRepo`] identities — never raw URLs — so every
+    /// consumer derives its own rendering.
+    pub async fn github_repo_search(
+        &self,
+        claim: farhelm_proto::ClaimContext,
+        query: &str,
+        root: Option<String>,
+    ) -> anyhow::Result<(Vec<farhelm_proto::GithubRepo>, bool)> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::GithubRepoSearch {
+                    req_id,
+                    claim,
+                    query: query.to_string(),
+                    root,
+                },
+            )
+            .await?
+        {
+            ControlMsg::GithubRepoResults {
+                repos, truncated, ..
+            } => Ok((repos, truncated)),
+            other => Err(wrong_reply("GithubRepoSearch", &other)),
         }
     }
 
@@ -3660,6 +3733,8 @@ mod tests {
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         }
     }
 

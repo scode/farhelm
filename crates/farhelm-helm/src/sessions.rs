@@ -679,6 +679,77 @@ pub(crate) struct CreateReq {
     /// bundle was selected. A retargeted row must not silently send either a
     /// profile-backed or raw create to a successor installation.
     expected_incarnation: Option<u64>,
+    /// A fresh GitHub checkout the caller asks this create to perform.
+    ///
+    /// Absent decodes as `None` — serde's built-in handling for `Option` —
+    /// so every pre-existing caller and older UI build sends and means
+    /// exactly what it always did. When PRESENT, this slice refuses the
+    /// whole request at the helm before any host contact, history write,
+    /// or supervisor frame (see [`github_checkout_refusal`]): the
+    /// supervisor-side create pipeline for owned checkouts does not exist
+    /// yet, and accepting the field now would mean dropping the
+    /// fresh-checkout intent while reporting an ordinary create. The only
+    /// validation that runs before the refusal is the repository text's
+    /// own parse, so an invalid `owner/repo` is reported as the parse
+    /// error it is rather than as the not-supported-yet refusal.
+    ///
+    /// Restricted session-authenticated callers can never supply this:
+    /// they reach the supervisor directly, never this body, and the
+    /// supervisor's restricted dispatcher refuses the create outright.
+    /// The resolved payload (canonical root, post-clone hook) is
+    /// helm-supplied from helm-side configuration and never echoes back
+    /// to the browser.
+    github_checkout: Option<farhelm_proto::GithubCheckoutRequest>,
+}
+
+/// Why a create body carrying `github_checkout` cannot be served, or
+/// `None` when the field is absent and the create proceeds unchanged.
+///
+/// Two failures in a fixed order, because they answer different questions:
+/// a repository string that does not parse is the CALLER's mistake and is
+/// reported as the parse error (naming the failure class against what the
+/// user actually typed, per the request type's own contract); a
+/// well-formed one is refused wholesale because this slice's blueprint
+/// rejects fresh creates until the full supervisor backend exists. Both
+/// refusals are `InvalidRequest` — a 400 — and both fire before any host
+/// contact, history write, or supervisor frame, so a refused request has
+/// observable effects on nothing.
+///
+/// Called from the create route AND from "replace with"'s override body,
+/// which resolves through the same body shape: a field accepted on one
+/// create form and silently dropped on another would be a quiet
+/// fresh-checkout loss, the exact outcome this slice's refusals exist to
+/// prevent.
+fn github_checkout_refusal(req: &CreateReq) -> Option<anyhow::Error> {
+    let checkout = req.github_checkout.as_ref()?;
+    if let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo) {
+        return Some(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: format!(
+                "invalid GitHub repository {:?}: {error}",
+                truncate_repo_text(&checkout.repo)
+            ),
+        }));
+    }
+    Some(anyhow::Error::new(SupervisorError {
+        kind: ErrorKind::InvalidRequest,
+        message: format!(
+            "fresh GitHub checkouts are not supported yet: the checkout backend arrives in a \
+             later unit of this feature, so this create (repo {}) was refused and nothing was \
+             launched",
+            truncate_repo_text(&checkout.repo)
+        ),
+    }))
+}
+
+/// The repository text as typed is user input that an error message will
+/// quote; bound it the way other echoed free text on this surface is
+/// bounded rather than quoting an arbitrarily long string verbatim.
+fn truncate_repo_text(repo: &str) -> &str {
+    match repo.char_indices().nth(120) {
+        Some((idx, _)) => &repo[..idx],
+        None => repo,
+    }
 }
 
 // Dimensions for a caller that has no terminal yet — the CLI, a script,
@@ -1054,6 +1125,14 @@ pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(mut req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
+    // FIRST, before mode resolution or target routing: a fresh-checkout
+    // request must be refused before anything observable happens, and the
+    // repository-text parse error must win over any selector-shape error a
+    // body might also carry (the user should hear about the repo they
+    // typed, not an unrelated field).
+    if let Some(e) = github_checkout_refusal(&req) {
+        return http_error(e);
+    }
     let mode = match create_mode(&mut req) {
         Ok(mode) => mode,
         Err(e) => return http_error(e),
@@ -2287,7 +2366,16 @@ pub(crate) async fn do_replace_session(
     // for why the wire even has two fields that could disagree.
     let mut with = with;
     let with_mode = match with.as_mut() {
-        Some(with) => Some(create_mode(with)?),
+        Some(with) => {
+            // The same fresh-checkout refusal the create route applies,
+            // for the same reason: "replace with" reuses the create body
+            // verbatim, and a github_checkout field on it must be refused
+            // loudly, never silently dropped.
+            if let Some(e) = github_checkout_refusal(with) {
+                return Err(e);
+            }
+            Some(create_mode(with)?)
+        }
         None => None,
     };
     if let Some(with) = &with

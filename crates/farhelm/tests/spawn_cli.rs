@@ -291,6 +291,8 @@ fn child_session(cwd: String) -> SessionInfo {
             name: "Agent One".to_string(),
             existence: farhelm_proto::ProfileExistence::Present,
         }),
+        github_repo: None,
+        working_copy: None,
     }
 }
 

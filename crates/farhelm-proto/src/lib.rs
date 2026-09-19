@@ -71,6 +71,15 @@ pub mod io;
 pub mod launch;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
+/// Owned GitHub checkouts: validated repo identity, deterministic naming,
+/// and the preview/create payload shapes (see the module's own docs).
+pub mod github_checkout;
+pub use github_checkout::{
+    AcceptedGithubPreview, CheckoutPreviewBinding, ClaimContext, GithubCheckoutIntent,
+    GithubCheckoutRequest, GithubPreviewRequest, GithubPreviewResponse, GithubRepo,
+    ResolvedGithubCheckout, WorkingCopyInfo, parse_github_repo,
+};
+
 /// Longest session identity accepted from a protocol peer.
 ///
 /// Farhelm currently mints UUIDs (36 bytes), but the wire treats the value
@@ -184,7 +193,23 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// decode or retain them, so mixed versions must refuse the hello rather than
 /// silently compiling another harness or dropping exact-resume behavior.
 ///
-/// `protocol_version_is_pinned_at_21` (renamed at every bump since `_at_4`)
+/// Version 22 adds the owned-GitHub-checkout wire vocabulary:
+/// [`ControlMsg::GithubCheckoutPreview`]/[`ControlMsg::GithubCheckoutPreviewed`]
+/// and [`ControlMsg::GithubRepoSearch`]/[`ControlMsg::GithubRepoResults`], the
+/// optional [`ControlMsg::CreateSession::github_checkout`] create payload, and
+/// the [`SessionInfo::github_repo`]/[`SessionInfo::working_copy`] provenance
+/// fields. [`ErrorKind::CheckoutConflict`] distinguishes a durably refused
+/// fresh allocation from an ambiguous or previously accepted intent. These
+/// additions share this feature's version bump. The create payload is why
+/// this is a bump and not an additive drift:
+/// a fresh-checkout create names an intent (clone a repository the user has
+/// never materialized) that an older supervisor cannot see in its
+/// create-pipeline at all. Silent tolerance would mean an old peer dropping
+/// the intent while reporting an ordinary create — exactly the outcome the
+/// handshake exists to make impossible — so an older peer must refuse the
+/// hello rather than half-serve the request.
+///
+/// `protocol_version_is_pinned_at_22` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -196,7 +221,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -231,6 +256,18 @@ pub const PROTOCOL_VERSION: u32 = 21;
 /// notice a client shows when the cap was hit is the one SPEC.md calls
 /// "could not read to the end" — nothing else produces it.
 pub const LIST_SESSIONS_CAP: usize = 500;
+
+/// Most repositories one [`ControlMsg::GithubRepoResults`] reply carries; a
+/// backend with more matches cuts the list here and says so with
+/// `truncated`.
+///
+/// The number is a dropdown size, not a search result page: the composer
+/// renders a handful of suggestions a person picks from by name, and a
+/// query that matches more than this many repositories is too vague to be
+/// useful — the user narrows it instead of scrolling. Bounding the reply
+/// here keeps it trivially under [`MAX_FRAME_LEN`] and keeps the helm's
+/// merge-with-its-cache step linear in a constant.
+pub const GITHUB_REPO_RESULTS_CAP: usize = 25;
 
 /// The build version compiled into this binary, carried in the hello for
 /// diagnostics.
@@ -289,6 +326,16 @@ pub enum ErrorKind {
     /// request alone) fits: only `Conflict` names "this identifier already
     /// has a meaning, and it is not the one you just sent."
     Conflict,
+    /// A fresh checkout's preview or exclusive mkdir conflicted before this
+    /// intent allocated any directory. For keyed creates, the refusal is
+    /// durably settled before this is returned and replays with the same kind.
+    /// Failed settlement, retained allocations, and recovery attempts must
+    /// never manufacture this proof from an ordinary Conflict.
+    ///
+    /// Maps to HTTP 409 with a definitely-unaccepted outcome. A caller may
+    /// obtain a new preview and explicitly resubmit, but prior transport
+    /// ambiguity still requires preserving that attempt's original key.
+    CheckoutConflict,
     /// The peer failed connection admission or a restricted peer requested
     /// an operation outside its permitted slice (PLAN_M7.md item 2).
     Unauthorized,
@@ -910,6 +957,38 @@ pub struct SessionInfo {
     /// and for why the profile's CURRENT name is deliberately not here.
     ///
     pub source_profile: Option<SourceProfile>,
+    /// The repository this session was created from by a fresh GitHub
+    /// checkout — provenance, fixed at create time. `None` for every other
+    /// kind of session and for any sender predating protocol 22 (the field
+    /// decodes absent as `None`).
+    ///
+    /// Provenance, not a behavior switch: a session created from a fresh
+    /// checkout behaves exactly like any other session in the same
+    /// directory, and a later Replace or Clone that reuses the EXISTING
+    /// directory keeps every existing destination behavior — this field
+    /// describes where the directory came from, it never changes what a
+    /// create does. It is also deliberately not updated by later sessions
+    /// that merely attach to the checkout; see
+    /// [`WorkingCopyInfo::origin_session_id`]'s docs for the same decision
+    /// on the registry side.
+    #[serde(default)]
+    pub github_repo: Option<GithubRepo>,
+    /// The managed checkout association for this session, as the
+    /// supervisor's checkout registry tracks it — the registry identity,
+    /// repository, and canonical directory this session belongs to.
+    /// `None` for sessions with no managed association and for senders
+    /// predating protocol 22.
+    ///
+    /// Like `github_repo`, this is association metadata rather than a
+    /// behavior switch: a plain Replace or Clone into an existing directory
+    /// keeps its destination behavior unchanged whether this field is set
+    /// or not. The supervisor recomputes it from its registry on every
+    /// reply; clients treat it as read-only.
+    /// If managed ancestors nest, this singular display field names the
+    /// innermost allocated checkout. Every ancestor membership still counts
+    /// for lifetime; this projection is not the membership inventory.
+    #[serde(default)]
+    pub working_copy: Option<WorkingCopyInfo>,
 }
 
 impl SessionInfo {
@@ -2291,6 +2370,35 @@ pub enum ControlMsg {
         /// the supervisor executes and resumes the frozen bundle, while the
         /// composer later uses this immutable selection for clone and history.
         launch: Option<LaunchSelection>,
+        /// An owned fresh GitHub checkout this create must perform before
+        /// launching: which repository to clone, where, and what runs after
+        /// the clone. Absent (`None`) is the entire pre-22 behavior, and
+        /// every pre-22 encoder's create decodes to exactly that: this
+        /// crate's `Option` fields decode a missing key as `None` (serde's
+        /// built-in handling, no `#[serde(default)]` needed) and the
+        /// encoder never omits an `Option` key — so the only visible
+        /// difference to an old peer is the handshake refusal, by design.
+        ///
+        /// **Who may supply it: nobody but the helm**, and only in a
+        /// full-authority create. A session-authenticated (restricted)
+        /// create carrying `Some` is refused with `Unauthorized` before any
+        /// credential or selector validation — the payload is
+        /// helm-supplied, resolved from helm-side configuration (checkout
+        /// root, post-clone hook) that a spawned session must never see or
+        /// influence, and the browser never sees the hook or the
+        /// post-clone command. The resolved value travels TO the
+        /// supervisor; nothing on this wire ever carries it back out to a
+        /// client.
+        ///
+        /// In protocol 22's plumbing slice the supervisor refuses ANY
+        /// `Some` value with an explicit "not supported yet" error at the
+        /// very top of create handling — before intent resolution, before
+        /// validation, before locks, before any side effect — because the
+        /// backend (clone, registry, post-clone hook) arrives in a later
+        /// unit. That refusal is temporary scaffolding, not the long-term
+        /// contract; the long-term contract is this field's presence on a
+        /// full-authority create and its absence everywhere else.
+        github_checkout: Option<ResolvedGithubCheckout>,
     },
     /// Success reply to `CreateSession`. The session and terminal exist,
     /// but this does not establish that the agent's later `exec`
@@ -2304,6 +2412,24 @@ pub enum ControlMsg {
     /// answer from tmux (`service.rs`'s `session_status`); nothing about
     /// creation itself can honestly claim more.
     SessionCreated { req_id: u64, session: SessionInfo },
+    /// Reconcile an already-recorded fresh create using its original client
+    /// identity before consulting current configuration or launch catalogs.
+    /// Full-authority helm connections only. An unknown key never allocates;
+    /// a matching pending attempt recovers under its recorded snapshot.
+    ReconcileGithubCheckout {
+        req_id: u64,
+        intent_key: String,
+        client_identity: String,
+        cols: u16,
+        rows: u16,
+    },
+    /// `None` proves that this supervisor has no reservation for the key.
+    /// Settled refusals, spent keys, and identity mismatches use `Error`;
+    /// they must never be interpreted as permission to allocate again.
+    GithubCheckoutReconciled {
+        req_id: u64,
+        session: Option<SessionInfo>,
+    },
     /// List every session this supervisor has, in one reply. There is no
     /// cursor and no page size, by contract (`PROTOCOL_VERSION` 14 and
     /// SPEC.md's Session list section): the whole set comes back in the
@@ -2353,6 +2479,69 @@ pub enum ControlMsg {
         cwd: String,
         parent: Option<String>,
         children: Vec<String>,
+        truncated: bool,
+    },
+    /// Ask the supervisor to preview where a fresh GitHub checkout of one
+    /// repository would land on a host: the checkout root, the proposed
+    /// basename, the resulting working directory, and the claim context the
+    /// answer is valid against. `request`'s raw `owner/repo` text is parsed
+    /// (and a malformed one refused) by the eventual backend; in protocol
+    /// 22's plumbing slice the ordinary dispatch answers this with an
+    /// explicit "not supported yet" error and nothing else.
+    ///
+    /// Helm→supervisor control connections ONLY: a session-authenticated
+    /// peer is refused with `Unauthorized` by the restricted dispatcher's
+    /// off-list refusal, because a checkout preview is a question about
+    /// where new work may be materialized on the host — a full-authority
+    /// question. The browser never sends this frame and never sees its
+    /// reply's raw plumbing; the helm owns the preview REST surface, and
+    /// the post-clone hook configuration it resolves server-side never
+    /// appears in any reply.
+    GithubCheckoutPreview {
+        req_id: u64,
+        request: GithubPreviewRequest,
+    },
+    /// Reply to [`ControlMsg::GithubCheckoutPreview`]: the proposed
+    /// destination, bound to the host connection and configuration revision
+    /// it was computed under. A refusal (invalid repository text, a
+    /// collided basename, a stale claim) travels as the crate's ordinary
+    /// [`ControlMsg::Error`] with the `req_id` correlated — there is no
+    /// second error channel.
+    GithubCheckoutPreviewed {
+        req_id: u64,
+        preview: GithubPreviewResponse,
+    },
+    /// Ask the supervisor which GitHub repositories match a completion
+    /// query, for the launch composer's `gh:` dropdown. `claim` is the host
+    /// connection the asking helm is currently talking to. The helm validates
+    /// that token and stamps the REST answer; a supervisor cannot interpret
+    /// another process's incarnation counter. `query` is the raw remainder
+    /// after the `gh:` label.
+    ///
+    /// Helm→supervisor control connections ONLY, for the same
+    /// full-authority reason as [`ControlMsg::GithubCheckoutPreview`]: a
+    /// session-authenticated peer gets the restricted dispatcher's
+    /// off-list `Unauthorized` refusal. The browser talks to the helm's
+    /// completion REST surface, never to this frame.
+    GithubRepoSearch {
+        req_id: u64,
+        claim: ClaimContext,
+        query: String,
+        /// Effective helm-owned checkout root, expanded only on the target.
+        /// Older senders omit it; absence refuses discovery rather than
+        /// scanning an implicit directory on the supervisor machine.
+        root: Option<String>,
+    },
+    /// Reply to [`ControlMsg::GithubRepoSearch`]: at most
+    /// [`GITHUB_REPO_RESULTS_CAP`] repository identities, with `truncated`
+    /// set when more matched than the cap allowed. Identities are
+    /// [`GithubRepo`] values — validated `owner/repo` pairs — never raw
+    /// URLs: the wire carries the identity once and every consumer derives
+    /// its own rendering (`clone_url`, display text) from it, the same way
+    /// the rest of this vocabulary avoids second copies of derived truth.
+    GithubRepoResults {
+        req_id: u64,
+        repos: Vec<GithubRepo>,
         truncated: bool,
     },
     /// Kill the agent's entire process tree (MCP servers, dev servers,
@@ -3142,8 +3331,11 @@ impl ControlMsg {
     pub fn reply_req_id(&self) -> Option<u64> {
         match self {
             ControlMsg::SessionCreated { req_id, .. }
+            | ControlMsg::GithubCheckoutReconciled { req_id, .. }
             | ControlMsg::SessionList { req_id, .. }
             | ControlMsg::DirectoryListing { req_id, .. }
+            | ControlMsg::GithubCheckoutPreviewed { req_id, .. }
+            | ControlMsg::GithubRepoResults { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
             | ControlMsg::SessionArchived { req_id, .. }
@@ -3167,8 +3359,11 @@ impl ControlMsg {
             // echo back, and this `None` is what stops that echo from being
             // delivered as an answer.
             ControlMsg::CreateSession { .. }
+            | ControlMsg::ReconcileGithubCheckout { .. }
             | ControlMsg::ListSessions { .. }
             | ControlMsg::BrowseDirectory { .. }
+            | ControlMsg::GithubCheckoutPreview { .. }
+            | ControlMsg::GithubRepoSearch { .. }
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
             | ControlMsg::ArchiveSession { .. }
@@ -3208,8 +3403,11 @@ impl ControlMsg {
     pub fn request_req_id(&self) -> Option<u64> {
         match self {
             ControlMsg::CreateSession { req_id, .. }
+            | ControlMsg::ReconcileGithubCheckout { req_id, .. }
             | ControlMsg::ListSessions { req_id, .. }
             | ControlMsg::BrowseDirectory { req_id, .. }
+            | ControlMsg::GithubCheckoutPreview { req_id, .. }
+            | ControlMsg::GithubRepoSearch { req_id, .. }
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
             | ControlMsg::ArchiveSession { req_id, .. }
@@ -3226,9 +3424,12 @@ impl ControlMsg {
             // asking `farhelm agent` waiting on a reply that never comes.
             | ControlMsg::AgentRequest { req_id, .. } => Some(*req_id),
             ControlMsg::Hello { .. }
+            | ControlMsg::GithubCheckoutReconciled { .. }
             | ControlMsg::SessionCreated { .. }
             | ControlMsg::SessionList { .. }
             | ControlMsg::DirectoryListing { .. }
+            | ControlMsg::GithubCheckoutPreviewed { .. }
+            | ControlMsg::GithubRepoResults { .. }
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
             | ControlMsg::SessionArchived { .. }
@@ -3282,6 +3483,12 @@ impl ControlMsg {
             ControlMsg::SessionList { .. } => "SessionList",
             ControlMsg::BrowseDirectory { .. } => "BrowseDirectory",
             ControlMsg::DirectoryListing { .. } => "DirectoryListing",
+            ControlMsg::GithubCheckoutPreview { .. } => "GithubCheckoutPreview",
+            ControlMsg::ReconcileGithubCheckout { .. } => "ReconcileGithubCheckout",
+            ControlMsg::GithubCheckoutReconciled { .. } => "GithubCheckoutReconciled",
+            ControlMsg::GithubCheckoutPreviewed { .. } => "GithubCheckoutPreviewed",
+            ControlMsg::GithubRepoSearch { .. } => "GithubRepoSearch",
+            ControlMsg::GithubRepoResults { .. } => "GithubRepoResults",
             ControlMsg::StopSession { .. } => "StopSession",
             ControlMsg::SessionStopped { .. } => "SessionStopped",
             ControlMsg::DeleteSession { .. } => "DeleteSession",
@@ -3675,6 +3882,14 @@ mod tests {
             serde_json::to_value(ErrorKind::Conflict).unwrap(),
             serde_json::json!("conflict")
         );
+        assert_eq!(
+            serde_json::to_value(ErrorKind::CheckoutConflict).unwrap(),
+            serde_json::json!("checkout_conflict")
+        );
+        assert_eq!(
+            serde_json::from_value::<ErrorKind>(serde_json::json!("checkout_conflict")).unwrap(),
+            ErrorKind::CheckoutConflict
+        );
         let unauthorized = ControlMsg::Error {
             req_id: 8,
             message: "session credential rejected".to_string(),
@@ -3938,6 +4153,8 @@ mod tests {
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["created_at"],
@@ -3982,6 +4199,8 @@ mod tests {
                 tabs: Vec::new(),
                 archived,
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             };
             let json = serde_json::to_value(&info).unwrap();
             assert_eq!(json["parent"], expected_parent);
@@ -3990,6 +4209,243 @@ mod tests {
         }
     }
 
+    /// The GitHub-checkout vocabulary is protocol 22's surface, so its wire
+    /// JSON is golden-pinned like every request/reply pair before it: a
+    /// serde-attribute change here would compile and pass a round-trip
+    /// while quietly producing bytes a peer on the same version cannot
+    /// parse. It also pins the reply pairs' correlation by `req_id` and
+    /// that `GithubRepoResults` carries identities, never URLs.
+    #[farhelm_testtrace::test]
+    fn github_checkout_message_json_shapes_are_pinned() {
+        let repo = parse_github_repo("acme/bar").expect("valid repo");
+        let preview_request = ControlMsg::GithubCheckoutPreview {
+            req_id: 21,
+            request: GithubPreviewRequest {
+                host: None,
+                expected_incarnation: None,
+                repo: "acme/bar".to_string(),
+                title: None,
+                root: None,
+                config_revision: None,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&preview_request).unwrap(),
+            serde_json::json!({
+                "type": "github_checkout_preview",
+                "req_id": 21,
+                "request": {
+                    "host": null,
+                    "expected_incarnation": null,
+                    "repo": "acme/bar",
+                    "title": null,
+                    "root": null,
+                    "config_revision": null,
+                },
+            })
+        );
+
+        let previewed = ControlMsg::GithubCheckoutPreviewed {
+            req_id: 22,
+            preview: GithubPreviewResponse {
+                canonical_root: "/checkouts".to_string(),
+                basename: "bar".to_string(),
+                cwd: "/checkouts/bar".to_string(),
+                config_revision: 3,
+                claim_context: ClaimContext {
+                    host: "host-1".to_string(),
+                    incarnation: 9,
+                },
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&previewed).unwrap(),
+            serde_json::json!({
+                "type": "github_checkout_previewed",
+                "req_id": 22,
+                "preview": {
+                    "canonical_root": "/checkouts",
+                    "basename": "bar",
+                    "cwd": "/checkouts/bar",
+                    "config_revision": 3,
+                    "claim_context": {"host": "host-1", "incarnation": 9},
+                },
+            })
+        );
+
+        let search = ControlMsg::GithubRepoSearch {
+            req_id: 23,
+            claim: ClaimContext {
+                host: "host-1".to_string(),
+                incarnation: 9,
+            },
+            query: "bar".to_string(),
+            root: Some("~/checkouts".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(&search).unwrap(),
+            serde_json::json!({
+                "type": "github_repo_search",
+                "req_id": 23,
+                "claim": {"host": "host-1", "incarnation": 9},
+                "query": "bar",
+                "root": "~/checkouts",
+            })
+        );
+
+        let results = ControlMsg::GithubRepoResults {
+            req_id: 24,
+            repos: vec![repo],
+            truncated: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&results).unwrap(),
+            serde_json::json!({
+                "type": "github_repo_results",
+                "req_id": 24,
+                "repos": [{"owner": "acme", "name": "bar"}],
+                "truncated": true,
+            })
+        );
+    }
+
+    /// The SessionInfo extension is additive within one decoder only in the
+    /// DECODE direction: an old frame without the fields must decode with
+    /// both absent (that is every pre-22 sender), and a new frame must
+    /// roundtrip both. The golden JSON also pins the exact keys, so a key
+    /// rename cannot pass silently behind the `Option` defaults.
+    #[farhelm_testtrace::test]
+    fn session_info_github_fields_decode_absent_and_roundtrip() {
+        let mut info = SessionInfo {
+            parent: None,
+            archived: false,
+            id: "s1".to_string(),
+            title: "demo".to_string(),
+            created_at: 0,
+            last_activity_at: 0,
+            last_work_started_at: 0,
+            creation_seq: None,
+            cwd: "/tmp".to_string(),
+            canonical_cwd: None,
+            invocation: "agent".to_string(),
+            resume_template: None,
+            launch: None,
+            status: SessionStatus::default(),
+            annotation: None,
+            restart_offer: RestartOffer::default(),
+            tabs: Vec::new(),
+            source_profile: None,
+            github_repo: None,
+            working_copy: None,
+        };
+        info.github_repo = Some(parse_github_repo("acme/bar").expect("valid repo"));
+        info.working_copy = Some(WorkingCopyInfo {
+            id: "wc-1".to_string(),
+            repo: parse_github_repo("acme/bar").expect("valid repo"),
+            canonical_path: "/checkouts/bar".to_string(),
+            origin_session_id: "sess-1".to_string(),
+        });
+
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(
+            json["github_repo"],
+            serde_json::json!({"owner": "acme", "name": "bar"})
+        );
+        assert_eq!(json["working_copy"]["id"], serde_json::json!("wc-1"));
+        let decoded: SessionInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, info);
+
+        // The old-frame half: delete both keys and decode again.
+        let old = serde_json::to_value(&info).unwrap();
+        let old = match old {
+            serde_json::Value::Object(mut map) => {
+                map.remove("github_repo");
+                map.remove("working_copy");
+                serde_json::Value::Object(map)
+            }
+            _ => panic!("expected an object"),
+        };
+        let decoded: SessionInfo = serde_json::from_value(old).unwrap();
+        assert_eq!(decoded.github_repo, None);
+        assert_eq!(decoded.working_copy, None);
+    }
+
+    /// The create payload's compat story, pinned at both ends: a pre-22
+    /// encoder's create (no `github_checkout` key at all) decodes with the
+    /// field `None`, and a present payload roundtrips. Together with the
+    /// exact-match handshake this is what makes the field's addition
+    /// invisible to old peers until the handshake refuses them.
+    #[farhelm_testtrace::test]
+    fn create_session_github_checkout_decodes_absent_and_roundtrips() {
+        let repo = parse_github_repo("acme/bar").expect("valid repo");
+        let resolved = ResolvedGithubCheckout {
+            client_identity: "fixture-request".into(),
+            repo,
+            root: "/checkouts".to_string(),
+            post_clone: Some("cargo fetch".to_string()),
+            preview: CheckoutPreviewBinding {
+                canonical_root: "/checkouts".to_string(),
+                basename: "bar".to_string(),
+                cwd: "/checkouts/bar".to_string(),
+                config_revision: 3,
+            },
+        };
+        let with_payload = ControlMsg::CreateSession {
+            req_id: 30,
+            parent: None,
+            cwd: "/checkouts/bar".to_string(),
+            invocation: Some("claude".to_string()),
+            profile_name: None,
+            profile_id: None,
+            inherit_agent: false,
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: None,
+            agent_kind: None,
+            resume_template: None,
+            source_profile: None,
+            launch: None,
+            github_checkout: Some(resolved.clone()),
+        };
+        let decoded: ControlMsg =
+            serde_json::from_value(serde_json::to_value(&with_payload).unwrap()).unwrap();
+        assert_eq!(decoded, with_payload);
+
+        let mut old_shape = serde_json::to_value(&with_payload).unwrap();
+        old_shape["github_checkout"] = serde_json::Value::Null;
+        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let ControlMsg::CreateSession {
+            github_checkout, ..
+        } = decoded
+        else {
+            panic!("expected a CreateSession");
+        };
+        assert_eq!(
+            github_checkout, None,
+            "a pre-22 create must decode as an ordinary create with no checkout intent"
+        );
+
+        // And with the key REMOVED entirely — a pre-22 encoder's actual
+        // byte shape, since this crate's encoder never omitted a field, but
+        // an older hand-rolled JSON may not carry it either.
+        let mut old_shape = serde_json::to_value(&with_payload).unwrap();
+        if let serde_json::Value::Object(ref mut map) = old_shape {
+            map.remove("github_checkout");
+        }
+        let decoded: ControlMsg = serde_json::from_value(old_shape).unwrap();
+        let ControlMsg::CreateSession {
+            github_checkout, ..
+        } = decoded
+        else {
+            panic!("expected a CreateSession");
+        };
+        assert_eq!(
+            github_checkout, None,
+            "a create with no checkout key at all must decode as an ordinary create"
+        );
+        let _ = resolved;
+    }
     /// `PROTOCOL_VERSION` is a load-bearing constant (see the version
     /// history linked from the const's own docs for the M2 bump to 3, the
     /// M2.5 bump to 4, the M3 bump to 5, the M4 bump to 6, the M5 bump to 7,
@@ -4004,7 +4460,10 @@ mod tests {
     /// every prior bump. The bump to 14 removes session-list pagination
     /// from the wire (`ListSessions` lost `cursor`/`limit`, `SessionList`
     /// lost `total`/`next_cursor` and gained `truncated`) — field removals,
-    /// the other non-additive case. Pinning the
+    /// the other non-additive case. The bump to 22 adds the GitHub-checkout
+    /// messages and the optional `CreateSession::github_checkout` payload;
+    /// see the constant's own docs for why that payload forces a handshake
+    /// refusal rather than silent tolerance. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
     /// drift discovered only by two builds refusing to talk to each other.
@@ -4012,11 +4471,117 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test is the one place the number itself is
-    /// asserted.
+    /// an edit per bump; this test and the literal-21 skew check below are
+    /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_21() {
-        assert_eq!(PROTOCOL_VERSION, 21);
+    fn protocol_version_is_pinned_at_22() {
+        assert_eq!(PROTOCOL_VERSION, 22);
+    }
+
+    /// Pins the skew direction the GitHub-checkout bump exists to create, in
+    /// BOTH directions, against the LITERAL previous version rather than the
+    /// constant-relative ± 1 the `io.rs` skew test uses:
+    ///
+    /// - A peer still speaking v21 is refused by this build's handshake with
+    ///   the explicit skew error and the connection torn down — never
+    ///   tolerated into silently dropping a fresh-checkout intent.
+    /// - A v22 hello is refused by a hand-rolled v21 receiver, which sees a
+    ///   version it does not know and hangs up. There is no v21 binary to
+    ///   run anymore, so the receiver is the refusal rule itself: accept
+    ///   exactly 21, refuse anything else. It is what keeps this test
+    ///   honest about the old side instead of asserting only the new side's
+    ///   opinion.
+    ///
+    /// The ± 1 skew tests in `io.rs` follow the constant, so they would keep
+    /// passing if the constant were ever reverted without the accompanying
+    /// rename; this test is the one that fails when the constant and the
+    /// version history disagree.
+    #[farhelm_testtrace::test]
+    async fn v21_and_v22_peers_refuse_each_other() {
+        let stale_hello = |protocol_version: u32| ControlMsg::Hello {
+            protocol_version,
+            build_version: "9.9.9-test".to_string(),
+            role: "helm".to_string(),
+            host_identity: None,
+            auth: None,
+        };
+
+        // A literal-v21 peer against THIS build's handshake.
+        let (a, b) = tokio::io::duplex(64 * 1024);
+        let (ar, aw) = tokio::io::split(a);
+        let (br, bw) = tokio::io::split(b);
+        let receiver = tokio::spawn(async move {
+            let mut r = crate::io::FrameReader::new(ar);
+            let mut w = crate::io::FrameWriter::new(aw);
+            crate::io::handshake(&mut r, &mut w, "supervisor").await
+        });
+        let mut r = crate::io::FrameReader::new(br);
+        let mut w = crate::io::FrameWriter::new(bw);
+        w.write_control(&stale_hello(21)).await.unwrap();
+        // Our hello crosses first (hellos cross on the wire), then the
+        // refusal — the same shape `io.rs`'s own skew test pins.
+        let _their_hello = r.read_frame().await.unwrap().unwrap();
+        let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
+        assert!(matches!(
+            refusal,
+            ControlMsg::Error {
+                req_id: 0,
+                kind: ErrorKind::Internal,
+                ..
+            }
+        ));
+        let err = receiver.await.unwrap().unwrap_err();
+        assert!(
+            err.to_string().contains("protocol version mismatch"),
+            "a literal v21 peer must be refused: {err}"
+        );
+        let skew = crate::io::VersionSkew::cause_of(&err)
+            .expect("the refusal must carry its versions as a typed payload");
+        assert_eq!(skew.peer_protocol, 21);
+        assert_eq!(skew.our_protocol, 22);
+
+        // The reverse direction: a v21 receiver (the refusal rule itself,
+        // since no v21 binary exists to run) meets a v22 hello and hangs up.
+        let (a, b) = tokio::io::duplex(64 * 1024);
+        let (ar, aw) = tokio::io::split(a);
+        let (br, bw) = tokio::io::split(b);
+        let v21_receiver = tokio::spawn(async move {
+            let mut r = crate::io::FrameReader::new(br);
+            let mut w = crate::io::FrameWriter::new(bw);
+            w.write_control(&stale_hello(21)).await.unwrap();
+            let frame = r.read_frame().await.unwrap().unwrap();
+            let their_hello = crate::io::parse_control(&frame).unwrap();
+            let ControlMsg::Hello {
+                protocol_version, ..
+            } = their_hello
+            else {
+                panic!("expected a hello, got {their_hello:?}");
+            };
+            if protocol_version != 21 {
+                // The old peer's refusal: an error, then the connection
+                // closes (the writer is dropped at scope exit).
+                w.write_control(&ControlMsg::Error {
+                    req_id: 0,
+                    message: "protocol version mismatch".to_string(),
+                    kind: ErrorKind::Internal,
+                })
+                .await
+                .unwrap();
+                Err("refused a v22 peer".to_string())
+            } else {
+                Ok(())
+            }
+        });
+        let mut r = crate::io::FrameReader::new(ar);
+        let mut w = crate::io::FrameWriter::new(aw);
+        w.write_control(&stale_hello(PROTOCOL_VERSION))
+            .await
+            .unwrap();
+        // Hellos cross first; the v21 peer's hello precedes its refusal.
+        let _their_hello = r.read_frame().await.unwrap().unwrap();
+        let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
+        assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
+        assert!(v21_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -4176,6 +4741,8 @@ mod tests {
             restart_offer: RestartOffer::FreshOnly,
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         for (msg, expected) in [
             (
@@ -4213,6 +4780,8 @@ mod tests {
                         "tabs": [],
                         "archived": true,
                         "source_profile": null,
+                        "github_repo": null,
+                        "working_copy": null,
                         "resume_template": null,
                         "launch": null,
                     },
@@ -4624,6 +5193,8 @@ mod tests {
                     restart_offer: RestartOffer::FreshOnly,
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
             },
         ] {
@@ -4668,6 +5239,8 @@ mod tests {
                 restart_offer: RestartOffer::FreshOnly,
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             },
         })
         .unwrap();
@@ -4848,6 +5421,8 @@ mod tests {
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             }],
             truncated: true,
         };
@@ -4912,6 +5487,8 @@ mod tests {
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         assert_eq!(
             serde_json::to_value(&bare).unwrap(),
@@ -4931,6 +5508,8 @@ mod tests {
                 "tabs": [],
                 "archived": false,
                 "source_profile": null,
+                "github_repo": null,
+                "working_copy": null,
                 "resume_template": null,
                 "launch": null,
             })
@@ -5046,6 +5625,8 @@ mod tests {
             tabs: Vec::new(),
             archived: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
 
         let sampled = at(1_700_000_000, 1_700_000_600);
@@ -5087,6 +5668,8 @@ mod tests {
             tabs: Vec::new(),
             archived: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         assert_eq!(info.effective_work_started_at(), 1_700_000_000_000);
         info.last_activity_at = i64::MAX;
@@ -5138,6 +5721,8 @@ mod tests {
                 },
             ],
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["tabs"],
@@ -5490,6 +6075,7 @@ mod tests {
             ]),
             source_profile: None,
             launch: None,
+            github_checkout: None,
         };
         assert_eq!(
             serde_json::to_value(&msg).unwrap(),
@@ -5510,6 +6096,7 @@ mod tests {
                 "resume_template": ["/opt/bin/claude", "--resume", "{conversation}"],
                 "source_profile": null,
                 "launch": null,
+                "github_checkout": null,
             })
         );
     }
@@ -5543,6 +6130,7 @@ mod tests {
                 name: "Claude Code".to_string(),
             }),
             launch: None,
+            github_checkout: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5561,6 +6149,7 @@ mod tests {
             "resume_template": null,
             "source_profile": {"id": "prof-7", "name": "Claude Code"},
             "launch": null,
+            "github_checkout": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         let golden_frame = Frame {
@@ -5592,6 +6181,7 @@ mod tests {
             resume_template: None,
             source_profile: None,
             launch: None,
+            github_checkout: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5610,6 +6200,7 @@ mod tests {
             "resume_template": null,
             "source_profile": null,
             "launch": null,
+            "github_checkout": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
@@ -5639,6 +6230,7 @@ mod tests {
             resume_template: None,
             source_profile: None,
             launch: None,
+            github_checkout: None,
         };
         let expected = serde_json::json!({
             "type": "create_session",
@@ -5657,6 +6249,7 @@ mod tests {
             "resume_template": null,
             "source_profile": null,
             "launch": null,
+            "github_checkout": null,
         });
         assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
         assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
@@ -5694,6 +6287,7 @@ mod tests {
                 resume_template: None,
                 source_profile: None,
                 launch: None,
+                github_checkout: None,
             };
             let json = serde_json::to_value(&msg).unwrap();
             let decoded: ControlMsg = serde_json::from_value(json)
@@ -5806,6 +6400,7 @@ mod tests {
             ]),
             source_profile: None,
             launch: None,
+            github_checkout: None,
         };
         let json = serde_json::to_value(&new_msg).unwrap();
 
@@ -5891,6 +6486,7 @@ mod tests {
             resume_template: None,
             source_profile: None,
             launch: None,
+            github_checkout: None,
         };
         let LegacyV9ControlMsg::CreateSession { invocation, .. } =
             serde_json::from_value(serde_json::to_value(&raw).unwrap())
@@ -5916,6 +6512,7 @@ mod tests {
             resume_template: None,
             source_profile: None,
             launch: None,
+            github_checkout: None,
         };
         serde_json::from_value::<LegacyV9ControlMsg>(serde_json::to_value(&profile_mode).unwrap())
             .expect_err(
@@ -5975,6 +6572,8 @@ mod tests {
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             },
         };
         let mut wire = Vec::new();
@@ -6073,6 +6672,8 @@ mod tests {
                 restart_offer: RestartOffer::Resume,
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             },
         };
         assert_eq!(
@@ -6096,6 +6697,8 @@ mod tests {
                     "tabs": [],
                     "archived": false,
                     "source_profile": null,
+                    "github_repo": null,
+                    "working_copy": null,
                     "resume_template": null,
                     "launch": null,
                 },
@@ -6304,6 +6907,8 @@ mod tests {
                         restart_offer: RestartOffer::Resume,
                         tabs: Vec::new(),
                         source_profile: None,
+                        github_repo: None,
+                        working_copy: None,
                     },
                 },
                 serde_json::json!({
@@ -6325,6 +6930,8 @@ mod tests {
                         "tabs": [],
                         "archived": false,
                         "source_profile": null,
+                        "github_repo": null,
+                        "working_copy": null,
                         "resume_template": null,
                         "launch": null,
                     },
@@ -6571,6 +7178,8 @@ mod tests {
                     name: "Claude Code".to_string(),
                     existence,
                 }),
+                github_repo: None,
+                working_copy: None,
             };
             let encoded = serde_json::to_value(&info).unwrap();
             assert_eq!(
@@ -6705,6 +7314,8 @@ mod tests {
             "restart_offer": "fresh_only",
             "tabs": [],
             "source_profile": null,
+            "github_repo": null,
+            "working_copy": null,
         });
         let decoded: SessionInfo = serde_json::from_value(with_null).unwrap();
         assert_eq!(decoded.source_profile, None);
@@ -7295,6 +7906,8 @@ mod tests {
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             }],
             truncated: false,
         };
