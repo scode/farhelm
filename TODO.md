@@ -223,20 +223,6 @@ is a clean gate.
   completion, and replay cutover. Do not widen the budget before locating why HIGH_WATER was never reached. Assessed
   2026-09-17 and left parked: the scenario is expensive (a sixty-second stall interval per attempt) and its
   discriminator receipts only pay on a fresh reproduction; the single-client stall shape is separately watched above.
-- Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` in
-  `crates/farhelm/tests/e2e/session_lifecycle.rs`. The baseline failed on the fifth exact execution (four passed): READY
-  arrived but BINARY-MARKER did not arrive within forty seconds. Earlier command-acknowledgement diagnostics localized
-  this as missing input, but new fixture receipts disprove that diagnosis for a reproduced occurrence: the fixture
-  consumed its input and flushed the binary reply, yet the client still saw no marker. Twenty quiet diagnostic runs
-  passed; with two CPU-load children, sixteen passed before the seventeenth failed with both receipts present. Keeping
-  the fixture alive after flushing passed twenty loaded runs. Restoring immediate exit with failure-only pane capture
-  and dead-state diagnostics also passed twenty loaded runs, so no failing capture was obtained. This points toward an
-  output/exit handoff without proving where bytes were lost; the timeout without a detach also weakens a simple early
-  terminal-end explanation. Keep `#[ignore]`. Next record raw tmux control markers, decoded payload counts, forwarder
-  enqueue, writer completion, and terminal-end handoff for this pane. Input replay, sleeps, or a final capture protocol
-  would add delivery/duplication semantics without a demonstrated cause and exceed this pass's scoped-fix boundary.
-  Assessed 2026-09-17 and left parked: two fixture-shape changes already passed twenty loaded runs each without
-  producing a failing capture, so the named deep instrumentation only pays on a fresh reproduction.
 - Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` in
   `crates/farhelm/tests/e2e/terminal_backpressure.rs`. Twenty exact baseline runs passed. The historical loaded
   four-thread failure exceeded the 64-MiB supervisor RSS allowance; twenty-one earlier loaded runs also passed. That
