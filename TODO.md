@@ -20,6 +20,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Definite simplification
 
 ## Near term
+- Replace the user-facing `version skew` label with `needs update`; `version skew` is internal jargon.
 
 - Launch an agent into a fresh clone of a GitHub repo by typing `gh:owner/repo` in the launch composer. Today that takes
   a detour through a terminal to clone the repo under a new local name before the session can be created. Farhelm stays
