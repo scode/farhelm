@@ -50,9 +50,9 @@ use std::sync::Arc;
 /// Resolve one exact profile name from a single helm catalog snapshot.
 ///
 /// Agent creates and the supervisor's upward named-spawn relay use this
-/// rule. Browser creation remains id-based, preserving the stable identity
-/// chosen by its catalog picker. Keeping name resolution here prevents the
-/// two name-taking entry points from disagreeing about ambiguity, and the
+/// rule, as does an explicit REST `profile_name` selector. The browser picker
+/// still submits stable ids. Keeping name resolution here prevents these
+/// name-taking entry points from disagreeing about ambiguity, and the
 /// candidate list gives a caller enough information to retry without
 /// weakening exact matching.
 pub(crate) fn resolve_profile_name(profiles: &[Profile], name: &str) -> anyhow::Result<Profile> {

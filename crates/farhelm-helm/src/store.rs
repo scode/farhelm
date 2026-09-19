@@ -118,6 +118,9 @@ fn history_order_is_newer(candidate: (i64, i64, &str), boundary: (i64, i64, &str
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LaunchHistoryEntry {
     pub host: HostId,
+    /// Accepted fresh-checkout intent. Reuse must obtain a new preview for
+    /// this repository; `cwd` remains the previous launch's diagnostic path.
+    pub github_repo: Option<farhelm_proto::GithubRepo>,
     /// The destination identity accepted with this particular create. A
     /// missing value belongs to a legacy row whose display spelling is the
     /// only durable fact; folder suggestions must never fill it in later.
@@ -160,7 +163,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 27;
+const SCHEMA_VERSION: i64 = 28;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -1747,6 +1750,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  ordering_value INTEGER NOT NULL,
                  PRIMARY KEY (host_id, host_identity, session_id)
              ) STRICT;
+             ALTER TABLE create_history_sessions ADD COLUMN github_repo TEXT;
              CREATE INDEX create_history_sessions_recent
                  ON create_history_sessions (host_id, host_identity, ordering_kind DESC, ordering_value DESC, session_id ASC);
              -- A compact, durable lower watermark for admissions evicted
@@ -1797,7 +1801,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 27;",
+              PRAGMA user_version = 28;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2517,6 +2521,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         ))
         .context("migrating helm.db to schema version 27")?;
         version = 27;
+    }
+    if version == 27 {
+        // Repo intent belongs to the admission, including raw creates.
+        // Keeping it here gives it the same replay and eviction boundary
+        // as every other create, without an independent recency clock.
+        tx.execute_batch(
+            "ALTER TABLE create_history_sessions ADD COLUMN github_repo TEXT;
+             PRAGMA user_version = 28;",
+        )
+        .context("migrating helm.db to schema version 28")?;
+        version = 28;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4706,6 +4721,42 @@ impl HelmStore {
         display_cwd: &str,
         remember_permissions: bool,
     ) -> anyhow::Result<bool> {
+        self.record_create_history_with_destination(
+            host,
+            identity,
+            entry,
+            (canonical_cwd, display_cwd),
+            None,
+            remember_permissions,
+        )
+        .await
+    }
+
+    /// Record accepted destination intent under the existing create window.
+    ///
+    /// `github_repo` must come from the helm's accepted request, never the
+    /// remote session's descriptive repo field. Fresh launches retain their
+    /// actual paths in structured history but do not teach folder completion
+    /// an ephemeral directory. Explicit existing-directory launches use the
+    /// ordinary folder projection even when they borrow a managed checkout.
+    /// Replays cannot replace the original intent or advance its frequency.
+    pub async fn record_create_history_with_destination(
+        &self,
+        host: HostId,
+        identity: &str,
+        entry: &SessionInfo,
+        paths: (&str, &str),
+        github_repo: Option<&farhelm_proto::GithubRepo>,
+        remember_permissions: bool,
+    ) -> anyhow::Result<bool> {
+        let github_repo = github_repo
+            .map(|repo| {
+                farhelm_proto::parse_github_repo(&format!("{}/{}", repo.owner, repo.name))
+                    .map(|repo| format!("{}/{}", repo.owner, repo.name))
+            })
+            .transpose()
+            .context("validating accepted repository history intent")?;
+        let (canonical_cwd, display_cwd) = paths;
         let conn = Arc::clone(&self.conn);
         let identity = identity.to_string();
         let entry = entry.clone();
@@ -4810,10 +4861,10 @@ impl HelmStore {
             let admitted = tx
                 .execute(
                     "INSERT INTO create_history_sessions
-                     (host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                     (host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, github_repo)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
-                    rusqlite::params![host, identity, entry.id, entry.created_at, sequence, ordering_kind, ordering_value],
+                    rusqlite::params![host, identity, entry.id, entry.created_at, sequence, ordering_kind, ordering_value, github_repo],
                 )
                 .context("claiming create-history admission")?
                 != 0;
@@ -4852,7 +4903,7 @@ impl HelmStore {
                 .context("switching create-history cutoff to fallback order")?;
             }
 
-            let folder_changed = tx
+            let folder_changed = if github_repo.is_none() { tx
                 .execute(
                     "INSERT INTO folder_history (
                          host_id, host_identity, canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq, ordering_kind, ordering_value, ordering_session_id
@@ -4910,7 +4961,7 @@ impl HelmStore {
                     ],
                 )
                 .context("recording created folder")?
-                != 0;
+                != 0 } else { false };
 
             let launch_changed = if let Some(selection) = &entry.launch {
                 // Captured before `selection` is shadowed by its serialized
@@ -5063,7 +5114,7 @@ impl HelmStore {
             )
             .context("removing structured projections evicted from the admission window")?;
             tx.commit().context("committing create history")?;
-            Ok(folder_changed || launch_changed)
+            Ok(folder_changed || launch_changed || github_repo.is_some())
         })
         .await
         .context("record create history task panicked")?
@@ -5160,9 +5211,10 @@ impl HelmStore {
 
     /// Read reusable structured launches for one still-matching installation.
     ///
-    /// Corrupt historical JSON is skipped rather than made into a malformed
-    /// API result. The next successful record can still evict it through the
-    /// normal bounded window.
+    /// Corrupt historical JSON or repo intent is skipped rather than made into
+    /// a malformed API result. A fresh setup must never degrade into an ordinary
+    /// folder setup just because its provenance cannot be decoded. The next
+    /// successful record can still evict it through the normal bounded window.
     pub async fn launch_history(
         &self,
         host: HostId,
@@ -5174,10 +5226,12 @@ impl HelmStore {
             let conn = conn.lock().expect("helm db mutex poisoned");
             let mut stmt = conn
                 .prepare(
-                    "SELECT cwd, canonical_cwd, launch_json, created_at, creation_seq
-                     FROM launch_history
+                    "SELECT cwd, canonical_cwd, launch_json, launch_history.created_at, launch_history.creation_seq,
+                            admission.github_repo
+                     FROM launch_history LEFT JOIN create_history_sessions AS admission
+                     USING (host_id, host_identity, session_id)
                      WHERE host_id = ?1 AND host_identity = ?2
-                     ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC",
+                     ORDER BY launch_history.ordering_kind DESC, launch_history.ordering_value DESC, session_id ASC",
                 )
                 .context("preparing structured launch history read")?;
             let rows = stmt
@@ -5188,12 +5242,13 @@ impl HelmStore {
                         row.get::<_, String>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 })
                 .context("reading structured launch history")?;
             let mut entries = Vec::new();
             for row in rows {
-                let (cwd, canonical_cwd, json, created_at, creation_seq) =
+                let (cwd, canonical_cwd, json, created_at, creation_seq, github_repo) =
                     row.context("decoding structured launch history row")?;
                 let Ok(selection) = serde_json::from_str(&json) else {
                     tracing::warn!(host, "a stored launch-history selection no longer decodes");
@@ -5209,8 +5264,21 @@ impl HelmStore {
                     },
                     None => None,
                 };
+                let github_repo = match github_repo {
+                    Some(repo) => match farhelm_proto::parse_github_repo(&repo) {
+                        Ok(repo) => Some(repo),
+                        Err(_) => {
+                            // Losing repo provenance must not reinterpret a
+                            // fresh setup as an ordinary folder launch.
+                            tracing::warn!(host, "a stored repository history intent no longer decodes");
+                            continue;
+                        }
+                    },
+                    None => None,
+                };
                 entries.push(LaunchHistoryEntry {
                     host,
+                    github_repo,
                     canonical_cwd,
                     cwd,
                     selection,
@@ -5224,7 +5292,51 @@ impl HelmStore {
         .context("launch history task panicked")?
     }
 
+    /// Return distinct accepted repos in the installation's create order.
+    ///
+    /// Both raw and structured fresh creates live in the same bounded
+    /// admission window. Ordinary creates age these suggestions out, and
+    /// replay cannot refresh them. Identity is checked in the read itself
+    /// so an adoption racing an offline completion request cannot expose
+    /// suggestions belonging to the previous installation.
+    pub async fn github_repository_history(
+        &self,
+        host: HostId,
+        identity: &str,
+    ) -> anyhow::Result<Vec<farhelm_proto::GithubRepo>> {
+        let conn = Arc::clone(&self.conn);
+        let identity = identity.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn.lock().expect("helm db mutex poisoned");
+            let mut stmt = conn.prepare(
+                "SELECT github_repo FROM create_history_sessions
+                 WHERE host_id = ?1 AND host_identity = ?2 AND github_repo IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM hosts WHERE id = ?1 AND host_identity = ?2)
+                 ORDER BY ordering_kind DESC, ordering_value DESC, session_id ASC",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![host, identity], |row| {
+                row.get::<_, String>(0)
+            })?;
+            let mut repos = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for row in rows {
+                let Ok(repo) = farhelm_proto::parse_github_repo(&row?) else {
+                    continue;
+                };
+                if seen.insert((repo.owner.clone(), repo.name.clone())) {
+                    repos.push(repo);
+                }
+            }
+            Ok(repos)
+        })
+        .await
+        .context("repository history task panicked")?
+    }
+
     /// Read folder suggestions for one still-matching installation.
+    ///
+    /// Repository suggestions use the admission window instead; they must
+    /// not turn a previous fresh checkout's diagnostic cwd into reusable intent.
     pub async fn folder_history(
         &self,
         host: HostId,
@@ -6148,6 +6260,264 @@ mod tests {
         host
     }
 
+    /// Fresh repo intent survives fallback ordering and repeated launches
+    /// without teaching completion the temporary checkout paths. The remote
+    /// session's repo text is deliberately different: only accepted helm
+    /// intent may define a reusable destination.
+    #[tokio::test]
+    async fn repository_history_preserves_trusted_intent_and_replay_boundary() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "repo-history.example", "identity-a").await;
+        let repo = farhelm_proto::parse_github_repo("acme/bar").unwrap();
+        let other = farhelm_proto::parse_github_repo("acme/other").unwrap();
+        let mut entry = session("repo-first", 100);
+        entry.launch = Some(LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        });
+        entry.github_repo = Some(other.clone());
+        assert!(
+            store
+                .record_create_history_with_destination(
+                    host,
+                    "identity-a",
+                    &entry,
+                    ("/work/bar-1", "/work/bar-1"),
+                    Some(&repo),
+                    true,
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .record_create_history_with_destination(
+                    host,
+                    "identity-a",
+                    &entry,
+                    ("/changed", "/changed"),
+                    Some(&other),
+                    true,
+                )
+                .await
+                .unwrap(),
+            "replay cannot replace accepted provenance"
+        );
+        entry.id = "repo-second".into();
+        entry.created_at = 101;
+        assert!(
+            store
+                .record_create_history_with_destination(
+                    host,
+                    "identity-a",
+                    &entry,
+                    ("/work/bar-2", "/work/bar-2"),
+                    Some(&repo),
+                    true,
+                )
+                .await
+                .unwrap()
+        );
+        let launches = store.launch_history(host, "identity-a").await.unwrap();
+        assert_eq!(launches.len(), 2, "replay adds no frequency");
+        assert!(
+            launches
+                .iter()
+                .all(|launch| launch.github_repo.as_ref() == Some(&repo))
+        );
+        assert_eq!(launches[0].cwd, "/work/bar-2");
+        assert_eq!(launches[1].cwd, "/work/bar-1");
+        assert!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .github_repository_history(host, "identity-a")
+                .await
+                .unwrap(),
+            vec![repo]
+        );
+
+        entry.id = "explicit-existing".into();
+        entry.created_at = 102;
+        store
+            .record_create_history_with_paths(
+                host,
+                "identity-a",
+                &entry,
+                "/work/bar-1",
+                "/work/bar-1",
+                true,
+            )
+            .await
+            .unwrap();
+        let folders = store.folder_history(host, "identity-a").await.unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].display_cwd, "/work/bar-1");
+        assert_eq!(
+            store.launch_history(host, "identity-a").await.unwrap()[0].github_repo,
+            None,
+            "descriptive remote repo text cannot turn Existing into fresh intent"
+        );
+    }
+
+    /// Raw fresh launches supply recents, but every accepted create ages
+    /// that same window. Eviction must also prevent an old replay from
+    /// resurrecting a repository after its admission row has been reclaimed.
+    #[tokio::test]
+    async fn repository_history_ages_with_raw_creates_and_adoption() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "repo-window.example", "identity-a").await;
+        let repo = farhelm_proto::parse_github_repo("acme/bar").unwrap();
+        let original = session("fresh", 1);
+        assert!(
+            store
+                .record_create_history_with_destination(
+                    host,
+                    "identity-a",
+                    &original,
+                    ("/work/bar-1", "/work/bar-1"),
+                    Some(&repo),
+                    false,
+                )
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store
+                .github_repository_history(host, "identity-a")
+                .await
+                .unwrap(),
+            vec![repo.clone()]
+        );
+        assert!(
+            store
+                .launch_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty(),
+            "fixture is a raw launch"
+        );
+        for index in 0..MAX_LAUNCH_HISTORY {
+            store
+                .record_create_history(
+                    host,
+                    "identity-a",
+                    &session(&format!("raw-{index}"), index + 2),
+                )
+                .await
+                .unwrap();
+        }
+        assert!(
+            store
+                .github_repository_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !store
+                .record_create_history_with_destination(
+                    host,
+                    "identity-a",
+                    &original,
+                    ("/work/bar-1", "/work/bar-1"),
+                    Some(&repo),
+                    false,
+                )
+                .await
+                .unwrap()
+        );
+        let fresh = session("fresh-after-window", 1000);
+        store
+            .record_create_history_with_destination(
+                host,
+                "identity-a",
+                &fresh,
+                ("/work/bar-2", "/work/bar-2"),
+                Some(&repo),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .github_repository_history(host, "identity-a")
+                .await
+                .unwrap(),
+            vec![repo]
+        );
+        store
+            .adopt_identity(
+                host,
+                &dialed_as(&store, host).await,
+                "identity-a",
+                "identity-b",
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .github_repository_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .github_repository_history(host, "identity-b")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// An existing schema-27 installation must retain ordinary history
+    /// when repo intent is added; fresh and migrated DDL must agree.
+    #[tokio::test]
+    async fn schema_28_preserves_history_without_inventing_repo_intent() {
+        let (dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "migration.example", "identity-a").await;
+        store
+            .record_create_history(host, "identity-a", &session("old", 1))
+            .await
+            .unwrap();
+        let folders = store.folder_history(host, "identity-a").await.unwrap();
+        let schema = schema_objects(&store.conn.lock().unwrap());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute_batch("ALTER TABLE create_history_sessions DROP COLUMN github_repo; PRAGMA user_version = 27;").unwrap();
+            let version: i64 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, 27);
+            assert!(
+                conn.prepare("SELECT github_repo FROM create_history_sessions")
+                    .is_err()
+            );
+        }
+        drop(store);
+        let migrated = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
+        assert_eq!(
+            migrated.folder_history(host, "identity-a").await.unwrap(),
+            folders
+        );
+        assert!(
+            migrated
+                .github_repository_history(host, "identity-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(schema_objects(&migrated.conn.lock().unwrap()), schema);
+    }
+
     /// A replay of a successful structured create is the same session, not a
     /// second observation. It must leave both the reusable launch and the
     /// folder's recency untouched.
@@ -6185,6 +6555,7 @@ mod tests {
                 .expect("read"),
             vec![LaunchHistoryEntry {
                 host,
+                github_repo: None,
                 canonical_cwd: None,
                 cwd: "/created".to_string(),
                 selection: entry.launch.clone().expect("selection"),
@@ -8648,6 +9019,7 @@ mod tests {
                  -- replayed step does a plain `CREATE TABLE`.
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
+                 ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  PRAGMA user_version = 25;",
             )
             .expect("plant schema-25 preferences");
