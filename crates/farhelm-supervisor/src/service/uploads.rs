@@ -206,9 +206,8 @@ pub(crate) enum UploadCommand {
 ///
 /// Three senders, one shape: the client (`AbortUpload`), the connection
 /// (its read loop ending), and `DeleteSession` (which holds no route at
-/// all and reaches transfers through `Supervisor::uploads`). Making them
-/// one message rather than three mechanisms is what keeps "stop
-/// immediately, clean up, and stay stopped" a single implementation.
+/// all and reaches transfers through `Supervisor::uploads`). This ends
+/// the transfer's wait, not a blocking publication already in progress.
 pub(crate) struct UploadSignal {
     /// User-legible, rendered verbatim if `tell_client` is set.
     pub(crate) reason: String,
@@ -921,11 +920,12 @@ enum DiskStage<T> {
 /// thread cannot be interrupted, so this ABANDONS the operation rather
 /// than stopping it. Dropping the join handle leaves the closure to finish
 /// in the blocking pool and drop the [`crate::files::StagedStream`] it
-/// owns, whose `Drop` removes the staging file. So the operation may still
-/// complete, but nothing the caller does afterwards can depend on it, and
-/// what it wrote is removed rather than published — which is exactly the
-/// guarantee that matters: a timed-out stage never contributes to a
-/// published file.
+/// owns. Before publication, `Drop` attempts to remove only the staging
+/// file, and no later caller can publish that stream. During publication,
+/// however, the closure may already have linked the complete attachment,
+/// or may still do so. Neither dropping the handle nor the stream rolls
+/// that back. The caller must report an unknown publication outcome, not
+/// infer that nothing was stored from an interrupted wait.
 async fn await_disk_stage<T>(
     bound: Duration,
     signals: &mut mpsc::Receiver<UploadSignal>,
@@ -939,8 +939,8 @@ async fn await_disk_stage<T>(
         }
         joined = &mut handle => match joined {
             Ok(value) => DiskStage::Done(value),
-            // A panic inside the blocking operation. The stream went with
-            // it, so its own `Drop` already removed the staging file.
+            // A panic does not establish whether publication happened.
+            // The stream's `Drop` attempts staging cleanup, not rollback.
             Err(join) => DiskStage::Failed(format!("{join}")),
         },
         _ = tokio::time::sleep(bound) => DiskStage::Failed(format!(
@@ -983,8 +983,7 @@ async fn write_upload_chunk(
 /// Verify and publish a finished transfer — `CommitUpload`'s whole
 /// contract.
 ///
-/// Three refusals, in the order they can be decided, and every one of them
-/// publishes nothing and cleans the temp file:
+/// Definite refusals publish nothing and attempt staging cleanup:
 ///
 /// 1. **The session was deleted underneath the transfer.** Taken under the
 ///    session's lifecycle claim, so a delete and a commit racing resolve to
@@ -995,6 +994,10 @@ async fn write_upload_chunk(
 ///    commit verifies byte-for-byte), never a published file.
 /// 3. **The publication itself failed** — a full disk at the fsync, a
 ///    vanished directory, or a candidate list exhausted by collisions.
+///
+/// Cancellation or failure of the wait after publication starts is
+/// different: the blocking operation may still publish a complete file.
+/// No path is acknowledged, and retrying may create another copy.
 async fn commit_upload(
     sup: &Arc<Supervisor>,
     priority: &mpsc::Sender<Frame>,
@@ -1089,16 +1092,18 @@ async fn commit_upload(
     // can wedge, and every one of this session's lifecycle operations —
     // stop, restart, delete — is queued behind this claim while they run.
     // An unbounded hold would let one stuck disk make a session
-    // unmanageable. Past the bound the transfer fails, the abandoned
-    // operation cleans up after itself when it finally returns
-    // (`await_disk_stage`), and nothing is ever published half-way.
+    // unmanageable. Past the bound the wait ends, but the abandoned
+    // operation may still publish a complete attachment. Staging cleanup
+    // does not undo its hard link (`await_disk_stage`).
     let seam = Arc::clone(&sup.seams.upload_fs);
     let name = request.name.clone();
     let handle = tokio::task::spawn_blocking(move || {
         staged.publish_no_clobber(&*seam, crate::attachments::name_candidates(&name))
     });
     let published = match await_disk_stage(sup.timeouts.upload_disk_stage, signals, handle).await {
-        DiskStage::Done(result) => result.map_err(|e| format!("{e}")),
+        DiskStage::Done(result) => {
+            result.map_err(|e| format!("could not publish this upload: {e}; nothing was stored"))
+        }
         DiskStage::Cancelled(signal) => {
             drop(lifecycle);
             warn!(
@@ -1112,12 +1117,17 @@ async fn commit_upload(
                     req_id,
                     message: if signal.session_gone {
                         format!(
-                            "session {} was deleted while this upload was publishing; nothing \
-                             was published",
+                            "session {} was deleted while this upload was publishing; \
+                             publication completion is unknown",
                             truncate_for_error(session_id)
                         )
                     } else {
-                        format!("this upload was cancelled: {}", signal.reason)
+                        format!(
+                            "this upload was cancelled: {}; publication completion is unknown; \
+                             a complete attachment may remain until session deletion, and \
+                             retrying may create another copy",
+                            signal.reason
+                        )
                     },
                     kind: if signal.session_gone {
                         ErrorKind::NotFound
@@ -1129,7 +1139,10 @@ async fn commit_upload(
             .await;
             return signal.session_gone;
         }
-        DiskStage::Failed(reason) => Err(reason),
+        DiskStage::Failed(reason) => Err(format!(
+            "could not confirm publication of this upload: {reason}; a complete attachment \
+             may remain until session deletion, and retrying may create another copy"
+        )),
     };
     // Released before the reply: nothing below touches the session, and
     // the claim is contended by every lifecycle operation on it.
@@ -1139,13 +1152,13 @@ async fn commit_upload(
         Err(e) => {
             warn!(
                 session = %session_id, transfer = request.transfer, channel = request.channel,
-                received_bytes = received, error = %e, "attachment upload failed to publish"
+                received_bytes = received, error = %e, "attachment upload commit was not acknowledged"
             );
             send_upload(
                 priority,
                 &ControlMsg::Error {
                     req_id,
-                    message: format!("could not publish this upload: {e}; nothing was stored"),
+                    message: e,
                     kind: ErrorKind::Internal,
                 },
             )
@@ -1259,11 +1272,11 @@ async fn abandon_upload(sup: &Arc<Supervisor>, staged: crate::files::StagedStrea
 /// Cancel every upload in flight for `session_id` and wait for each to
 /// finish cleaning up.
 ///
-/// A whole-session teardown's first step. Once this returns, no task can
-/// still write into or publish into that session's attachments directory.
-/// The wait is what makes that a guarantee rather than a hope — firing the
-/// signals and moving on would race teardown against a transfer's last
-/// write.
+/// A whole-session teardown's first step. Once this returns, the async
+/// transfer tasks have ended. Blocking disk operations abandoned by those
+/// tasks may still finish, including publication; this wait does not join
+/// them or undo a completed attachment. Delete removes attachments through
+/// its ordinary directory teardown, while Archive retains them.
 ///
 /// `session_gone` distinguishes delete from archive. Both cancel the
 /// transfer, but only delete may turn a late commit into `NotFound`; an
@@ -1354,6 +1367,9 @@ pub(crate) fn prune_finished_uploads(routes: &mut HashMap<u32, UploadRoute>) {
 /// reused by nothing at all, and asking "does this session exist now?"
 /// would answer a different question than "what happened to this
 /// transfer?".
+///
+/// A deletion tombstone does not record whether publication had started,
+/// so it cannot promise that the transfer never published a file.
 pub(crate) fn commit_without_upload(
     route: Option<&UploadRoute>,
     channel: u32,
@@ -1361,7 +1377,7 @@ pub(crate) fn commit_without_upload(
     match route {
         Some(route) if route.outcome.session_gone() => (
             format!(
-                "session {} was deleted while this upload was in flight; nothing was published",
+                "session {} was deleted while this upload was in flight",
                 truncate_for_error(&route.session)
             ),
             ErrorKind::NotFound,

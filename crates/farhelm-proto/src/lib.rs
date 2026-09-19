@@ -3182,9 +3182,14 @@ pub enum ControlMsg {
     /// an existing attachment. A plain rename would satisfy the atomicity
     /// requirement and violate that one. The reply is
     /// `UploadCommitted` only for a file that actually published. Every
-    /// failure AT commit — size mismatch, a rename or fsync error, the
-    /// session's deletion winning the race — is a correlated `Error`,
-    /// and the temp is cleaned; a torn or partial file is never
+    /// failure AT commit — size mismatch, a link or fsync error, the
+    /// session's deletion winning the race — is a correlated `Error`.
+    /// Definite prepublication failures attempt staging cleanup. If the
+    /// final publication wait is interrupted, completion is unknown: a
+    /// complete attachment may remain without an acknowledged path.
+    /// It has ordinary retention until session deletion, not cleanup on
+    /// startup, Stop, or Archive. Retrying may create another copy; there
+    /// is no rollback or deduplication. A torn or partial file is never
     /// observable at the published path. Failures BEFORE commit are not
     /// this message's to report: they already tore the channel down as
     /// `UploadAborted`, and a commit naming a channel that no longer
@@ -3205,10 +3210,11 @@ pub enum ControlMsg {
     /// and for the same reason: a client tearing down (a cancelled drop,
     /// a closed view) must never have to reason about who won a race
     /// against a concurrent abort or completion. The receiver drops the
-    /// channel and cleans the temp file.
+    /// channel and attempts staging cleanup. This does not stop or roll
+    /// back final publication already in progress; see `CommitUpload`.
     AbortUpload { channel: u32 },
     /// Unsolicited: the receiver gave up on this upload. This is the
-    /// outcome for EVERY post-start receiver-side failure — the stall
+    /// outcome for receiver-side failures BEFORE commit — the stall
     /// timeout ([`UPLOAD_ABORT_REASON_STALLED`]), the session deleted
     /// mid-transfer, a storage or write error while streaming, an
     /// oversized or otherwise invalid chunk — because once
@@ -3222,10 +3228,11 @@ pub enum ControlMsg {
     /// abort means the same thing to a client (show the reason, insert
     /// nothing), so a classification would be dead weight on the wire.
     ///
-    /// NOTHING PUBLISHED is unconditional: no client ever has to wonder
-    /// whether an aborted transfer left a file at some path it was not
-    /// told. The receiver's own staging file is a weaker promise, stated
-    /// honestly: its removal is ATTEMPTED (and retried) before this
+    /// This precommit event means nothing was published by the transfer.
+    /// It is not the outcome of an interrupted final-publication wait,
+    /// which is a correlated `Error` with unknown completion (see
+    /// `CommitUpload`). The receiver's own staging file is a weaker
+    /// promise: its removal is ATTEMPTED (and retried) before this
     /// message is sent, but a removal can fail for reasons no
     /// implementation can overrule — a read-only mount, a filesystem
     /// error — and what survives such a failure is a file in the

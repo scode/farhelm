@@ -238,8 +238,9 @@ pub const UPLOAD_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
 /// fsync are milliseconds), short enough that a session is not held
 /// hostage for long. A blocking operation cannot actually be cancelled, so
 /// what this bounds is how long the TRANSFER waits: past it the operation
-/// is abandoned to finish (or not) on its own, and its staging file is
-/// removed when it does — see `await_disk_stage`.
+/// is abandoned to finish (or not) on its own. Staging cleanup is attempted
+/// when it finishes, but a completed attachment is not rolled back — see
+/// `await_disk_stage`.
 pub const UPLOAD_DISK_STAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long the supervisor waits for the attached helm to answer one

@@ -503,7 +503,7 @@ pub async fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// one of [`publish_no_clobber`](Self::publish_no_clobber) or
 /// [`abandon`](Self::abandon) ends it. Both consume `self`, so a
 /// half-finished stream is not a value a caller can accidentally keep
-/// using, and both leave nothing staged behind.
+/// using. Both attempt staging cleanup; neither removes a published file.
 ///
 /// ## The temp file's fate is not left to the caller's diligence
 ///
@@ -512,17 +512,17 @@ pub async fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// OTHER way — a panic, a cancelled async task, a caller that simply drops
 /// it. That matters more here than for the whole-file tiers: an upload's
 /// stream is owned by a long-lived task that a client disconnect, a
-/// session delete, or a stall timeout can end at any moment, and "the
-/// staging file goes away when the transfer stops" has to hold on every
-/// one of those paths rather than on the handful somebody remembered to
-/// write cleanup code for.
+/// session delete, or a stall timeout can end. If a blocking operation
+/// owns the stream, cleanup waits for that operation to finish; dropping
+/// its async wait does not stop it or roll back publication.
 ///
 /// "Attempts" is the honest word: a removal can itself fail (a read-only
 /// directory, a filesystem error), and no caller can be made to succeed at
-/// it. A failure is always REPORTED — folded into the returned error, or
-/// returned by `abandon` — never swallowed, and the startup sweep of the
-/// staging directory (`crate::attachments::sweep_staging`) is the backstop
-/// both for that and for the case no in-process cleanup can cover at all,
+/// it. `abandon` and failing writes report cleanup failures. `Drop` and
+/// cleanup after a successful link are best-effort: neither can turn a
+/// completed publication into a refusal. The staging-directory sweep
+/// (`crate::attachments::sweep_staging`) is the backstop for debris and for
+/// the case no in-process cleanup can cover at all,
 /// a hard crash (`crate::attachments::reconcile_at_startup`). What never
 /// varies is the other half: nothing partial is ever published.
 pub struct StagedStream {
@@ -623,6 +623,11 @@ impl StagedStream {
     /// `candidates` running out is a genuine failure (nothing published,
     /// temp cleaned), not a silent overwrite: the caller's sequence is
     /// what decides how hard to try.
+    ///
+    /// Once the link succeeds, the destination is an ordinary attachment.
+    /// Abandoning the caller's wait cannot undo it: `Drop` and staging
+    /// sweeps remove only the temp name. A caller that stops awaiting this
+    /// operation cannot conclude that no file was published.
     pub fn publish_no_clobber<I>(
         mut self,
         seam: &dyn FaultSeam,
@@ -673,9 +678,9 @@ impl StagedStream {
     }
 
     /// End the stream without publishing anything: the abort, stall, and
-    /// channel-loss path. Reports a cleanup failure rather than hiding it,
-    /// because a temp file that outlives its transfer is exactly the
-    /// debris the lifecycle exists to prevent.
+    /// channel-loss path BEFORE publication starts. Reports a cleanup
+    /// failure rather than hiding it, because a temp file that outlives
+    /// its transfer is exactly the debris the lifecycle exists to prevent.
     pub fn abandon(mut self, seam: &dyn FaultSeam) -> io::Result<()> {
         self.file = None;
         self.finished = true;
