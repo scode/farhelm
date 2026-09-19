@@ -191,17 +191,6 @@ is a clean gate.
   focus events do not establish the cause of these older startup/bridge failures. Assessed 2026-09-17 and left parked:
   neither fingerprint has recurred since the corrections, and the named instrumentation only pays on a fresh
   reproduction; the 2026-09-17 focus-budget raise (#707) also changed the focus machinery these symptoms raced against.
-- Investigate `opening the actions menu enters it, and Tab leaves it` in `e2e/tests/sidebar.spec.ts`, WebKit. At
-  `6903cf90`, the full run failed to open the menu with ArrowDown. Its trace shows the toggle focus assertion passing,
-  then terminal focus in the keyboard-action snapshot about 23 ms later; the menu handler never received that key.
-  Initial terminal reveal was still pending despite `__farhelmTermReady` being true. The test, menu handler, and
-  `terminal.js` are unchanged from `d71a87fb`, suggesting a pre-existing fixture race, but twenty exact baseline
-  executions passed without extra load on the worker shape and pin above. The new layout may affect its frequency; there
-  is no direct baseline reproduction. First check whether awaiting `__farhelmTest.replay.revealed` before focusing the
-  toggle settles initial reveal, then retain focus and reveal receipts in repetitions of both engines. Keep this
-  initial-attach race distinct from reconnect behavior, and retain the keyboard-entry and Tab-exit assertions. Assessed
-  2026-09-17 and left parked: the awaiting-`revealed` check is cheap but needs loaded WebKit repetitions to observe
-  anything, and the one sighting has stood unreproduced through the twenty baseline runs already recorded here.
 - Deflake `a client that stops draining is detached with the stall reason after the full stall interval` in
   `e2e/tests/terminal-flood.spec.ts`, WebKit. The loaded 2026-09-03 failure saw zero pauses after thirty seconds, before
   the sixty-second stall interval could start. Thirty prior loaded repetitions passed; ten gate-to-first-pause
