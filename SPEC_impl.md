@@ -42,6 +42,15 @@ Dioxus, version pinned at the workspace level, rendering the same component tree
 served by the helm) and desktop (wry webview wrapping the identical DOM). No dioxus-fullstack / server functions — the
 UI is a pure client of the helm's HTTP/WS API.
 
+The composer keeps destination choice separate from agent mode. `github_checkout` owns the preview authority and
+retained-attempt state; `launch_composer` owns pure scope parsing and history grouping. An async preview is usable only
+for the same destination generation, host/incarnation/install claim, repository, title, agent choice and observed
+configuration epoch. Key minting snapshots and rechecks that authority. A transport-ambiguous attempt retains its entire
+body and key across configuration changes and ordinary conflicts. Authenticated reconciliation on the original
+installation either returns the recorded result or durably refuses that same key before any allocation. Only that
+refusal permits retiring a dispatched binding, including after a lost reply; the composer then refreshes its preview and
+waits for another explicit submission. It never automatically substitutes a new key.
+
 Motivation: the project's standing constraints — recorded here, because SPEC.md deliberately stays
 implementation-neutral and does not contain them: as much Rust as possible, one implementation for web and native, and a
 GUI that agents can test visually without a human in the loop. Those force a DOM-based Rust framework. Canvas-rendering
@@ -1045,6 +1054,52 @@ reports a failed listing rather than a silently shortened one.
 
 ## Supervisor internals
 
+### Owned checkout admission and lifetime
+
+Protocol 24 carries validated checkout destinations separately from existing cwd requests. Only full-authority callers
+can preview, discover or create them; restricted session clients cannot supply helm-owned configuration. Shared proto
+validation constructs the sole HTTPS GitHub URL and validates naming; the supervisor repeats validation at admission.
+Existing request fingerprint encodings remain frozen. Fresh fingerprints include the original client identity and
+resolved configuration, while reconciliation looks up the original request before consulting mutable settings.
+
+Reconciliation defaults to lookup: an unknown key has no effect. When the helm must refuse an unknown request, it asks
+the supervisor to settle a permanent identity-bound refusal under intent and directory admission. The supervisor reads
+back the stored row before returning proof, so a concurrent winner remains authoritative. Known pending attempts still
+use their recorded recovery state; reconciliation is therefore not generally read-only. Storage or authority failure, an
+identity mismatch or an unverified installation cannot establish definite refusal. The identity-only refusal uses a
+versioned fresh fingerprint variant and the ordinary serialized create-field cap; existing fingerprints stay unchanged.
+
+Schema 18 stores the checkout registry, memberships, origin provenance and preparation snapshot alongside session and
+intent state. Directory admission serializes allocation, membership insertion and last-reference teardown. Intent locks
+precede directory admission; profile catalog round trips precede admission so a restricted parent's lifecycle claim
+cannot be held while waiting on the helm. Discovery uses its own subprocess budget rather than directory admission.
+Fresh allocation records its plan before mkdir, then records filesystem identity before exposing preparation. A
+post-allocation failure atomically retains an error session and membership instead of losing the only deletion handle.
+Borrowers join every applicable canonical managed ancestor; they never inherit the origin's preparation duty.
+
+If identity capture never committed, an existing candidate path remains ambiguous: explicit Delete retires the plan
+without adopting or moving that object and names the preserved path in its diagnostic.
+
+The launch shim executes clone, the frozen optional hook, and the real agent invocation in the existing terminal.
+Preparation has durable claim/progress/Ready state. The parent-directory durability barrier precedes launch publication;
+once publication may have started, missing or ambiguous evidence refuses automatic repetition. Only the original pending
+create may recover an unstarted preparation. Ready restart validates the recorded identity and skips clone and hook. The
+agent's kind and launch metadata remain its actual values, rather than identifying the preparation wrapper.
+
+Last-reference Delete journals the source identity and archive destination before one no-replace rename. Linux uses
+`renameat2` through its syscall with `RENAME_NOREPLACE`; macOS uses `renameatx_np(RENAME_EXCL)`. Parent fsync barriers
+precede journal retirement and atomic metadata settlement. Recovery accepts a matching already-moved destination but
+does not adopt a foreign source object. No recursive-copy or delete fallback is permitted. Directory admission also
+orders ordinary same-path creates against that move, so a new reference either commits before Delete or observes the
+directory as unavailable afterward.
+
+Root identity is checked even before accepting an apparently missing source. Common archive entry points refuse
+overlapping active registry paths, including during startup recovery. After process teardown and committed final
+retirement, Delete removes the private preparation lock and state files. This cleanup is best effort: a crash or unlink
+failure can leave private evidence, but cannot authorize another directory move.
+
+### Runtime state
+
 - State in SQLite (rusqlite) at `~/.local/state/farhelm/supervisor.db`: sessions and their metadata (SPEC.md's
   supervisor-authoritative list), each session's profile snapshot taken at creation, spawn idempotency keys, captured
   conversation identities, host identity, and the boot id last seen. The helm owns the mutable profile catalog, so the
@@ -1215,8 +1270,9 @@ reports a failed listing rather than a silently shortened one.
   retaining it — gating the whole report on file existence would leave the previous conversation's resume target
   standing after a fileless transition. Reports serialize so a slow report for an old conversation cannot win. OMP
   18.2.4's `/new` persists eagerly, so a fresh-but-empty conversation can legitimately carry a resume offer immediately;
-  the eventless-relocation and non-file-backend gaps SPEC.md states are accepted here rather than papered over.
-  `PROTOCOL_VERSION` is 22 for this kind; PR 2 bumps it to 23 for `LaunchHarness::Omp`.
+  the eventless-relocation and non-file-backend gaps SPEC.md states are accepted here rather than papered over. Protocol
+  22 introduced this kind; protocol 23 added `LaunchHarness::Omp`. Protocol 24 also carries the owned-checkout
+  vocabulary described above.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the
@@ -1319,6 +1375,37 @@ reports a failed listing rather than a silently shortened one.
 
 ## Helm internals
 
+### Checkout configuration and discovery
+
+Schema 27 adds global checkout settings, per-host overrides and a monotonically increasing revision. Effective settings
+are read in one SQLite snapshot. The configuration CLI opens only an existing current-schema database; it neither
+creates missing state nor migrates a database owned by another running process. Clearing a setting restores inheritance,
+whereas an empty hook override explicitly disables it. Configuration stays with the registry row on adoption; history
+stays with the installation identity.
+
+`POST /api/github-checkout-preview` asks the target supervisor to expand/canonicalize the configured root and propose
+the exact destination, without writing it. Responses include the configuration revision and installation/incarnation
+claim, never the hook. Naming scans refuse incomplete results after 100,000 entries. Create verifies this binding and
+uses atomic mkdir as the collision authority. Known intent keys reconcile their original snapshot before current
+configuration or profile resolution; replacement identities additionally bind the source session and preserve its veto.
+
+The serving future owns one serial three-second revision observer, initialized before readiness and HTTP serving.
+Changed revisions publish existing fleet invalidations; failed reads preserve the last observation. Launch history
+carries the authenticated revision. The composer's shared SurfaceReader retains refresh demand through read failures,
+obeys build-skew withdrawal, and applies replies only to the current target. While the feed is unavailable, a
+component-owned fallback uses the shared polling cadence and scheduled reader trigger; it cannot queue overlapping reads
+or interrupt backoff. Its highest observed revision cannot roll back while another history request is pending or fails.
+
+`POST /api/github-repositories` merges installation-scoped recents with supervisor discovery. The scanner owns two
+subprocess permits independently of directory admission, considers at most 1024 immediate entries and returns at most
+100 identities/64 KiB. It skips the archive directory, symlink children and candidates without their own `.git` entry.
+Read-only `git config --local --no-includes --get remote.origin.url` has a 4096-byte stdout cap, a one-second child
+deadline and a five-second enclosing budget. Cancellation kills and reaps before releasing permits. Inspection children
+discard ambient Git configuration/location overrides, without changing the ordinary credential environment used by
+clone. Only validated GitHub HTTPS/scp/SSH origins become canonical pairs; raw origin URLs never reach the UI.
+Recent-first deduplication, sorted discovered entries and explicit incomplete status keep a failed scan from disabling
+manual repository selection. Browser requests debounce for 150 ms and discard stale host/query generations.
+
 ### Composer history
 
 Composer history is one 100-record, per-host-installation unique-create window. Each accepted supervisor session id
@@ -1347,6 +1434,13 @@ all history partitions for its host that do not match the new recorded identity 
 change. Each structured launch stores its accepted canonical destination beside the submitted display spelling. Folder
 history remains a bounded suggestion projection: browse may refine legacy unknown paths but never changes an
 accepted-create destination.
+
+Schema 28 adds trusted repository provenance to the same bounded create-admission transaction. The helm records it from
+the accepted request, not arbitrary supervisor display metadata. Raw fresh creates age the same window and contribute
+repository recents; structured history additionally projects the saved selection. Fresh requests retain accepted cwd for
+diagnostics but skip the folder projection. Repository setups group by destination kind, canonical repository and
+complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's repository
+suggestions with its other history; ordinary history rows retain their existing semantics.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order
@@ -1824,6 +1918,11 @@ property of the architecture instead of a discipline.
 
 clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. The user-facing surface:
 
+- `farhelm helm checkout-config show`, `set-root <path>`, `clear-root`, `set-post-clone <command>` and
+  `clear-post-clone` — inspect/edit existing helm checkout settings. Each accepts `--state-dir`; `--host <id>` selects a
+  registered host override instead of the global value. An empty post-clone command disables inheritance explicitly. The
+  command neither initializes missing state nor migrates an incompatible database, and never creates target directories
+  or runs the hook.
 - `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
   `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
   The last two select where "add host" provisioning payloads come from — an operator-staged directory (verified not at

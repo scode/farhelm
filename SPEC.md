@@ -286,7 +286,8 @@ shipping uninstall support.
 
 ### Creation
 
-Session creation is one action, not a wizard. Only the working directory is fundamentally required:
+Session creation is one action, not a wizard. Choose an existing directory or explicitly request a fresh GitHub
+checkout; the agent choice is independent of that destination:
 
 - Working directory: an existing directory on the target host, named by an absolute path (a relative path would resolve
   against the supervisor process rather than the client, and would shift meaning across supervisor restarts). `~` and
@@ -332,7 +333,7 @@ Session creation is one action, not a wizard. Only the working directory is fund
   structured model/effort/permissions summary is absent while a profile or command is active. See the
   maintainer-confirmed decisions below.
 - Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
-  identity. A recent row fills every saved choice and directory; clicking it never launches, and pressing Enter on a
+  identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
   replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk; explicit
   browsing asks the selected supervisor for one bounded directory level. Recent-setup rows appear only when the current
@@ -368,6 +369,68 @@ Failures split cleanly in two: precondition failures (nonexistent directory, unk
 create with a visible error and no session; launch failures of a session that was successfully created surface on the
 session itself — **error** when the agent process could not be started at all (exec failure, command not found),
 **exited** when it started and then ended, however quickly, with its exit code visible.
+
+### Fresh GitHub checkouts
+
+Selecting `gh:owner/repo` in the composer explicitly requests a new checkout on the selected host. It works with
+structured harness choices, legacy profiles, and raw commands. Selecting a folder or editing the ordinary directory
+returns to an existing-directory launch without changing the agent choice. Ordinary Clone and Replace start from the
+source session's actual directory; a new checkout requires an explicit repository selection or a saved repository setup.
+
+The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
+root and no configuration GUI. The root must already exist on the target host; `~` expands there, using the supervisor's
+captured home. Clearing an override restores inheritance; an empty hook override disables the inherited hook.
+Configuration changes affect new attempts, not an already accepted attempt or its retries.
+
+Before Launch becomes available, the composer shows the exact host and path. Preview creates no directory and reserves
+nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session title. An
+explicit title keeps its printable display spelling while the path uses `repo-` followed by its lowercase ASCII slug;
+runs outside letters and digits become hyphens. A title already starting with `repo-` does not repeat that prefix. An
+empty slug or a component over 200 bytes is refused. Existing files, directories and symlinks all occupy a name. If
+another create wins the displayed path, Launch reports the conflict and obtains a new preview; it never submits
+automatically or silently chooses another directory. An explicit name remains a conflict rather than gaining a suffix.
+
+Repository input is a GitHub owner/repository pair, not a URL, branch selector or shell fragment. The owner has 1–39
+ASCII letters, digits or hyphens, starts and ends alphanumeric, and has no consecutive hyphens. The repository has 1–100
+ASCII letters, digits, underscores, dots or hyphens, excluding `.` and `..`. Identity is lowercase. Clone uses the
+constructed HTTPS GitHub URL, with the target user's ordinary credentials. Clone, configured hook, and agent run in that
+order inside the session terminal, so progress, authentication prompts and failures are visible. A failed stage prevents
+later stages and preserves partial content. A checkout is not permission to run a hook unless the maintainer configured
+that hook.
+
+Once allocation has occurred, failures retain the session and its checkout association for inspection and Delete. A
+completed preparation permits ordinary restart without repeating clone or hook. Interrupted, missing, corrupt or
+ambiguous preparation refuses automatic repetition. Retrying an accepted create with its original key reconciles the
+original allocation and configuration, including after a helm restart or configuration edit. A transport-ambiguous reply
+keeps that original request and key. Authenticated reconciliation can return the accepted result or a durable refusal
+that prevents this key from allocating later. That refusal resolves even an earlier lost reply: the composer refreshes
+the preview and requires another explicit submission. An ordinary conflict without that proof retains the original
+request and key.
+
+An interruption after mkdir but before durable identity capture leaves ownership unestablished. Recovery retains a
+visible error session and refuses to adopt or prepare the unknown directory. Explicit Delete may retire that unresolved
+session and plan, with a diagnostic naming the preserved path; the directory remains untouched for manual inspection.
+
+Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
+directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
+exited, errored and archived sessions still count. Archive changes the session's visibility without moving files. Delete
+releases its reference; only the final reference causes the recorded checkout to move into
+`farhelm-archived-working-copies` under its original root, using its original basename plus a timestamp and collision
+handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback. Unresolved move
+failures retain recoverable metadata. A foreign object replacing the recorded path must remain untouched.
+
+Repository suggestions combine successful repository launches for the same host installation with immediate Git clones
+under the configured root. Discovery does not confer ownership, contact GitHub, fetch, recurse, run repository code, or
+return credential-bearing origin URLs. Incomplete discovery is visible and does not prevent selecting a valid manually
+entered pair. A saved repository setup remembers repository intent and agent choices: using it obtains a new preview and
+creates a new checkout, rather than reopening its prior directory. Fresh creates do not populate ordinary folder history
+with ephemeral paths; an explicit existing-directory launch can still do so.
+
+Unlabelled search retains ordinary matching. Leading `harness:`, `model:`, `effort:`, `folder:`, `recent:` and `gh:`
+labels filter to their respective kinds, case-insensitively; unknown labels and colons inside model IDs retain ordinary
+meaning. Invalid `gh:` input cannot launch a hidden existing directory. Host, installation, destination, title, agent
+choice and observed configuration changes invalidate an undispatched preview. Late responses cannot restore its
+authority or steal focus. An already ambiguous submission remains bound to its original request.
 
 ### Lifecycle operations
 
@@ -832,7 +895,7 @@ every launch and restart; there is no launch without a working directory.
 
 ## VCS neutrality
 
-The control plane is version-control-agnostic and mutates nothing:
+Ordinary session operation is version-control-agnostic. Explicit fresh-checkout creation is the bounded exception:
 
 - Sessions launch in any existing directory: detached HEAD, no `.git`, colocated or pure `jj` workspaces, nested
   repositories, and plain directories all work identically.
@@ -840,6 +903,9 @@ The control plane is version-control-agnostic and mutates nothing:
   Stacked changes work because the control plane stays out of the way, not because it models them.
 - The system never performs VCS mutations implicitly. Repository state is owned by the agent, repository instructions
   (`AGENTS.md` and kin), and user-chosen tools (`jj`, Graphite, plain Git, whatever).
+- An explicit GitHub checkout request runs the clone and configured post-clone command described above. It creates no
+  branch/worktree workflow, and later session operations do not infer one. Last-reference Delete moves the owned
+  directory intact; it does not inspect, reset or clean its repository state.
 - The working directory and the running agent are authoritative; the UI never presents a cached branch model as truth.
   VCS-specific UI, if any exists, is informational and degrades to hidden when not applicable.
 
