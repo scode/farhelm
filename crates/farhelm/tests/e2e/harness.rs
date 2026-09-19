@@ -544,6 +544,21 @@ pub(crate) async fn supervisor_process_with_env(
     supervisor_process_on_state(state, env).await
 }
 
+/// [`supervisor_process_with_env`], after removing named inherited variables.
+///
+/// Tests that exercise a child tool's configuration boundary use this rather
+/// than clearing the supervisor's whole environment: the shipped process keeps
+/// its ordinary runtime substrate, while ambient tool-specific overrides
+/// cannot leak into the fixture. Explicit child values are applied after the
+/// removals, so callers can replace an inherited variable with owned state.
+pub(crate) async fn supervisor_process_with_env_removed(
+    env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
+    removed: impl IntoIterator<Item = std::ffi::OsString>,
+) -> SupervisorProcess {
+    let state = farhelm_teststate::tempdir().expect("supervisor state dir");
+    supervisor_process_on_state_with_env_removed(state, env, removed).await
+}
+
 /// [`supervisor_process_with_env`], on a caller-prepared state directory.
 ///
 /// Exists for tests that must plant on-disk state (an older build's
@@ -557,10 +572,24 @@ pub(crate) async fn supervisor_process_on_state(
     state: farhelm_teststate::TestDir,
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
 ) -> SupervisorProcess {
+    supervisor_process_on_state_with_env_removed(state, env, std::iter::empty()).await
+}
+
+/// Shared spawn path for ordinary and selectively scrubbed supervisor children.
+/// Apply removals before explicit fixture values so test-owned configuration
+/// wins without changing the test process's environment or runtime substrate.
+async fn supervisor_process_on_state_with_env_removed(
+    state: farhelm_teststate::TestDir,
+    env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
+    removed: impl IntoIterator<Item = std::ffi::OsString>,
+) -> SupervisorProcess {
     let mut command = tokio::process::Command::new(farhelm_bin());
     command
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path());
+    for key in removed {
+        command.env_remove(key);
+    }
     for (key, value) in env {
         command.env(key, value);
     }
@@ -584,7 +613,7 @@ pub(crate) async fn supervisor_process_on_state(
 
 /// A running helm process and the loopback base URL it printed.
 pub(crate) struct HelmProcess {
-    _child: tokio::process::Child,
+    child: Option<tokio::process::Child>,
     pub(crate) base: String,
 }
 
@@ -598,6 +627,21 @@ impl HelmProcess {
             .unwrap_or_else(|e| {
                 panic!("the helm's base URL is not an address ({e}): {}", self.base)
             })
+    }
+
+    /// Stop and reap this owned helm before another process opens the same state.
+    ///
+    /// `kill_on_drop` protects panic paths, but a restart test needs a stronger
+    /// boundary: the old process must have exited before the replacement reads
+    /// its database and reconnects to the supervisor. Consuming `self` also
+    /// prevents callers from accidentally retaining a stale base URL.
+    pub(crate) async fn stop_and_reap(mut self) {
+        let mut child = self.child.take().expect("an owned helm child is present");
+        child.start_kill().expect("signal the owned helm");
+        tokio::time::timeout(REAL_STACK_SETTLE, child.wait())
+            .await
+            .expect("the owned helm exited within the settle budget")
+            .expect("reap the owned helm");
     }
 }
 
@@ -649,7 +693,7 @@ pub(crate) async fn helm_process(
         .map(|(_, url)| format!("http://{}", url.trim_end_matches('/')))
         .unwrap_or_else(|| panic!("the helm's first stdout line named no URL: {line:?}"));
     HelmProcess {
-        _child: child,
+        child: Some(child),
         base,
     }
 }

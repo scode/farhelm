@@ -139,6 +139,10 @@ pub(crate) struct LaunchHistoryQuery {
 pub(crate) struct LaunchHistoryBody {
     launches: Vec<store::LaunchHistoryEntry>,
     folders: Vec<store::FolderHistoryEntry>,
+    /// The composer re-reads this authenticated surface on feed changes.
+    /// Carrying the current configuration epoch lets it invalidate an old
+    /// checkout preview without exposing roots or hook text in the feed.
+    checkout_config_revision: i64,
 }
 
 /// A browser request to inspect one directory on the selected host.
@@ -156,6 +160,259 @@ pub(crate) struct BrowseDirectoryBody {
     parent: Option<String>,
     children: Vec<String>,
     truncated: bool,
+}
+
+/// A browser request to preview a fresh GitHub checkout: the repo text and
+/// title as typed, scoped to the selected host. The browser never supplies
+/// the checkout root or sees the hook — the helm resolves its own
+/// configuration and the supervisor does the host-side naming.
+#[derive(Deserialize)]
+pub(crate) struct GithubCheckoutPreviewReq {
+    host: store::HostId,
+    expected_incarnation: Option<u64>,
+    repo: String,
+    title: Option<String>,
+}
+
+/// The preview answer the composer renders before enabling Launch: the
+/// exact proposed path and host. The hook/post-clone command is never part
+/// of this payload — the browser does not receive it.
+pub(crate) type GithubCheckoutPreviewBody = farhelm_proto::AcceptedGithubPreview;
+
+/// Repository completion is scoped to the destination connection selected by
+/// the composer. The query is the text after `gh:`, not a filesystem path.
+#[derive(Deserialize)]
+pub(crate) struct GithubRepositoriesReq {
+    host: store::HostId,
+    expected_incarnation: Option<u64>,
+    query: String,
+}
+
+/// Discovery status travels with usable suggestions. An incomplete scan cannot
+/// forbid a manually entered repository, and its error must not disable ordinary
+/// folder or agent choices. The installation claim lets the composer discard
+/// an answer after adoption, reconnect, or a destination change.
+#[derive(Serialize)]
+struct GithubRepositoriesBody {
+    host: String,
+    incarnation: u64,
+    installation_identity: String,
+    repos: Vec<farhelm_proto::GithubRepo>,
+    truncated: bool,
+    scan_error: Option<String>,
+}
+
+/// Ask the selected target to inspect local clone origins using helm-owned
+/// configuration. Missing configuration and scan failure are explicit incomplete
+/// observations, rather than a successful empty inventory or an error affecting
+/// the composer's independent launch choices. Accepted repo intent ranks first
+/// and remains available from the registry's installation history while offline.
+pub(crate) async fn github_repositories(
+    State(state): State<Arc<AppState>>,
+    axum::Json(req): axum::Json<GithubRepositoriesReq>,
+) -> impl IntoResponse {
+    if req.query.len() > 4096 {
+        return http_error(
+            SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: "repository query exceeds the 4096-byte limit".into(),
+            }
+            .into(),
+        );
+    }
+    let Some(status) = state.manager.status(req.host) else {
+        return http_error(
+            SupervisorError {
+                kind: ErrorKind::NotFound,
+                message: format!("no such host: {}", req.host),
+            }
+            .into(),
+        );
+    };
+    // Offline suggestions belong to the registry's accepted installation,
+    // never the identity of an unadopted replacement peer. Connected hosts
+    // instead use the same status snapshot that supplies the scan client.
+    let identity = match &status.state {
+        manager::HostState::Connected { identity, .. } => identity.clone(),
+        _ => match state.store.list_hosts().await {
+            Ok(hosts) => hosts
+                .into_iter()
+                .find(|host| host.id == req.host)
+                .and_then(|host| host.host_identity),
+            Err(error) => return http_error(error),
+        },
+    };
+    let claim = manager::SessionClaim {
+        host: req.host,
+        incarnation: status.incarnation,
+        identity,
+    };
+    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
+        return http_error(error);
+    }
+    let Some(installation_identity) = claim
+        .identity
+        .clone()
+        .filter(|identity| !identity.is_empty())
+    else {
+        return http_error(
+            SupervisorError {
+                kind: ErrorKind::Conflict,
+                message: "repository discovery requires a stable host installation identity".into(),
+            }
+            .into(),
+        );
+    };
+    let config = match state.store.resolve_checkout_config(Some(claim.host)).await {
+        Ok(config) => config,
+        Err(error) => return http_error(error),
+    };
+    let recent = match state
+        .store
+        .github_repository_history(claim.host, &installation_identity)
+        .await
+    {
+        Ok(recent) => recent,
+        Err(error) => return http_error(error),
+    };
+    let result = if let Some(client) = status.client.filter(|_| config.root.is_some()) {
+        client
+            .github_repo_search(
+                farhelm_proto::ClaimContext {
+                    host: claim.host.to_string(),
+                    incarnation: claim.incarnation,
+                },
+                &req.query,
+                config.root,
+            )
+            .await
+            // A remote diagnostic may contain arbitrary config text or URLs.
+            // Keep discovery's public response limited to identities and a
+            // bounded actionable status, including when the scan itself fails.
+            .map_err(|_| "repository discovery is unavailable on this host; verify Git and the configured checkout root".to_string())
+    } else if config.root.is_none() {
+        Err(
+            "no checkout root is configured; set one with `farhelm helm checkout-config set-root`"
+                .to_string(),
+        )
+    } else {
+        Err("repository discovery is unavailable while this host is offline; recent repositories are still available".to_string())
+    };
+    let (repos, mut truncated, scan_error) = match result {
+        Ok((repos, truncated)) => (repos, truncated, None),
+        Err(error) => (Vec::new(), true, Some(error)),
+    };
+    // Remote data is not authority to manufacture a repository identity. Keep
+    // only canonical parser-validated pairs and cap again at the REST boundary.
+    let mut validated = std::collections::BTreeMap::new();
+    for repo in repos {
+        let key = format!("{}/{}", repo.owner, repo.name);
+        if farhelm_proto::parse_github_repo(&key).ok().as_ref() != Some(&repo) {
+            truncated = true;
+            continue;
+        }
+        if validated.len() == farhelm_proto::GITHUB_REPO_RESULTS_CAP
+            && !validated.contains_key(&key)
+        {
+            truncated = true;
+            continue;
+        }
+        validated.insert(key, repo);
+    }
+    // Recent intent wins over alphabetically ordered discoveries. Filter it
+    // locally because the supervisor sees only its own scanned candidates.
+    let query = req.query.to_ascii_lowercase();
+    let mut repos = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for repo in recent.into_iter().chain(validated.into_values()) {
+        let key = format!("{}/{}", repo.owner, repo.name);
+        if !key.contains(&query) || !seen.insert(key) {
+            continue;
+        }
+        if repos.len() == farhelm_proto::GITHUB_REPO_RESULTS_CAP {
+            truncated = true;
+            break;
+        }
+        repos.push(repo);
+    }
+    axum::Json(GithubRepositoriesBody {
+        host: claim.host.to_string(),
+        incarnation: claim.incarnation,
+        installation_identity,
+        repos,
+        truncated,
+        scan_error,
+    })
+    .into_response()
+}
+
+/// POST /api/github-checkout-preview resolves the helm's checkout
+/// configuration in ONE database snapshot and asks the selected supervisor
+/// to expand `~`, canonicalize, and propose the deterministic name.
+/// NOTHING is created — the create carries this binding and the supervisor
+/// re-verdicts it under directory admission.
+pub(crate) async fn github_checkout_preview(
+    State(state): State<Arc<AppState>>,
+    axum::Json(req): axum::Json<GithubCheckoutPreviewReq>,
+) -> impl IntoResponse {
+    let (claim, client) = match host_client(&state, req.host) {
+        Ok(target) => target,
+        Err(error) => return http_error(error),
+    };
+    if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
+        return http_error(error);
+    }
+    let Some(installation_identity) = claim.identity.clone().filter(|id| !id.is_empty()) else {
+        return http_error(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: "fresh checkout preview requires a host with a stable installation identity"
+                .into(),
+        }));
+    };
+    // One database snapshot: root + revision are resolved together so the
+    // binding the create later presents is internally consistent.
+    let config = match state.store.resolve_checkout_config(Some(claim.host)).await {
+        Ok(config) => config,
+        Err(error) => return http_error(error),
+    };
+    let Some(root) = config.root.clone() else {
+        return http_error(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "no checkout root is configured; set one with \
+                      `farhelm helm checkout-config set-root`"
+                .to_string(),
+        }));
+    };
+    let request = farhelm_proto::GithubPreviewRequest {
+        host: Some(claim.host.to_string()),
+        expected_incarnation: req.expected_incarnation,
+        repo: req.repo,
+        title: req.title,
+        root: Some(root),
+        config_revision: Some(config.config_revision),
+    };
+    match client.github_checkout_preview(request).await {
+        Ok(mut preview) => {
+            // The supervisor cannot know the helm's per-host incarnation;
+            // the authoritative claim is stamped here, and the create is
+            // bound against exactly this pair.
+            preview.claim_context.host = claim.host.to_string();
+            preview.claim_context.incarnation = claim.incarnation;
+            axum::Json(GithubCheckoutPreviewBody {
+                binding: farhelm_proto::CheckoutPreviewBinding {
+                    canonical_root: preview.canonical_root,
+                    basename: preview.basename,
+                    cwd: preview.cwd,
+                    config_revision: preview.config_revision,
+                },
+                host: preview.claim_context.host,
+                incarnation: preview.claim_context.incarnation,
+                installation_identity,
+            })
+            .into_response()
+        }
+        Err(error) => http_error(error),
+    }
 }
 
 /// POST /api/browse-directory asks the selected supervisor, never the helm,
@@ -216,10 +473,15 @@ pub(crate) async fn launch_history(
         Ok(target) => target,
         Err(error) => return http_error(error),
     };
+    let checkout_config_revision = match state.store.checkout_config_snapshot(None).await {
+        Ok(snapshot) => snapshot.revision,
+        Err(error) => return http_error(error),
+    };
     let Some(identity) = claim.identity else {
         return axum::Json(LaunchHistoryBody {
             launches: Vec::new(),
             folders: Vec::new(),
+            checkout_config_revision,
         })
         .into_response();
     };
@@ -227,9 +489,12 @@ pub(crate) async fn launch_history(
         state.store.launch_history(claim.host, &identity),
         state.store.folder_history(claim.host, &identity),
     ) {
-        Ok((launches, folders)) => {
-            axum::Json(LaunchHistoryBody { launches, folders }).into_response()
-        }
+        Ok((launches, folders)) => axum::Json(LaunchHistoryBody {
+            launches,
+            folders,
+            checkout_config_revision,
+        })
+        .into_response(),
         Err(error) => http_error(error),
     }
 }
@@ -597,16 +862,10 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
 #[derive(Deserialize)]
 pub(crate) struct CreateReq {
     cwd: String,
-    /// The agent command line, in RAW mode. Absent selects PROFILE mode,
-    /// where `profile_id` supplies it (PLAN_M6_75.md item 3's two mutually
-    /// exclusive creation modes, as they reach this API).
-    ///
-    /// Optional only in the type: exactly one of `invocation` and
-    /// `profile_id` must be present, and a body naming both or neither is a
-    /// 400 (see [`create_mode`]). Kept as two fields rather than one tagged
-    /// union because that is the wire's own shape, and translating between
-    /// two spellings of the same choice would be one more place for them to
-    /// disagree.
+    /// A complete raw command, mutually exclusive with profile or structured
+    /// selection. Exactly one of `invocation`, `profile_id`, `profile_name`
+    /// or `launch` must be present; the helm never guesses which complete
+    /// launch choice should win.
     invocation: Option<String>,
     /// The profile to create from, in PROFILE mode — a `Profile::id` from
     /// the helm catalog (`GET /api/profiles`). The id has the same meaning
@@ -617,6 +876,10 @@ pub(crate) struct CreateReq {
     /// remembered default (see [`create_session`]): "last used" means a
     /// session was actually created from it, not that a picker was opened.
     profile_id: Option<String>,
+    /// An exact, unambiguous helm catalog name instead of its stable id.
+    /// Name resolution happens only for a new create; a known fresh intent
+    /// keeps the profile snapshot that originally passed admission.
+    profile_name: Option<String>,
     /// Explicit launch-composer intent. The helm compiles this into the
     /// existing resolved invocation before contacting a supervisor, so the
     /// supervisor never needs a vendor catalog or a command parser.
@@ -683,63 +946,164 @@ pub(crate) struct CreateReq {
     ///
     /// Absent decodes as `None` — serde's built-in handling for `Option` —
     /// so every pre-existing caller and older UI build sends and means
-    /// exactly what it always did. When PRESENT, this slice refuses the
-    /// whole request at the helm before any host contact, history write,
-    /// or supervisor frame (see [`github_checkout_refusal`]): the
-    /// supervisor-side create pipeline for owned checkouts does not exist
-    /// yet, and accepting the field now would mean dropping the
-    /// fresh-checkout intent while reporting an ordinary create. The only
-    /// validation that runs before the refusal is the repository text's
-    /// own parse, so an invalid `owner/repo` is reported as the parse
-    /// error it is rather than as the not-supported-yet refusal.
+    /// exactly what it always did. When PRESENT, the helm parses the
+    /// repository text first (an invalid `owner/repo` is reported as the
+    /// parse error it is), resolves the checkout configuration for the
+    /// claimed host in one database snapshot, and sends the resolved
+    /// payload to the supervisor, whose admission allocates the checkout
+    /// under directory admission. A checkout root that is not configured
+    /// is refused with the exact CLI command that fixes it. The root and
+    /// post-clone hook come from helm configuration. Preview exposes the
+    /// target-resolved root and destination for acceptance; hook text stays
+    /// private to the helm and supervisor.
     ///
     /// Restricted session-authenticated callers can never supply this:
     /// they reach the supervisor directly, never this body, and the
     /// supervisor's restricted dispatcher refuses the create outright.
-    /// The resolved payload (canonical root, post-clone hook) is
-    /// helm-supplied from helm-side configuration and never echoes back
-    /// to the browser.
     github_checkout: Option<farhelm_proto::GithubCheckoutRequest>,
 }
 
-/// Why a create body carrying `github_checkout` cannot be served, or
-/// `None` when the field is absent and the create proceeds unchanged.
+/// Freeze client-controlled launch fields before mode compilation consumes
+/// selectors or normalizes titles. Dimensions and the lookup key do not shape
+/// the durable create. Replacement wraps this encoding with its source id so
+/// the same key cannot accidentally reconcile another replacement operation.
+fn fresh_create_request_identity(req: &CreateReq) -> String {
+    let identity = serde_json::to_string(&(
+        "github_create_request_v1",
+        &req.cwd,
+        &req.invocation,
+        &req.profile_id,
+        &req.launch,
+        &req.title,
+        &req.host,
+        &req.agent_kind,
+        &req.resume_template,
+        &req.expected_incarnation,
+        &req.github_checkout,
+    ))
+    .expect("create request identity contains only serializable fields");
+    // Preserve the existing encoding when the new selector is absent.
+    // A name is client intent, not the mutable id it happens to resolve to.
+    match &req.profile_name {
+        Some(name) => serde_json::to_string(&("github_named_profile_v1", name, identity))
+            .expect("named profile identity contains only strings"),
+        None => identity,
+    }
+}
+
+/// Verify the original preview's installation before any intent lookup.
+/// An incarnation alone cannot establish this across helm restarts, and using
+/// today's identity as the request's expected identity would silently retarget
+/// a request prepared for another installation.
+fn accepted_checkout_preview<'a>(
+    checkout: &'a farhelm_proto::GithubCheckoutRequest,
+    claim: &manager::SessionClaim,
+) -> anyhow::Result<&'a farhelm_proto::AcceptedGithubPreview> {
+    let preview = checkout.preview.as_ref().ok_or_else(|| SupervisorError {
+        kind: ErrorKind::InvalidRequest,
+        message: "fresh checkout requires an accepted preview; request a preview before launching"
+            .into(),
+    })?;
+    if preview.host != claim.host.to_string()
+        || preview.installation_identity.is_empty()
+        || claim.identity.as_deref() != Some(preview.installation_identity.as_str())
+    {
+        return Err(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: "the accepted checkout preview belongs to a different host installation"
+                .into(),
+        }
+        .into());
+    }
+    Ok(preview)
+}
+
+/// The helm's fresh-checkout resolution for a create body carrying
+/// `github_checkout`: `None` when the field is absent and the create
+/// proceeds unchanged; `Some(Ok(resolved))` when everything resolved; and
+/// `Some(Err(error))` for a refusal before a new create frame or history write.
+/// A keyed request may already have performed lookup-only reconciliation;
+/// only an unknown result reaches this current-settings resolution.
 ///
-/// Two failures in a fixed order, because they answer different questions:
-/// a repository string that does not parse is the CALLER's mistake and is
-/// reported as the parse error (naming the failure class against what the
-/// user actually typed, per the request type's own contract); a
-/// well-formed one is refused wholesale because this slice's blueprint
-/// rejects fresh creates until the full supervisor backend exists. Both
-/// refusals are `InvalidRequest` — a 400 — and both fire before any host
-/// contact, history write, or supervisor frame, so a refused request has
-/// observable effects on nothing.
+/// The failure order answers different questions: a repository string that
+/// does not parse is the CALLER's mistake and is reported as the parse
+/// error (naming the failure class against what the user actually typed,
+/// per the request type's own contract); a checkout root that is not
+/// configured is the OPERATOR's gap and is reported with the exact CLI
+/// command that fixes it. The resolution itself is one database snapshot —
+/// root and revision together — so the binding the create presents to the
+/// supervisor is internally consistent. The helm refuses a stale revision;
+/// the supervisor independently verifies the recorded root and exact path.
 ///
-/// Called from the create route AND from "replace with"'s override body,
-/// which resolves through the same body shape: a field accepted on one
-/// create form and silently dropped on another would be a quiet
-/// fresh-checkout loss, the exact outcome this slice's refusals exist to
-/// prevent.
-fn github_checkout_refusal(req: &CreateReq) -> Option<anyhow::Error> {
+/// Restricted session-authenticated callers can never supply this field:
+/// they reach the supervisor directly, never this body, and the
+/// supervisor's restricted dispatcher refuses the create outright. The
+/// root and post-clone hook come from helm configuration. The accepted
+/// preview carries the target-resolved paths, but hook text is never sent
+/// to the browser.
+async fn github_checkout_resolution(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    req: &CreateReq,
+    client_identity: String,
+) -> Option<anyhow::Result<Option<farhelm_proto::ResolvedGithubCheckout>>> {
     let checkout = req.github_checkout.as_ref()?;
     if let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo) {
-        return Some(anyhow::Error::new(SupervisorError {
+        return Some(Err(anyhow::Error::new(SupervisorError {
             kind: ErrorKind::InvalidRequest,
             message: format!(
                 "invalid GitHub repository {:?}: {error}",
                 truncate_repo_text(&checkout.repo)
             ),
-        }));
+        })));
     }
-    Some(anyhow::Error::new(SupervisorError {
-        kind: ErrorKind::InvalidRequest,
-        message: format!(
-            "fresh GitHub checkouts are not supported yet: the checkout backend arrives in a \
-             later unit of this feature, so this create (repo {}) was refused and nothing was \
-             launched",
-            truncate_repo_text(&checkout.repo)
-        ),
-    }))
+    // One database snapshot: root and revision resolved together, the same
+    // pair the preview endpoint presents.
+    let config = match state.store.resolve_checkout_config(Some(claim.host)).await {
+        Ok(config) => config,
+        Err(error) => return Some(Err(error)),
+    };
+    let Some(root) = config.root else {
+        return Some(Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "no checkout root is configured; set one with \
+                      `farhelm helm checkout-config set-root`"
+                .to_string(),
+        })));
+    };
+    let repo = farhelm_proto::parse_github_repo(&checkout.repo)
+        .expect("the parse above already accepted this identifier");
+    let Some(preview) = &checkout.preview else {
+        return Some(Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message:
+                "fresh checkout requires an accepted preview; request a preview before launching"
+                    .into(),
+        })));
+    };
+    if preview.binding.config_revision != config.config_revision {
+        return Some(Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: "checkout settings changed since the accepted preview; request a new preview"
+                .into(),
+        })));
+    }
+    // REST callers may retain the displayed preview path in their request,
+    // but it is not a second destination. Reject contradictory folder state
+    // before converting this request to the supervisor's fresh-only shape.
+    if !req.cwd.is_empty() && req.cwd != preview.binding.cwd {
+        return Some(Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "fresh checkout cwd must be empty or match the accepted preview".into(),
+        })));
+    }
+    Some(Ok(Some(farhelm_proto::ResolvedGithubCheckout {
+        client_identity,
+        repo,
+        root,
+        post_clone: config.post_clone,
+        preview: preview.binding.clone(),
+    })))
 }
 
 /// The repository text as typed is user input that an error message will
@@ -1126,21 +1490,58 @@ pub(crate) async fn create_session(
     axum::Json(mut req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
     // FIRST, before mode resolution or target routing: a fresh-checkout
-    // request must be refused before anything observable happens, and the
-    // repository-text parse error must win over any selector-shape error a
-    // body might also carry (the user should hear about the repo they
-    // typed, not an unrelated field).
-    if let Some(e) = github_checkout_refusal(&req) {
-        return http_error(e);
+    // request's repository-text parse error must win over any
+    // selector-shape error a body might also carry (the user should hear
+    // about the repo they typed, not an unrelated field). The parse is
+    // sync; the config resolution needs the claim, so it re-runs below
+    // after routing — a fresh create resolves against the host it will
+    // actually land on.
+    if let Some(checkout) = req.github_checkout.as_ref()
+        && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
+    {
+        return http_error(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: format!(
+                "invalid GitHub repository {:?}: {error}",
+                truncate_repo_text(&checkout.repo)
+            ),
+        }));
     }
-    let mode = match create_mode(&mut req) {
-        Ok(mode) => mode,
-        Err(e) => return http_error(e),
+    // Mode compilation consumes selector fields. Retain the original request
+    // first so later reconciliation does not depend on mutable catalogs.
+    let client_identity = fresh_create_request_identity(&req);
+    let ordinary_mode = if req.github_checkout.is_none() {
+        match resolve_create_mode(&state, &mut req).await {
+            Ok(mode) => Some(mode),
+            Err(e) => return http_error(e),
+        }
+    } else {
+        None
     };
     let (claim, client) = match create_target(&state, req.host) {
         Ok(target) => target,
         Err(e) => return http_error(e),
     };
+    if req.github_checkout.is_some() {
+        let intent_key = req.intent_key.clone();
+        return match create_fresh_session(
+            &state,
+            &claim,
+            &client,
+            req,
+            intent_key,
+            client_identity,
+            None,
+        )
+        .await
+        {
+            Ok(session) => match browser_session_ready(&session) {
+                Ok(()) => axum::Json(session).into_response(),
+                Err(error) => http_error(error),
+            },
+            Err(error) => http_error(error),
+        };
+    }
     // Checked HERE, and once, because routing and claim-taking are one read
     // for a create: `create_target` resolves the host, takes the connection,
     // and mints the claim from the same borrow of the actor's status, so there
@@ -1152,6 +1553,7 @@ pub(crate) async fn create_session(
     if let Err(e) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(e);
     }
+    let mode = ordinary_mode.expect("fresh requests returned through their shared admission path");
     match do_create_session(
         &state,
         &claim,
@@ -1171,6 +1573,7 @@ pub(crate) async fn create_session(
             // and the reply names one. Only the relay's clone has a result
             // it must refuse.
             accept_result: None,
+            github_checkout: None,
         },
     )
     .await
@@ -1247,12 +1650,18 @@ pub(crate) async fn do_create_session(
         resume_template,
         origin,
         accept_result,
+        github_checkout,
     } = spec;
+    // REST carries the displayed preview cwd as part of the retained client
+    // request identity. The supervisor's fresh-create destination instead
+    // comes exclusively from the resolved binding; its ordinary cwd input
+    // must remain empty. Keep the original spelling for history bookkeeping.
+    let supervisor_cwd = if github_checkout.is_some() { "" } else { &cwd };
     let (mut session, profile_names) = match &mode {
         CreateMode::Raw(invocation) => {
             let session = client
                 .create_session_with_extras(
-                    &cwd,
+                    supervisor_cwd,
                     invocation,
                     title,
                     cols,
@@ -1263,6 +1672,7 @@ pub(crate) async fn do_create_session(
                         resume_template,
                         source_profile: None,
                         launch: None,
+                        github_checkout: github_checkout.clone(),
                     },
                 )
                 .await?;
@@ -1271,7 +1681,7 @@ pub(crate) async fn do_create_session(
         CreateMode::Structured(compiled) => {
             let session = client
                 .create_session_with_extras(
-                    &cwd,
+                    supervisor_cwd,
                     &compiled.invocation,
                     title,
                     cols,
@@ -1282,6 +1692,7 @@ pub(crate) async fn do_create_session(
                         resume_template: compiled.resume_template.clone(),
                         source_profile: None,
                         launch: Some(compiled.selection.clone()),
+                        github_checkout: github_checkout.clone(),
                     },
                 )
                 .await?;
@@ -1301,7 +1712,7 @@ pub(crate) async fn do_create_session(
                 })?;
             let session = client
                 .create_session_with_extras(
-                    &cwd,
+                    supervisor_cwd,
                     &profile.invocation,
                     title,
                     cols,
@@ -1315,6 +1726,7 @@ pub(crate) async fn do_create_session(
                             name: profile.name,
                         }),
                         launch: None,
+                        github_checkout: github_checkout.clone(),
                     },
                 )
                 .await?;
@@ -1326,7 +1738,7 @@ pub(crate) async fn do_create_session(
         } => {
             let session = client
                 .create_session_with_extras(
-                    &cwd,
+                    supervisor_cwd,
                     &profile.invocation,
                     title,
                     cols,
@@ -1340,6 +1752,7 @@ pub(crate) async fn do_create_session(
                             name: profile.name.clone(),
                         }),
                         launch: None,
+                        github_checkout: github_checkout.clone(),
                     },
                 )
                 .await?;
@@ -1349,6 +1762,55 @@ pub(crate) async fn do_create_session(
     if let Some(profile_names) = &profile_names {
         resolve_session_profiles(profile_names, std::iter::once(&mut session));
     }
+    let remembered_profile = match &mode {
+        CreateMode::Profile(profile_id) => Some(profile_id.clone()),
+        CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
+        CreateMode::Raw(_) | CreateMode::Structured(_) => None,
+    };
+    accept_created_session(
+        state,
+        claim,
+        session,
+        CreateAcceptance {
+            github_repo: github_checkout.map(|checkout| checkout.repo),
+            requested_cwd: cwd,
+            origin,
+            accept_result,
+            remembered_profile,
+        },
+    )
+    .await
+}
+
+/// Bookkeeping intent for an accepted create, independent of launch compilation.
+/// Reconciliation uses the original request's provenance without resolving a
+/// profile or structured selection that may have changed since acceptance.
+struct CreateAcceptance {
+    /// Trusted request intent, retained across lookup-only reconciliation.
+    /// SessionInfo's descriptive repo field cannot establish this authority.
+    github_repo: Option<farhelm_proto::GithubRepo>,
+    requested_cwd: String,
+    origin: CreateOrigin,
+    accept_result: Option<CreatedSessionCheck>,
+    remembered_profile: Option<String>,
+}
+
+/// Apply the same source veto, cache, history and default effects to first
+/// replies and reconciled replies. The veto precedes every durable side effect;
+/// best-effort suggestion writes never turn an accepted create into a failure.
+async fn accept_created_session(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    session: farhelm_proto::SessionInfo,
+    acceptance: CreateAcceptance,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let CreateAcceptance {
+        github_repo,
+        requested_cwd,
+        origin,
+        accept_result,
+        remembered_profile,
+    } = acceptance;
     // The caller's veto, BEFORE anything durable is written for this row —
     // see this function's own "Two phases" note for why the seam is here and
     // not after the seed.
@@ -1356,18 +1818,28 @@ pub(crate) async fn do_create_session(
         accept_result(&session)?;
     }
     record_session(state, claim, &session).await;
+    // A fresh request's cwd is not its accepted destination: the target
+    // allocated that path. Keep the actual path for diagnostics while repo
+    // intent, independently captured from the request, controls reuse.
     // Suggestions are a convenience written only after the session exists.
     // A database failure here must not turn a successful supervisor create
     // into an HTTP error that tempts the caller to submit it again.
     if let Some(identity) = claim.identity.as_deref() {
         match state
             .store
-            .record_create_history_with_paths(
+            .record_create_history_with_destination(
                 claim.host,
                 identity,
                 &session,
-                session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
-                &cwd,
+                (
+                    session.canonical_cwd.as_deref().unwrap_or(&session.cwd),
+                    if github_repo.is_some() {
+                        &session.cwd
+                    } else {
+                        &requested_cwd
+                    },
+                ),
+                github_repo.as_ref(),
                 // Only a USER-initiated create may move the helm-wide
                 // remembered permissions default — the same authority
                 // boundary already drawn around the remembered legacy
@@ -1393,17 +1865,8 @@ pub(crate) async fn do_create_session(
     // succeeds. A reply that unexpectedly names no source profile writes
     // nothing: inventing an id would make the next dialog preselect a profile
     // nobody used.
-    let remembered = match &mode {
-        CreateMode::Raw(_) => None,
-        CreateMode::Profile(profile_id) => Some(profile_id.clone()),
-        CreateMode::ResolvedProfile { profile, .. } => Some(profile.id.clone()),
-        // Structured launches are independent of the legacy profile selector,
-        // so a successful create must not change that selector's remembered
-        // default.
-        CreateMode::Structured(_) => None,
-    };
     if origin == CreateOrigin::User
-        && let Some(profile_id) = remembered
+        && let Some(profile_id) = remembered_profile
     {
         remember_default_profile(state, claim.host, &profile_id, &session).await;
     }
@@ -1437,6 +1900,11 @@ pub(crate) struct CreateSpec {
     /// an agent creating work must not silently move the user's next-dialog
     /// suggestion.
     pub(crate) origin: CreateOrigin,
+    /// The helm-resolved fresh-checkout payload for a create whose body
+    /// carried `github_checkout`: `Some` reaches the supervisor's
+    /// allocation path; `None` is every existing create. Resolved against
+    /// the claimed host AFTER routing, one database snapshot.
+    pub(crate) github_checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
     /// A veto on the session the target answered with, run before any of
     /// [`do_create_session`]'s bookkeeping. `None` accepts whatever the
     /// target says it created, which is the REST edge's position: it asked
@@ -1485,9 +1953,10 @@ pub(crate) type CreatedSessionCheck =
 /// else reads them afterwards.
 ///
 /// Profile names and ids resolve against the helm catalog before any
-/// supervisor call. The resolved bundle, rather than the selector, is what
-/// the supervisor fingerprints, so a profile edit between keyed retries is
-/// correctly treated as a changed request.
+/// supervisor call. Ordinary creates fingerprint the resolved bundle, so a
+/// profile edit between keyed retries remains a changed request. Fresh
+/// checkout callers reconcile the original request identity before reaching
+/// mode resolution; their accepted profile snapshot survives later edits.
 pub(crate) enum CreateMode {
     Raw(String),
     /// A release-catalog-validated launch composer selection. This stays
@@ -1603,7 +2072,180 @@ pub(crate) async fn mode_from_source(
     }
 }
 
-/// Resolve a create body's mode, refusing the two ambiguous shapes.
+/// Create and replacement share the same fresh-intent admission protocol.
+/// Authority and reply enrichment precede any recovery that could launch a
+/// pending request. Original identity/provenance is captured before selector
+/// consumption or title normalization. A local resolution failure may race
+/// another create, so only a supervisor-settled refusal permits resubmission;
+/// a concurrent winner instead receives ordinary acceptance bookkeeping.
+///
+/// The refusal branch ends before dispatch. Transport errors, rejected
+/// returned sessions, history writes and replacement deletion cannot enter it.
+async fn create_fresh_session(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    mut req: CreateReq,
+    intent_key: Option<String>,
+    client_identity: String,
+    accept_result: Option<CreatedSessionCheck>,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let checkout = req
+        .github_checkout
+        .as_ref()
+        .expect("fresh request has checkout intent");
+    let preview_incarnation = accepted_checkout_preview(checkout, claim)?.incarnation;
+    let acceptance = CreateAcceptance {
+        github_repo: Some(farhelm_proto::parse_github_repo(&checkout.repo)?),
+        requested_cwd: req.cwd.clone(),
+        origin: CreateOrigin::User,
+        accept_result,
+        // Remote profile provenance cannot select a helm-wide default. Named
+        // replay has no trusted retained name-to-id mapping, so leaves it alone.
+        remembered_profile: req.profile_id.clone(),
+    };
+    let profile_names = if req.profile_id.is_some() || req.profile_name.is_some() {
+        Some(load_profile_name_index(&state.store).await?)
+    } else {
+        None
+    };
+    if let Some(key) = &intent_key
+        && let Some(session) = client
+            .reconcile_github_checkout(key.clone(), client_identity.clone(), req.cols, req.rows)
+            .await?
+    {
+        return accept_reconciled_fresh(state, claim, session, profile_names.as_ref(), acceptance)
+            .await;
+    }
+
+    // The complete locally fallible preparation phase sits before dispatch,
+    // including profile-ID lookup that ordinary create performs farther down.
+    let prepared = async {
+        crate::precondition::incarnation_holds(claim, Some(preview_incarnation))?;
+        crate::precondition::incarnation_holds(claim, req.expected_incarnation)?;
+        let checkout = req.github_checkout.as_ref().expect("fresh intent retained");
+        if let (Some(outer), Some(inner)) = (&req.title, &checkout.title)
+            && outer != inner
+        {
+            return Err(anyhow::Error::new(SupervisorError {
+                kind: ErrorKind::InvalidRequest,
+                message: "fresh checkout and session titles must agree".into(),
+            }));
+        }
+        if req.title.is_none() {
+            req.title = checkout.title.clone();
+        }
+        let github_checkout =
+            github_checkout_resolution(state, claim, &req, client_identity.clone())
+                .await
+                .expect("fresh request requires resolution")?;
+        let mode = resolve_create_mode(state, &mut req).await?;
+        let mode = if let CreateMode::Profile(id) = mode {
+            let profiles = state.store.profiles().await?;
+            let profile = profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow::Error::new(SupervisorError {
+                        kind: ErrorKind::NotFound,
+                        message: format!("profile not found: {id}"),
+                    })
+                })?;
+            CreateMode::resolved_profile(profile, &profiles)
+        } else {
+            mode
+        };
+        Ok((github_checkout, mode))
+    }
+    .await;
+    let (github_checkout, mode) = match prepared {
+        Ok(prepared) => prepared,
+        Err(local_error) => {
+            let Some(key) = intent_key else {
+                return Err(local_error.context(crate::FreshCreateUnaccepted));
+            };
+            return match client.reconcile_github_checkout_with_refusal(
+                key, client_identity, req.cols, req.rows, true,
+            ).await {
+                Ok(Some(session)) => accept_reconciled_fresh(
+                    state, claim, session, profile_names.as_ref(), acceptance,
+                ).await,
+                // Older peers may ignore the flag. Unknown is still only an
+                // observation and must never authorize a fresh-key allocation.
+                Ok(None) => Err(local_error.context("the supervisor did not establish a durable refusal; retain this request for retry")),
+                // Preserve the recorded supervisor outcome, including its
+                // kind, rather than replacing it with today's local failure.
+                // Only CheckoutConflict carries durable non-acceptance proof.
+                Err(error) => Err(error.context(format!("current request validation also failed: {local_error:#}"))),
+            };
+        }
+    };
+    do_create_session(
+        state,
+        claim,
+        client,
+        CreateSpec {
+            cwd: req.cwd,
+            mode,
+            title: req.title,
+            cols: req.cols,
+            rows: req.rows,
+            intent_key,
+            agent_kind: req.agent_kind,
+            resume_template: req.resume_template,
+            github_checkout,
+            origin: CreateOrigin::User,
+            accept_result: acceptance.accept_result,
+        },
+    )
+    .await
+}
+
+/// Initial lookup and refusal settlement can both return the accepted winner.
+/// Enrich from the pre-mutation catalog snapshot, then apply the same source
+/// veto and trusted request-derived bookkeeping to either reply.
+async fn accept_reconciled_fresh(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    mut session: farhelm_proto::SessionInfo,
+    profile_names: Option<&ProfileNameIndex>,
+    acceptance: CreateAcceptance,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    if let Some(index) = profile_names {
+        resolve_session_profiles(index, std::iter::once(&mut session));
+    }
+    accept_created_session(state, claim, session, acceptance).await
+}
+
+/// Resolve an explicit name using the same exact/ambiguity rules as other
+/// helm catalog callers. Fresh callers invoke this only after reconciliation
+/// found no recorded intent, so later renames cannot invalidate a retry.
+async fn resolve_create_mode(state: &AppState, req: &mut CreateReq) -> anyhow::Result<CreateMode> {
+    let Some(name) = req.profile_name.as_ref() else {
+        return create_mode(req);
+    };
+    if req.invocation.is_some() || req.profile_id.is_some() || req.launch.is_some() {
+        return Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message:
+                "a create names exactly one of invocation, profile_id, profile_name, or launch"
+                    .into(),
+        }));
+    }
+    if req.agent_kind.is_some() || req.resume_template.is_some() {
+        return Err(anyhow::Error::new(SupervisorError {
+            kind: ErrorKind::InvalidRequest,
+            message: "a profile-backed create cannot also send agent_kind or resume_template"
+                .into(),
+        }));
+    }
+    let profiles = state.store.profiles().await?;
+    let profile = crate::profiles::resolve_profile_name(&profiles, name)?;
+    Ok(CreateMode::resolved_profile(profile, &profiles))
+}
+
+/// Resolve an id/raw/structured body after the name-taking boundary.
 ///
 /// Both refusals are `InvalidRequest` — a 400 — and both are worth making
 /// loudly rather than picking a winner. A body naming BOTH has no honest
@@ -2347,13 +2989,18 @@ pub(crate) struct ReplaceReq {
 /// delete, its two failure shapes, `forget_session` — is unchanged by
 /// `with`'s presence; only the `CreateSpec` fields feeding that create
 /// differ.
+///
+/// A fresh-checkout override has one additional phase: lookup of the original
+/// source-bound request before mutable launch or checkout configuration is
+/// resolved. A recorded result uses its durable snapshot; an unknown key must
+/// still satisfy the accepted preview's current incarnation and revision.
 pub(crate) async fn do_replace_session(
     state: &AppState,
     id: &str,
     intent_key: Option<String>,
     with: Option<CreateReq>,
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
-    // Body-shape refusals, checked before anything touches the network —
+    // Ordinary body-shape refusals, checked before anything touches the network —
     // the same precedence an ordinary create's own mutual-exclusivity
     // refusals (`create_mode`) get ahead of routing in `create_session`.
     // Resolving the override's MODE here, and not down where the source's
@@ -2364,18 +3011,35 @@ pub(crate) async fn do_replace_session(
     // round trip first. Two keys naming one intended create is the other
     // shape refused here: an ambiguity this route resolves by refusing
     // rather than silently picking one; see `ReplaceReq::with`'s own doc
-    // for why the wire even has two fields that could disagree.
+    // for why the wire even has two fields that could disagree. Fresh mode
+    // compilation waits for lookup below; repository syntax and key ambiguity
+    // remain local refusals even for fresh requests.
     let mut with = with;
     let with_mode = match with.as_mut() {
         Some(with) => {
-            // The same fresh-checkout refusal the create route applies,
+            // The same fresh-checkout resolution the create route applies,
             // for the same reason: "replace with" reuses the create body
-            // verbatim, and a github_checkout field on it must be refused
-            // loudly, never silently dropped.
-            if let Some(e) = github_checkout_refusal(with) {
-                return Err(e);
+            // verbatim, and a github_checkout field on it must be resolved
+            // (or refused loudly), never silently dropped. The replacement
+            // lands on the SOURCE's host — the claim both halves share.
+            if let Some(checkout) = with.github_checkout.as_ref()
+                && let Err(error) = farhelm_proto::parse_github_repo(&checkout.repo)
+            {
+                return Err(anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::InvalidRequest,
+                    message: format!(
+                        "invalid GitHub repository {:?}: {error}",
+                        truncate_repo_text(&checkout.repo)
+                    ),
+                }));
             }
-            Some(create_mode(with)?)
+            if with.github_checkout.is_some() {
+                // A recorded fresh intent must reconcile before today's
+                // catalog is allowed to compile or refuse its launch.
+                None
+            } else {
+                Some(resolve_create_mode(state, with).await?)
+            }
         }
         None => None,
     };
@@ -2411,6 +3075,20 @@ pub(crate) async fn do_replace_session(
                 claim.host
             ),
         }));
+    }
+    if with
+        .as_ref()
+        .is_some_and(|req| req.github_checkout.is_some())
+    {
+        return replace_with_fresh_checkout(
+            state,
+            &claim,
+            &client,
+            id,
+            intent_key,
+            with.expect("fresh body checked above"),
+        )
+        .await;
     }
     crate::precondition::incarnation_holds(
         &claim,
@@ -2495,6 +3173,7 @@ pub(crate) async fn do_replace_session(
             intent_key,
             agent_kind,
             resume_template,
+            github_checkout: None,
             origin: CreateOrigin::User,
             // Unlike an ordinary REST create, replace DOES have a session an
             // idempotency replay can collide with: the SOURCE itself. A
@@ -2511,24 +3190,97 @@ pub(crate) async fn do_replace_session(
             // conversation, a replacement left alive). See
             // `clone_for_agent`'s identical veto, which this mirrors for the
             // identical reason.
-            accept_result: Some(Box::new({
-                let source_id = id.to_string();
-                move |created: &farhelm_proto::SessionInfo| {
-                    if created.id != source_id {
-                        return Ok(());
-                    }
-                    Err(anyhow::Error::new(SupervisorError {
-                        kind: ErrorKind::Conflict,
-                        message: "the idempotency key replayed the create that made the source \
-                                  session, so no replacement was made; retry the replace with a \
-                                  key that has not been used on this host, or with none at all"
-                            .to_string(),
-                    }))
-                }
-            })),
+            accept_result: Some(replacement_result_check(id)),
         },
     )
     .await?;
+    finish_replacement(state, &claim, &client, id, created).await
+}
+
+/// A replacement must leave a different session alive. Run this check through
+/// shared create acceptance, before cache/history/default writes as well as
+/// before deletion; a replay of the source is not a successful replacement.
+fn replacement_result_check(id: &str) -> CreatedSessionCheck {
+    let source_id = id.to_string();
+    Box::new(move |created| {
+        if created.id != source_id {
+            return Ok(());
+        }
+        Err(SupervisorError {
+            kind: ErrorKind::Conflict,
+            message: "the idempotency key replayed the create that made the source \
+                      session, so no replacement was made; retry the replace with a \
+                      key that has not been used on this host, or with none at all"
+                .into(),
+        }
+        .into())
+    })
+}
+
+/// Reconcile fresh replacements against their original request and source.
+/// Current incarnation/configuration/catalog checks apply only to unknown
+/// intents. The accepted installation is checked even for known keys, and a
+/// live source is still required, preserving replace's existing 404 contract
+/// after a fully completed operation. Neither lookup nor creation may bypass
+/// the source-id veto or change the connection used by the delete half.
+async fn replace_with_fresh_checkout(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    id: &str,
+    intent_key: Option<String>,
+    req: CreateReq,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let client_identity = serde_json::to_string(&(
+        "github_replace_request_v1",
+        id,
+        fresh_create_request_identity(&req),
+    ))
+    .expect("replacement identity contains only serializable fields");
+    accepted_checkout_preview(
+        req.github_checkout
+            .as_ref()
+            .expect("fresh replacement has checkout intent"),
+        claim,
+    )?;
+    // Lookup may resume an accepted pending create, so establish the source's
+    // continued existence first. This read does not resolve launch settings.
+    if !manager::drain_sessions(client)
+        .await?
+        .sessions
+        .iter()
+        .any(|session| session.id == id)
+    {
+        return Err(SupervisorError {
+            kind: ErrorKind::NotFound,
+            message: "this session's own host no longer lists it, so there is nothing to replace"
+                .into(),
+        }
+        .into());
+    }
+    let created = create_fresh_session(
+        state,
+        claim,
+        client,
+        req,
+        intent_key,
+        client_identity,
+        Some(replacement_result_check(id)),
+    )
+    .await?;
+    finish_replacement(state, claim, client, id, created).await
+}
+
+/// Delete the source only after a replacement has passed acceptance. Both a
+/// newly created session and a reconciled one use this tail so lost delete
+/// replies retain the same definite-versus-ambiguous failure reporting.
+async fn finish_replacement(
+    state: &AppState,
+    claim: &manager::SessionClaim,
+    client: &SupervisorClient,
+    id: &str,
+    created: farhelm_proto::SessionInfo,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
     if let Err(delete_error) = client.delete_session(id).await {
         // Two shapes of failure here, and they earn different words because
         // they answer a different question: did the delete happen?
@@ -2573,7 +3325,7 @@ pub(crate) async fn do_replace_session(
             message,
         }));
     }
-    forget_session(state, &claim, id).await;
+    forget_session(state, claim, id).await;
     Ok(created)
 }
 

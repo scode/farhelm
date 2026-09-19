@@ -1428,7 +1428,7 @@ pub(crate) fn create_fingerprint(
             requested_cwd: cwd.to_owned(),
             mode: mode.clone(),
             title: title.map(str::to_owned),
-            checkout: checkout.clone(),
+            checkout: Box::new(checkout.clone()),
         })
         .expect("a fingerprint of strings and options always serializes");
     }
@@ -2023,13 +2023,18 @@ pub(crate) enum CreateMode {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 enum FreshCreateFingerprint {
+    /// A helm-local refusal can precede launch/config resolution. Only the
+    /// original client identity exists then; this variant may accompany only
+    /// a permanent Failed/CheckoutConflict reservation, never launch recovery.
+    #[serde(rename = "github_checkout_refused_v1")]
+    RefusedGithubCheckout { client_identity: String },
     #[serde(rename = "github_checkout_v3")]
     GithubCheckout {
         parent: Option<String>,
         requested_cwd: String,
         mode: CreateMode,
         title: Option<String>,
-        checkout: farhelm_proto::ResolvedGithubCheckout,
+        checkout: Box<farhelm_proto::ResolvedGithubCheckout>,
     },
 }
 
@@ -6675,8 +6680,11 @@ impl Supervisor {
 
     /// Recover a recorded fresh intent without consulting today's helm settings.
     ///
-    /// Unknown keys return without validation, reservation, or allocation. A
-    /// known key must be permanent and carry the same original client identity;
+    /// Ordinary lookup returns unknown keys without validation or mutation.
+    /// With `refuse_unknown`, an absent key is permanently refused under the
+    /// same admission guards; only the verified stored outcome proves that a
+    /// fresh explicit submission is safe. No session or checkout is allocated
+    /// by that branch. A known key must be permanent and carry the same original client identity;
     /// neither legacy fingerprints nor restricted spawn reservations can enter
     /// this recovery path. Intent and directory admission remain held through
     /// the ordinary settlement/relaunch state machine, closing the lookup gap.
@@ -6686,6 +6694,7 @@ impl Supervisor {
         client_identity: &str,
         cols: u16,
         rows: u16,
+        refuse_unknown: bool,
     ) -> anyhow::Result<Option<SessionInfo>> {
         if intent_key.is_empty()
             || intent_key.len() > 512
@@ -6698,7 +6707,48 @@ impl Supervisor {
             ).into());
         }
         let guards = self.admit_create(Some(&intent_key), None).await?;
-        let Some(reservation) = self.store.reservation(&intent_key).await? else {
+        let mut reservation = self.store.reservation(&intent_key).await?;
+        if reservation.is_none() && refuse_unknown {
+            anyhow::ensure!(
+                self.may_record(),
+                "this supervisor cannot durably refuse an intent without recording authority"
+            );
+            let fingerprint =
+                serde_json::to_string(&FreshCreateFingerprint::RefusedGithubCheckout {
+                    client_identity: client_identity.to_owned(),
+                })?;
+            // Lookup accepts a larger transport envelope for existing keys.
+            // A new permanent tombstone must fit the ordinary create budget,
+            // including JSON escaping, rather than expanding retained input.
+            if fingerprint.len() > super::handlers::CREATE_FIELD_CAP {
+                return Err(RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "fresh refusal identity exceeds the serialized create-field limit",
+                )
+                .into());
+            }
+            let identity = new_session_identity();
+            self.store.record_failed_intent(
+                IntentClaim {
+                    intent_key: intent_key.clone(),
+                    fingerprint,
+                    dedup_scope: DedupScope::Permanent,
+                },
+                &identity.session_id,
+                &identity.tmux_name,
+                ErrorKind::CheckoutConflict,
+                "this checkout request was permanently refused before allocation; obtain a new preview and explicitly resubmit",
+            ).await.context("recording the fresh refusal; its durable outcome is unresolved")?;
+            // The insert deliberately tolerates a winning existing row.
+            // Only its readback, still under intent/directory admission, can
+            // prove refusal or identify the request that won instead.
+            reservation = self.store.reservation(&intent_key).await?;
+            anyhow::ensure!(
+                reservation.is_some(),
+                "fresh refusal has no durable reservation"
+            );
+        }
+        let Some(reservation) = reservation else {
             return Ok(None);
         };
         if reservation.dedup_scope != DedupScope::Permanent {
@@ -6708,18 +6758,49 @@ impl Supervisor {
             )
             .into());
         }
+        let fingerprint: FreshCreateFingerprint = serde_json::from_str(&reservation.fingerprint)
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this intent key has no compatible fresh-checkout recovery snapshot",
+                )
+            })?;
+        if let FreshCreateFingerprint::RefusedGithubCheckout {
+            client_identity: recorded,
+        } = &fingerprint
+        {
+            if recorded != client_identity {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this intent key belongs to a different create request",
+                )
+                .into());
+            }
+            // Failed alone is not non-acceptance: ordinary failed launches
+            // may retain an allocation. This fingerprint has exactly one
+            // valid terminal state and must never enter launch recovery.
+            return match &reservation.outcome {
+                ReservationOutcome::Failed {
+                    kind: ErrorKind::CheckoutConflict,
+                    message,
+                } => Err(RequestError::new(ErrorKind::CheckoutConflict, message.clone()).into()),
+                _ => Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "fresh refusal reservation has an invalid durable outcome",
+                )
+                .into()),
+            };
+        }
         let FreshCreateFingerprint::GithubCheckout {
             parent,
             requested_cwd,
             mode,
             title,
             checkout,
-        } = serde_json::from_str(&reservation.fingerprint).map_err(|_| {
-            RequestError::new(
-                ErrorKind::Conflict,
-                "this intent key has no compatible fresh-checkout recovery snapshot",
-            )
-        })?;
+        } = fingerprint
+        else {
+            unreachable!("refusal-only fingerprint handled above")
+        };
         if checkout.client_identity != client_identity {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -6731,7 +6812,7 @@ impl Supervisor {
             CreateInputs {
                 cwd: &requested_cwd,
                 parent,
-                github_checkout: Some(checkout),
+                github_checkout: Some(*checkout),
                 mode,
                 title,
                 cols,
@@ -21649,7 +21730,10 @@ pub(crate) mod tests {
                 mode: recovered_mode,
                 title,
                 checkout: recovered_checkout,
-            } = serde_json::from_str(&original).expect("decode durable launch snapshot");
+            } = serde_json::from_str(&original).expect("decode durable launch snapshot")
+            else {
+                panic!("a launch fingerprint must retain its resolved snapshot");
+            };
             assert_eq!(
                 original,
                 create_fingerprint(
@@ -21700,11 +21784,14 @@ pub(crate) mod tests {
             mode: recovered,
             title,
             checkout: resolved,
-        } = serde_json::from_str(&encoded).unwrap();
+        } = serde_json::from_str(&encoded).unwrap()
+        else {
+            panic!("a launch fingerprint must retain its resolved snapshot");
+        };
         assert_eq!(parent.as_deref(), Some("parent-id"));
         assert_eq!(requested_cwd, "requested-cwd");
         assert_eq!(title.as_deref(), Some("accepted-title"));
-        assert_eq!(resolved, checkout);
+        assert_eq!(*resolved, checkout);
         let CreateMode::Raw {
             invocation,
             agent_kind,
@@ -21749,7 +21836,7 @@ pub(crate) mod tests {
         let checkout = checkout_fixture(root.path());
         let key = "lookup-only-key";
         assert!(
-            sup.reconcile_github_checkout(key.into(), &checkout.client_identity, 80, 24)
+            sup.reconcile_github_checkout(key.into(), &checkout.client_identity, 80, 24, false)
                 .await
                 .unwrap()
                 .is_none()
@@ -21792,7 +21879,7 @@ pub(crate) mod tests {
             ),
         ] {
             let error = sup
-                .reconcile_github_checkout(key.into(), identity, 80, 24)
+                .reconcile_github_checkout(key.into(), identity, 80, 24, false)
                 .await
                 .expect_err("known refusal or mismatch must not become unknown");
             let error = error.downcast_ref::<RequestError>().unwrap();
@@ -21802,6 +21889,339 @@ pub(crate) mod tests {
         }
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
         assert!(sup.store.session("never-launched").await.unwrap().is_none());
+    }
+
+    /// A refusal tombstone spends the original request without creating a
+    /// session or directory. Its proof survives a lost reply and reopen; a
+    /// prebuilt create arriving later still cannot use that key to allocate.
+    #[farhelm_testtrace::test]
+    async fn fresh_refusal_is_durable_without_allocating() {
+        let state = StateDir::new();
+        let root = tempfile::tempdir().unwrap();
+        let checkout = checkout_fixture(root.path());
+        let key = "refusal-key";
+        let mut sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        assert!(sup.store.reservation(key).await.unwrap().is_none());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert!(!state.path().join("checkout-preparation").exists());
+        let refused = sup
+            .reconcile_github_checkout(key.into(), &checkout.client_identity, 80, 24, true)
+            .await
+            .expect_err("unknown key must be durably refused");
+        assert_eq!(error_kind(&refused), ErrorKind::CheckoutConflict);
+        let original = sup.store.reservation(key).await.unwrap().unwrap();
+        assert_eq!(original.dedup_scope, DedupScope::Permanent);
+        assert!(matches!(
+            original.outcome,
+            ReservationOutcome::Failed {
+                kind: ErrorKind::CheckoutConflict,
+                ..
+            }
+        ));
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert!(!state.path().join("checkout-preparation").exists());
+        drop(sup);
+        sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        for refuse_unknown in [false, true] {
+            let replay = sup
+                .reconcile_github_checkout(
+                    key.into(),
+                    &checkout.client_identity,
+                    80,
+                    24,
+                    refuse_unknown,
+                )
+                .await
+                .expect_err("lost refusal reply must remain recoverable");
+            assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);
+            assert_eq!(format!("{replay:#}"), format!("{refused:#}"));
+        }
+        let different = sup
+            .reconcile_github_checkout(key.into(), "different-request", 80, 24, true)
+            .await
+            .expect_err("the proof is bound to the original request");
+        assert_eq!(error_kind(&different), ErrorKind::Conflict);
+        let claim = IntentClaim {
+            intent_key: key.into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let late = fresh_create(&sup, &checkout, Some(claim))
+            .await
+            .expect_err("a prebuilt create cannot revive the key");
+        assert_eq!(error_kind(&late), ErrorKind::Conflict);
+        assert_eq!(sup.store.reservation(key).await.unwrap().unwrap(), original);
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    /// Refusal and creation compete for the same real intent lock. Observe
+    /// both futures returning Pending before releasing admission, then prove
+    /// each queue order: refusal leaves no checkout, while creation forces
+    /// refusal to return the one accepted session instead of a negative proof.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn fresh_refusal_serializes_with_competing_create_in_both_orders() {
+        for refusal_first in [true, false] {
+            let state = StateDir::new();
+            let root = tempfile::tempdir().unwrap();
+            let checkout = checkout_fixture(root.path());
+            let waiting = Arc::new(tokio::sync::Notify::new());
+            let signal = Arc::clone(&waiting);
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .unwrap();
+            let key = "competing-refusal";
+            let claim = IntentClaim {
+                intent_key: key.into(),
+                fingerprint: checkout_fingerprint(&checkout),
+                dedup_scope: DedupScope::Permanent,
+            };
+            assert!(sup.store.reservation(key).await.unwrap().is_none());
+            assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+            let held = sup.intent_locks.claim(key).await;
+            let enqueue = |refuse: bool| {
+                let sup = Arc::clone(&sup);
+                let checkout = checkout.clone();
+                let claim = claim.clone();
+                tokio::spawn(async move {
+                    if refuse {
+                        sup.reconcile_github_checkout(
+                            key.into(),
+                            &checkout.client_identity,
+                            80,
+                            24,
+                            true,
+                        )
+                        .await
+                    } else {
+                        fresh_create(&sup, &checkout, Some(claim)).await.map(Some)
+                    }
+                })
+            };
+            let first = enqueue(refusal_first);
+            tokio::time::timeout(std::time::Duration::from_secs(5), waiting.notified())
+                .await
+                .expect("first operation must be queued on the held intent");
+            let second = enqueue(!refusal_first);
+            tokio::time::timeout(std::time::Duration::from_secs(5), waiting.notified())
+                .await
+                .expect("second operation must be queued behind the first");
+            assert!(sup.store.reservation(key).await.unwrap().is_none());
+            drop(held);
+            let first = first.await.unwrap();
+            let second = second.await.unwrap();
+            if refusal_first {
+                assert_eq!(error_kind(&first.unwrap_err()), ErrorKind::CheckoutConflict);
+                assert_eq!(error_kind(&second.unwrap_err()), ErrorKind::Conflict);
+                assert!(sup.store.load_all().await.unwrap().is_empty());
+                assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+                assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+            } else {
+                let winner = first.unwrap().expect("create returns its session");
+                let replay = second.unwrap().expect("refusal must recover the winner");
+                assert_eq!(winner.id, replay.id);
+                let stored = sup.store.load_all().await.unwrap();
+                assert_eq!(stored.len(), 1);
+                assert_eq!(stored[0].id, winner.id);
+                assert_eq!(sup.store.working_copy_rows().await.unwrap().len(), 1);
+                assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+                sup.tmux.kill_session(&stored[0].tmux_name).await.unwrap();
+                assert!(
+                    !sup.tmux
+                        .pane_states()
+                        .await
+                        .unwrap()
+                        .values()
+                        .any(|pane| pane.session_name == stored[0].tmux_name)
+                );
+            }
+        }
+    }
+
+    /// Cancelling a refusal that is still waiting for admission must not
+    /// spend the key later. The waiter notification proves that the operation
+    /// was actually queued; joining its cancellation precedes releasing the
+    /// lock and checking the subsequent authoritative refusal.
+    #[farhelm_testtrace::test]
+    async fn cancelled_fresh_refusal_waiter_cannot_leave_a_tombstone() {
+        let state = StateDir::new();
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let signal = Arc::clone(&waiting);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let key = "cancelled-refusal";
+        let held = sup.intent_locks.claim(key).await;
+        let task = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            async move {
+                sup.reconcile_github_checkout(key.into(), "request", 80, 24, true)
+                    .await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), waiting.notified())
+            .await
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(sup.store.reservation(key).await.unwrap().is_none());
+        drop(held);
+        assert!(
+            sup.reconcile_github_checkout(key.into(), "request", 80, 24, false)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let error = sup
+            .reconcile_github_checkout(key.into(), "request", 80, 24, true)
+            .await
+            .unwrap_err();
+        assert_eq!(error_kind(&error), ErrorKind::CheckoutConflict);
+    }
+
+    /// Neither a successful no-op insert nor a database failure establishes
+    /// refusal. Inject at SQLite's actual insertion boundary so the test
+    /// distinguishes readback of durable evidence from trusting Ok(()).
+    #[farhelm_testtrace::test]
+    async fn fresh_refusal_requires_the_actual_stored_outcome() {
+        use rusqlite::OptionalExtension;
+        for boundary in [
+            "insert-conflict",
+            "write-failure",
+            "readback-failure",
+            "no-authority",
+        ] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+            let key = "refusal-fault-key";
+            assert!(sup.store.reservation(key).await.unwrap().is_none());
+            match boundary {
+                "insert-conflict" => conn.execute_batch(
+                    "CREATE TRIGGER inject_refusal_winner BEFORE INSERT ON create_reservations BEGIN
+                       INSERT INTO create_reservations
+                         (intent_key, fingerprint, state, session_id, tmux_name, error_kind, error_detail, created_at, dedup_scope)
+                       VALUES (NEW.intent_key, '[]', NEW.state, 'foreign-winner', 'foreign-tmux', NEW.error_kind,
+                         'foreign outcome', NEW.created_at, NEW.dedup_scope);
+                     END;"
+                ).unwrap(),
+                "write-failure" => conn.execute_batch(
+                    "CREATE TRIGGER refuse_tombstone BEFORE INSERT ON create_reservations
+                     BEGIN SELECT RAISE(ABORT, 'fixture refusal write failure'); END;"
+                ).unwrap(),
+                "readback-failure" => conn.execute_batch(
+                    "CREATE TRIGGER corrupt_tombstone AFTER INSERT ON create_reservations
+                     BEGIN UPDATE create_reservations SET error_kind = 'unknown-kind' WHERE intent_key = NEW.intent_key; END;"
+                ).unwrap(),
+                "no-authority" => sup.may_record.store(false, std::sync::atomic::Ordering::SeqCst),
+                _ => unreachable!(),
+            }
+            let error = sup
+                .reconcile_github_checkout(key.into(), "request", 80, 24, true)
+                .await
+                .expect_err("fault must not produce successful reconciliation");
+            assert_ne!(
+                error_kind(&error),
+                ErrorKind::CheckoutConflict,
+                "{boundary}: {error:#}"
+            );
+            let durable: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT session_id, error_kind FROM create_reservations WHERE intent_key = ?1",
+                    [key],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .unwrap();
+            match boundary {
+                "insert-conflict" => assert_eq!(durable.unwrap().0, "foreign-winner"),
+                "readback-failure" => assert_eq!(durable.unwrap().1, "unknown-kind"),
+                _ => assert!(durable.is_none()),
+            }
+            assert!(sup.store.load_all().await.unwrap().is_empty());
+            assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        }
+    }
+
+    /// A refusal-only fingerprint has no launch snapshot. Corrupt state must
+    /// not make it launchable or turn an unrelated failure into non-acceptance
+    /// proof; oversized new tombstones must stay out of permanent storage.
+    #[farhelm_testtrace::test]
+    async fn fresh_refusal_rejects_invalid_outcomes_and_oversized_identity() {
+        for state_value in ["pending", "created", "failed"] {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let key = "corrupt-refusal";
+            let error = sup
+                .reconcile_github_checkout(key.into(), "original-request", 80, 24, true)
+                .await
+                .unwrap_err();
+            assert_eq!(error_kind(&error), ErrorKind::CheckoutConflict);
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db")).unwrap();
+            let (kind, detail) = if state_value == "failed" {
+                (Some("invalid_request"), Some("unrelated refusal"))
+            } else {
+                (None, None)
+            };
+            assert_eq!(conn.execute(
+                "UPDATE create_reservations SET state = ?1, error_kind = ?2, error_detail = ?3 WHERE intent_key = ?4",
+                rusqlite::params![state_value, kind, detail, key],
+            ).unwrap(), 1);
+            // Read the deliberately installed premise before the operation.
+            let recorded = sup.store.reservation(key).await.unwrap().unwrap();
+            let error = sup
+                .reconcile_github_checkout(key.into(), "original-request", 80, 24, true)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error_kind(&error),
+                ErrorKind::Conflict,
+                "{state_value}: {error:#}"
+            );
+            assert_eq!(sup.store.reservation(key).await.unwrap().unwrap(), recorded);
+            assert!(sup.store.load_all().await.unwrap().is_empty());
+            assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        }
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        // Escaping doubles this identity, so its raw length alone cannot
+        // enforce the retained serialized-fingerprint budget.
+        let identity = "\"".repeat(super::super::handlers::CREATE_FIELD_CAP / 2);
+        assert!(identity.len() < farhelm_proto::github_checkout::MAX_CLIENT_IDENTITY_BYTES);
+        let error = sup
+            .reconcile_github_checkout("oversized".into(), &identity, 80, 24, true)
+            .await
+            .unwrap_err();
+        assert_eq!(error_kind(&error), ErrorKind::InvalidRequest);
+        assert!(sup.store.reservation("oversized").await.unwrap().is_none());
     }
 
     /// The fingerprint a keyed fresh-checkout create carries — computed
@@ -22919,6 +23339,7 @@ pub(crate) mod tests {
                         &checkout.client_identity,
                         80,
                         24,
+                        false,
                     )
                     .await
                     .expect("recover recorded checkout")
@@ -22930,6 +23351,7 @@ pub(crate) mod tests {
                         &checkout.client_identity,
                         100,
                         30,
+                        false,
                     )
                     .await
                     .unwrap()
@@ -24700,7 +25122,7 @@ pub(crate) mod tests {
         std::fs::remove_file(root.join("bar-1")).unwrap();
         assert!(!root.join("bar-1").exists());
         let replay = sup
-            .reconcile_github_checkout(claim.intent_key, &checkout.client_identity, 80, 24)
+            .reconcile_github_checkout(claim.intent_key, &checkout.client_identity, 80, 24, false)
             .await
             .expect_err("lookup uses the recorded refusal rather than new occupancy");
         assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);
@@ -24819,7 +25241,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let replay = reopened
-            .reconcile_github_checkout(claim.intent_key, &checkout.client_identity, 80, 24)
+            .reconcile_github_checkout(claim.intent_key, &checkout.client_identity, 80, 24, false)
             .await
             .expect_err("authenticated lookup replays the settled conflict after reopen");
         assert_eq!(error_kind(&replay), ErrorKind::CheckoutConflict);

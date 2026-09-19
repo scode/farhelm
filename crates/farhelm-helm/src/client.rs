@@ -719,6 +719,12 @@ pub struct CreateExtras {
     /// it beside the immutable resolved bundle rather than recovering it from
     /// the command later.
     pub launch: Option<farhelm_proto::LaunchSelection>,
+    /// The helm-resolved fresh-checkout payload: repo identity, root, hook,
+    /// and the preview binding the create re-verdicts. `None` is every
+    /// existing create (Existing destination); `Some` reaches the
+    /// supervisor's allocation path. The binding's config revision must
+    /// match what the helm resolved at preview time.
+    pub github_checkout: Option<farhelm_proto::ResolvedGithubCheckout>,
 }
 
 /// A live connection to one supervisor, shared by every request in flight.
@@ -2509,16 +2515,10 @@ impl SupervisorClient {
                     resume_template: extras.resume_template,
                     source_profile: extras.source_profile,
                     launch: extras.launch,
-                    // The helm never sends a fresh-checkout payload on the
-                    // wire: a create carrying `github_checkout` is refused
-                    // at the helm's REST edge before any connection is
-                    // chosen, because the resolved payload is helm-supplied
-                    // (configuration plus hook) and the supervisor backend
-                    // that would accept it does not exist yet (protocol 22's
-                    // plumbing slice). This wrapper's `None` is the
-                    // vocabulary-level statement of that posture, not a
-                    // missing feature.
-                    github_checkout: None,
+                    // The resolved payload is helm-supplied (configuration
+                    // plus hook); the supervisor re-verdicts it under
+                    // directory admission and allocates the checkout.
+                    github_checkout: extras.github_checkout,
                 },
             )
             .await?
@@ -2590,17 +2590,61 @@ impl SupervisorClient {
         }
     }
 
+    /// Reconcile a previously submitted fresh intent under its durable snapshot.
+    /// `None` means unknown and is the only result that permits ordinary create
+    /// validation to continue. Transport errors remain ambiguous; callers must
+    /// retain the key rather than turning them into an unknown result.
+    pub async fn reconcile_github_checkout(
+        &self,
+        intent_key: String,
+        client_identity: String,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<Option<SessionInfo>> {
+        self.reconcile_github_checkout_with_refusal(intent_key, client_identity, cols, rows, false)
+            .await
+    }
+
+    /// Atomically close an unknown key or recover the request that won it.
+    /// Only a durable CheckoutConflict proves non-acceptance. An old peer may
+    /// ignore the flag and return None; callers must leave that unresolved.
+    pub(crate) async fn reconcile_github_checkout_with_refusal(
+        &self,
+        intent_key: String,
+        client_identity: String,
+        cols: u16,
+        rows: u16,
+        refuse_unknown: bool,
+    ) -> anyhow::Result<Option<SessionInfo>> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::ReconcileGithubCheckout {
+                    req_id,
+                    intent_key,
+                    client_identity,
+                    cols,
+                    rows,
+                    refuse_unknown,
+                },
+            )
+            .await?
+        {
+            ControlMsg::GithubCheckoutReconciled { session, .. } => Ok(session),
+            other => Err(wrong_reply("ReconcileGithubCheckout", &other)),
+        }
+    }
+
     /// Ask the connected supervisor where a fresh GitHub checkout of one
     /// repository would land, as [`ControlMsg::GithubCheckoutPreview`]
     /// carries it.
     ///
-    /// Plumbing-only in protocol 22's first slice: the supervisor's
-    /// dispatch answers this request with an explicit "not supported yet"
-    /// error until the checkout backend lands in a later unit, so a call
-    /// today surfaces that refusal as a [`SupervisorError`] — which is
-    /// exactly what the wrapper should do rather than guessing at a
-    /// preview itself. The reply's canonical paths are
-    /// supervisor-resolved values; this client expands nothing locally.
+    /// Naming and canonical paths depend on the target's filesystem. The
+    /// supervisor resolves them without allocating a directory; this client
+    /// expands nothing locally and preserves any refusal as a
+    /// [`SupervisorError`]. Creation later revalidates the returned binding
+    /// under target-side directory admission.
     pub async fn github_checkout_preview(
         &self,
         request: farhelm_proto::GithubPreviewRequest,
@@ -2622,9 +2666,8 @@ impl SupervisorClient {
     /// completion query, as [`ControlMsg::GithubRepoSearch`] carries it,
     /// returning the bounded identity list plus its `truncated` flag.
     ///
-    /// Like [`SupervisorClient::github_checkout_preview`], this is
-    /// plumbing ahead of the backend: the supervisor refuses explicitly
-    /// until the search lands in a later unit. The reply carries
+    /// The root comes from helm configuration; the supervisor expands it
+    /// against the target user's captured home. The reply carries
     /// validated [`GithubRepo`] identities — never raw URLs — so every
     /// consumer derives its own rendering.
     pub async fn github_repo_search(
