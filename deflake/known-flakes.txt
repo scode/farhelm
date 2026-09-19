@@ -9,7 +9,6 @@
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
-playwright profiles.spec.ts the profiles popup border box stays inside a constrained viewport  # profiles-webkit-initial-focus
 playwright terminal-multihost.spec.ts a failed removal stays visible with details collapsed  # host-removal-details-toggle
 playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
 playwright terminal-flood.spec.ts real backspace erases; real ctrl-c kills the fake agent  # backspace-ctrlc-session-deletion
