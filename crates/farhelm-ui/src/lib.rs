@@ -137,6 +137,7 @@ mod auth;
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
 pub mod desktop;
 mod feed;
+mod github_checkout;
 mod hosts;
 mod icons;
 mod launch_composer;
@@ -576,6 +577,14 @@ pub struct Session {
     /// an `Option` as `None`, which is also what a helm predating the field
     /// sends. Both readings agree: no profile is known for this session.
     pub source_profile: Option<SourceProfile>,
+    /// Immutable fresh-create provenance. Borrowers and older senders leave
+    /// this absent; it never turns Clone or Replace into a fresh allocation.
+    #[serde(default)]
+    pub(crate) github_repo: Option<github_checkout::GithubRepo>,
+    /// Current managed checkout association, including existing-directory
+    /// borrowers. The registry owns its lifetime; the UI treats it as metadata.
+    #[serde(default)]
+    pub(crate) working_copy: Option<github_checkout::WorkingCopyInfo>,
     /// The activity stamp that was current the last time some client had
     /// this session open — the helm's `session_seen` row, denormalized onto
     /// every list/detail row exactly the way `host_identity` is (SPEC.md,
@@ -1988,6 +1997,46 @@ mod tests {
         assert_eq!(decoded.annotation, None);
     }
 
+    /// Checkout provenance and membership are separate wire facts: an origin
+    /// has both, a borrower only membership, and an older server neither.
+    /// The UI mirror must retain these facts without rewriting the actual cwd.
+    #[farhelm_testtrace::test]
+    fn session_checkout_metadata_preserves_origin_and_borrower_distinction() {
+        let mut body = serde_json::json!({
+            "id": "borrower",
+            "title": "demo",
+            "cwd": "/work/bar-1/subdir",
+            "invocation": "agent",
+            "status": {"state": "running"}
+        });
+        let legacy: Session = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(legacy.github_repo, None);
+        assert_eq!(legacy.working_copy, None);
+
+        body["working_copy"] = serde_json::json!({
+            "id": "checkout-1",
+            "repo": {"owner": "acme", "name": "bar"},
+            "canonical_path": "/work/bar-1",
+            "origin_session_id": "origin"
+        });
+        let borrower: Session = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(borrower.github_repo, None);
+        let association = borrower.working_copy.unwrap();
+        assert_eq!(association.id, "checkout-1");
+        assert_eq!(association.repo.identifier(), "acme/bar");
+        assert_eq!(association.canonical_path, "/work/bar-1");
+        assert_eq!(association.origin_session_id, "origin");
+        assert_eq!(borrower.cwd, "/work/bar-1/subdir");
+
+        body["id"] = serde_json::json!("origin");
+        body["cwd"] = serde_json::json!("/work/bar-1");
+        body["github_repo"] = serde_json::json!({"owner": "acme", "name": "bar"});
+        let origin: Session = serde_json::from_value(body).unwrap();
+        assert_eq!(origin.github_repo.unwrap().identifier(), "acme/bar");
+        assert_eq!(origin.working_copy.unwrap(), association);
+        assert_eq!(origin.cwd, "/work/bar-1");
+    }
+
     /// Every live status the helm can send, decoded through the REAL
     /// `Session` — the UI's half of PLAN_M6_75.md item 3's live split.
     ///
@@ -2547,6 +2596,8 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
             seen_activity_at: None,
         };
 
@@ -2609,6 +2660,8 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
             seen_activity_at,
         };
 
