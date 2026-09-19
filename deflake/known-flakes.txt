@@ -19,5 +19,4 @@ playwright profiles.spec.ts an outside click overrides a delayed opening focus c
 playwright profiles.spec.ts stale focus-out classifiers cannot clear newer obligations  # profiles-stubfeed-socket-missing
 playwright sidebar.spec.ts opening the actions menu enters it, and Tab leaves it  # sidebar-menu-arrowdown-miss
 playwright terminal-flood.spec.ts a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays  # flood-stall-zero-pauses
-nextest farhelm::e2e terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled  # backpressure-rss-attribution
 playwright profiles.spec.ts profile CRUD round-trips from the app-bar popup to the helm  # profile-crud-edit-timeout

@@ -223,15 +223,6 @@ is a clean gate.
   completion, and replay cutover. Do not widen the budget before locating why HIGH_WATER was never reached. Assessed
   2026-09-17 and left parked: the scenario is expensive (a sixty-second stall interval per attempt) and its
   discriminator receipts only pay on a fresh reproduction; the single-client stall shape is separately watched above.
-- Deflake `terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled` in
-  `crates/farhelm/tests/e2e/terminal_backpressure.rs`. Twenty exact baseline runs passed. The historical loaded
-  four-thread failure exceeded the 64-MiB supervisor RSS allowance; twenty-one earlier loaded runs also passed. That
-  supervisor lives inside the e2e process, so the sample includes libtest, harness, and sibling allocations; the
-  separate tmux RSS sample belongs to this test's private server. The producer-progress assertion excludes a stopped
-  producer as the explanation for a pass. On recurrence, retain every RSS/progress sample, active sibling identities,
-  and a bounded allocator breakdown to attribute growth before changing a queue or bound. The four-thread full binary
-  supplies the co-resident allocations an isolated loop omits. Assessed 2026-09-17 and left parked: one historical
-  sighting under four-thread load; the named attribution evidence only pays on a recurrence of that exact shape.
 - Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
   isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
   worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
