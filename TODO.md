@@ -24,6 +24,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Add the major OpenAI models to the model choices for every supported provider-independent harness (all supported harnesses except Claude and OpenAI).
 - Fix the Codex restart/resume bug where Farhelm can capture the wrong session ID and then resume a nonexistent conversation even though the original transcript remains intact. The reported case stored `01a0a9fb-e20c-7741-9450-138bd276ad9a`, while the visible conversation was `01a07eed-44dd-7a53-be64-54190d4c645e`, and restart failed with `No saved session found`. [Gist investigation](https://gist.github.com/scode/3d9789d37d94218e6385102710290cbe) records the evidence and unresolved cause.
 - Add a `farhelm` command to restart sessions so agents using the `$farhelm` skill can restart sessions.
+- Make `$farhelm help` in agent sessions show a user-friendly introduction and list of available actions instead of the underlying command's help output; details are TBD when this TODO is implemented.
 
 - Launch an agent into a fresh clone of a GitHub repo by typing `gh:owner/repo` in the launch composer. Today that takes
   a detour through a terminal to clone the repo under a new local name before the session can be created. Farhelm stays
