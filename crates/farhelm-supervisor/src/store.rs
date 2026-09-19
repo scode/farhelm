@@ -6418,6 +6418,81 @@ mod tests {
         assert_eq!(row.agent_kind, farhelm_proto::AgentKind::Omp);
     }
 
+    /// Checkout storage must preserve sessions written by the OMP release.
+    /// An empty migration fixture misses the failure where the schema opens
+    /// but startup's bulk session decode rejects a previously supported kind.
+    /// Exercise both the pre-checkout schema and a second open after migration,
+    /// retaining the structured launch and exact-resume identity in each.
+    #[farhelm_testtrace::test]
+    async fn checkout_migration_preserves_persisted_omp_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&path, true)
+            .await
+            .expect("create fixture");
+        let launch = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Omp,
+            model: Some("provider/model".into()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: Some(farhelm_proto::LaunchPermission::Approve),
+        };
+        let locator = r#"omp:{"version":1,"session_id":"persisted-omp","session_file":"/work/conversation.jsonl"}"#;
+        let mut row = launching_row("persisted-omp");
+        row.agent_kind = farhelm_proto::AgentKind::Omp;
+        row.invocation = "omp --provider openrouter --model provider/model".into();
+        row.launch = Some(launch.clone());
+        row.resume_template = Some(vec![
+            "omp".into(),
+            "--resume".into(),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+        ]);
+        row.captured_conversation = Some(locator.into());
+        row.conversation_source = Some("hook".into());
+        assert!(matches!(
+            store
+                .insert_session(row, None)
+                .await
+                .expect("insert OMP row"),
+            Claimed::Ours { .. }
+        ));
+        {
+            // Restore the exact pre-checkout additions boundary. This fixture
+            // tests preservation across 17 -> 18, not historical schema parity;
+            // the separate migration-ladder tests cover the latter.
+            let conn = store.conn.lock().expect("db mutex");
+            conn.execute_batch(
+                "DROP TABLE working_copy_members;
+                 DROP TABLE working_copies;
+                 ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
+                 PRAGMA user_version = 17;",
+            )
+            .expect("restore pre-checkout schema");
+            assert_eq!(
+                conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                17
+            );
+            assert_eq!(
+                conn.query_row("SELECT agent_kind FROM sessions", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                "omp"
+            );
+        }
+        drop(store);
+
+        for phase in ["migration", "reopen"] {
+            let store = SessionStore::open(&path, true).await.expect(phase);
+            let rows = store.load_all().await.expect("startup bulk decode");
+            assert_eq!(rows.len(), 1, "{phase} must preserve the session");
+            assert_eq!(rows[0].agent_kind, farhelm_proto::AgentKind::Omp);
+            assert_eq!(rows[0].launch.as_ref(), Some(&launch));
+            assert_eq!(rows[0].captured_conversation.as_deref(), Some(locator));
+            assert_eq!(rows[0].conversation_source.as_deref(), Some("hook"));
+            assert!(store.working_copy_rows().await.unwrap().is_empty());
+        }
+    }
+
     /// A fresh database (`user_version` 0) must come up on `user_version`
     /// [`SCHEMA_VERSION`] after `open` — the invariant every other
     /// `SessionStore` method assumes without re-checking on each call.
