@@ -68,3 +68,337 @@
   revival to fail, and verifies the durable adoption and preserved retired state before a later retry reconnects. This
   is a controlled reproduction of the ordering, not evidence of a natural actor-panic trigger. The full manager test
   module passed, including ordinary adoption. The feedback file and index entry were removed.
+
+## adopt-request-silently-ignores-unknown-fields.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `AdoptReq` in
+  `crates/farhelm-helm/src/hosts.rs` accepts unknown JSON fields, unlike neighboring host-add and alias requests.
+  Missing `reported` still fails, and the manager still checks the approved identity and requires an identity mismatch.
+  This is a low-impact request-validation inconsistency, not an identity-check bypass. Neither SPEC.md's explicit
+  adoption requirement nor SPEC_impl.md's approved-identity check requires rejection of unknown fields.
+- Decision: the user chose the proposed bounded code fix: reject unknown adoption-request fields, matching the
+  neighboring request types. No spec change.
+- Completion criteria: add `#[serde(deny_unknown_fields)]` to `AdoptReq`; verify that extra fields are rejected while
+  valid requests and the existing identity checks retain their behavior. Remove the feedback file and its index entry in
+  the same execution PR.
+- Execution: `pending`.
+
+## agent-fence-claimed-before-validation.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct, established by current-code inspection rather than runtime reproduction.
+  `handle_restricted_control` claims the asking session's fence before pure verb validation and runs inline on that
+  session-authenticated connection's read loop. Invalid requests therefore wait behind an existing holder unnecessarily.
+  This does not establish a stall of other agents or ordinary helm/GUI controls: it is not the helm's shared connection.
+  Ten minutes is the retained-mutation safeguard, not a general deadline on acquiring the fence. SPEC_impl.md requires
+  the fence before credential validation, not before shape validation. SPEC.md excludes hostile same-account
+  availability defense, but ordinary invalid requests can encounter this unnecessary wait too.
+- Decision: the user chose the narrow code fix: validate request shape before acquiring the fence, while keeping
+  credential validation under the fence for valid mutations. No scheduling redesign, new timeout, or spec change.
+- Completion criteria: malformed verbs are refused without waiting for the asking session's fence; valid mutations
+  retain the claim-before-credential-check ordering and existing mutation-lifetime protection. Verify the contention
+  boundary with a focused regression. Remove the feedback file and its index entry in the same execution PR.
+- Execution: `pending`.
+
+## agentrequest-refusals-hold-fence-across-reply.md
+
+- Outcome: `fix code`.
+- Assessment: partly correct by current-code inspection, not runtime reproduction. `service/handlers.rs:3588-3646`
+  retains the fence across refusal replies; the successful relay takes ownership correctly. The reply contract forbids
+  waiting on the queue with a supervisor mutex held. The writer has a no-progress deadline, so indefinite freezing is
+  overstated. SPEC_impl.md requires fencing credential validation and actual mutations, not refusal delivery.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Scope fence ownership around outcome
+  construction and release it before refusal replies. Coordinate with the approved validation-order fix; preserve
+  credential validation under the fence and successful relay ownership. No new timeout or task mechanism.
+- Completion criteria: reply backpressure on a refusal no longer holds the deletion fence; successful mutations retain
+  their existing lifetime protection. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## archive-drops-permit-before-reply.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/handlers.rs:1540-1541` drops the
+  successful archive's admission permit before metadata reconstruction and reply at 1567-1583. Error branches retain it.
+  This contradicts the existing admission/reply lifetime contract; no hostile-client overload claim is needed.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Keep the existing permit in the reply
+  task's scope through metadata reconstruction and response delivery. No new quota or scheduling mechanism.
+- Completion criteria: archive success and metadata-read failure retain admission until the reply task finishes or is
+  cancelled. Preserve mutation ownership. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## attach-refuses-tombstoned-channel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/handlers.rs:1614-1622` rejects
+  any upload route, whereas BeginUpload and data routing check liveness. `service/uploads.rs:1323-1335` explicitly
+  permits channel reuse after completion. No spec requires finished receipts to reserve channels.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Use the existing upload-route liveness
+  predicate in both attach admission and diagnostic selection. Leave tombstone retention unchanged.
+- Completion criteria: attach accepts a finished-upload channel but rejects live uploads, live input routes, channel
+  zero and oversized leases. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## clearing-local-alias-restores-colliding-name.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Helm `store.rs:3961-3969` checks the
+  restored local name only against explicit aliases, missing an unaliased SSH destination displaying that name. SPEC.md
+  requires unique host display names; alias SET already compares effective names.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Check the restored local effective
+  name against other effective names inside the alias-clear transaction, using existing derivation and AliasTaken.
+  Coordinate with the destination-collision item without merging their outcomes or adding a reserved-name policy.
+- Completion criteria: collision refuses the clear without changing the alias. A destination hidden by its own different
+  alias is not falsely treated as the visible name. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## create-mode-message-blames-wrong-caller.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/handlers.rs:359-362` gives a
+  full-authority empty-selector create the restricted-spawn advice, although its resolver refuses those suggested
+  selectors. Restricted dispatch already rejects missing selectors before this helper. SPEC.md requires actionable
+  invalid-operation errors.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Correct this refusal to describe the
+  invocation bundle the reachable full-authority path accepts. Keep admission and accepted request shapes unchanged.
+- Completion criteria: the refusal no longer suggests a selector the next check rejects. No new authority abstraction or
+  wording-only regression test. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## discarded-replacement-logs-spurious-row-gone-retire.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `manager.rs:1600-1609` returns normally
+  when an unused replacement's start gate is dropped; 1626-1662 treats that as a missing registry row, logs retirement
+  and bumps fleet events. This violates the existing side-effect-free discarded-start contract; no actor ran.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Distinguish never-started completion
+  from a running actor ending with a small task-result value. Exit supervision silently for the former.
+- Completion criteria: discarded gated replacements produce no false retirement or fleet invalidation; started actors
+  ending or panicking still publish retirement. No new supervision framework. Remove this feedback file and its index
+  entry in its execution PR.
+- Execution: `pending`.
+
+## disconnect-publishes-keep-stale-contested-claims.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `manager.rs:1484-1502,1648-1656` withdraws
+  clients/live lists but retains contested IDs that contested_claimants still reads. Ordinary disconnected publication
+  clears them. SPEC_impl.md ties collision evidence to current reporting hosts.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Clear contested IDs in the existing
+  atomic retarget and actor-retirement status mutations, beside withdrawing the client and live list.
+- Completion criteria: obsolete claims from withdrawn connections no longer block routing. Failed refreshes on
+  still-live connections retain their existing evidence policy. No collision-policy redesign. Remove this feedback file
+  and its index entry in its execution PR.
+- Execution: `pending`.
+
+## forget-splits-guarded-update-drops-fresh-contested.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `manager.rs:2024-2034` guards the
+  in-memory list update by incarnation/client presence, but 2039-2049 clears contested evidence without that guard. The
+  durable branch also awaits before this unguarded mutation. A stale delete can erase a replacement connection's
+  collision evidence, contrary to the existing claim-bound update discipline.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Put the relevant in-memory list and
+  contested changes under the existing incarnation/client guard at final publication for both storage branches. Preserve
+  the cache-write lock and valid-delete epoch behavior; do not broaden this into actor-map publication redesign.
+- Completion criteria: stale claims cannot remove replacement-connection collision evidence or report stale in-memory
+  changes; valid deletes still clear their own row and claim. Remove this feedback file and its index entry in its
+  execution PR.
+- Execution: `pending`.
+
+## in-memory-seed-skips-id-length-bound.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `manager.rs:1797-1934` lacks the seeded-ID
+  bound enforced by drain validation and helm `store.rs:4514-4524`. SPEC_impl.md requires bounded IDs at every peer
+  ingress and treats mutation seeding as best effort.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Apply MAX_SESSION_ID_BYTES before
+  manager seed publication using established refusal behavior. Retain the store defense.
+- Completion criteria: oversized IDs never enter the identity-less list; valid boundary-sized IDs remain accepted.
+  Rejecting a seed must not turn a successful remote mutation into a reported failure. Remove this feedback file and its
+  index entry in its execution PR.
+- Execution: `pending`.
+
+## local-identity-conflict-returns-500.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `provisioning/service.rs:473-483` erases
+  non-Recorded FirstContactOutcome values into untyped errors. Existing HostStoreError mappings already express these
+  conflicts as 409. SPEC.md treats identity changes as adopt-or-fix states, not internal malfunction.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Translate Mismatch, Collision and
+  StaleAttempt exhaustively into their existing typed store errors; reuse HTTP mapping.
+- Completion criteria: local discovery identity conflicts produce actionable conflict responses without changing
+  identity or dial coordinates. Successful registration and internal errors retain their behavior. Remove this feedback
+  file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## local-update-refusal-returns-500.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `provisioning/service.rs:594-599` refuses
+  local UPDATE with untyped bail, becoming HTTP 500. SPEC.md deliberately hands local installation to setup; this
+  refusal is policy, not server malfunction.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Add one message-carrying provisioning
+  refusal variant mapped to 409 and use it for the existing local handoff. Share it with the manual-update sibling.
+- Completion criteria: local update planning returns 409 with the existing handoff reason. Failure to obtain that reason
+  remains a real failure; no local update plan becomes possible and no success-response schema changes. Remove this
+  feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## manual-update-refusal-returns-500.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `provisioning/service.rs:696-704` turns
+  ReachOutcome::Manual into untyped bail and HTTP 500. SPEC.md treats unsupported automatic installation as a normal
+  manual fallback.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Reuse the typed 409 refusal from
+  `local-update-refusal-returns-500.md`; execute after that dependency. Preserve the original reason.
+- Completion criteria: manual-needs update planning returns 409, backend failures remain errors and successful
+  update-plan responses keep their schema. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## oversized-profile-relayed-before-size-check.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/handlers.rs:3337-3367` resolves a
+  restricted profile before the shared aggregate cap at 590-610. The current issue concerns profile name/ID selectors,
+  not accepted caller-supplied source_profile metadata. SPEC.md and SPEC_impl.md define the combined creation-field
+  limit.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Apply the existing aggregate
+  calculation before restricted profile resolution, reusing or extracting it rather than adding per-field limits.
+- Completion criteria: oversized combined parent/cwd/profile-selector/title requests are refused before relay; valid
+  requests resolve normally. Preserve the shared ingress check and account for fields actually accepted on each path. No
+  queue-policy changes. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## refresh-arm-busy-drains-on-dropped-sender.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed readiness defect by current-code inspection, not runtime reproduction. `manager.rs:3432-3444`
+  ignores refresh.changed() errors, allowing a closed watch channel to wake refresh repeatedly. next_nudge already parks
+  a closed sender. SPEC_impl.md specifies bounded refresh cadence; actual orphan duration and request volume were not
+  measured.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Disable this wakeup on sender closure
+  using the existing pending-on-closure pattern, inside the selected future. No new retry policy.
+- Completion criteria: closure cannot drive repeated drains; timer, client-closure and nudge branches remain selectable.
+  Normal notifications still refresh without reconnecting. Remove this feedback file and its index entry in its
+  execution PR.
+- Execution: `pending`.
+
+## resolve-owner-compares-first-claimant-only.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `sessions.rs:750-764` checks only the
+  first sorted contested claimant. If that is the cached owner, a second different claimant is ignored. The existing
+  resolve_owner contract and SPEC_impl.md collision rules require fail-closed routing.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Find any claimant different from the
+  cached owner and return the existing SessionOwnerAmbiguous error, preserving its ordered pair and subsequent checks.
+- Completion criteria: owner X with claimants [X, Y] is refused regardless of ordering; a sole self-claim is not falsely
+  ambiguous. No routing-policy redesign. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## restart-failure-says-restarted.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/core.rs:10943-10955` computes
+  cleanup failure/reaping state, sends session restarted, then returns failure. SPEC.md defines restart as a real
+  relaunch; the removed attachment must still receive a detach notice on failure.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Construct the local cleanup result
+  before choosing the detach reason; notify truthfully when cleanup prevents restart, then return that failure.
+- Completion criteria: failed detach-for-restart says the attachment ended but restart failed, without claiming
+  completion. Both paths notify; successful flow remains unchanged. No lifecycle or automatic-reattach redesign. Remove
+  this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## reverify-stamp-refresh-never-lands.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/capture.rs:312-328` rejects
+  Captured-to-Captured advance, but 1597-1607 relies on it to refresh the stamp after a matching record read. The stale
+  stamp causes repeated reads. SPEC_impl.md calls for cheap re-verification while retaining identity.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Under the existing mutex, update only
+  the stamp if still Captured for the same conversation and record locator. Do not broaden the state ladder.
+- Completion criteria: a verified append updates the stamp so unchanged later polls avoid content reads. Concurrent
+  Reported state, another conversation or another record is never overwritten. No new cache/polling machinery. Remove
+  this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## seed-eviction-evicts-just-recorded-row.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `manager.rs:1918-1928` includes the new
+  seed in victim selection; helm `store.rs:4604-4623` excludes it. This contradicts the existing admitted-seed invariant
+  and SPEC_impl.md's mutation seeding contract. The feedback overstates truncation: any actual eviction correctly sets
+  the truncated flag.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Exclude the new ID before selecting
+  the in-memory victim, preserving original vector indices and ordering.
+- Completion criteria: at capacity, an oldest/tied new row remains routable and the correct other row is evicted.
+  Preserve the cap and truncated flag. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## ssh-destination-collides-with-local-display-name.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Helm `store.rs:1230-1246` checks
+  destination candidates against explicit aliases but omits the unaliased local effective name. Destination-write paths
+  reuse this check. SPEC.md requires unique display names; alias SET already compares effective names.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Extend the existing transactional
+  collision check to include the local effective name, using existing derivation/refusal types. Preserve self-exclusion
+  and aliased-retarget semantics; coordinate with the separate local-alias-clear fix.
+- Completion criteria: add, probed registration, ensure and retarget cannot introduce a visible local-name collision.
+  Local alias changes naturally change the comparison. No literal-string blacklist or new SSH syntax policy. Remove this
+  feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## stop-actor-skips-client-retirement.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `manager.rs:1399-1415,2554-2570` aborts
+  removed-row actors without explicitly retiring their published clients. Retained clones can keep transport serving;
+  retire_withdrawn exists for this distinction. SPEC_impl.md requires withdrawn connections to stop serving.
+- Decision: scheduled under the user's authorization for clear, small code fixes. At both removed-row paths, withdraw
+  the client through the existing status mutation and call retire_withdrawn outside it, alongside actor cancellation.
+- Completion criteria: removal retires transport despite retained clones and pending requests, without stopping remote
+  sessions. No new graceful-shutdown protocol. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## sweep-deletes-live-staged-sentinel.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed internal healthy-filesystem race by current-code inspection, not runtime reproduction.
+  `service/launch_artifacts.rs:392-393` removes every staged artifact, including a surviving shim's unpublished
+  sentinel. Existing staged-name parsing identifies its session. SPEC.md and SPEC_impl.md rely on launch-failure
+  evidence surviving supervisor restart.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Reuse staged launch-name parsing to
+  preserve staging owned by reloaded sessions and remove genuinely orphaned staging. Keep published sentinel retention.
+- Completion criteria: a surviving session's staged sentinel is not startup-swept; orphaned staging remains eligible. No
+  generation reconciliation, age policy or background sweep. Remove this feedback file and its index entry in its
+  execution PR.
+- Execution: `pending`.
+
+## terminal-less-delete-no-server-guards-never-match.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/teardown.rs:802-812` searches
+  error.to_string() for missing-server diagnostics, but `tmux.rs:2479` wraps them in outer context. The guards cannot
+  see the raw message. The existing teardown contract permits deletion for proven absence, not uncertain liveness.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Classify known absent-server
+  diagnostics from existing typed raw tmux stderr at the driver boundary for this delete path, including ENOENT for the
+  error-connecting form. Do not search rendered error chains.
+- Completion criteria: terminal-less deletion succeeds for proven server absence. Permission errors, unknown diagnostics
+  and diagnostic-like target paths remain failures. Preserve other has_session callers' semantics; no broad error-system
+  rewrite. Remove this feedback file and its index entry in its execution PR.
+- Execution: `pending`.
+
+## tombstone-eviction-counts-live-transfers.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. `service/uploads.rs:1336-1351` collects
+  finished tombstones but calculates excess from all routes. With 33 tombstones and eight live routes it removes nine
+  instead of one. The existing contract bounds finished receipts independently of live work.
+- Decision: scheduled under the user's authorization for clear, small code fixes. Calculate excess from tombstones.len()
+  before consuming the vector and evict that many oldest tombstones. Keep live routes untouched.
+- Completion criteria: mixed routes retain the newest MAX_UPLOAD_TOMBSTONES receipts, evict exactly the finished excess
+  and preserve live transfers. No retention-policy change. Remove this feedback file and its index entry in its
+  execution PR.
+- Execution: `pending`.
