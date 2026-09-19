@@ -624,7 +624,6 @@ async fn reattach_cutover_has_no_missing_or_duplicated_output() {
 /// control-mode stream byte-for-byte. Any conversion through `String`
 /// would replace 0xff while ordinary TUI tests continued to pass.
 #[farhelm_testtrace::test]
-#[ignore = "load flake: the request byte's reply never arrives on a loaded runner (3 of 9 GitHub runs on 2026-09-03), localized to the input path; FLAKES.md has the evidence"]
 async fn non_utf8_terminal_output_survives_live_stream() {
     let h = harness().await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -656,8 +655,11 @@ async fn non_utf8_terminal_output_survives_live_stream() {
     // `send_input` returning proves only that the frame was queued. The
     // supervisor's tmux `send-keys` exchange behind it is allowed 30 s under
     // load, so the marker's budget has to cover that whole exchange plus the
-    // output's trip back, or this test would re-grow the load flake it exists
-    // to remove.
+    // output's trip back. Note the budget bounds the exchange; it does not
+    // resolve the historical load-timeout mechanism, which FLAKES.md
+    // localized to the fixture flushing its reply without the bytes ever
+    // arriving — a recurrence here is the signal to instrument, not to wait
+    // longer.
     wait_for(&mut live, &mut live_bytes, "BINARY-MARKER", 40).await;
     assert!(
         live_bytes.contains(&0xff),
