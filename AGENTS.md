@@ -359,6 +359,81 @@ the current tree, however recent it looks.
 `review_feedback_queue/AGENTS.md`; when asked to address a queued item, remove the item (or narrow it, if partially
 addressed) in the same commit, change, or PR as the fix.
 
+## Triage step
+
+"Triage review feedback" means decide what to do with individual items, WITH the user. It does not authorize fixes or PR
+creation. Read `review_feedback_queue/AGENTS.md`, the index, and root `TRIAGE_OUTCOMES.md` if it exists. Work through
+items in index order unless the user chooses another order, skipping items with a recorded decision unless asked to
+revisit them.
+
+For each item, complete these steps before asking the user for an outcome:
+
+1. Understand the feedback. Read the whole feedback file, trace the relevant current code paths, and read the
+   authoritative spec sections. Identify the claimed behavior, the conditions that trigger it, and the consequence.
+2. Verify whether the feedback is correct; do not take the reviewer's claim as established fact. Check its premises
+   against the current code and specs, including guards or lifecycle rules that could invalidate it. Use a focused
+   reproduction or check when code inspection cannot settle the claim, following the verification rules above.
+   Distinguish a current problem from one that only existed at the reviewed commit. If verification is blocked or
+   inconclusive, say exactly what remains unverified and why; do not present it as confirmed.
+3. State the assessment to the user, with the evidence and any uncertainty: confirmed, partly correct, incorrect,
+   already addressed, or unresolved. Keep correctness separate from whether the issue is worth addressing.
+
+Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Name the feedback
+filename and explain the affected feature or operation, the triggering scenario, expected versus actual behavior, and
+the practical consequence. Give enough context to understand the assessment without opening the file or knowing internal
+symbols; explain implementation details only where they are needed to understand the issue.
+
+Then recommend an outcome with its reason and ask the user to decide before recording an outcome or moving to the next
+item. A recommendation is not a decision; unresolved items stay undecided. The outcomes are:
+
+- `discard`: not worth the human's time at this time. This says nothing about the item's validity, severity, or merit.
+  Drop it from the queue without remedial action; do not turn it into a spec exception, code fix, or TODO.
+- `fix spec`: clarify the underlying principle in `SPEC.md` and/or `SPEC_impl.md` so similar feedback is suppressed for
+  the right reason, not by blacklisting a particular finding. For example, an agreed target of roughly 100 sessions can
+  make million-session scalability concerns out of scope. That example is not itself a new product requirement.
+- `fix code`: the feedback is legitimate; address the problem within the existing specification.
+- `fix spec+code`: make both the agreed specification change and the corresponding code change.
+- `other`: negotiate a concrete custom outcome with the user, including what to do with the queue item.
+
+After each decision, create or update root `TRIAGE_OUTCOMES.md`. Use one heading per feedback filename, spelled exactly
+as it appears in `review_feedback_queue/`, with these fields:
+
+- Outcome: one of the five values above.
+- Assessment: the correctness verdict, supporting evidence, and any unverified claims or limitations, separate from the
+  user's chosen outcome.
+- Decision: the user's rationale and agreed scope; preserve their meaning rather than substituting the recommendation.
+  For spec changes, include the underlying principle; for `other`, include the negotiated action.
+- Completion criteria: what execution must accomplish, including any deliberately retained part of the feedback.
+- Execution: `pending` initially; later `in progress`, `blocked` with the reason, or `complete`, with the stable jj
+  change ID, bookmark, and PR URL as they become available.
+
+Keep previous decisions and execution records; do not overwrite the file on a new triage session. If the user revises a
+decision, retain the prior decision and note what supersedes it. Do not create entries for undecided items. Triaged
+items are no longer awaiting a triage decision, but their feedback files and index entries stay until execution,
+including for `discard`. This preserves the input for the separate execution step and its per-item PR.
+
+## Execute triage outcomes
+
+"Execute triage outcomes" is a separate user request. Read root `TRIAGE_OUTCOMES.md` and execute its pending decisions
+(or the subset the user names); resume incomplete execution rather than making duplicate PRs. Do not silently triage
+undecided items or change an agreed outcome. If current code or specs invalidate a decision, return that item to the
+user for clarification.
+
+Load and follow the `jjstack` skill. Make one reviewable commit, stable bookmark, and draft PR per triaged outcome,
+including `discard` and `other`, in a single linear stack. Use ledger order unless dependencies require another order;
+state the order before starting. Base each PR on the preceding bookmark, with the bottom PR based on the chosen stack
+base per jjstack. Do not combine items into one PR or split `fix spec+code` across PRs.
+
+Each item's PR contains its agreed changes, the corresponding `TRIAGE_OUTCOMES.md` execution update, and removal of its
+feedback file and index entry (or the agreed narrowing for a partial/custom outcome). A discard PR contains only that
+queue removal and outcome bookkeeping, with no spec or code change. Retain completed ledger entries so another execution
+request can distinguish completed work from pending work. Record the change ID and bookmark before creating the PR, then
+add its URL to the same change and update that PR; do not make a separate bookkeeping PR.
+
+Validate each change using the "Finishing work" rules above. Completion means the agreed work is verified and its draft
+PR exists, not that it has merged. Report the item-to-PR mapping and any blocked items. This workflow never marks PRs
+ready, enables auto-merge, or merges them; publishing or landing requires a separate user request.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and

@@ -42,3 +42,9 @@ Reviewed commit: <full commit hash>
 Feedback leaves the queue the same way it arrived: explicitly. A change, commit, or PR that addresses an item must
 remove the item's file (and its `INDEX.md` line) in the same commit, change, or PR — or narrow the file to what remains,
 if it only partially addresses it. A fix that leaves its feedback item behind is incomplete.
+
+The root `AGENTS.md` defines the separate "triage review feedback" and "execute triage outcomes" steps. Triage records
+the user's decision in root `TRIAGE_OUTCOMES.md` without changing the feedback file or index. Execution applies that
+decision and removes or narrows the item in its own draft PR. A `discard` outcome means only "not worth the human's time
+at this time", not that the feedback is wrong; its execution removes the file and index entry without a spec or code
+change. The outcome ledger lives outside this directory and is not a feedback file to add to `INDEX.md`.
