@@ -2734,7 +2734,29 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             resume_template,
             source_profile,
             launch,
+            github_checkout,
         } => {
+            // The very first thing create handling does — ahead of selector
+            // resolution, validation, locks, and every side effect. The
+            // fresh-checkout backend does not exist yet (protocol 22's
+            // plumbing slice), and accepting the payload now would mean
+            // dropping the checkout intent while reporting an ordinary
+            // create; an explicit refusal leaves nothing to reconstruct.
+            if github_checkout.is_some() {
+                send_reply(
+                    ctx.tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "fresh GitHub checkouts are not supported yet: the checkout \
+                                  backend arrives in a later unit, so this create was refused \
+                                  and nothing was launched"
+                            .to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
             handle_create_session(
                 sup,
                 ctx.tx,
@@ -2769,6 +2791,51 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // a later timeout or invalid-directory reply still has a receipt.
             debug!(%cwd, "received directory browse request");
             handle_browse_directory(sup, ctx.tx, ctx.tasks, req_id, cwd).await
+        }
+        // The GitHub-checkout requests are helm→supervisor vocabulary
+        // whose backend does not exist yet (protocol 22's plumbing slice).
+        // They get REAL refusals rather than the catch-all below — a helm
+        // that sends one is waiting on a correlated reply, and the
+        // catch-all logs a line and sends nothing. No filesystem, database,
+        // or process side effect of any kind happens on this path.
+        ControlMsg::GithubCheckoutPreview { req_id, .. } => {
+            send_reply(
+                ctx.tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: "GitHub checkout previews are not supported yet: the checkout \
+                              backend arrives in a later unit"
+                        .to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                },
+            )
+            .await;
+        }
+        ControlMsg::GithubRepoSearch { req_id, .. } => {
+            send_reply(
+                ctx.tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: "GitHub repository completion is not supported yet: the checkout \
+                              backend arrives in a later unit"
+                        .to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                },
+            )
+            .await;
+        }
+        ControlMsg::ReconcileGithubCheckout { req_id, .. } => {
+            send_reply(
+                ctx.tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: "GitHub checkout reconciliation is not supported yet: the checkout \
+                              backend arrives in a later unit"
+                        .to_string(),
+                    kind: ErrorKind::InvalidRequest,
+                },
+            )
+            .await;
         }
         ControlMsg::StopSession { req_id, session_id } => {
             handle_stop_session(sup, ctx.tx, ctx.tasks, req_id, session_id).await
@@ -2975,7 +3042,32 @@ pub(crate) async fn handle_restricted_control(
             resume_template,
             source_profile,
             launch,
+            github_checkout,
         } => {
+            // Refused BEFORE the credential check, at the very top of
+            // create handling: a fresh-checkout payload is helm-supplied
+            // from helm-side configuration (checkout root, post-clone hook)
+            // that a spawned session must never see or influence, so no
+            // restricted path can carry it under any credential. The two
+            // new GitHub-checkout requests never reach this arm at all —
+            // they are off the restricted allowlist and fall to the
+            // catch-all below — but a create carrying the payload is ON
+            // the allowlist's message shape and must be cut here.
+            if github_checkout.is_some() {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "fresh GitHub checkouts are not available to \
+                                  session-authenticated creates: the payload is helm-supplied, \
+                                  and the checkout backend arrives in a later unit"
+                            .to_string(),
+                        kind: ErrorKind::Unauthorized,
+                    },
+                )
+                .await;
+                return;
+            }
             // Reject an invalid credential before asking the attached helm
             // anything. This check is intentionally unclaimed: it prevents
             // an unauthenticated peer from causing an upcall, while the
@@ -4033,6 +4125,7 @@ mod tests {
                     name: "Claude".to_string(),
                 }),
                 launch: None,
+                github_checkout: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -4098,6 +4191,7 @@ mod tests {
                 resume_template: None,
                 source_profile: None,
                 launch: None,
+                github_checkout: None,
             },
             &tx,
             &auth,
@@ -4156,6 +4250,7 @@ mod tests {
                 resume_template: None,
                 source_profile: None,
                 launch: None,
+                github_checkout: None,
             },
             &tx,
             &auth,
@@ -4221,6 +4316,7 @@ mod tests {
                 resume_template: None,
                 source_profile: None,
                 launch: None,
+                github_checkout: None,
             },
             &tx,
             &auth,
@@ -4284,6 +4380,7 @@ mod tests {
                         resume_template: None,
                         source_profile: None,
                         launch: None,
+                        github_checkout: None,
                     },
                     &tx,
                     &auth,
@@ -4529,6 +4626,7 @@ mod tests {
                     agent_kind,
                     resume_template,
                     launch: None,
+                    github_checkout: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -6195,6 +6293,7 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
                 launch: None,
+                github_checkout: None,
             },
             &tx,
             &auth,
@@ -6215,6 +6314,332 @@ mod tests {
         assert!(message.contains("parent-session"));
         assert!(sup.sessions.lock().await.is_empty());
         assert_eq!(sup.store.reservation("forged-key").await.unwrap(), None);
+    }
+
+    /// The GitHub-checkout vocabulary is refused on every path it must not
+    /// travel while the backend does not exist yet (protocol 22's plumbing
+    /// slice), and each refusal leaves nothing behind.
+    ///
+    /// Three shapes, three doors: the two request variants are off the
+    /// restricted allowlist (the catch-all's `Unauthorized`) and get
+    /// explicit "not supported yet" errors on an ordinary helm connection
+    /// (a correlated `InvalidRequest`, never the silent catch-all), and a
+    /// create carrying the resolved payload is cut at the very top of
+    /// create handling on BOTH paths — before the restricted path's
+    /// credential check and before any selector validation, lock, or
+    /// durable write on the ordinary one. The store-empty assertions are
+    /// the "no other effect" half: a refused request must be
+    /// indistinguishable from one never sent. Lookup-only reconciliation is
+    /// also refused on both paths until durable checkout recovery exists;
+    /// recognizing its request ID must not leave callers waiting forever.
+    #[farhelm_testtrace::test]
+    async fn github_checkout_requests_are_refused_on_both_dispatch_paths() {
+        use farhelm_proto::{
+            CheckoutPreviewBinding, ClaimContext, GithubPreviewRequest, ResolvedGithubCheckout,
+        };
+
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = authenticated_parent(&sup, state.path(), "checkout-parent").await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+
+        let preview_request = GithubPreviewRequest {
+            host: None,
+            expected_incarnation: None,
+            repo: "acme/bar".to_string(),
+            title: None,
+            root: Some("~/checkouts".into()),
+            config_revision: Some(1),
+        };
+
+        // Restricted path: both request variants are off-list refusals.
+        handle_restricted_control(
+            &sup,
+            ControlMsg::GithubCheckoutPreview {
+                req_id: 61,
+                request: preview_request.clone(),
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("preview refusal").body).unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 61,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+
+        handle_restricted_control(
+            &sup,
+            ControlMsg::GithubRepoSearch {
+                req_id: 62,
+                claim: ClaimContext {
+                    host: "local".to_string(),
+                    incarnation: 1,
+                },
+                query: "bar".to_string(),
+                root: Some("~/checkouts".into()),
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("search refusal").body).unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 62,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+
+        // Restricted path: a create carrying the resolved payload is cut
+        // before the credential check that every other create runs first.
+        let repo = farhelm_proto::parse_github_repo("acme/bar").expect("valid repo");
+        handle_restricted_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 63,
+                parent: Some("checkout-parent".to_string()),
+                cwd: state.path().to_string_lossy().into_owned(),
+                invocation: None,
+                profile_name: None,
+                profile_id: None,
+                inherit_agent: true,
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("checkout-key".to_string()),
+                agent_kind: None,
+                resume_template: None,
+                source_profile: None,
+                launch: None,
+                github_checkout: Some(ResolvedGithubCheckout {
+                    client_identity: "restricted-fixture".into(),
+                    repo: repo.clone(),
+                    root: "/tmp/checkouts".to_string(),
+                    post_clone: None,
+                    preview: CheckoutPreviewBinding {
+                        canonical_root: "/tmp/checkouts".to_string(),
+                        basename: "bar".to_string(),
+                        cwd: "/tmp/checkouts/bar".to_string(),
+                        config_revision: 1,
+                    },
+                }),
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("payload refusal").body).unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 63,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+        assert_eq!(
+            sup.store.reservation("checkout-key").await.unwrap(),
+            None,
+            "the refusal must precede any idempotency reservation"
+        );
+
+        // Ordinary path: correlated "not supported yet" errors, and a
+        // create with the payload refused before any side effect.
+        let mut input_routes = HashMap::new();
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::GithubCheckoutPreview {
+                req_id: 64,
+                request: preview_request,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("ordinary preview refusal").body)
+                .unwrap();
+        let ControlMsg::Error {
+            req_id, message, ..
+        } = reply
+        else {
+            panic!("expected an error reply");
+        };
+        assert_eq!(req_id, 64);
+        assert!(message.contains("not supported yet"));
+
+        handle_control(
+            &sup,
+            ControlMsg::GithubRepoSearch {
+                req_id: 65,
+                claim: ClaimContext {
+                    host: "local".to_string(),
+                    incarnation: 1,
+                },
+                query: "bar".to_string(),
+                root: Some("~/checkouts".into()),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("ordinary search refusal").body)
+                .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 65,
+                kind: ErrorKind::InvalidRequest,
+                ..
+            }
+        ));
+
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 66,
+                parent: None,
+                cwd: state.path().to_string_lossy().into_owned(),
+                invocation: Some("claude".to_string()),
+                profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("ordinary-checkout-key".to_string()),
+                agent_kind: None,
+                resume_template: None,
+                source_profile: None,
+                launch: None,
+                github_checkout: Some(ResolvedGithubCheckout {
+                    client_identity: "ordinary-fixture".into(),
+                    repo: repo.clone(),
+                    root: "/tmp/checkouts".to_string(),
+                    post_clone: None,
+                    preview: CheckoutPreviewBinding {
+                        canonical_root: "/tmp/checkouts".to_string(),
+                        basename: "bar".to_string(),
+                        cwd: "/tmp/checkouts/bar".to_string(),
+                        config_revision: 1,
+                    },
+                }),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("ordinary payload refusal").body)
+                .unwrap();
+        let ControlMsg::Error { message, .. } = reply else {
+            panic!("expected an error reply");
+        };
+        assert!(message.contains("not supported yet"));
+        handle_restricted_control(
+            &sup,
+            ControlMsg::ReconcileGithubCheckout {
+                req_id: 67,
+                intent_key: "ordinary-checkout-key".into(),
+                client_identity: "ordinary-fixture".into(),
+                cols: 80,
+                rows: 24,
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let reply: ControlMsg = serde_json::from_slice(
+            &rx.recv()
+                .await
+                .expect("restricted reconciliation refusal")
+                .body,
+        )
+        .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 67,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+
+        handle_control(
+            &sup,
+            ControlMsg::ReconcileGithubCheckout {
+                req_id: 68,
+                intent_key: "ordinary-checkout-key".into(),
+                client_identity: "ordinary-fixture".into(),
+                cols: 80,
+                rows: 24,
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut input_routes,
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let reply: ControlMsg = serde_json::from_slice(
+            &rx.recv()
+                .await
+                .expect("ordinary reconciliation refusal")
+                .body,
+        )
+        .unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 68,
+                kind: ErrorKind::InvalidRequest,
+                ..
+            }
+        ));
+        assert!(
+            sup.sessions.lock().await.is_empty(),
+            "nothing may be launched"
+        );
+        assert_eq!(
+            sup.store
+                .reservation("ordinary-checkout-key")
+                .await
+                .unwrap(),
+            None,
+            "the refusal must precede intent resolution and every durable write"
+        );
     }
 
     /// Deleting a parent revokes every already-open restricted connection.
@@ -6253,6 +6678,7 @@ mod tests {
                 agent_kind: None,
                 resume_template: None,
                 launch: None,
+                github_checkout: None,
             },
             &tx,
             &auth,
@@ -7106,6 +7532,7 @@ mod tests {
             agent_kind: None,
             resume_template: None,
             launch: None,
+            github_checkout: None,
         };
         let mut send = async |msg| {
             handle_restricted_control(&sup, msg, &tx, &auth).await;
@@ -7270,6 +7697,7 @@ mod tests {
                 intent_key: None,
                 agent_kind: None,
                 resume_template: None,
+                github_checkout: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -7358,6 +7786,7 @@ mod tests {
                     intent_key: Some(key),
                     agent_kind: None,
                     resume_template: None,
+                    github_checkout: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -7413,6 +7842,7 @@ mod tests {
                 intent_key: Some("k".repeat(INTENT_KEY_CAP)),
                 agent_kind: None,
                 resume_template: None,
+                github_checkout: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -7480,6 +7910,7 @@ mod tests {
                     intent_key: Some("key".to_string()),
                     agent_kind: None,
                     resume_template: Some(template),
+                    github_checkout: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -7560,6 +7991,8 @@ mod tests {
                     restart_offer: RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
                 terminal: Some(Terminal {
                     tmux_name: "fh-fake".to_string(),
@@ -7742,6 +8175,8 @@ mod tests {
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             },
             terminal: None,
             outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
@@ -7933,6 +8368,8 @@ mod tests {
                     restart_offer: RestartOffer::default(),
                     tabs: Vec::new(),
                     source_profile: None,
+                    github_repo: None,
+                    working_copy: None,
                 },
                 terminal: None,
                 outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),

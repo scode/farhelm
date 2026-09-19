@@ -360,6 +360,14 @@ enum HelmCmd {
         #[command(subcommand)]
         command: TokenCmd,
     },
+    /// View or change where fresh checkouts are created (the working-copy
+    /// root) and what runs after cloning (an optional post-clone command),
+    /// globally or per registered host. Edits stored configuration only:
+    /// never contacts a host, creates a directory, or runs the hook.
+    CheckoutConfig {
+        #[command(subcommand)]
+        command: CheckoutConfigCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -372,6 +380,73 @@ enum TokenCmd {
     },
     /// Replace the token and invalidate every browser device session.
     Rotate {
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CheckoutConfigCmd {
+    /// Print the stored values, the effective inheritance for the selected
+    /// scope, and the current revision.
+    Show {
+        /// Registered host id to view that host's overrides; omit for the
+        /// global settings.
+        #[arg(long)]
+        host: Option<i64>,
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Set the working-copy root: an absolute path, `~`, or `~/...`,
+    /// stored UNEXPANDED (only the target supervisor expands it).
+    SetRoot {
+        /// The root path. Hyphen-leading values (a leading-slash path is
+        /// fine, but so is a command-like start) are taken verbatim.
+        #[arg(allow_hyphen_values = true)]
+        path: String,
+        /// Registered host id to set that host's override; omit for the
+        /// global setting.
+        #[arg(long)]
+        host: Option<i64>,
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Remove the root setting: a host override goes back to inheriting
+    /// the global value; the global setting is unset.
+    ClearRoot {
+        /// Registered host id to clear that host's override; omit for the
+        /// global setting.
+        #[arg(long)]
+        host: Option<i64>,
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Set the post-clone shell command. An EMPTY command on a host is an
+    /// explicit disable that overrides a global hook.
+    SetPostClone {
+        /// The command. Allowed to start with `-` — it is shell text, not
+        /// a flag.
+        #[arg(allow_hyphen_values = true)]
+        command: String,
+        /// Registered host id to set that host's override; omit for the
+        /// global setting.
+        #[arg(long)]
+        host: Option<i64>,
+        /// State directory holding helm.db.
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Remove the post-clone setting, with the same clear-to-inherit /
+    /// global-unset split as clear-root.
+    ClearPostClone {
+        /// Registered host id to clear that host's override; omit for the
+        /// global setting.
+        #[arg(long)]
+        host: Option<i64>,
         /// State directory holding helm.db.
         #[arg(long)]
         state_dir: Option<PathBuf>,
@@ -728,6 +803,18 @@ fn main() -> anyhow::Result<()> {
                 }
             };
             println!("{token}");
+            Ok(())
+        }
+        Cmd::Helm {
+            command: HelmCmd::CheckoutConfig { command },
+        } => {
+            init_tracing();
+            let runtime = runtime()?;
+            let output = runtime.block_on(run_checkout_config(command))?;
+            // `print!`, not `println!`: the command layer already ends its
+            // output with exactly one newline, and a show's exact stdout is
+            // part of what the tests pin.
+            print!("{output}");
             Ok(())
         }
         Cmd::Supervisor {
@@ -1187,6 +1274,9 @@ async fn spawn_session(args: SpawnArgs) -> anyhow::Result<String> {
             // supervisor copies the authenticated parent's stored launch
             // bundle, which is the only safe source of that provenance.
             launch: None,
+            // Fresh-checkout payloads are helm-supplied only; a restricted
+            // spawn never carries one (and the supervisor refuses it).
+            github_checkout: None,
         })
         .await
         .context("sending the spawn request")?;
@@ -2034,6 +2124,41 @@ fn init_tracing() {
         .init();
 }
 
+/// Map the parsed `farhelm helm checkout-config` grammar onto the helm
+/// crate's command layer. Purely mechanical: the grammar lives here so the
+/// CLI surface evolves with the rest of `farhelm helm`, while the storage
+/// and rendering rules stay behind the never-create, never-migrate open in
+/// `farhelm_helm::checkout_config`.
+async fn run_checkout_config(command: CheckoutConfigCmd) -> anyhow::Result<String> {
+    use farhelm_helm::checkout_config::{CheckoutConfigAction, checkout_config_cli};
+    let (host, state_dir, action) = match command {
+        CheckoutConfigCmd::Show { host, state_dir } => {
+            (host, state_dir, CheckoutConfigAction::Show)
+        }
+        CheckoutConfigCmd::SetRoot {
+            path,
+            host,
+            state_dir,
+        } => (host, state_dir, CheckoutConfigAction::SetRoot { path }),
+        CheckoutConfigCmd::ClearRoot { host, state_dir } => {
+            (host, state_dir, CheckoutConfigAction::ClearRoot)
+        }
+        CheckoutConfigCmd::SetPostClone {
+            command,
+            host,
+            state_dir,
+        } => (
+            host,
+            state_dir,
+            CheckoutConfigAction::SetPostClone { command },
+        ),
+        CheckoutConfigCmd::ClearPostClone { host, state_dir } => {
+            (host, state_dir, CheckoutConfigAction::ClearPostClone)
+        }
+    };
+    checkout_config_cli(state_dir, host, action).await
+}
+
 /// Pump bytes both ways between our stdio and the supervisor socket.
 /// Deliberately dumb: framing, hello, and versioning belong to the two
 /// endpoints, not the pipe between them.
@@ -2160,6 +2285,76 @@ mod tests {
                 }
             ));
         }
+    }
+
+    /// Every checkout-config verb accepts `--host` and `--state-dir`, and
+    /// the two value-taking verbs take their value POSITIONALLY with
+    /// hyphen-leading values intact — a post-clone command is shell text
+    /// that may start with `-`, and the grammar must never mistake it for
+    /// a flag.
+    #[farhelm_testtrace::test]
+    fn checkout_config_cli_parses_all_verbs_with_hyphen_leading_values() {
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "helm",
+            "checkout-config",
+            "show",
+            "--host",
+            "7",
+            "--state-dir",
+            "/tmp/farhelm-test-state",
+        ])
+        .unwrap();
+        let Cmd::Helm {
+            command: HelmCmd::CheckoutConfig { command },
+        } = cli.command
+        else {
+            panic!("expected the checkout-config subcommand");
+        };
+        assert!(matches!(
+            command,
+            CheckoutConfigCmd::Show { host: Some(7), .. }
+        ));
+
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "helm",
+            "checkout-config",
+            "set-root",
+            "--",
+            "-/leading-hyphen/path",
+        ])
+        .unwrap();
+        let Cmd::Helm {
+            command: HelmCmd::CheckoutConfig { command },
+        } = cli.command
+        else {
+            panic!("expected the checkout-config subcommand");
+        };
+        let CheckoutConfigCmd::SetRoot { path, host, .. } = command else {
+            panic!("expected set-root");
+        };
+        assert_eq!(path, "-/leading-hyphen/path");
+        assert_eq!(host, None);
+
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "helm",
+            "checkout-config",
+            "set-post-clone",
+            "-rm -rf /tmp/x",
+        ])
+        .unwrap();
+        let Cmd::Helm {
+            command: HelmCmd::CheckoutConfig { command },
+        } = cli.command
+        else {
+            panic!("expected the checkout-config subcommand");
+        };
+        let CheckoutConfigCmd::SetPostClone { command, .. } = command else {
+            panic!("expected set-post-clone");
+        };
+        assert_eq!(command, "-rm -rf /tmp/x");
     }
 
     /// The sweep verb parses under the hidden internal namespace — the

@@ -61,7 +61,7 @@ default-members = [
 # (`PROTOCOL_VERSION`) and refuses at connect. This number is what stands in
 # for that handshake on the browser edge, which has none.
 [workspace.package]
-version = "0.9.0-rc.3"
+version = "0.9.0-rc.3+github-checkouts"
 edition = "2024"
 # cargo-dist reads `repository` to know where to cut releases and expects a
 # homepage in the package metadata. The project has no separate site, so both
@@ -166,7 +166,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 # libsqlite3 — required for the musl-static supervisor artifacts
 # SPEC_impl.md's cross-compilation plan ships (audited there: builds fine
 # for both target triples under cargo-zigbuild).
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled", "hooks"] }
 # Compares a payload-cache generation directory's version against this
 # build's before deleting it recursively (`provisioning/release_payloads.rs`).
 # A hand-rolled comparison got prereleases wrong in both directions — a

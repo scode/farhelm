@@ -186,6 +186,12 @@ pub mod store;
 /// The terminal WebSocket: the browser's end of an attachment.
 mod terminal;
 
+/// `farhelm helm checkout-config`: the stored checkout configuration
+/// (working-copy root, post-clone command), its inheritance resolution,
+/// and the offline CLI that edits it — backed by the never-create,
+/// never-migrate opening mode R1.5 requires.
+pub mod checkout_config;
+
 /// Private local coordination between the token CLI and a serving helm.
 mod token_control;
 pub use token_control::{rotate as rotate_token, show as show_token};
@@ -1805,7 +1811,7 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         // fingerprint. 409 is the standard HTTP reading of "this identifier
         // already means something else"; `error_kind`'s own docs are where
         // the full classification table lives.
-        ErrorKind::Conflict => axum::http::StatusCode::CONFLICT,
+        ErrorKind::Conflict | ErrorKind::CheckoutConflict => axum::http::StatusCode::CONFLICT,
         ErrorKind::Unauthorized => axum::http::StatusCode::UNAUTHORIZED,
         ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
         ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,
