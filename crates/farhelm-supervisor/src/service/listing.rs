@@ -220,7 +220,15 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
         // `transition_many` is ever called.
         let observed = observe_entry(sup, entry, &pane_states).await?;
         if observed.settled_error {
-            cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
+            if sup.may_record() {
+                cleanup_launch_artifacts(
+                    &sup.state_dir,
+                    &sup.store,
+                    &entry.info.id,
+                    entry.generation,
+                )
+                .await;
+            }
             continue;
         }
         if let Some(detail) = observed.sentinel {
@@ -241,12 +249,11 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
                 // Cleanup folded into this successful arm
                 // (item 7), not a separate loop afterward: see
                 // `reload_sessions`'s identical step for the
-                // full lifecycle rationale (both files are
-                // cosmetic once the durable outcome already
-                // says what happened; a failed write must
-                // leave them for the next pass to retry
-                // against, hence gating on `committed` here
-                // rather than on `sentinel_hits` alone).
+                // full lifecycle rationale. The shared helper additionally
+                // preserves accepted-create evidence before unlinking a
+                // generation-zero sentinel. A failed outcome write must
+                // leave the files for another pass, hence gating on the
+                // commit rather than the sentinel observation alone.
                 for entry in &entries {
                     if sentinel_hits.contains_key(&entry.info.id)
                         && matches!(
@@ -254,8 +261,13 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
                             Some(LastOutcome::Error { .. })
                         )
                     {
-                        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation)
-                            .await;
+                        cleanup_launch_artifacts(
+                            &sup.state_dir,
+                            &sup.store,
+                            &entry.info.id,
+                            entry.generation,
+                        )
+                        .await;
                     }
                 }
             }
@@ -280,6 +292,7 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             )
         })
         .collect();
+    let sessions = sup.store.project_checkout_metadata(sessions).await?;
     Ok(ListReply {
         sessions,
         truncated,

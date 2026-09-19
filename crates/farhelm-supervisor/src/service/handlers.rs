@@ -66,8 +66,9 @@ impl CreateAdmission {
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, AgentOutcome, AgentReply, AgentVerb, ControlMsg, ErrorKind, Frame, LaunchHarness,
-    LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot, RestartMode,
-    SessionInfo, TerminalSelector,
+    LaunchSelection, MAX_SESSION_ID_BYTES, ProfileSnapshot as WireProfileSnapshot,
+    ResolvedGithubCheckout, RestartMode, SessionInfo, TerminalSelector,
+    github_checkout::GithubPreviewRequest,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -101,6 +102,47 @@ use tracing::{debug, warn};
 /// impossible and bounds the permanent fingerprint copy, before
 /// `create_session` has touched storage, tmux, or the filesystem.
 pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
+
+/// Validate the fresh destination before resolution can contact a peer or
+/// reserve an intent. The returned encoded size belongs to the same total
+/// create allowance as the launch fields: the original client identity and
+/// accepted preview are durable input too, not free routing metadata.
+///
+/// Per-path and hook limits are independent of that total. Error messages
+/// identify only fields and sizes, since hook bodies may contain credentials.
+fn validate_checkout_fields(checkout: &ResolvedGithubCheckout) -> Result<usize, String> {
+    if checkout.client_identity.is_empty() {
+        return Err("fresh checkout requires a nonempty client request identity".into());
+    }
+    for (field, value) in [
+        ("root", checkout.root.as_str()),
+        ("preview root", checkout.preview.canonical_root.as_str()),
+        ("preview basename", checkout.preview.basename.as_str()),
+        ("preview cwd", checkout.preview.cwd.as_str()),
+    ] {
+        if value.len() > 4096 {
+            return Err(format!(
+                "fresh checkout {field} exceeds the 4096-byte limit"
+            ));
+        }
+    }
+    if checkout
+        .post_clone
+        .as_ref()
+        .is_some_and(|hook| hook.len() > 16 * 1024)
+    {
+        return Err("fresh checkout post-clone command exceeds the 16384-byte limit".into());
+    }
+    let bytes = serde_json::to_vec(checkout)
+        .expect("resolved checkout is always serializable")
+        .len();
+    if bytes > CREATE_FIELD_CAP {
+        return Err(format!(
+            "serialized checkout fields are {bytes} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit"
+        ));
+    }
+    Ok(bytes)
+}
 
 /// Byte cap on `CreateSession`'s `intent_key` (PLAN_M3.md item 6),
 /// enforced alongside `CREATE_FIELD_CAP` before any lookup or write.
@@ -482,6 +524,7 @@ async fn handle_create_session(
     rows: u16,
     intent_key: Option<String>,
     admission: CreateAdmission,
+    restricted_auth: Option<&farhelm_proto::SessionAuth>,
     // Two consumers, and they must see the SAME values: item 6's
     // fingerprint (a retry differing only in an override is a
     // different request and is refused as a key reuse) and item
@@ -492,7 +535,31 @@ async fn handle_create_session(
     source_profile: Option<WireProfileSnapshot>,
     launch: Option<LaunchSelection>,
     resolved_mode: Option<CreateMode>,
+    // The helm-resolved fresh-checkout intent (protocol 22). Passed
+    // through to the create path untouched: validation, fingerprinting,
+    // and allocation all happen below this line (Design C), never in the
+    // dispatcher.
+    github_checkout: Option<ResolvedGithubCheckout>,
 ) {
+    let checkout_bytes = match github_checkout
+        .as_ref()
+        .map(validate_checkout_fields)
+        .transpose()
+    {
+        Ok(bytes) => bytes.unwrap_or(0),
+        Err(message) => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    kind: ErrorKind::InvalidRequest,
+                    message,
+                },
+            )
+            .await;
+            return;
+        }
+    };
     let selector = match create_mode(CreateSelectorFields {
         invocation,
         profile_name,
@@ -520,6 +587,7 @@ async fn handle_create_session(
     if let CreateSelector::Profile { name, id } = &selector {
         let field_len = parent.as_deref().map_or(0, str::len)
             + cwd.len()
+            + checkout_bytes
             + name.as_deref().map_or(0, str::len)
             + id.as_deref().map_or(0, str::len)
             + title.as_deref().map_or(0, str::len);
@@ -558,10 +626,38 @@ async fn handle_create_session(
         .await;
         return;
     }
-    let mode = if let Some(mode) = resolved_mode {
-        Ok(mode)
+    // Profile resolution may contact the helm, so it precedes admission.
+    // Inheritance reads the parent's durable bundle and must instead wait
+    // until its credential and lifecycle are protected by the same guards
+    // that will cover fingerprint construction and the create itself.
+    let mode_before_admission = if let Some(mode) = resolved_mode {
+        Some(Ok(mode))
+    } else if matches!(selector, CreateSelector::Derived) {
+        None
     } else {
-        resolve_create_selector(sup, &admission, selector).await
+        Some(resolve_create_selector(sup, &admission, selector).await)
+    };
+    let guards = match sup
+        .admit_create(intent_key.as_deref(), restricted_auth)
+        .await
+    {
+        Ok(guards) => guards,
+        Err(error) => {
+            send_reply(
+                tx,
+                &ControlMsg::Error {
+                    req_id,
+                    message: format!("{error:#}"),
+                    kind: error_kind(&error),
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    let mode = match mode_before_admission {
+        Some(mode) => mode,
+        None => resolve_create_selector(sup, &admission, CreateSelector::Derived).await,
     };
     let mode = match mode {
         Ok(mode) => mode,
@@ -618,13 +714,26 @@ async fn handle_create_session(
             resume_template.as_ref().map_or(0, Vec::len),
         ),
     };
+    // Fresh fingerprints retain the whole resolved mode, including launch
+    // provenance on raw/profile launches. Charge its serialized form along
+    // with the checkout snapshot; counting only displayed strings would omit
+    // durable fields and JSON escaping. Existing requests keep their original
+    // byte allowance and fingerprint contract.
+    let mode_bytes = if github_checkout.is_some() {
+        serde_json::to_vec(&mode)
+            .expect("create mode is always serializable")
+            .len()
+    } else {
+        mode_bytes
+    };
     let field_len = parent.as_deref().map_or(0, str::len)
         + cwd.len()
         + mode_bytes
+        + checkout_bytes
         + title.as_deref().map_or(0, str::len);
     let refusal = if field_len > CREATE_FIELD_CAP {
         Some(format!(
-            "parent, cwd, invocation or profile, title, and resume template together are \
+            "parent, cwd, launch fields, title, resume template, and checkout fields together are \
              {field_len} bytes, exceeding the {CREATE_FIELD_CAP}-byte limit"
         ))
     } else if template_elements > RESUME_TEMPLATE_ELEMENT_CAP {
@@ -653,23 +762,33 @@ async fn handle_create_session(
     }
     // The fingerprint binds the resolved bundle. A profile edit between
     // retries therefore changes the fingerprint instead of replaying a
-    // launch shaped by stale catalog data.
+    // launch shaped by stale catalog data. A fresh-checkout create binds
+    // the helm's resolved checkout intent beside it (R1.4's versioned
+    // discriminant; the frozen encodings are untouched).
     let idempotency = intent_key.map(|intent_key| IntentClaim {
         intent_key,
-        fingerprint: create_fingerprint(parent.as_deref(), &cwd, &mode, title.as_deref()),
+        fingerprint: create_fingerprint(
+            github_checkout.as_ref(),
+            parent.as_deref(),
+            &cwd,
+            &mode,
+            title.as_deref(),
+        ),
         dedup_scope: admission.dedup_scope(),
     });
     match sup
-        .create_session(
+        .create_session_admitted(
             CreateInputs {
                 cwd: &cwd,
                 parent,
+                github_checkout,
                 mode,
                 title,
                 cols,
                 rows,
             },
             idempotency,
+            guards,
         )
         .await
     {
@@ -731,8 +850,9 @@ async fn session_info_now(
         None => HashMap::new(),
     };
     let observed = observe_entry(sup, entry, &pane_states).await?;
-    if observed.settled_error {
-        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
+    if observed.settled_error && sup.may_record() {
+        cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
+            .await;
     }
     if let Some(transition) = observed.transition {
         // One entry's transition through the same batching API the
@@ -757,19 +877,20 @@ async fn session_info_now(
         if let Some(outcome) = committed {
             *entry.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
         }
-        // Both files are cosmetic once the durable outcome says what
-        // happened, and a write that did NOT land must leave them for a
-        // later pass to retry against — hence gating on what committed
-        // rather than on the sentinel find alone.
+        // Outcome durability precedes cleanup, whose shared helper also
+        // preserves the sentinel's accepted-create evidence. A failed write
+        // must leave both files for another pass.
         if observed.sentinel.is_some() && matches!(committed, Some(LastOutcome::Error { .. })) {
-            cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation).await;
+            cleanup_launch_artifacts(&sup.state_dir, &sup.store, &entry.info.id, entry.generation)
+                .await;
         }
     }
-    Ok(entry_info(
+    sup.with_checkout_metadata(entry_info(
         entry,
         &pane_states,
         observed.sentinel.as_deref(),
     ))
+    .await
 }
 
 /// Spawned onto its own task rather than awaited inline: this
@@ -1136,18 +1257,18 @@ async fn handle_stop_session(
                 .await;
                 return;
             }
-            // Sentinel lifecycle: if the classification just
-            // recorded WAS a `SentinelError` and it committed, this
-            // stop is the moment that classification became durable
-            // — clean up both files right away rather than waiting
-            // for a later list or reload to notice (item 4/25 of
-            // the review-swarm fix batch; see
-            // `cleanup_launch_artifacts`'s own docs).
-            if matches!(
-                &*entry.outcome.lock().expect("outcome mutex poisoned"),
-                LastOutcome::Error { .. }
-            ) {
-                cleanup_launch_artifacts(&sup.state_dir, &session_id, entry.generation).await;
+            // A durable Error can clean up its artifacts now, including
+            // residue from an earlier failed settlement. `record` returns
+            // Ok without writing when recording is disabled, so its result
+            // alone cannot authorize cleanup's reservation write or unlink.
+            if sup.may_record()
+                && matches!(
+                    &*entry.outcome.lock().expect("outcome mutex poisoned"),
+                    LastOutcome::Error { .. }
+                )
+            {
+                cleanup_launch_artifacts(&sup.state_dir, &sup.store, &session_id, entry.generation)
+                    .await;
             }
             // The reap still runs with no live pid to walk from:
             // SPEC.md assigns reaping a PAST run's leftover
@@ -1260,6 +1381,20 @@ async fn handle_delete_session(
             .acquire_owned()
             .await
             .expect("admission semaphore is never closed");
+        // Directory admission (R1.1): taken in this OUTER owned mutation
+        // BEFORE the lifecycle claim, and held across the whole teardown.
+        // Lock order is agent fence → admission permit → directory
+        // admission → lifecycle claim, matching every create's intent →
+        // directory → lifecycle sequence; `teardown_session` itself never
+        // acquires the mutex (it would order lifecycle → directory and
+        // cycle against a restricted create). Holding it across the slow
+        // sweep is deliberate: the last-reference archival decision and
+        // the final membership-removing transaction must see the same
+        // world, and a create admitted in between could bind a membership
+        // after the reference count said zero.
+        let _directory_admission = Arc::clone(&mutation_sup.working_copy_operations)
+            .lock_owned()
+            .await;
         let outcome = async {
             let _lifecycle = mutation_sup.lifecycle_locks.claim(&mutation_id).await;
             let entry = mutation_sup
@@ -1275,7 +1410,7 @@ async fn handle_delete_session(
                     )
                 })?;
             mutation_sup
-                .teardown_session(&entry, &mutation_id)
+                .teardown_session(&entry, &mutation_id, _directory_admission)
                 .await
                 .map_err(|error| {
                 let message = match error {
@@ -2733,27 +2868,16 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             launch,
             github_checkout,
         } => {
-            // The very first thing create handling does — ahead of selector
-            // resolution, validation, locks, and every side effect. The
-            // fresh-checkout backend does not exist yet (protocol 22's
-            // plumbing slice), and accepting the payload now would mean
-            // dropping the checkout intent while reporting an ordinary
-            // create; an explicit refusal leaves nothing to reconstruct.
-            if github_checkout.is_some() {
-                send_reply(
-                    ctx.tx,
-                    &ControlMsg::Error {
-                        req_id,
-                        message: "fresh GitHub checkouts are not supported yet: the checkout \
-                                  backend arrives in a later unit, so this create was refused \
-                                  and nothing was launched"
-                            .to_string(),
-                        kind: ErrorKind::InvalidRequest,
-                    },
-                )
-                .await;
-                return;
-            }
+            // The fresh-checkout payload flows straight through to the
+            // create path (Design C): the supervisor validates the
+            // helm-resolved intent fail-closed and allocates the checkout
+            // atomically before the launch. No refusal here any more —
+            // this arm refused only while the backend did not exist, and
+            // a refusal that dropped the checkout intent while reporting
+            // an ordinary create would be a lie about what was launched.
+            // (REST-level requests whose repo text does not parse are
+            // refused by the HELM, which owns raw repo text; the
+            // supervisor sees only resolved payloads.)
             handle_create_session(
                 sup,
                 ctx.tx,
@@ -2769,11 +2893,13 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 rows,
                 intent_key,
                 CreateAdmission::Interactive,
+                None,
                 agent_kind,
                 resume_template,
                 source_profile,
                 launch,
                 None,
+                github_checkout,
             )
             .await
         }
@@ -2789,49 +2915,111 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             debug!(%cwd, "received directory browse request");
             handle_browse_directory(sup, ctx.tx, ctx.tasks, req_id, cwd).await
         }
-        // The GitHub-checkout requests are helm→supervisor vocabulary
-        // whose backend does not exist yet (protocol 22's plumbing slice).
-        // They get REAL refusals rather than the catch-all below — a helm
-        // that sends one is waiting on a correlated reply, and the
-        // catch-all logs a line and sends nothing. No filesystem, database,
-        // or process side effect of any kind happens on this path.
-        ControlMsg::GithubCheckoutPreview { req_id, .. } => {
-            send_reply(
-                ctx.tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "GitHub checkout previews are not supported yet: the checkout \
-                              backend arrives in a later unit"
-                        .to_string(),
-                    kind: ErrorKind::InvalidRequest,
+        // The GitHub-checkout preview: the supervisor's half of the
+        // three-way preview contract. The HELM resolves its configuration
+        // (root + revision) and supplies both in the request; this side
+        // expands `~` against ITS OWN captured home, canonicalizes, proves
+        // the root is a real usable directory, runs the bounded occupancy
+        // scan, and proposes the deterministic name. NOTHING is created:
+        // preview is a precondition, not a reservation. The claim context
+        // in the reply is a placeholder the HELM overwrites with its
+        // authoritative (host id, incarnation) before the browser sees it —
+        // the incarnation is a helm-side fact this process cannot know.
+        ControlMsg::GithubCheckoutPreview {
+            req_id,
+            request:
+                GithubPreviewRequest {
+                    repo,
+                    title,
+                    root,
+                    config_revision,
+                    ..
                 },
+        } => {
+            let reply = Supervisor::github_checkout_preview(
+                sup,
+                &repo,
+                title.as_deref(),
+                root,
+                config_revision,
             )
             .await;
+            match reply {
+                Ok(preview) => {
+                    send_reply(
+                        ctx.tx,
+                        &ControlMsg::GithubCheckoutPreviewed { req_id, preview },
+                    )
+                    .await
+                }
+                Err(error) => {
+                    let message = format!("{error:#}");
+                    let kind = error
+                        .downcast_ref::<RequestError>()
+                        .map(|e| e.kind)
+                        .unwrap_or(ErrorKind::InvalidRequest);
+                    send_reply(
+                        ctx.tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message,
+                            kind,
+                        },
+                    )
+                    .await;
+                }
+            }
         }
-        ControlMsg::GithubRepoSearch { req_id, .. } => {
-            send_reply(
-                ctx.tx,
-                &ControlMsg::Error {
+        ControlMsg::ReconcileGithubCheckout {
+            req_id,
+            intent_key,
+            client_identity,
+            cols,
+            rows,
+        } => {
+            let reply = match sup
+                .reconcile_github_checkout(intent_key, &client_identity, cols, rows)
+                .await
+            {
+                Ok(session) => ControlMsg::GithubCheckoutReconciled { req_id, session },
+                Err(error) => ControlMsg::Error {
                     req_id,
-                    message: "GitHub repository completion is not supported yet: the checkout \
-                              backend arrives in a later unit"
-                        .to_string(),
-                    kind: ErrorKind::InvalidRequest,
+                    kind: error
+                        .downcast_ref::<RequestError>()
+                        .map(|e| e.kind)
+                        .unwrap_or(ErrorKind::Internal),
+                    message: format!("{error:#}"),
                 },
-            )
-            .await;
+            };
+            send_reply(ctx.tx, &reply).await;
         }
-        ControlMsg::ReconcileGithubCheckout { req_id, .. } => {
-            send_reply(
-                ctx.tx,
-                &ControlMsg::Error {
-                    req_id,
-                    message: "GitHub checkout reconciliation is not supported yet: the checkout \
-                              backend arrives in a later unit"
-                        .to_string(),
-                    kind: ErrorKind::InvalidRequest,
-                },
-            )
+        ControlMsg::GithubRepoSearch {
+            req_id,
+            root,
+            query,
+            ..
+        } => {
+            // Git can consume the full discovery deadline. Keep this work in
+            // the connection's tracked task set, with shared handler admission
+            // and the scanner's separate two-child budget. Never hold directory
+            // admission across inspection subprocesses.
+            let sup2 = Arc::clone(sup);
+            let tx = ctx.tx.clone();
+            spawn_admitted(&sup.admission, ctx.tasks, async move {
+                let reply = match sup2.github_repo_search(root.as_deref(), &query).await {
+                    Ok(result) => ControlMsg::GithubRepoResults {
+                        req_id,
+                        repos: result.repos,
+                        truncated: result.truncated,
+                    },
+                    Err(error) => ControlMsg::Error {
+                        req_id,
+                        kind: error_kind(&error),
+                        message: format!("{error:#}"),
+                    },
+                };
+                send_reply(&tx, &reply).await;
+            })
             .await;
         }
         ControlMsg::StopSession { req_id, session_id } => {
@@ -3045,7 +3233,7 @@ pub(crate) async fn handle_restricted_control(
             // create handling: a fresh-checkout payload is helm-supplied
             // from helm-side configuration (checkout root, post-clone hook)
             // that a spawned session must never see or influence, so no
-            // restricted path can carry it under any credential. The two
+            // restricted path can carry it under any credential. The three
             // new GitHub-checkout requests never reach this arm at all —
             // they are off the restricted allowlist and fall to the
             // catch-all below — but a create carrying the payload is ON
@@ -3056,8 +3244,7 @@ pub(crate) async fn handle_restricted_control(
                     &ControlMsg::Error {
                         req_id,
                         message: "fresh GitHub checkouts are not available to \
-                                  session-authenticated creates: the payload is helm-supplied, \
-                                  and the checkout backend arrives in a later unit"
+                                  session-authenticated creates: the payload is helm-supplied"
                             .to_string(),
                         kind: ErrorKind::Unauthorized,
                     },
@@ -3174,50 +3361,9 @@ pub(crate) async fn handle_restricted_control(
             } else {
                 None
             };
-            // The first check above prevents an unauthenticated peer from
-            // reaching the helm. The hello check admits the connection, but
-            // credentials can be revoked after hello; this second check
-            // authorizes this create at the lifecycle boundary. Holding the
-            // parent's claim across it and creation serializes both with
-            // deletion, so an authenticated peer cannot outlive the session
-            // whose authority it is using. The profile round trip stays
-            // outside the claim because it may take several seconds.
-            let _parent_lifecycle = sup.lifecycle_locks.claim(&auth.session_id).await;
-            match sup
-                .store
-                .authenticates_session(&auth.session_id, &auth.token)
-                .await
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    send_reply(
-                        tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message:
-                                "the session credential is invalid or its session no longer exists"
-                                    .to_string(),
-                            kind: ErrorKind::Unauthorized,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-                Err(error) => {
-                    send_reply(
-                        tx,
-                        &ControlMsg::Error {
-                            req_id,
-                            message: format!(
-                                "could not validate the session credential: {error:#}"
-                            ),
-                            kind: ErrorKind::Internal,
-                        },
-                    )
-                    .await;
-                    return;
-                }
-            }
+            // The shared handler revalidates this credential after intent,
+            // directory and parent-lifecycle admission. No inherited field
+            // or fingerprint is resolved before that protected check.
             // A session may ask the helm to resolve a name, but it may not
             // assert that an arbitrary invocation came from a trusted
             // profile. Only the full-authority helm and this supervisor's
@@ -3269,11 +3415,16 @@ pub(crate) async fn handle_restricted_control(
                 CreateAdmission::Spawn {
                     asking_session: auth.session_id.clone(),
                 },
+                Some(auth),
                 agent_kind,
                 resume_template,
                 source_profile,
                 launch,
                 resolved_mode,
+                // Unreachable as `Some` — the arm above refuses a
+                // restricted create that carries the payload before this
+                // call is reached.
+                None,
             )
             .await;
         }
@@ -4413,9 +4564,17 @@ mod tests {
         )
         .await;
         create_waiting.notified().await;
+        // R1.1: the parent lifecycle claim is NOT held at intent-lock
+        // time. It is taken in `admit_create` AFTER directory
+        // admission, so holding it here would cycle against a concurrent
+        // Delete/Restart that holds directory admission and wants the
+        // parent's lifecycle claim. The credential pre-check (without the
+        // claim) still gates entry; the definitive serialization happens
+        // in `admit_create`, before inherited resolution and fingerprinting.
         assert!(
-            sup.lifecycle_locks.claimed_for_test(&auth.session_id),
-            "the parent claim must cover the credential and create path"
+            !sup.lifecycle_locks.claimed_for_test(&auth.session_id),
+            "the parent claim must NOT be held at intent-lock time (R1.1: \
+             intent → directory admission → parent lifecycle)"
         );
         drop(intent);
         create.await.expect("create task must not panic");
@@ -6313,24 +6472,11 @@ mod tests {
         assert_eq!(sup.store.reservation("forged-key").await.unwrap(), None);
     }
 
-    /// The GitHub-checkout vocabulary is refused on every path it must not
-    /// travel while the backend does not exist yet (protocol 22's plumbing
-    /// slice), and each refusal leaves nothing behind.
-    ///
-    /// Three shapes, three doors: the two request variants are off the
-    /// restricted allowlist (the catch-all's `Unauthorized`) and get
-    /// explicit "not supported yet" errors on an ordinary helm connection
-    /// (a correlated `InvalidRequest`, never the silent catch-all), and a
-    /// create carrying the resolved payload is cut at the very top of
-    /// create handling on BOTH paths — before the restricted path's
-    /// credential check and before any selector validation, lock, or
-    /// durable write on the ordinary one. The store-empty assertions are
-    /// the "no other effect" half: a refused request must be
-    /// indistinguishable from one never sent. Lookup-only reconciliation is
-    /// also refused on both paths until durable checkout recovery exists;
-    /// recognizing its request ID must not leave callers waiting forever.
+    /// Restricted callers cannot preview, discover, reconcile or request fresh
+    /// checkouts. Full-authority requests still need configured roots and valid
+    /// create inputs; those local refusals must leave no owned checkout behind.
     #[farhelm_testtrace::test]
-    async fn github_checkout_requests_are_refused_on_both_dispatch_paths() {
+    async fn github_checkout_dispatch_paths_preserve_authority_and_require_configuration() {
         use farhelm_proto::{
             CheckoutPreviewBinding, ClaimContext, GithubPreviewRequest, ResolvedGithubCheckout,
         };
@@ -6347,11 +6493,46 @@ mod tests {
             expected_incarnation: None,
             repo: "acme/bar".to_string(),
             title: None,
-            root: Some("~/checkouts".into()),
-            config_revision: Some(1),
+            // The preview backend exists in unit 2; the restricted path
+            // still refuses the whole variant off-list, so the resolved
+            // fields here are irrelevant to the restricted assertions.
+            root: None,
+            config_revision: None,
         };
 
-        // Restricted path: both request variants are off-list refusals.
+        // Restricted peers cannot use lookup to discover or recover another
+        // caller's intent, even when the supplied key is unknown.
+        handle_restricted_control(
+            &sup,
+            ControlMsg::ReconcileGithubCheckout {
+                req_id: 60,
+                intent_key: "unknown-checkout-key".into(),
+                client_identity: "fixture-request".into(),
+                cols: 80,
+                rows: 24,
+            },
+            &tx,
+            &auth,
+        )
+        .await;
+        let reply: ControlMsg =
+            serde_json::from_slice(&rx.recv().await.expect("reconciliation refusal").body).unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 60,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+        assert!(
+            sup.store
+                .reservation("unknown-checkout-key")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
         handle_restricted_control(
             &sup,
             ControlMsg::GithubCheckoutPreview {
@@ -6377,12 +6558,12 @@ mod tests {
             &sup,
             ControlMsg::GithubRepoSearch {
                 req_id: 62,
+                root: None,
                 claim: ClaimContext {
                     host: "local".to_string(),
                     incarnation: 1,
                 },
                 query: "bar".to_string(),
-                root: Some("~/checkouts".into()),
             },
             &tx,
             &auth,
@@ -6421,7 +6602,7 @@ mod tests {
                 source_profile: None,
                 launch: None,
                 github_checkout: Some(ResolvedGithubCheckout {
-                    client_identity: "restricted-fixture".into(),
+                    client_identity: "fixture-request".into(),
                     repo: repo.clone(),
                     root: "/tmp/checkouts".to_string(),
                     post_clone: None,
@@ -6473,8 +6654,7 @@ mod tests {
         )
         .await;
         let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("ordinary preview refusal").body)
-                .unwrap();
+            serde_json::from_slice(&rx.recv().await.expect("ordinary preview reply").body).unwrap();
         let ControlMsg::Error {
             req_id, message, ..
         } = reply
@@ -6482,18 +6662,22 @@ mod tests {
             panic!("expected an error reply");
         };
         assert_eq!(req_id, 64);
-        assert!(message.contains("not supported yet"));
+        // The preview backend exists in unit 2; THIS request carries no
+        // resolved root, so the refusal is the actionable
+        // root-not-configured message, not the old not-supported-yet one.
+        assert!(message.contains("checkout root"));
+        assert!(!message.contains("not supported yet"));
 
         handle_control(
             &sup,
             ControlMsg::GithubRepoSearch {
                 req_id: 65,
+                root: None,
                 claim: ClaimContext {
                     host: "local".to_string(),
                     incarnation: 1,
                 },
                 query: "bar".to_string(),
-                root: Some("~/checkouts".into()),
             },
             ConnectionCtx {
                 tx: &tx,
@@ -6516,12 +6700,16 @@ mod tests {
             }
         ));
 
+        let missing_root = state.path().join("missing-checkout-root");
+        assert!(!missing_root.exists());
         handle_control(
             &sup,
             ControlMsg::CreateSession {
                 req_id: 66,
                 parent: None,
-                cwd: state.path().to_string_lossy().into_owned(),
+                // Fresh creates must NOT choose a cwd: the supervisor
+                // allocates the directory under the configured root.
+                cwd: String::new(),
                 invocation: Some("claude".to_string()),
                 profile_name: None,
                 profile_id: None,
@@ -6535,14 +6723,14 @@ mod tests {
                 source_profile: None,
                 launch: None,
                 github_checkout: Some(ResolvedGithubCheckout {
-                    client_identity: "ordinary-fixture".into(),
+                    client_identity: "fixture-request".into(),
                     repo: repo.clone(),
-                    root: "/tmp/checkouts".to_string(),
+                    root: missing_root.to_string_lossy().into_owned(),
                     post_clone: None,
                     preview: CheckoutPreviewBinding {
-                        canonical_root: "/tmp/checkouts".to_string(),
+                        canonical_root: missing_root.to_string_lossy().into_owned(),
                         basename: "bar".to_string(),
-                        cwd: "/tmp/checkouts/bar".to_string(),
+                        cwd: missing_root.join("bar").to_string_lossy().into_owned(),
                         config_revision: 1,
                     },
                 }),
@@ -6557,86 +6745,46 @@ mod tests {
         )
         .await;
         let reply: ControlMsg =
-            serde_json::from_slice(&rx.recv().await.expect("ordinary payload refusal").body)
+            serde_json::from_slice(&rx.recv().await.expect("ordinary payload handling").body)
                 .unwrap();
+        // Unit 2 enabled the real create path for fresh checkouts: the
+        // payload is no longer refused as unsupported. It proceeds through
+        // the ordered create admission into validation, which must FAIL
+        // CLOSED on this fixture's nonexistent root before anything is
+        // launched or durably claimed. (The real end-to-end create is
+        // covered by the C1/C2 tests in service::core.)
         let ControlMsg::Error { message, .. } = reply else {
             panic!("expected an error reply");
         };
-        assert!(message.contains("not supported yet"));
-        handle_restricted_control(
-            &sup,
-            ControlMsg::ReconcileGithubCheckout {
-                req_id: 67,
-                intent_key: "ordinary-checkout-key".into(),
-                client_identity: "ordinary-fixture".into(),
-                cols: 80,
-                rows: 24,
-            },
-            &tx,
-            &auth,
-        )
-        .await;
-        let reply: ControlMsg = serde_json::from_slice(
-            &rx.recv()
-                .await
-                .expect("restricted reconciliation refusal")
-                .body,
-        )
-        .unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 67,
-                kind: ErrorKind::Unauthorized,
-                ..
-            }
-        ));
-
-        handle_control(
-            &sup,
-            ControlMsg::ReconcileGithubCheckout {
-                req_id: 68,
-                intent_key: "ordinary-checkout-key".into(),
-                client_identity: "ordinary-fixture".into(),
-                cols: 80,
-                rows: 24,
-            },
-            ConnectionCtx {
-                tx: &tx,
-                priority: &tx,
-                input_routes: &mut input_routes,
-                upload_routes: &mut no_uploads(),
-                tasks: &mut tasks,
-            },
-        )
-        .await;
-        let reply: ControlMsg = serde_json::from_slice(
-            &rx.recv()
-                .await
-                .expect("ordinary reconciliation refusal")
-                .body,
-        )
-        .unwrap();
-        assert!(matches!(
-            reply,
-            ControlMsg::Error {
-                req_id: 68,
-                kind: ErrorKind::InvalidRequest,
-                ..
-            }
-        ));
+        assert!(
+            !message.contains("not supported yet"),
+            "the backend exists now; failures come from validation: {message}"
+        );
         assert!(
             sup.sessions.lock().await.is_empty(),
-            "nothing may be launched"
+            "validation failure must launch nothing"
         );
+        // The failed create settles its intent reservation as Failed —
+        // durably, under the typed fresh fingerprint encoding —
+        // so a same-key retry replays the recorded failure instead of
+        // retrying the checkout (R1.2's settled-failure contract).
+        let reservation = sup
+            .store
+            .reservation("ordinary-checkout-key")
+            .await
+            .unwrap()
+            .expect("a validation-failed fresh create settles its reservation");
+        let fingerprint: serde_json::Value =
+            serde_json::from_str(&reservation.fingerprint).unwrap();
+        assert_eq!(fingerprint["kind"], "github_checkout_v3");
         assert_eq!(
-            sup.store
-                .reservation("ordinary-checkout-key")
-                .await
-                .unwrap(),
-            None,
-            "the refusal must precede intent resolution and every durable write"
+            fingerprint["checkout"]["client_identity"],
+            "fixture-request"
         );
+        assert!(matches!(
+            reservation.outcome,
+            crate::store::ReservationOutcome::Failed { .. }
+        ));
     }
 
     /// Deleting a parent revokes every already-open restricted connection.
@@ -6693,6 +6841,308 @@ mod tests {
             }
         ));
         assert_eq!(sup.store.reservation("revoked-key").await.unwrap(), None);
+    }
+
+    /// An already authenticated create can lose authority while queued behind
+    /// its parent's lifecycle operation. Observe the actual Pending lock
+    /// acquisition before removing the parent, so an edge-only auth check
+    /// would incorrectly proceed to inherited resolution instead of refusing.
+    #[farhelm_testtrace::test]
+    async fn restricted_create_revalidates_a_parent_revoked_while_waiting() {
+        let state = StateDir::new();
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let signal = Arc::clone(&waiting);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_parent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let auth = authenticated_parent(&sup, state.path(), "waiting-parent").await;
+        assert!(
+            sup.store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+                .unwrap()
+        );
+        let parent_guard = sup.lifecycle_locks.claim(&auth.session_id).await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let request = ControlMsg::CreateSession {
+            req_id: 44,
+            parent: None,
+            cwd: state.path().to_string_lossy().into_owned(),
+            invocation: None,
+            source_profile: None,
+            profile_name: None,
+            profile_id: None,
+            inherit_agent: true,
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("waiting-revoked-key".into()),
+            agent_kind: None,
+            resume_template: None,
+            launch: None,
+            github_checkout: None,
+        };
+        // Keep the request future owned by this test: a timeout drops it,
+        // rather than detaching a task that might later create a session.
+        let create = handle_restricted_control(&sup, request, &tx, &auth);
+        tokio::pin!(create);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::select! {
+                _ = &mut create => panic!("create completed while parent admission was held"),
+                _ = waiting.notified() => {},
+            }
+        })
+        .await
+        .expect("create must reach Pending parent acquisition");
+        assert!(
+            sup.store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+                .unwrap()
+        );
+        sup.store
+            .delete_session_settling_reservations(&auth.session_id)
+            .await
+            .unwrap();
+        assert!(
+            !sup.store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+                .unwrap()
+        );
+        drop(parent_guard);
+        tokio::time::timeout(std::time::Duration::from_secs(5), &mut create)
+            .await
+            .expect("revoked create must finish after release");
+        let reply: ControlMsg = serde_json::from_slice(&rx.recv().await.unwrap().body).unwrap();
+        assert!(matches!(
+            reply,
+            ControlMsg::Error {
+                req_id: 44,
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+        assert!(
+            sup.store
+                .reservation("waiting-revoked-key")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(sup.sessions.lock().await.is_empty());
+    }
+
+    /// Delete wins directory admission before a restricted inherited create.
+    /// The create must wait without holding its parent's lifecycle claim,
+    /// then reject the credential revoked by the completed Delete. This is a
+    /// real handler pair: a reversed lock order deadlocks instead of yielding
+    /// the correlated replies and empty durable state asserted below.
+    #[farhelm_testtrace::test]
+    async fn restricted_inherited_create_waits_for_parent_delete_then_refuses() {
+        restricted_create_after_parent_mutation(false).await;
+    }
+
+    /// Restart must finish its protected metadata update before an inherited
+    /// create resolves the parent bundle. Both operations must complete with
+    /// the credential retained and the child's actual agent metadata matching
+    /// the restarted parent, despite contending for both admission locks.
+    #[farhelm_testtrace::test]
+    async fn restricted_inherited_create_waits_for_parent_restart_then_inherits() {
+        restricted_create_after_parent_mutation(true).await;
+    }
+
+    /// Park a real parent mutation after directory admission but before its
+    /// lifecycle claim, then observe the inherited create's actual Pending
+    /// directory acquisition. The manual guard controls only ordering; the
+    /// production handlers perform every mutation and produce both replies.
+    async fn restricted_create_after_parent_mutation(restart: bool) {
+        let state = StateDir::new();
+        let waiting = Arc::new(tokio::sync::Notify::new());
+        let signal = Arc::clone(&waiting);
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .unwrap();
+        let auth = reporting_session(&sup, "mutation-parent").await;
+        // The report-only fixture deliberately uses a minimal generic view.
+        // Restart republishes that view, while inheritance reads the durable
+        // row, so this lifecycle fixture must establish their real-world parity.
+        let row = sup.store.session(&auth.session_id).await.unwrap().unwrap();
+        let mut entry = entry_with(None, row.outcome.clone());
+        entry.info.id = row.id.clone();
+        entry.info.cwd = row.cwd.clone();
+        entry.info.canonical_cwd = row.canonical_cwd.clone();
+        entry.info.invocation = row.invocation.clone();
+        entry.info.resume_template = row.resume_template.clone();
+        entry.info.launch = row.launch.clone();
+        entry.snapshot = IntegrationSnapshot {
+            kind: row.agent_kind,
+            resume_template: row.resume_template.clone(),
+        };
+        sup.sessions
+            .lock()
+            .await
+            .insert(row.id.clone(), Arc::new(entry));
+        {
+            let sessions = sup.sessions.lock().await;
+            let entry = sessions.get(&row.id).unwrap();
+            assert_eq!(entry.info.invocation, row.invocation);
+            assert_eq!(entry.info.resume_template, row.resume_template);
+            assert_eq!(entry.snapshot.kind, row.agent_kind);
+        }
+        assert!(
+            sup.store
+                .authenticates_session(&auth.session_id, &auth.token)
+                .await
+                .unwrap()
+        );
+        let parent_guard = sup.lifecycle_locks.claim(&auth.session_id).await;
+        let (mut mutation_tasks, mut mutation_rx) = dispatch_for_test(
+            &sup,
+            if restart {
+                ControlMsg::RestartSession {
+                    req_id: 45,
+                    session_id: auth.session_id.clone(),
+                    mode: RestartMode::Fresh,
+                    stop_if_running: true,
+                }
+            } else {
+                ControlMsg::DeleteSession {
+                    req_id: 45,
+                    session_id: auth.session_id.clone(),
+                }
+            },
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            sup.lifecycle_locks
+                .claims_reached_for_test(&auth.session_id, 2),
+        )
+        .await
+        .expect("parent mutation must reach its lifecycle acquisition");
+        assert!(
+            sup.working_copy_operations.try_lock().is_err(),
+            "parent mutation owns directory admission"
+        );
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let request = ControlMsg::CreateSession {
+            req_id: 46,
+            parent: Some(auth.session_id.clone()),
+            cwd: state.path().to_string_lossy().into_owned(),
+            invocation: None,
+            source_profile: None,
+            profile_name: None,
+            profile_id: None,
+            inherit_agent: true,
+            title: None,
+            cols: 80,
+            rows: 24,
+            intent_key: Some("mutation-wins-key".into()),
+            agent_kind: None,
+            resume_template: None,
+            launch: None,
+            github_checkout: None,
+        };
+        let create = handle_restricted_control(&sup, request, &tx, &auth);
+        tokio::pin!(create);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                _ = &mut create => panic!("create must wait behind the parent mutation"),
+                _ = waiting.notified() => {},
+            }
+        })
+        .await
+        .expect("create must observe Pending directory admission");
+        assert!(sup.store.session(&auth.session_id).await.unwrap().is_some());
+        drop(parent_guard);
+        // Poll the create while joining the real owned parent mutation. Neither
+        // operation may depend on the other's reply being consumed to release
+        // admission; both queues have capacity for their one correlated reply.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(&mut create, async {
+                while let Some(result) = mutation_tasks.join_next().await {
+                    result.expect("parent mutation task");
+                }
+            });
+        })
+        .await
+        .expect("parent mutation and restricted create must both finish");
+        let mutation: ControlMsg =
+            serde_json::from_slice(&mutation_rx.recv().await.unwrap().body).unwrap();
+        let reply: ControlMsg = serde_json::from_slice(&rx.recv().await.unwrap().body).unwrap();
+        if restart {
+            let ControlMsg::SessionRestarted {
+                req_id: 45,
+                session: parent,
+            } = mutation
+            else {
+                panic!("expected restarted parent, got {mutation:?}");
+            };
+            let ControlMsg::SessionCreated {
+                req_id: 46,
+                session: child,
+            } = reply
+            else {
+                panic!("expected inherited child, got {reply:?}");
+            };
+            assert_eq!(child.parent.as_deref(), Some(auth.session_id.as_str()));
+            assert_eq!(child.invocation, parent.invocation);
+            let child_row = sup.store.session(&child.id).await.unwrap().unwrap();
+            let parent_row = sup.store.session(&parent.id).await.unwrap().unwrap();
+            assert_eq!(child_row.agent_kind, parent_row.agent_kind);
+            assert_eq!(child.resume_template, parent.resume_template);
+            assert_eq!(child.launch, parent.launch);
+            assert!(
+                sup.store
+                    .authenticates_session(&auth.session_id, &auth.token)
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(sup.store.load_all().await.unwrap().len(), 2);
+            return;
+        }
+        assert!(
+            matches!(mutation, ControlMsg::SessionDeleted { req_id: 45 }),
+            "{mutation:?}"
+        );
+        assert!(
+            matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 46,
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ),
+            "{reply:?}"
+        );
+        assert!(sup.store.load_all().await.unwrap().is_empty());
+        assert!(
+            sup.store
+                .reservation("mutation-wins-key")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(sup.sessions.lock().await.is_empty());
     }
 
     /// Seed a session that is able to report its own conversation
@@ -7655,6 +8105,241 @@ mod tests {
             message.contains("no-such-session"),
             "the refusal names what was not found: {message}"
         );
+    }
+
+    /// Real local Git origins travel through the dispatcher as canonical repo
+    /// identities. Holding directory admission proves this observation path
+    /// does not serialize behind allocation/deletion, and joining its tracked
+    /// handler proves the test leaves no unobserved scan task running.
+    #[farhelm_testtrace::test]
+    async fn github_repository_dispatch_scans_without_directory_admission() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("checkouts");
+        let repo = root.join("local-clone");
+        std::fs::create_dir_all(&repo).unwrap();
+        for args in [
+            vec!["init", "--quiet"],
+            vec![
+                "config",
+                "--local",
+                "remote.origin.url",
+                "git@github.com:Acme/Bar.git",
+            ],
+        ] {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("HOME", home.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert!(repo.join(".git").is_dir());
+        assert!(
+            std::fs::read_to_string(repo.join(".git/config"))
+                .unwrap()
+                .contains("git@github.com:Acme/Bar.git")
+        );
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            super::super::core::SupervisorTimeouts::default(),
+            super::super::core::SupervisorSeams {
+                user_home: Some(home.path().to_path_buf()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let directory_guard = sup.working_copy_operations.lock().await;
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let mut tasks = tokio::task::JoinSet::new();
+        handle_control(
+            &sup,
+            ControlMsg::GithubRepoSearch {
+                req_id: 701,
+                claim: farhelm_proto::ClaimContext {
+                    host: "local".into(),
+                    incarnation: 1,
+                },
+                query: "ACME".into(),
+                root: Some("~/checkouts".into()),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut HashMap::new(),
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tasks,
+            },
+        )
+        .await;
+        let frame = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("discovery must not wait for directory admission")
+            .unwrap();
+        let reply: ControlMsg = serde_json::from_slice(&frame.body).unwrap();
+        assert!(
+            matches!(reply, ControlMsg::GithubRepoResults { req_id: 701, repos, truncated: false }
+            if repos == vec![farhelm_proto::parse_github_repo("acme/bar").unwrap()])
+        );
+        drop(directory_guard);
+        while let Some(result) = tasks.join_next().await {
+            result.unwrap();
+        }
+        assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    }
+
+    /// A small complete checkout payload for byte-accounting tests. Paths
+    /// are inert strings; dispatcher tests replace them with an owned root
+    /// so absence of allocation is observed on a real filesystem.
+    fn checkout_size_fixture() -> ResolvedGithubCheckout {
+        ResolvedGithubCheckout {
+            client_identity: "original-request".into(),
+            repo: farhelm_proto::parse_github_repo("acme/bar").unwrap(),
+            root: "/checkouts".into(),
+            post_clone: None,
+            preview: farhelm_proto::CheckoutPreviewBinding {
+                canonical_root: "/checkouts".into(),
+                basename: "bar-1".into(),
+                cwd: "/checkouts/bar-1".into(),
+                config_revision: 1,
+            },
+        }
+    }
+
+    /// Each path and hook limit is inclusive and independent of the total.
+    /// Multibyte paths establish byte rather than character accounting; hook
+    /// refusal must not disclose command content. Identity escaping must also
+    /// consume budget because the whole snapshot is permanently retained.
+    #[test]
+    fn fresh_checkout_field_limits_cover_paths_hook_and_encoded_identity() {
+        for field in 0..4 {
+            let mut checkout = checkout_size_fixture();
+            let value = match field {
+                0 => &mut checkout.root,
+                1 => &mut checkout.preview.canonical_root,
+                2 => &mut checkout.preview.basename,
+                _ => &mut checkout.preview.cwd,
+            };
+            *value = "é".repeat(2048);
+            assert!(validate_checkout_fields(&checkout).is_ok());
+            let value = match field {
+                0 => &mut checkout.root,
+                1 => &mut checkout.preview.canonical_root,
+                2 => &mut checkout.preview.basename,
+                _ => &mut checkout.preview.cwd,
+            };
+            value.push('x');
+            assert!(
+                validate_checkout_fields(&checkout)
+                    .unwrap_err()
+                    .contains("4096-byte")
+            );
+        }
+        let mut checkout = checkout_size_fixture();
+        checkout.post_clone = Some("x".repeat(16 * 1024));
+        assert!(validate_checkout_fields(&checkout).is_ok());
+        checkout.post_clone.as_mut().unwrap().push('x');
+        assert_eq!(
+            validate_checkout_fields(&checkout).unwrap_err(),
+            "fresh checkout post-clone command exceeds the 16384-byte limit"
+        );
+
+        checkout.post_clone = None;
+        checkout.client_identity = "\"".repeat(CREATE_FIELD_CAP / 2);
+        assert!(checkout.client_identity.len() < CREATE_FIELD_CAP);
+        assert!(
+            validate_checkout_fields(&checkout)
+                .unwrap_err()
+                .contains("65536-byte")
+        );
+        checkout.client_identity.clear();
+        assert!(
+            validate_checkout_fields(&checkout)
+                .unwrap_err()
+                .contains("nonempty")
+        );
+    }
+
+    /// A checkout and a launch that each fit separately must still share one
+    /// allowance. Drive admission with a real empty root and keyed create:
+    /// refusal must precede reservation, allocation and session publication.
+    #[farhelm_testtrace::test]
+    async fn fresh_checkout_total_cap_precedes_reservation_and_allocation() {
+        let state = StateDir::new();
+        let root = tempfile::tempdir().unwrap();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .unwrap();
+        let mut checkout = checkout_size_fixture();
+        checkout.root = root.path().canonicalize().unwrap().to_str().unwrap().into();
+        checkout.preview.canonical_root = checkout.root.clone();
+        checkout.preview.cwd = format!("{}/bar-1", checkout.root);
+        let checkout_bytes = validate_checkout_fields(&checkout).unwrap();
+        let invocation = "x".repeat(CREATE_FIELD_CAP - checkout_bytes + 1);
+        assert!(invocation.len() < CREATE_FIELD_CAP);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert!(
+            sup.store
+                .reservation("oversized-checkout")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        handle_control(
+            &sup,
+            ControlMsg::CreateSession {
+                req_id: 97,
+                parent: None,
+                profile_name: None,
+                profile_id: None,
+                inherit_agent: false,
+                cwd: String::new(),
+                invocation: Some(invocation),
+                source_profile: None,
+                launch: None,
+                title: None,
+                cols: 80,
+                rows: 24,
+                intent_key: Some("oversized-checkout".into()),
+                agent_kind: None,
+                resume_template: None,
+                github_checkout: Some(checkout),
+            },
+            ConnectionCtx {
+                tx: &tx,
+                priority: &tx,
+                input_routes: &mut HashMap::new(),
+                upload_routes: &mut no_uploads(),
+                tasks: &mut tokio::task::JoinSet::new(),
+            },
+        )
+        .await;
+        let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+        assert!(matches!(reply, ControlMsg::Error {
+            req_id: 97, kind: ErrorKind::InvalidRequest, message,
+        } if message.contains("65536-byte limit")));
+        assert!(
+            sup.store
+                .reservation("oversized-checkout")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(sup.sessions.lock().await.is_empty());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
     }
 
     /// The pre-side-effect half of the `CREATE_FIELD_CAP` guard: a request

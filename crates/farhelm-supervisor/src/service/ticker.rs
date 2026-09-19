@@ -1032,8 +1032,15 @@ async fn sample_pass(
                     // the durable error and deleting launch artifacts.
                     // Matching LIST's idempotent cleanup keeps that
                     // credential-bearing residue from waiting for a poll.
-                    cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation)
+                    if sup.may_record() {
+                        cleanup_launch_artifacts(
+                            &sup.state_dir,
+                            &sup.store,
+                            &entry.info.id,
+                            entry.generation,
+                        )
                         .await;
+                    }
                     continue;
                 }
                 if observed.sentinel.is_some() {
@@ -1073,8 +1080,13 @@ async fn sample_pass(
                             Some(LastOutcome::Error { .. })
                         )
                     {
-                        cleanup_launch_artifacts(&sup.state_dir, &entry.info.id, entry.generation)
-                            .await;
+                        cleanup_launch_artifacts(
+                            &sup.state_dir,
+                            &sup.store,
+                            &entry.info.id,
+                            entry.generation,
+                        )
+                        .await;
                     }
                 }
             }
@@ -2531,6 +2543,7 @@ mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    github_checkout: None,
                     cwd: &cwd,
                     parent: None,
                     mode: CreateMode::Raw {
