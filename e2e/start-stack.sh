@@ -130,6 +130,10 @@ work="$state/work"
 # get one, so a future spec selecting any of them lands on a fake too.
 structured_bin="$state/structured-bin"
 structured_home="$state/structured-home"
+# Actual checkout tests map an exact GitHub URL to an owned bare repository.
+# Both the supervisor and its login shells use this private config; the file
+# protocol allowlist makes a missing rewrite fail instead of reaching GitHub.
+checkout_git_config="$state/checkout-git-config"
 # Assigned BEFORE the trap below, not where it is first used. The cleanup
 # expands it, so a signal arriving while it was still unset expanded to
 # `tmux -S /tmux.sock kill-server` — a command aimed at a path outside this
@@ -160,6 +164,7 @@ provisioning_backend="$state/provisioning-backend"
 stack_info="$repo/e2e/.stack-info.json"
 auth_state="$repo/e2e/.auth/storage-state.json"
 mkdir -p "$work" "$remote_state" "$provisioning_backend" "$structured_bin" "$structured_home" || exit 1
+: >"$checkout_git_config" || exit 1
 printf '%s\n' 'farhelm-e2e-provisioning-v1' >"$provisioning_backend/ENABLED" || exit 1
 printf '%s\n' '{}' >"$provisioning_backend/config.json" || exit 1
 : >"$provisioning_backend/events.jsonl" || exit 1
@@ -193,7 +198,11 @@ exec "$bin" internal fake-agent --script claude-record --record-home "$structure
 EOF
   chmod 700 "$structured_bin/$structured_name" || exit 1
 done
-printf '%s\n' "export PATH=$structured_bin:\$PATH" >"$structured_home/.bash_profile" || exit 1
+printf '%s\n' "export PATH=$structured_bin:\$PATH" \
+  'for checkout_git_variable in ${!GIT_@}; do unset "$checkout_git_variable"; done' \
+  "export GIT_CONFIG_GLOBAL=$checkout_git_config" \
+  'export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0' \
+  >"$structured_home/.bash_profile" || exit 1
 bash_shell=$(command -v bash) || exit 1
 [ -n "$bash_shell" ] && [ -x "$bash_shell" ] || exit 1
 
@@ -260,7 +269,9 @@ orphan_watch() {
 orphan_watch 9>&- &
 watcher_pid=$!
 
-HOME="$structured_home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
+HOME="$structured_home" SHELL="$bash_shell" GIT_CONFIG_GLOBAL="$checkout_git_config" \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
+  "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 # A SECOND supervisor, on its own state directory inside this run's
@@ -350,8 +361,10 @@ print(json.dumps({
     "state": sys.argv[4],
     "provisioning_backend": sys.argv[5],
     "remote_boot_id_file": sys.argv[6],
+    "checkout_git_config": sys.argv[7],
+    "structured_home": sys.argv[8],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to

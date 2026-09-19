@@ -4,17 +4,18 @@
 //! registry's (list/probe/provision/update/retarget/remove/adopt/retry) since
 //! PLAN_M7.md item 7 extended the M6 host surface, and the helm-wide profile catalog's
 //! (list/create/update/delete) since PLAN_M6_75.md item 5 did the same —
-//! each exposing every failure — transport, status, or body-read — as a
-//! single displayable `String`. Internally, the shared send funnel keeps a
+//! generally expose failures — transport, status, or body-read — as a
+//! single displayable `String`. Fresh-checkout submission also preserves
+//! whether the server proved the attempt definitely unaccepted: the composer
+//! needs that distinction to retain an ambiguous request's original key and
+//! payload rather than accidentally allocate a second checkout. Internally,
+//! the shared send funnel keeps a
 //! typed distinction just long enough to separate the authentication
 //! middleware's global state transition from an operation's own failure, and
-//! its callers explicitly flatten both variants at the public boundary. That
-//! flattening is deliberate, not laziness:
-//! every caller (`list::ListView`, `list::CreateSessionForm`,
-//! `hosts::HostsPanel`, `session_view::SessionView`) renders the message
-//! directly to the user per SPEC.md's "concrete, actionable errors", so
-//! there is no second consumer that would ever want a structured error to
-//! match on.
+//! ordinary callers flatten both variants at the public boundary. Views render
+//! those messages directly per SPEC.md's "concrete, actionable errors";
+//! fresh-create retry policy consumes its typed outcome separately from the
+//! display text.
 //!
 //! `SessionListBody`/`SessionListing`, `SessionFilter`, `POLL_INTERVAL_MS`,
 //! and `restart_mode_for` live here too, even though none of them performs
@@ -55,6 +56,9 @@
 //! `encode_bytes`, `install_field`, `eval_minted_id`, and the two
 //! failure-text builders) stay private to this module.
 
+use crate::github_checkout::{
+    FreshCreateError, GithubCheckoutRequest, GithubPreview, GithubRepositories,
+};
 use crate::skew;
 use crate::{
     Host, HostId, LaunchEffort, LaunchHarness, LaunchSelection, Profile, RestartOffer, Session, Tab,
@@ -101,6 +105,10 @@ struct SessionListBody {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(crate) struct LaunchHistoryEntry {
     pub(crate) host: HostId,
+    /// Accepted fresh-checkout intent. When present, reuse must request a new
+    /// preview for this repository; `cwd` describes the previous launch only.
+    /// Missing on old replies and on explicit existing-directory launches.
+    pub(crate) github_repo: Option<crate::github_checkout::GithubRepo>,
     /// The accepted destination belongs to this launch row. Older helm
     /// replies may lack it; callers then keep the display spelling separate
     /// instead of consulting mutable folder suggestions.
@@ -134,6 +142,11 @@ pub(crate) struct FolderHistoryEntry {
 pub(crate) struct LaunchHistory {
     pub(crate) launches: Vec<LaunchHistoryEntry>,
     pub(crate) folders: Vec<FolderHistoryEntry>,
+    /// Configuration is observed through the same feed-driven read as history.
+    /// Older responses default to the initial epoch; submit still validates
+    /// the accepted preview against the authoritative helm snapshot.
+    #[serde(default)]
+    pub(crate) checkout_config_revision: i64,
 }
 
 /// One known model the helm accepts for the named structured harness.
@@ -1744,6 +1757,67 @@ fn create_body(
     body
 }
 
+/// Capture one fresh create before dispatch, using the same agent/title shape
+/// as ordinary creates. The returned payload is retained across ambiguous
+/// outcomes; rebuilding it from a later preview would describe a new checkout.
+pub(crate) fn fresh_create_body(
+    agent: CreateAgent<'_>,
+    key: &str,
+    host: HostId,
+    checkout: &GithubCheckoutRequest,
+) -> serde_json::Value {
+    let mut body = create_body(
+        &checkout.preview.cwd,
+        agent,
+        checkout.title.as_deref().unwrap_or_default(),
+        key,
+        Some(host),
+        Some(checkout.preview.incarnation),
+    );
+    body["github_checkout"] = serde_json::json!(checkout);
+    body
+}
+
+/// Dispatch the retained payload for either create or Replace-with. Only an
+/// explicit authenticated outcome marker may classify a refusal as unaccepted;
+/// status 409 alone also describes spent and unresolved accepted intents.
+/// For these keyed requests the marker proves permanent refusal of the exact
+/// original request on its preview's installation, even after a lost reply.
+pub(crate) async fn submit_fresh_create(
+    base: &str,
+    source: Option<&str>,
+    body: &serde_json::Value,
+) -> Result<Session, FreshCreateError> {
+    let (url, payload) = match source {
+        Some(source) => (
+            format!(
+                "{base}/api/sessions/{}/replace",
+                encode_path_segment(source)
+            ),
+            serde_json::json!({"intent_key": body["intent_key"], "with": body}),
+        ),
+        None => (format!("{base}/api/sessions"), body.clone()),
+    };
+    let resp = send(client().post(&url).json(&payload))
+        .await
+        .map_err(FreshCreateError::Unresolved)?;
+    if !resp.status().is_success() {
+        let unaccepted = resp
+            .headers()
+            .get("x-farhelm-create-outcome")
+            .is_some_and(|value| value == "definitely-unaccepted");
+        let text = refusal_text("POST", &url, resp).await;
+        return Err(if unaccepted {
+            FreshCreateError::Unaccepted(text)
+        } else {
+            FreshCreateError::Unresolved(text)
+        });
+    }
+    resp.json::<Session>()
+        .await
+        .map_err(|error| FreshCreateError::Unresolved(error.to_string()))
+}
+
 /// The marker the helm appends to a create refused because the host is no
 /// longer on the connection the create named (`precondition.rs` in the helm).
 const INCARNATION_MARKER: &str = "[farhelm:precondition/incarnation]";
@@ -2658,6 +2732,49 @@ pub(crate) async fn browse_directory(
         .map_err(|error| error.to_string())
 }
 
+/// Ask for an exact fresh destination without allocating it. The caller keeps
+/// the request generation and rechecks the returned installation before use.
+pub(crate) async fn preview_github_checkout(
+    base: &str,
+    host: HostId,
+    incarnation: u64,
+    repo: &str,
+    title: Option<&str>,
+) -> Result<GithubPreview, String> {
+    let url = format!("{base}/api/github-checkout-preview");
+    let resp = send(client().post(&url).json(&serde_json::json!({
+        "host": host, "expected_incarnation": incarnation, "repo": repo, "title": title,
+    })))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("POST", &url, resp).await);
+    }
+    resp.json::<GithubPreview>()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Read recent and locally discovered repos together with incomplete-scan
+/// status. A scan error does not discard usable installation-scoped recents.
+pub(crate) async fn fetch_github_repositories(
+    base: &str,
+    host: HostId,
+    incarnation: u64,
+    query: &str,
+) -> Result<GithubRepositories, String> {
+    let url = format!("{base}/api/github-repositories");
+    let resp = send_read(client().post(&url).json(&serde_json::json!({
+        "host": host, "expected_incarnation": incarnation, "query": query,
+    })))
+    .await?;
+    if !resp.status().is_success() {
+        return Err(read_failure("POST", &url, resp).await);
+    }
+    resp.json::<GithubRepositories>()
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Decode the frozen host-list envelope for the desktop bootstrap and the
 /// ordinary UI client alike. Bootstrap cannot call [`fetch_hosts`] before a
 /// Dioxus runtime exists because the shared send funnel updates UI signals;
@@ -3197,6 +3314,23 @@ pub(crate) fn restart_mode_for(offer: RestartOffer) -> &'static str {
 mod tests {
     use super::*;
 
+    /// Saved fresh launches preserve repository intent independently of their
+    /// old allocation path. Old helm replies still decode as ordinary folders.
+    #[test]
+    fn launch_history_decodes_repository_intent_and_legacy_absence() {
+        let mut body = serde_json::json!({
+            "host": 1, "canonical_cwd": "/work/bar-1", "cwd": "/work/bar-1",
+            "selection": {"harness": "codex", "model": null, "effort": null, "permissions": null},
+            "created_at": 1, "creation_seq": 1
+        });
+        let legacy: LaunchHistoryEntry = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(legacy.github_repo, None);
+        body["github_repo"] = serde_json::json!({"owner": "acme", "name": "bar"});
+        let fresh: LaunchHistoryEntry = serde_json::from_value(body).unwrap();
+        assert_eq!(fresh.github_repo.unwrap().identifier(), "acme/bar");
+        assert_eq!(fresh.cwd, legacy.cwd);
+    }
+
     /// Only the middleware's structured marker means device authentication;
     /// an unrelated 401 must stay with the operation that received it.
     #[farhelm_testtrace::test]
@@ -3421,6 +3555,46 @@ mod tests {
             "a profile already says what to run, and a body naming both is refused outright"
         );
         assert_eq!(by_profile["title"], serde_json::json!("named"));
+    }
+
+    /// All supported agent selectors must carry the accepted destination and
+    /// its original connection claim. A fresh title omitted by the user stays
+    /// absent in both places instead of becoming an explicit empty label.
+    #[farhelm_testtrace::test]
+    fn fresh_create_body_keeps_preview_and_one_agent_selector() {
+        let preview: GithubPreview = serde_json::from_value(serde_json::json!({
+            "canonical_root": "/work", "basename": "bar-1", "cwd": "/work/bar-1",
+            "config_revision": 7, "host": "3", "incarnation": 5,
+            "installation_identity": "installation-a",
+        }))
+        .unwrap();
+        let checkout = GithubCheckoutRequest {
+            repo: "acme/bar".into(),
+            title: None,
+            preview,
+        };
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+        };
+        for (agent, selector) in [
+            (CreateAgent::Command("agent"), "invocation"),
+            (CreateAgent::Profile("profile-1"), "profile_id"),
+            (CreateAgent::Structured(&selection), "launch"),
+        ] {
+            let body = fresh_create_body(agent, "intent", 3, &checkout);
+            assert_eq!(body["github_checkout"], serde_json::json!(checkout));
+            assert_eq!(body["cwd"], "/work/bar-1");
+            assert_eq!(body["intent_key"], "intent");
+            assert_eq!(body["host"], 3);
+            assert_eq!(body["expected_incarnation"], 5);
+            assert!(body["title"].is_null());
+            for key in ["invocation", "profile_id", "launch"] {
+                assert_eq!(body.get(key).is_some(), key == selector);
+            }
+        }
     }
 
     /// A create carries the connection it was prepared against, in both

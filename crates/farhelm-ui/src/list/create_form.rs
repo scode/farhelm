@@ -6,14 +6,18 @@
 use dioxus::prelude::*;
 
 use crate::api::{self, CreateAgent, ProfileCatalog, create_session, mint_intent_key};
-use crate::feed::use_feed_reader;
+use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
+use crate::github_checkout::{
+    DestinationDraft, GithubAttempt, GithubCheckoutRequest, GithubRepo, PreviewAuthority,
+    PreviewState, RepositoryAuthority, repository_choices,
+};
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::profiles::{
     AgentChoice, CatalogLookup, CatalogSurface, UNRESOLVED_VALUE, resolve_agent, seeded_choice,
     submitted_field,
 };
-use crate::reader::Trigger;
+use crate::reader::{SurfaceReader, Trigger, request_read};
 use crate::{
     ApiBase, HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
     ProfileExistence, Session,
@@ -156,6 +160,8 @@ fn apply_composer_search_result(
     live_destination: Signal<Option<CreateTarget>>,
     mut remembered_destination: Signal<Option<CreateTarget>>,
     history_activation_attempts: Signal<u64>,
+    mut destination_draft: Signal<DestinationDraft>,
+    mut preview_revision: Signal<u64>,
     mut cwd: Signal<String>,
     mut cwd_raw_seed: Signal<Option<String>>,
     mut cwd_edited: Signal<bool>,
@@ -199,15 +205,34 @@ fn apply_composer_search_result(
             // stays untouched until the person edits that field.
             creation_surface.set(CreationSurface::Legacy);
         }
+        ComposerSearchResult::Github(repo) => {
+            remembered_destination.set(None);
+            destination_draft.set(DestinationDraft::github(repo));
+            preview_revision.with_mut(|value| {
+                *value = value.checked_add(1).expect("preview revision exhausted")
+            });
+        }
         crate::launch_composer::ComposerSearchResult::UsePath(folder)
         | crate::launch_composer::ComposerSearchResult::Folder(folder) => {
-            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
+            select_existing_directory(
+                &mut destination_draft,
+                &mut cwd,
+                &mut cwd_raw_seed,
+                &mut cwd_edited,
+                &folder,
+            );
         }
         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => {
             // Query-path actions are treated like other relayed path choices:
             // the escaped field remains reviewable, while the browse request
             // and an untouched later create retain the exact requested bytes.
-            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
+            select_existing_directory(
+                &mut destination_draft,
+                &mut cwd,
+                &mut cwd_raw_seed,
+                &mut cwd_edited,
+                &folder,
+            );
             intent_key.set(None);
             return Some(folder);
         }
@@ -306,11 +331,41 @@ fn apply_composer_search_result(
             // `structured_permissions_is_explicit`'s own doc.
             structured_permissions_is_explicit.set(true);
             custom_model_harness.set(owner);
-            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &entry.cwd);
+            if let Some(repo) = entry.github_repo {
+                remembered_destination.set(None);
+                destination_draft.set(DestinationDraft::github(repo));
+                preview_revision.with_mut(|value| {
+                    *value = value.checked_add(1).expect("preview revision exhausted")
+                });
+            } else {
+                select_existing_directory(
+                    &mut destination_draft,
+                    &mut cwd,
+                    &mut cwd_raw_seed,
+                    &mut cwd_edited,
+                    &entry.cwd,
+                );
+            }
         }
     }
     intent_key.set(None);
     None
+}
+
+/// Every explicit path choice leaves fresh-checkout mode. Keep the raw path
+/// authority and its escaped editor spelling in the same synchronous action,
+/// before a queued submit or directory callback can observe the choice.
+fn select_existing_directory(
+    destination: &mut Signal<DestinationDraft>,
+    cwd: &mut Signal<String>,
+    raw_seed: &mut Signal<Option<String>>,
+    edited: &mut Signal<bool>,
+    path: &str,
+) {
+    destination.set(DestinationDraft::Existing {
+        cwd: path.to_string(),
+    });
+    reseed_cloned_field(cwd, raw_seed, edited, path);
 }
 
 /// Refuse a draft transition once the shared operation token is held.
@@ -337,7 +392,11 @@ fn draft_transition_allowed(ops: OpLock) -> bool {
 ///   Keyed on the id alone, a retry after an ambiguous failure carries the
 ///   first attempt's key to a machine that has never seen it — where it is
 ///   not idempotent at all, and the "retry" is a second real agent. See
-///   `hosts::host_incarnation`.
+///   `hosts::host_incarnation`. Fresh checkout retries additionally retain
+///   the accepted installation identity and exact request body: authenticated
+///   lookup may reconcile that original intent across a new incarnation on
+///   the same installation. [`same_fresh_intent`] is that narrow exception;
+///   a different installation must never receive the old attempt's key.
 /// - **The form's values, snapshotted.** They already start a new intent
 ///   when edited (each field's `oninput` is what clears the key), but that
 ///   rule has a gap the size of one await: minting is asynchronous and the
@@ -353,6 +412,9 @@ struct IntentBinding {
     /// The target host's incarnation at submit time — see the type docs.
     incarnation: String,
     cwd: String,
+    /// Fresh requests carry the exact accepted preview as part of the key's
+    /// identity. Existing requests leave this absent and keep their old body.
+    github_checkout: Option<GithubCheckoutRequest>,
     /// What this create launches — see [`LaunchIntent`]. Switching between
     /// the two modes is a different intended create, and so is switching
     /// profiles, which is why the mode lives inside the binding rather than
@@ -390,11 +452,31 @@ impl IntentBinding {
             host: host.id,
             incarnation: host.incarnation.clone(),
             cwd,
+            github_checkout: None,
             agent,
             title,
             replace_source,
         })
     }
+}
+
+/// Reconciliation follows user intent and installation, not the latest config
+/// or connection counter. The retained body still carries its original preview
+/// and incarnation for the helm's authenticated reconciliation path.
+fn same_fresh_intent(
+    accepted: &IntentBinding,
+    current: &IntentBinding,
+    repo: &GithubRepo,
+    installation: &str,
+) -> bool {
+    accepted.host == current.host
+        && accepted.agent == current.agent
+        && accepted.title == current.title
+        && accepted.replace_source == current.replace_source
+        && accepted.github_checkout.as_ref().is_some_and(|checkout| {
+            checkout.repo == repo.identifier()
+                && checkout.preview.installation_identity == installation
+        })
 }
 
 /// Whether the create target still describes the selected row — the same
@@ -519,6 +601,40 @@ fn invalidate_directory_browse(
     browse_request.set(None);
     browse_result.set(None);
     browse_error.set(None);
+}
+
+/// Keep history and its configuration epoch current after a feed notice.
+/// A failed request must retain demand: otherwise one lost response consumes
+/// the only notification of a CLI edit and leaves an open preview stale until
+/// an unrelated fleet change. The shared reader bounds concurrency and retries
+/// and withdraws unattended work under build skew. Results keep their target
+/// identity, so a host switch cannot borrow its predecessor's suggestions.
+fn request_launch_history(
+    base: String,
+    target: Signal<Option<CreateTarget>>,
+    reader: Signal<SurfaceReader>,
+    mut result: Signal<Option<(CreateTarget, api::LaunchHistory)>>,
+    trigger: Trigger,
+) {
+    request_read(reader, trigger, move || {
+        let base = base.clone();
+        let requested = target.peek().clone();
+        async move {
+            let Some(requested) = requested else {
+                result.set(None);
+                return true;
+            };
+            match api::fetch_launch_history(&base, requested.host).await {
+                Ok(history) => {
+                    if target.peek().as_ref() == Some(&requested) {
+                        result.set(Some((requested, history)));
+                    }
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    });
 }
 
 /// Make the latest fetched suggestions visible after an intentional choice.
@@ -1351,6 +1467,15 @@ pub(super) fn CreateSessionForm(
             .map(display_peer)
             .unwrap_or_else(|| "~".to_string())
     });
+    let destination_seed = initial_cwd.clone().unwrap_or_else(|| "~".into());
+    let mut destination_draft = use_signal(move || DestinationDraft::Existing {
+        cwd: destination_seed,
+    });
+    let mut github_attempt = use_signal(|| None::<(IntentBinding, GithubAttempt)>);
+    let mut preview_generation = use_signal(|| 0_u64);
+    let mut preview_revision = use_signal(|| 0_u64);
+    let mut observed_checkout_revision = use_signal(|| 0_i64);
+    let mut live_preview_authority = use_signal(|| None::<PreviewAuthority>);
     let mut invocation = use_signal(String::new);
     let mut title = use_signal(String::new);
     let mut creation_surface = use_signal(|| CreationSurface::Structured);
@@ -1547,28 +1672,50 @@ pub(super) fn CreateSessionForm(
     // browser launched a session, so its resource must react both to the
     // live destination and to the feed rather than to this render's host
     // snapshot.
-    let history_revision = use_signal(|| 0_u64);
-    let mut history_feed = history_revision;
+    let history_reader = use_signal(SurfaceReader::default);
+    let launch_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
+    let history_feed_base = base.clone();
     use_feed_reader(move || {
-        history_feed.with_mut(|revision| *revision = revision.wrapping_add(1));
+        request_launch_history(
+            history_feed_base.clone(),
+            create_target,
+            history_reader,
+            launch_history,
+            Trigger::Notice,
+        );
     });
     let history_base = base.clone();
-    let history_target_signal = create_target;
-    let launch_history = use_resource(move || {
-        let base = history_base.clone();
-        // This read is intentionally a dependency even though its numeric
-        // value is not sent to the helm: it fetches a successful create in a
-        // different client without disturbing the offered snapshot or this
-        // dialog's draft. A later deliberate choice decides whether to
-        // promote that fetched history.
-        let _revision = history_revision();
-        let target = history_target_signal();
+    let requested_history_target = create_target();
+    use_effect(use_reactive((&requested_history_target,), move |_| {
+        request_launch_history(
+            history_base.clone(),
+            create_target,
+            history_reader,
+            launch_history,
+            Trigger::Explicit,
+        );
+    }));
+    // Configuration edits also invalidate checkout previews. When the feed
+    // is unavailable, unchanged host/list replies cannot tell this reader
+    // about those edits. The component owns this fallback's lifetime; the
+    // shared scheduled trigger neither queues behind a busy read nor cuts
+    // short its backoff, and the feed gate withdraws it under build skew.
+    let history_fallback_base = base.clone();
+    use_future(move || {
+        let base = history_fallback_base.clone();
         async move {
-            let answer = match target.as_ref() {
-                Some(target) => api::fetch_launch_history(&base, target.host).await,
-                None => Ok(api::LaunchHistory::default()),
-            };
-            (target, answer)
+            loop {
+                fallback_sleep().await;
+                if fallback_polls_now() {
+                    request_launch_history(
+                        base.clone(),
+                        create_target,
+                        history_reader,
+                        launch_history,
+                        Trigger::Scheduled,
+                    );
+                }
+            }
         }
     });
     // A feed update is fetched immediately, but it is not allowed to rewrite
@@ -1577,10 +1724,7 @@ pub(super) fn CreateSessionForm(
     // destination is the exception: its old suggestions lose authority at
     // once and remain blank until a reply for the new installation arrives.
     let mut offered_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
-    let history_for_offer = launch_history
-        .read()
-        .as_ref()
-        .and_then(|(target, result)| target.clone().zip(result.as_ref().ok().cloned()));
+    let history_for_offer = launch_history();
     // Feed replies update this handoff immediately, while `offered_history`
     // remains stable until a deliberate choice calls the shared promoter.
     let mut fetched_history = use_signal(|| None::<(CreateTarget, api::LaunchHistory)>);
@@ -1673,7 +1817,13 @@ pub(super) fn CreateSessionForm(
                     browse_result,
                     browse_error,
                 );
-                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &prefill.cwd);
+                select_existing_directory(
+                    &mut destination_draft,
+                    &mut cwd,
+                    &mut cwd_raw_seed,
+                    &mut cwd_edited,
+                    &prefill.cwd,
+                );
                 // Clone owns a separate installation-reconciliation contract;
                 // a new clone generation replaces any earlier history choice.
                 remembered_destination.set(None);
@@ -1888,6 +2038,131 @@ pub(super) fn CreateSessionForm(
         resolve_agent(chosen_profile.peek().as_ref(), offered, seeded).choice
     };
 
+    // The render publishes the current authority before any old completion
+    // may be applied. Effects only start requests; they never decide whether
+    // an old reply still belongs to the visible draft.
+    // A removed profile must not strand an already dispatched fresh request.
+    // Only an exact retained selection gets this reconciliation fallback;
+    // ordinary creates still require the current catalog's resolution.
+    let resolve_fresh_or_current = move || {
+        resolve_now().or_else(|| {
+            let destination = destination_draft.peek();
+            let repo = destination.repo()?;
+            let held = github_attempt.peek();
+            let (binding, _) = held.as_ref()?;
+            let LaunchIntent::Profile(id) = &binding.agent else {
+                return None;
+            };
+            (binding.github_checkout.as_ref()?.repo == repo.identifier()
+                && chosen_profile.peek().as_ref() == Some(&AgentChoice::Profile(id.clone())))
+            .then(|| AgentChoice::Profile(id.clone()))
+        })
+    };
+    let preview_agent_now = move || {
+        format!(
+            "{:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{}",
+            creation_surface(),
+            structured_harness(),
+            structured_model(),
+            structured_effort(),
+            structured_permissions(),
+            resolve_fresh_or_current(),
+            submitted_field(
+                &invocation(),
+                invocation_edited(),
+                invocation_raw_seed.peek().as_deref()
+            ),
+        )
+    };
+    // Configuration epochs are global and monotonic. Retain the highest
+    // observed value while a history refresh is pending or fails; falling
+    // back to zero would authorize a preview we already know is obsolete.
+    if let Some((target, history)) = &history_for_offer
+        && Some(target) == create_target().as_ref()
+        && history.checkout_config_revision > *observed_checkout_revision.peek()
+    {
+        observed_checkout_revision.set(history.checkout_config_revision);
+    }
+    let mut proposed_authority = destination_draft().repo().cloned().and_then(|repo| {
+        let host = hosts.iter().find(|host| Some(host.id) == selected)?;
+        Some(PreviewAuthority {
+            generation: 0,
+            config_revision: observed_checkout_revision(),
+            host: host.id.to_string(),
+            incarnation: host.connection,
+            installation_identity: host.identity.clone()?,
+            repo,
+            title: Some(submitted_field(
+                &title(),
+                title_edited(),
+                title_raw_seed.peek().as_deref(),
+            )),
+            agent: preview_agent_now(),
+        })
+    });
+    let mut previous_authority = live_preview_authority.peek().clone();
+    if let Some(previous) = &mut previous_authority {
+        previous.generation = 0;
+    }
+    let revision_now = preview_revision();
+    let mut applied_preview_revision = use_signal(|| 0_u64);
+    if proposed_authority != previous_authority || revision_now != *applied_preview_revision.peek()
+    {
+        let generation = preview_generation
+            .peek()
+            .checked_add(1)
+            .expect("preview generation exhausted");
+        preview_generation.set(generation);
+        applied_preview_revision.set(revision_now);
+        if let Some(authority) = &mut proposed_authority {
+            authority.generation = generation;
+        }
+        live_preview_authority.set(proposed_authority);
+        let draft = destination_draft.peek().clone();
+        if let DestinationDraft::Github { repo, .. } = draft {
+            destination_draft.set(DestinationDraft::github(repo));
+        }
+    }
+    let preview_base = base.clone();
+    let preview_response = use_resource(move || {
+        let authority = live_preview_authority();
+        let base = preview_base.clone();
+        async move {
+            let authority = authority?;
+            let result = api::preview_github_checkout(
+                &base,
+                authority.host.parse().expect("host id came from registry"),
+                authority.incarnation,
+                &authority.repo.identifier(),
+                authority.title.as_deref(),
+            )
+            .await;
+            Some((authority, result))
+        }
+    });
+    use_effect(move || {
+        let Some(Some((authority, result))) = preview_response.read().clone() else {
+            return;
+        };
+        let Some(live) = live_preview_authority.peek().clone() else {
+            return;
+        };
+        if authority != live {
+            return;
+        }
+        let preview_state = match result {
+            Ok(preview) if authority.accepts(&live, &preview) => PreviewState::Ready { authority: authority.clone(), preview },
+            Ok(_) => PreviewState::Failed { authority: authority.clone(), message: "the preview is stale or belongs to a different host installation; select the repository again".into() },
+            Err(message) => PreviewState::Failed { authority: authority.clone(), message },
+        };
+        if destination_draft.peek().repo() == Some(&authority.repo) {
+            destination_draft.set(DestinationDraft::Github {
+                repo: authority.repo,
+                preview_state: Box::new(preview_state),
+            });
+        }
+    });
+
     let catalog_models = launch_catalog
         .read()
         .as_ref()
@@ -1921,11 +2196,14 @@ pub(super) fn CreateSessionForm(
             None
         },
     };
-    let recent_launches =
-        crate::launch_composer::matching_recents(&recent_history, &recent_filter, Some(&cwd()))
-            .into_iter()
-            .cloned()
-            .collect::<Vec<_>>();
+    let recent_launches = crate::launch_composer::destination_recents(
+        &recent_history,
+        &recent_filter,
+        &destination_draft(),
+    )
+    .into_iter()
+    .cloned()
+    .collect::<Vec<_>>();
     let selected_host_label = selected
         .and_then(|id| hosts.iter().find(|host| host.id == id))
         .map(HostOption::label)
@@ -2033,7 +2311,83 @@ pub(super) fn CreateSessionForm(
     // earlier. `launch-composer-launch-context` beside it is unchanged
     // either way — the host/folder summary is equally true of both verbs.
     let submit_verb = if is_replace_with { "replace" } else { "launch" };
-    let summary_folder = display_peer(&cwd());
+    let current_launch = if creation_surface() == CreationSurface::Structured {
+        structured_harness().map(|harness| {
+            LaunchIntent::Structured(LaunchSelection {
+                harness,
+                model: structured_model(),
+                effort: structured_effort(),
+                permissions: crate::launch_composer::normalized_permissions(
+                    harness,
+                    structured_permissions(),
+                ),
+            })
+        })
+    } else {
+        resolve_fresh_or_current().map(|choice| match choice {
+            AgentChoice::Command => LaunchIntent::Command(submitted_field(
+                &invocation(),
+                invocation_edited(),
+                invocation_raw_seed.peek().as_deref(),
+            )),
+            AgentChoice::Profile(id) => LaunchIntent::Profile(id),
+        })
+    };
+    let retry_binding = current_launch.and_then(|launch| {
+        let draft = IntentBinding::of(
+            selected,
+            &hosts,
+            cwd(),
+            launch,
+            submitted_field(&title(), title_edited(), title_raw_seed.peek().as_deref()),
+            prefill_for_submit
+                .as_ref()
+                .and_then(|prefill| prefill.replace_source.clone()),
+        )?;
+        let destination = destination_draft();
+        let repo = destination.repo()?;
+        let installation = hosts
+            .iter()
+            .find(|host| Some(host.id) == selected)?
+            .identity
+            .as_deref()?;
+        github_attempt()
+            .filter(|(original, _)| same_fresh_intent(original, &draft, repo, installation))
+            .map(|(binding, _)| binding)
+    });
+    let current_preview = match destination_draft() {
+        DestinationDraft::Github { preview_state, .. } => match *preview_state {
+            PreviewState::Ready { authority, preview }
+                if live_preview_authority
+                    .peek()
+                    .as_ref()
+                    .is_some_and(|live| authority.accepts(live, &preview)) =>
+            {
+                Some(preview)
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let fresh_destination_ready = matches!(destination_draft(), DestinationDraft::Existing { .. })
+        || retry_binding.is_some()
+        || current_preview.is_some();
+    let displayed_preview = retry_binding
+        .as_ref()
+        .and_then(|binding| {
+            binding
+                .github_checkout
+                .as_ref()
+                .map(|checkout| checkout.preview.clone())
+        })
+        .or(current_preview);
+    let summary_folder = match destination_draft() {
+        DestinationDraft::Existing { cwd } => display_peer(&cwd),
+        DestinationDraft::Github { repo, .. } => displayed_preview.as_ref().map_or_else(
+            || format!("gh:{} (preview pending)", repo.identifier()),
+            |preview| display_peer(&preview.cwd),
+        ),
+    };
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
         .unwrap_or_else(|| "default".to_string());
@@ -2097,7 +2451,21 @@ pub(super) fn CreateSessionForm(
                 browse_result,
                 browse_error,
             );
-            reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &entry.cwd);
+            if let Some(repo) = entry.github_repo {
+                remembered_destination.set(None);
+                destination_draft.set(DestinationDraft::github(repo));
+                preview_revision.with_mut(|value| {
+                    *value = value.checked_add(1).expect("preview revision exhausted")
+                });
+            } else {
+                select_existing_directory(
+                    &mut destination_draft,
+                    &mut cwd,
+                    &mut cwd_raw_seed,
+                    &mut cwd_edited,
+                    &entry.cwd,
+                );
+            }
             // Admission precedes the mode transition so a stale destination
             // cannot leave the user on a partially applied structured draft.
             // Once admitted, the row's meaning is the whole structured setup;
@@ -2217,14 +2585,103 @@ pub(super) fn CreateSessionForm(
     let active_search_model = (*creation_surface.read() == CreationSurface::Structured)
         .then(&*structured_model)
         .flatten();
-    let search_result_groups =
-        crate::launch_composer::grouped_search_results(crate::launch_composer::search_results(
-            &recent_history,
-            &catalog_models,
-            &composer_search(),
-            active_search_harness,
-            active_search_model.as_deref(),
-        ));
+    let search_text = composer_search();
+    let (search_scope, repo_query) = crate::launch_composer::scoped_query(&search_text);
+    let mut live_repository_authority = use_signal(|| None::<RepositoryAuthority>);
+    let mut repository_generation = use_signal(|| 0_u64);
+    let mut proposed_repository_authority = (search_scope
+        == crate::launch_composer::SearchScope::Github)
+        .then(|| {
+            let host = hosts.iter().find(|host| Some(host.id) == selected)?;
+            Some(RepositoryAuthority {
+                generation: 0,
+                host: host.id,
+                incarnation: host.connection,
+                installation_identity: host.identity.clone()?,
+                destination_generation: preview_generation(),
+                query: repo_query.to_string(),
+            })
+        })
+        .flatten();
+    let mut previous_repository_authority = live_repository_authority.peek().clone();
+    if let Some(previous) = &mut previous_repository_authority {
+        previous.generation = 0;
+    }
+    if proposed_repository_authority != previous_repository_authority {
+        let generation = repository_generation
+            .peek()
+            .checked_add(1)
+            .expect("search generation exhausted");
+        repository_generation.set(generation);
+        if let Some(authority) = &mut proposed_repository_authority {
+            authority.generation = generation;
+        }
+        live_repository_authority.set(proposed_repository_authority);
+    }
+    let repository_base = base.clone();
+    let repository_response = use_resource(move || {
+        let authority = live_repository_authority();
+        let base = repository_base.clone();
+        async move {
+            let authority = authority?;
+            crate::reader::sleep_ms(150).await;
+            let response = api::fetch_github_repositories(
+                &base,
+                authority.host,
+                authority.incarnation,
+                &authority.query,
+            )
+            .await;
+            Some((authority, response))
+        }
+    });
+    let repository_result =
+        repository_response
+            .read()
+            .clone()
+            .flatten()
+            .and_then(|(authority, response)| {
+                let live = live_repository_authority.peek().clone()?;
+                if authority != live {
+                    return None;
+                }
+                match response {
+                    Ok(reply) if authority.accepts(&live, &reply) => Some(Ok(reply)),
+                    Ok(_) => Some(Err(
+                        "repository suggestions belong to a different host installation"
+                            .to_string(),
+                    )),
+                    Err(error) => Some(Err(error)),
+                }
+            });
+    let repository_note = match &repository_result {
+        Some(Ok(reply)) => reply.scan_error.clone().or_else(|| {
+            reply.truncated.then(|| {
+                "repository search is incomplete; a valid owner/repo can still be selected".into()
+            })
+        }),
+        Some(Err(message)) => Some(message.clone()),
+        None => None,
+    };
+    let mut search_rows = crate::launch_composer::search_results(
+        &recent_history,
+        &catalog_models,
+        &composer_search(),
+        active_search_harness,
+        active_search_model.as_deref(),
+    );
+    if search_scope == crate::launch_composer::SearchScope::Github {
+        let discovered = repository_result
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map_or(&[][..], |r| r.repos.as_slice());
+        search_rows.extend(
+            repository_choices(repo_query, discovered)
+                .into_iter()
+                .map(crate::launch_composer::ComposerSearchResult::Github),
+        );
+    }
+    let search_result_groups = crate::launch_composer::grouped_search_results(search_rows);
     let catalog_models_for_search_input = catalog_models.clone();
     let search_results_for_keys = search_result_groups
         .iter()
@@ -2365,7 +2822,7 @@ pub(super) fn CreateSessionForm(
                 invalidate_directory_browse(
                     browse_generation, browse_request, browse_result, browse_error,
                 );
-                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
+                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
                 intent_key.set(None);
             },
             "home"
@@ -2387,7 +2844,7 @@ pub(super) fn CreateSessionForm(
                 invalidate_directory_browse(
                     browse_generation, browse_request, browse_result, browse_error,
                 );
-                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
+                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, "~");
                 intent_key.set(None);
             },
             "local home"
@@ -2485,26 +2942,9 @@ pub(super) fn CreateSessionForm(
                         harness,
                         selection.permissions,
                     );
-                    if selection.model.is_none()
-                        && let Some(message) = missing_model_error(harness)
-                    {
-                        error.set(Some(message.to_string()));
-                        ops.release();
-                        return;
-                    }
-                    if !crate::launch_composer::selection_is_compatible(
-                        &selection,
-                        &catalog_for_submit,
-                    ) {
-                        error.set(Some(
-                            "this saved choice is no longer supported by the current catalog; choose a compatible model or effort".to_string(),
-                        ));
-                        ops.release();
-                        return;
-                    }
                     LaunchIntent::Structured(selection)
                 } else {
-                    let Some(choice) = resolve_now() else {
+                    let Some(choice) = resolve_fresh_or_current() else {
                         error.set(Some("no agent is selected for this create — choose a profile or custom command in other / command mode".to_string()));
                         ops.release();
                         return;
@@ -2611,7 +3051,7 @@ pub(super) fn CreateSessionForm(
                 // this form may reach by omission while its own selector is
                 // still blank. Saying so beats creating on a machine the
                 // user was never shown.
-                let Some(binding) = IntentBinding::of(
+                let Some(mut binding) = IntentBinding::of(
                     selected_now,
                     &hosts,
                     submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()),
@@ -2633,6 +3073,64 @@ pub(super) fn CreateSessionForm(
                     ops.release();
                     return;
                 };
+                if crate::launch_composer::scoped_query(&composer_search()).0 == crate::launch_composer::SearchScope::Github {
+                    error.set(Some("select a GitHub repository from search before launching".into()));
+                    return;
+                }
+                let fresh_draft_snapshot = move || (
+                    destination_draft.peek().repo().cloned(),
+                    *creation_surface.peek(), *structured_harness.peek(),
+                    structured_model.peek().clone(), *structured_effort.peek(),
+                    *structured_permissions.peek(), chosen_profile.peek().clone(),
+                    submitted_field(&invocation.peek(), *invocation_edited.peek(), invocation_raw_seed.peek().as_deref()),
+                    submitted_field(&title.peek(), *title_edited.peek(), title_raw_seed.peek().as_deref()),
+                    *chosen_host.peek(),
+                );
+                let fresh_snapshot = fresh_draft_snapshot();
+                let mut replaying_fresh = false;
+                match destination_draft.peek().clone() {
+                    DestinationDraft::Existing { cwd } => { binding.cwd = cwd; }
+                    DestinationDraft::Github { repo, preview_state } => {
+                        let installation = hosts.iter().find(|host| host.id == binding.host).and_then(|host| host.identity.as_deref());
+                        let Some(installation) = installation else {
+                            error.set(Some("the host installation is not verified; a checkout cannot be created".into()));
+                            return;
+                        };
+                        let held = github_attempt.peek().clone();
+                        if let Some((original, attempt)) = held.filter(|(original, _)| same_fresh_intent(original, &binding, &repo, installation)) {
+                            binding = original;
+                            intent_key.set(Some((attempt.key, binding.clone())));
+                            replaying_fresh = true;
+                        } else if let PreviewState::Ready { authority, preview } = *preview_state
+                            && live_preview_authority.peek().as_ref().is_some_and(|live| authority.accepts(live, &preview))
+                            && preview.installation_identity == installation
+                            && preview.host == binding.host.to_string()
+                            && Some(preview.incarnation) == connection_claim(&hosts, binding.host)
+                            && authority.title.as_deref() == Some(binding.title.as_str())
+                            && authority.agent == preview_agent_now()
+                            && *preview_revision.peek() == *applied_preview_revision.peek()
+                        {
+                            binding.cwd = preview.cwd.clone();
+                            binding.github_checkout = Some(GithubCheckoutRequest { repo: repo.identifier(), title: Some(binding.title.clone()), preview });
+                        } else {
+                            error.set(Some("wait for a current checkout preview before launching".into()));
+                            return;
+                        }
+                    }
+                }
+                let fresh_authority = live_preview_authority.peek().clone();
+                // An accepted request replays its recorded launch snapshot.
+                // New requests still validate against today's catalog.
+                if !replaying_fresh && let LaunchIntent::Structured(selection) = &binding.agent {
+                    if selection.model.is_none() && let Some(message) = missing_model_error(selection.harness) {
+                        error.set(Some(message.to_string()));
+                        return;
+                    }
+                    if !crate::launch_composer::selection_is_compatible(selection, &catalog_for_submit) {
+                        error.set(Some("this saved choice is no longer supported by the current catalog; choose a compatible model or effort".into()));
+                        return;
+                    }
+                }
                 let base = base.clone();
                 // The target row's install identity as this form knew it at
                 // submit — resolved here, outside the spawn, because
@@ -2757,11 +3255,9 @@ pub(super) fn CreateSessionForm(
                             binding.agent = LaunchIntent::Structured(selection);
                         }
                         binding = IntentBinding {
-                            cwd: submitted_field(
-                                &cwd.peek(),
-                                *cwd_edited.peek(),
-                                cwd_raw_seed.peek().as_deref(),
-                            ),
+                            cwd: if binding.github_checkout.is_some() { binding.cwd.clone() } else {
+                                submitted_field(&cwd.peek(), *cwd_edited.peek(), cwd_raw_seed.peek().as_deref())
+                            },
                             title: submitted_field(
                                 &title.peek(),
                                 *title_edited.peek(),
@@ -2786,6 +3282,14 @@ pub(super) fn CreateSessionForm(
                         intent_key.set(None);
                         return;
                     }
+                    if bound.github_checkout.is_some()
+                        && (fresh_draft_snapshot() != fresh_snapshot
+                            || live_destination.peek().as_ref() != target_now.as_ref()
+                            || (!replaying_fresh && *live_preview_authority.peek() != fresh_authority))
+                    {
+                        error.set(Some("the checkout draft changed while preparing the request; review the preview and press launch again".into()));
+                        return;
+                    }
                     let agent = match &bound.agent {
                         LaunchIntent::Command(invocation) => CreateAgent::Command(invocation),
                         LaunchIntent::Profile(id) => CreateAgent::Profile(id),
@@ -2801,7 +3305,36 @@ pub(super) fn CreateSessionForm(
                     // — resolution, guards, key minting — has already run
                     // identically for both; only the network call itself
                     // forks.
-                    let create_result = match &bound.replace_source {
+                    let create_result = if let Some(checkout) = &bound.github_checkout {
+                        let attempt = github_attempt.peek().as_ref()
+                            .filter(|(original, attempt)| original == &bound && attempt.key == key)
+                            .map(|(_, attempt)| attempt.clone())
+                            .unwrap_or_else(|| GithubAttempt::new(
+                                key.clone(), api::fresh_create_body(agent, &key, bound.host, checkout),
+                                checkout.preview.installation_identity.clone(),
+                            ));
+                        // Publish before dispatch. A lost response must leave
+                        // the exact payload available to the next explicit retry.
+                        github_attempt.set(Some((bound.clone(), attempt.clone())));
+                        match api::submit_fresh_create(&base, bound.replace_source.as_deref(), &attempt.body).await {
+                            Ok(session) => { github_attempt.set(None); Ok(session) }
+                            Err(failure) => {
+                                let retired = attempt.may_retire_after(&failure);
+                                if retired {
+                                    github_attempt.set(None);
+                                    intent_key.set(None);
+                                    preview_revision.with_mut(|revision| *revision = revision.checked_add(1).expect("preview revision exhausted"));
+                                } else {
+                                    github_attempt.set(Some((bound.clone(), attempt)));
+                                }
+                                Err(format!("{}; {}", failure.message(), if retired {
+                                    "nothing was accepted; review the refreshed preview and press launch again"
+                                } else {
+                                    "the original request is retained; retry reconciles that request without allocating a different checkout"
+                                }))
+                            }
+                        }
+                    } else { match &bound.replace_source {
                         Some(source) => {
                             api::replace_session_with(
                                 &base,
@@ -2827,7 +3360,7 @@ pub(super) fn CreateSessionForm(
                             )
                             .await
                         }
-                    };
+                    }};
                     match create_result {
                         Ok(session) => {
                             // A profile-backed create changes the helm's
@@ -2911,11 +3444,13 @@ pub(super) fn CreateSessionForm(
                     // is the visible half of that rule rather than the guard).
                     disabled: busy
                         || !selected_host_available
+                        || !fresh_destination_ready
+                        || search_scope == crate::launch_composer::SearchScope::Github
                         || !remembered_destination_valid
-                        || (*creation_surface.read() == CreationSurface::Structured
+                        || (retry_binding.is_none() && *creation_surface.read() == CreationSurface::Structured
                             && (structured_harness.read().is_none()
                                 || structured_choice_error.is_some()))
-                        || (*creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
+                        || (retry_binding.is_none() && *creation_surface.read() == CreationSurface::Legacy && agent.choice.is_none()),
                     "{submit_verb}"
                     " "
                     span { class: "launch-composer-launch-context",
@@ -3190,6 +3725,8 @@ pub(super) fn CreateSessionForm(
                                             live_destination,
                                             remembered_destination,
                                             history_activation_attempts,
+                                            destination_draft,
+                                            preview_revision,
                                         cwd,
                                         cwd_raw_seed,
                                         cwd_edited,
@@ -3258,7 +3795,7 @@ pub(super) fn CreateSessionForm(
                                                     title: match &result {
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
                                                             "{} · {} · {}",
-                                                            display_peer(&entry.cwd), selected_host_label,
+                                                                display_peer(&crate::launch_composer::recent_destination_label(entry)), selected_host_label,
                                                             display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
                                                         ),
                                                         _ => String::new(),
@@ -3270,7 +3807,7 @@ pub(super) fn CreateSessionForm(
                                                     aria_label: match &result {
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => format!(
                                                             "Recent setup: {} · {} · {}",
-                                                            display_peer(&entry.cwd), selected_host_label,
+                                                                display_peer(&crate::launch_composer::recent_destination_label(entry)), selected_host_label,
                                                             display_peer(&crate::launch_composer::selection_summary(&entry.selection)),
                                                         ),
                                                         _ => String::new(),
@@ -3297,7 +3834,7 @@ pub(super) fn CreateSessionForm(
                                                             let browse_path = apply_composer_search_result(
                                                                 result.clone(), history_target.clone(),
                                                                 live_destination, remembered_destination,
-                                                                history_activation_attempts, cwd, cwd_raw_seed, cwd_edited,
+                                                                history_activation_attempts, destination_draft, preview_revision, cwd, cwd_raw_seed, cwd_edited,
                                                                 creation_surface,
                                                                 structured_harness, structured_model,
                                                                 structured_model_raw_seed, structured_model_edited,
@@ -3327,10 +3864,11 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {harness:?}" },
                                                         crate::launch_composer::ComposerSearchResult::Command => rsx! { "Other / command" },
+                                                        crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
-                                                            span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&entry.cwd)} · {selected_host_label}" }
+                                                            span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label}" }
                                                             // Keep the dangerous permission as a semantic span
                                                             // instead of flattening it into the shared summary
                                                             // string, so search recents carry the same warning as
@@ -3374,14 +3912,14 @@ pub(super) fn CreateSessionForm(
                                     r#type: "button",
                                     dir: "ltr",
                                     disabled: busy,
-                                    title: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
+                                    title: "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
                                     // The visible row makes scanning cheaper, but
                                     // its title and accessible name retain every
                                     // saved value that the one-line layout may
                                     // truncate. The punctuated string also keeps
                                     // adjacent spans from running together for
                                     // assistive technology.
-                                    aria_label: "{display_peer(&entry.cwd)} · {selected_host_label} · {display_peer(&summary)}",
+                                    aria_label: "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label} · {display_peer(&summary)}",
                                     onclick: {
                                         let entry = entry.clone();
                                         move |_| {
@@ -3409,7 +3947,7 @@ pub(super) fn CreateSessionForm(
                                     },
                                     span { class: "launch-composer-recent-harness", "{entry.selection.harness:?}" }
                                     " · "
-                                    span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&entry.cwd)} · {selected_host_label}" }
+                                    span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label}" }
                                     " · "
                                     // The permission is spelled here, not by the
                                     // summary helper, so the one danger-colored
@@ -3449,6 +3987,28 @@ pub(super) fn CreateSessionForm(
             // The two columns preserve the form's destination-first tab
             // order in every mode. Only the launch-specific controls in the
             // choices column change when the user selects other / command.
+            if search_scope == crate::launch_composer::SearchScope::Github {
+                if let Some(note) = repository_note {
+                    div { class: "launch-composer-repository-note", role: "status", "{display_peer(&note)}" }
+                }
+            }
+            if let DestinationDraft::Github { repo, preview_state } = destination_draft() {
+                div { class: "launch-composer-checkout-preview", aria_live: "polite",
+                    "fresh checkout of {repo.identifier()} on {selected_host_label}"
+                    if let Some(preview) = &displayed_preview {
+                        div { dir: "ltr", "{display_peer(&preview.cwd)}" }
+                    }
+                    if retry_binding.is_some() {
+                        div { "retry reconciles the original request at this path" }
+                    } else {
+                        match *preview_state {
+                            PreviewState::Pending => rsx! { div { "waiting for a current checkout preview" } },
+                            PreviewState::Failed { message, .. } => rsx! { div { class: "create-session-error", "{display_peer(&message)}" } },
+                            PreviewState::Ready { .. } => rsx! {},
+                        }
+                    }
+                }
+            }
             div { class: "launch-composer-columns",
                     div { class: "launch-composer-column-destination",
                         // A destination is a host and its folder, so the structured
@@ -3485,7 +4045,7 @@ pub(super) fn CreateSessionForm(
                             {host_notes.clone()}
                             input {
                                 r#type: "text",
-                                required: true,
+                                required: matches!(destination_draft(), DestinationDraft::Existing { .. }),
                                 autocomplete: "off",
                                 autocorrect: "off",
                                 autocapitalize: "none",
@@ -3500,6 +4060,7 @@ pub(super) fn CreateSessionForm(
                                         offered_history, create_target, fetched_history,
                                     );
                                     cwd.set(evt.value());
+                                    destination_draft.set(DestinationDraft::Existing { cwd: evt.value() });
                                     cwd_edited.set(true);
                                     remembered_destination.set(None);
                                     invalidate_directory_browse(
@@ -3536,7 +4097,7 @@ pub(super) fn CreateSessionForm(
                                                 invalidate_directory_browse(
                                                     browse_generation, browse_request, browse_result, browse_error,
                                                 );
-                                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
+                                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &folder);
                                                 intent_key.set(None);
                                             }
                                         },
@@ -4139,7 +4700,7 @@ pub(super) fn CreateSessionForm(
                 }
                 input {
                     r#type: "text",
-                    required: !by_profile,
+                    required: !by_profile && retry_binding.is_none(),
                     autocomplete: "off",
                     autocorrect: "off",
                     autocapitalize: "none",
@@ -4205,7 +4766,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &selected_cwd);
+                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &selected_cwd);
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -4234,7 +4795,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &parent);
+                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &parent);
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -4267,7 +4828,7 @@ pub(super) fn CreateSessionForm(
                                 promote_fetched_history_snapshot(
                                     offered_history, create_target, fetched_history,
                                 );
-                                reseed_cloned_field(&mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &child);
+                                select_existing_directory(&mut destination_draft, &mut cwd, &mut cwd_raw_seed, &mut cwd_edited, &child);
                                 remembered_destination.set(None);
                                 invalidate_directory_browse(
                                     browse_generation, browse_request, browse_result, browse_error,
@@ -4339,6 +4900,60 @@ mod tests {
     use super::super::shared::tests::{open, option};
     use super::*;
     use crate::{Profile, SourceProfile};
+
+    /// A lost fresh-create reply remains reconcilable after reconnect and a
+    /// changed preview, but cannot be replayed for another installation, agent,
+    /// repo, title or replacement source. Ordinary bindings never qualify.
+    #[test]
+    fn fresh_retry_matches_user_intent_independently_of_current_preview() {
+        let mut original = IntentBinding::of(
+            Some(1),
+            &[option(1, "target", true)],
+            "/old/bar-1".into(),
+            LaunchIntent::Profile("profile-a".into()),
+            "work".into(),
+            Some("source-a".into()),
+        )
+        .unwrap();
+        let repo = GithubRepo::parse("acme/bar").unwrap();
+        original.github_checkout = Some(GithubCheckoutRequest {
+            repo: repo.identifier(),
+            title: Some("work".into()),
+            preview: crate::github_checkout::GithubPreview {
+                canonical_root: "/old".into(),
+                basename: "bar-1".into(),
+                cwd: "/old/bar-1".into(),
+                config_revision: 1,
+                host: "1".into(),
+                incarnation: 1,
+                installation_identity: "install-a".into(),
+            },
+        });
+        let mut current = original.clone();
+        current.incarnation = "reconnected".into();
+        current.cwd = "/new/bar-2".into();
+        current.github_checkout = None;
+        assert!(same_fresh_intent(&original, &current, &repo, "install-a"));
+        assert!(!same_fresh_intent(&current, &current, &repo, "install-a"));
+        assert!(!same_fresh_intent(&original, &current, &repo, "install-b"));
+        assert!(!same_fresh_intent(
+            &original,
+            &current,
+            &GithubRepo::parse("acme/other").unwrap(),
+            "install-a"
+        ));
+        let mut changed = current.clone();
+        changed.agent = LaunchIntent::Command("agent".into());
+        assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
+        let mut changed = current.clone();
+        changed.title = "different".into();
+        assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
+        let mut changed = current.clone();
+        changed.replace_source = Some("source-b".into());
+        assert!(!same_fresh_intent(&original, &changed, &repo, "install-a"));
+        current.host = 2;
+        assert!(!same_fresh_intent(&original, &current, &repo, "install-a"));
+    }
 
     /// An intent is a command, in a directory, on one INCARNATION of a host
     /// — so a binding must differ whenever any of those does, and the
@@ -4827,6 +5442,26 @@ mod tests {
         assert_eq!(prefill.cwd, "/work/api");
         assert_eq!(prefill.title, "my session");
         assert_eq!(prefill.replace_source, None);
+    }
+
+    /// Repo metadata describes the source, not a fresh destination request.
+    /// Ordinary Clone (also used to seed Replace-with) must preserve the actual
+    /// cwd even for a borrower running below the managed checkout root.
+    #[farhelm_testtrace::test]
+    fn prefill_from_checkout_metadata_keeps_existing_subdirectory() {
+        let mut session = Session {
+            cwd: "/work/bar-1/subdir".to_string(),
+            working_copy: Some(crate::github_checkout::WorkingCopyInfo {
+                id: "checkout-1".to_string(),
+                repo: GithubRepo::parse("acme/bar").unwrap(),
+                canonical_path: "/work/bar-1".to_string(),
+                origin_session_id: "origin".to_string(),
+            }),
+            ..row_specimen("borrower")
+        };
+        assert_eq!(prefill_from(&session, 1).cwd, "/work/bar-1/subdir");
+        session.github_repo = Some(GithubRepo::parse("acme/bar").unwrap());
+        assert_eq!(prefill_from(&session, 2).cwd, "/work/bar-1/subdir");
     }
 
     // -------------------------------------------------------------

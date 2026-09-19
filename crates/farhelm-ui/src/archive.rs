@@ -157,6 +157,8 @@ mod tests {
             host_name: None,
             stale: false,
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
             seen_activity_at: None,
         }
     }
