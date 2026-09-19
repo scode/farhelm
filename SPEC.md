@@ -1128,6 +1128,18 @@ named outcome is explicitly acceptable, not an unresolved specification gap. Rev
 alone as a defect or require additional machinery solely to select another accepted outcome. Preserve the decision's
 firm boundaries; this allowance does not extend to unrelated behavior or override other requirements.
 
+### Healthy local filesystems
+
+Confirmed 2026-09-19: assume each host's local filesystem is healthy. Local filesystem I/O errors or hangs may cause
+failures or halt progress on that host. Do not add complexity to recover from or bound those problems solely to keep the
+affected host making progress; those outcomes are accepted, not defects requiring additional recovery machinery. This
+applies to each supervisor host as well as the machine running the helm.
+
+The boundary is host isolation: a remote host's broken filesystem must not freeze or break the helm or prevent it from
+serving other hosts. Requests involving the affected host may fail or remain pending, but the helm must otherwise
+continue to function. This allowance concerns filesystem errors and hangs, not ordinary cancellation or disconnection
+while the filesystem is healthy.
+
 ### Desktop Quit
 
 Quit must close the desktop app promptly, without waiting for in-flight uploads or other requests to finish.

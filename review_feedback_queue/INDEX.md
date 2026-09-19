@@ -2,7 +2,6 @@
 
 One line per open item. This file must always match the feedback files in this directory.
 
-- `abandon-upload-waits-unboundedly.md` — transfer cleanup waits unboundedly, pinning claims and blocking deletes.
 - `abandoned-publish-reports-failure.md` — a commit that times out still publishes while reporting failure.
 - `adopt-publishes-unconditionally-after-commit.md` — adopt overwrites state after commit, resurrecting a retired actor
   as connecting.
