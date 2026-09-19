@@ -61,7 +61,7 @@ default-members = [
 # (`PROTOCOL_VERSION`) and refuses at connect. This number is what stands in
 # for that handshake on the browser edge, which has none.
 [workspace.package]
-version = "0.10.0-rc.4"
+version = "0.10.0"
 edition = "2024"
 # cargo-dist reads `repository` to know where to cut releases and expects a
 # homepage in the package metadata. The project has no separate site, so both
