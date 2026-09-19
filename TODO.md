@@ -55,19 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- Watch the initial profile focus failures in `e2e/tests/profiles.spec.ts` after the focus-budget fix. WebKit failed the
-  editor focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus
-  in `a profile edited in another browser reaches this one over the real feed` (the latter occurs before the separately
-  corrected second-client terminal-readiness boundary). Recorded hunt 2026-09-12 (batch
-  `daf6d0e1-8081-4caa-85f1-c39624a75d8e`): the two-client feed case reproduced its focus-premise failure 1/20 on WebKit
-  (`toBeFocused` received inactive for 5s while the input sat rendered), trace and screenshots retained in the run. The
-  recorded hypothesis — the 250ms `FOCUS_SETTLE_MS` budget could not cover the four bridge evaluations an opening focus
-  needs, so the request was consumed as `Unknown` with nothing left to re-issue it — was addressed structurally by the
-  2026-09-17 budget raise to 1000ms (`crates/farhelm-ui/src/profiles.rs`); no instrumented rerun ever caught receipts in
-  the act, so the mechanism stays unproven. A recurrence under the new budget reopens this with fresh evidence: check
-  `focusSettled` and `focusAttempts` receipts before hunting anything else. Preserve both tests' focus and feed
-  assertions; the new observation does not establish a regression in saving profiles or delivering their updates.
-
 - Watch the stall-test shape in `e2e/tests/terminal-tabs.spec.ts`:
   `stalling one tab's writes pauses only that tab;
   the agent and a sibling stay live` never established a HIGH_WATER
