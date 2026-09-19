@@ -11,5 +11,4 @@
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
 playwright terminal-flood.spec.ts real backspace erases; real ctrl-c kills the fake agent  # backspace-ctrlc-session-deletion
-playwright profiles.spec.ts an outside click overrides a delayed opening focus commit  # profiles-outside-click-deadline
 playwright profiles.spec.ts profile CRUD round-trips from the app-bar popup to the helm  # profile-crud-edit-timeout
