@@ -134,13 +134,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
 
-- Investigate the full-run backspace/Ctrl+C failures in `e2e/tests/terminal-flood.spec.ts`. Both engines failed during
-  session-deletion setup after the large-paste case, before the input assertions: `deleted.ok()` was false. Both passed
-  in narrow candidate and baseline sequences. Inspect the deletion response and session lifecycle evidence to
-  distinguish paste contamination from an independent failure; do not infer a cause from a retry. Assessed 2026-09-17
-  and left parked: no recurrence since the recorded sightings, and the next step needs a fresh FULL-RUN failure's
-  deletion response to inspect — the narrow sequences that can be run cheaply have all passed.
-
 The earlier entries below remain unresolved after targeted investigation; clean repetitions are non-reproduction
 evidence, not fixes. Their 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM.
 Those workers reported pinned tmux 3.7c, but no resolved executable hash was retained; exact substrate identity remains
