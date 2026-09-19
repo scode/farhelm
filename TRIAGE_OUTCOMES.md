@@ -82,7 +82,9 @@
 - Completion criteria: add `#[serde(deny_unknown_fields)]` to `AdoptReq`; verify that extra fields are rejected while
   valid requests and the existing identity checks retain their behavior. Remove the feedback file and its index entry in
   the same execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/761/changes. jj change:
+  `okpsxlvtzzxmmkrtlpknskowwsuktvyl`; bookmark: `fix-adopt-unknown-fields`. The focused HTTP regression failed before
+  the fix (200 instead of 422); seven adoption checks pass after the fix.
 
 ## agent-fence-claimed-before-validation.md
 

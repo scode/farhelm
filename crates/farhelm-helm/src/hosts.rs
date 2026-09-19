@@ -672,6 +672,7 @@ pub(crate) async fn remove_host(
 /// adopt install C. Naming what was approved turns that race into a 409 the
 /// client answers by asking again.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AdoptReq {
     /// The `state.reported` value from the `HostView` the decision was made
     /// against.
@@ -1908,6 +1909,28 @@ mod tests {
             StatusCode::UNPROCESSABLE_ENTITY,
             "an adopt with no approved identity must not be accepted at all"
         );
+
+        // Unknown fields must not turn a malformed approval into an adoption.
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/adopt"),
+            Some(serde_json::json!({
+                "reported": "identity-after",
+                "unexpected": true,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{text}");
+
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/adopt"),
+            Some(serde_json::json!({ "reported": "identity-after" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
     }
 
     /// A retired host must come back through RETRY, and retry must be an
