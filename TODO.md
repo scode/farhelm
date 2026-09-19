@@ -55,6 +55,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- Deflake `events::tests::a_subscriber_answering_keepalives_stays_connected` in `crates/farhelm-helm/src/events.rs`. It
+  blocked the `v0.10.0` release and reproduced once in twenty isolated runs with the same closed-subscriber failure
+  (FLAKES.md, 2026-09-19). Investigate paused-clock advancement racing real loopback IO and the lack of a server-side
+  Pong receipt before the next interval; preserve the contract that an answering subscriber keeps its seat.
+
 - Watch the initial profile focus failures in `e2e/tests/profiles.spec.ts` after the focus-budget fix. WebKit failed the
   editor focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus
   in `a profile edited in another browser reaches this one over the real feed` (the latter occurs before the separately

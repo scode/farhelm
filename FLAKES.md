@@ -1007,3 +1007,27 @@ left the working copy, so none remains to remove.
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-09-19 — `events::tests::a_subscriber_answering_keepalives_stays_connected` (crates/farhelm-helm/src/events.rs)
+
+The `v0.10.0` release's x86_64 Linux job failed with `a live subscriber must receive each keepalive`; its retained trace
+records the server dropping the subscription for an unanswered keepalive. Release run `35464185186`, attempt 1, job
+`105953298844`, recorder run `a6d728bc-d6e9-43c0-bcd7-9828faaf6d61`, tested clean commit
+`a6ad9e58fdabba2bebdf44a02df5882a44e3209f`: `cargo nextest run --workspace --exclude farhelm --exclude farhelm-desktop`,
+four global slots, zero retries, 2250 passed, one failed, 32 skipped. The exact test then failed once in twenty recorded
+local Linux x86_64 attempts at the same clean commit (batch `6a866e76-e0db-4d1b-8826-e44b90d81688`, failed run
+`871af3af-130f-4de2-b3ef-8c3ff1dfdcef`), selected with `-p farhelm-helm --lib` and
+`-E 'test(=events::tests::a_subscriber_answering_keepalives_stays_connected)'`, four available nextest slots but only
+one selected test, zero retries. The paused Tokio clock can advance while real loopback IO is pending; the test also
+advances an interval after sending a Pong without observing server receipt. That is a fixture-race hypothesis, not an
+established cause. Both substrates recorded tmux 3.7c: release executable SHA256
+`dce6b70ab22dcaa87d40fa82c11d9d741c7e462bb81294560dece5d85569616d`, local executable SHA256
+`312fb28d170ddc98ca3b5d8491b5d86def0fa2bf575ebb41a378060af34288ac`. Both used `LANG=C.UTF-8`; local `LC_ALL` and
+`LC_CTYPE` were also `C.UTF-8`, while those overrides were unset in the release job. The recorder retained no ambient
+`FARHELM_*` inputs; only its own `FARHELM_TEST_TRACE_DIR` reached the tests. Failure logs, JUnit and recovered release
+traces were downloaded before retrying. Disposition: open in TODO.md; no test or product behavior changed for the
+release retry.
+
+Class: fixture-premise
+
+Cause: hypothesis
