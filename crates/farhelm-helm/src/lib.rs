@@ -531,6 +531,14 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(sessions::browse_directory),
         )
         .route(
+            "/api/github-checkout-preview",
+            axum::routing::post(sessions::github_checkout_preview),
+        )
+        .route(
+            "/api/github-repositories",
+            axum::routing::post(sessions::github_repositories),
+        )
+        .route(
             "/api/sessions/{id}/stop",
             axum::routing::post(sessions::stop_session),
         )
@@ -1639,6 +1647,11 @@ async fn run_with_ready(
     warn_if_no_ui(&ui);
     let app = build_router(Arc::clone(&state), ui, addr.port());
 
+    // Establish the configuration baseline before announcing readiness or
+    // accepting previews. A later CLI commit is then necessarily a change
+    // the watcher can publish, even if it precedes the loop's first tick.
+    let checkout_revision = state.store.checkout_config_snapshot(None).await?.revision;
+
     if let Some(ready) = ready {
         let _ = ready.send(addr);
     }
@@ -1659,6 +1672,9 @@ async fn run_with_ready(
     tokio::select! {
         result = axum::serve(listener, app) => result.context("serving helm HTTP")?,
         result = token_control.failed() => result?,
+        () = checkout_config::watch_revision(
+            state.store.clone(), Arc::clone(state.manager.events()), checkout_revision,
+        ) => unreachable!("checkout configuration watcher runs until serving ends"),
         () = embedded_shutdown => {}
     }
     state.manager.shutdown();
@@ -1803,7 +1819,10 @@ fn find_cause<T: std::error::Error + Send + Sync + 'static>(e: &anyhow::Error) -
 /// body as text rather than interpreting it, which is what makes a remote
 /// supervisor's message safe to pass through verbatim.
 fn http_error(e: anyhow::Error) -> axum::response::Response {
-    let status = match error_kind(&e) {
+    let kind = error_kind(&e);
+    let unaccepted =
+        e.downcast_ref::<FreshCreateUnaccepted>().is_some() || kind == ErrorKind::CheckoutConflict;
+    let status = match kind {
         ErrorKind::NotFound => axum::http::StatusCode::NOT_FOUND,
         ErrorKind::InvalidRequest => axum::http::StatusCode::BAD_REQUEST,
         ErrorKind::Internal => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1817,8 +1836,23 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,
     };
     // The UI shows this body verbatim.
-    (status, format!("{e:#}")).into_response()
+    let mut response = (status, format!("{e:#}")).into_response();
+    if unaccepted {
+        response.headers_mut().insert(
+            "x-farhelm-create-outcome",
+            axum::http::HeaderValue::from_static("definitely-unaccepted"),
+        );
+    }
+    response
 }
+
+/// An unkeyed fresh request failed before any create frame was dispatched.
+/// Keyed local refusals cannot establish this proof: a concurrent request may
+/// accept the same key after an unknown lookup. Spent or unresolved keys also
+/// conflict and must never acquire this marker from their status alone.
+#[derive(Debug, thiserror::Error)]
+#[error("fresh checkout was not accepted")]
+pub(crate) struct FreshCreateUnaccepted;
 
 #[cfg(test)]
 mod tests {
@@ -2311,7 +2345,44 @@ mod tests {
             message: "intent key already used with a different request".to_string(),
         });
         let response = super::http_error(err);
+        assert!(
+            !response.headers().contains_key("x-farhelm-create-outcome"),
+            "Conflict alone cannot prove an intent was never accepted"
+        );
         assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    /// Only explicit pre-dispatch proof permits the browser to distinguish an
+    /// unaccepted fresh request from an identically coded spent-key conflict.
+    #[farhelm_testtrace::test]
+    fn fresh_unaccepted_marker_preserves_status_and_exposes_outcome() {
+        let error = anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::Conflict,
+            message: "checkout settings changed".into(),
+        })
+        .context(super::FreshCreateUnaccepted);
+        let response = super::http_error(error);
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(
+            response.headers()["x-farhelm-create-outcome"],
+            "definitely-unaccepted"
+        );
+    }
+
+    /// A durably settled supervisor refusal carries the same proof on first
+    /// reply and replay. The HTTP marker must survive that wire-to-REST seam
+    /// without relying on user-facing message text.
+    #[farhelm_testtrace::test]
+    fn supervisor_checkout_conflict_exposes_unaccepted_outcome() {
+        let response = super::http_error(anyhow::Error::new(SupervisorError {
+            kind: farhelm_proto::ErrorKind::CheckoutConflict,
+            message: "checkout path occupied".into(),
+        }));
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(
+            response.headers()["x-farhelm-create-outcome"],
+            "definitely-unaccepted"
+        );
     }
 
     /// A discovery claim made before its destination is registered is still

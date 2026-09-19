@@ -1081,6 +1081,9 @@ async fn create_for_agent(
                 cols: crate::sessions::default_cols(),
                 rows: crate::sessions::default_rows(),
                 intent_key: request.intent_key,
+                // Agent creates never carry a fresh-checkout payload: the
+                // composer's gh: flow is a user-dialog concern.
+                github_checkout: None,
                 // Neither override is reachable from an agent, and that is
                 // deliberate rather than an omission: both are
                 // profile-editor concerns (which integrated kind this is,
@@ -1240,6 +1243,7 @@ async fn clone_for_agent(
                 intent_key: request.intent_key,
                 agent_kind: None,
                 resume_template: None,
+                github_checkout: None,
                 origin: crate::sessions::CreateOrigin::Agent,
                 // A clone that comes back as the SOURCE or ASKING session is
                 // refused rather than reported. Either is reachable through
