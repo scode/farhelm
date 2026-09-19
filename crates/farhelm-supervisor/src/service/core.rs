@@ -5561,6 +5561,12 @@ impl Supervisor {
                             name: profile.name,
                             existence: ProfileExistence::Present,
                         }),
+                        // Provenance/association fields; the checkout
+                        // registry that would populate them arrives with
+                        // the GitHub-checkout backend, so every restored
+                        // row reports none yet.
+                        github_repo: None,
+                        working_copy: None,
                     },
                     terminal,
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
@@ -6819,6 +6825,10 @@ impl Supervisor {
                     // where tabs get real rediscovery.
                     tabs: Vec::new(),
                     source_profile,
+                    // Checkout provenance/association; populated once the
+                    // GitHub-checkout registry exists.
+                    github_repo: None,
+                    working_copy: None,
                 };
                 self.with_derived_source_profile(info).await
             }
@@ -7375,6 +7385,10 @@ impl Supervisor {
                 name: profile.name,
                 existence: ProfileExistence::Present,
             }),
+            // Checkout provenance/association; populated once the
+            // GitHub-checkout registry exists.
+            github_repo: None,
+            working_copy: None,
         };
         // Creation uses its own timestamp rather than pretending the
         // sampler observed a work transition. It still raises the allocator
@@ -9013,6 +9027,8 @@ impl Supervisor {
             // every entry carries; the reply built from this derives its
             // own.
             source_profile: entry.info.source_profile.clone(),
+            github_repo: None,
+            working_copy: None,
         };
         let published = relaunched_entry(
             entry,
@@ -12146,6 +12162,8 @@ pub(crate) mod tests {
                 restart_offer: RestartOffer::default(),
                 tabs: Vec::new(),
                 source_profile: None,
+                github_repo: None,
+                working_copy: None,
             },
             terminal,
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
@@ -14469,6 +14487,7 @@ pub(crate) mod tests {
                 intent_key: None,
                 agent_kind: None,
                 resume_template: None,
+                github_checkout: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -15497,6 +15516,7 @@ pub(crate) mod tests {
             intent_key: Some("one-intent".to_string()),
             agent_kind,
             resume_template: None,
+            github_checkout: None,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
             let frame = rx.try_recv().expect("a reply must have been sent");
@@ -16105,6 +16125,7 @@ pub(crate) mod tests {
                     intent_key: None,
                     agent_kind: None,
                     resume_template: None,
+                    github_checkout: None,
                 },
                 ConnectionCtx {
                     tx: &tx,
@@ -16156,6 +16177,7 @@ pub(crate) mod tests {
                 intent_key: None,
                 agent_kind: None,
                 resume_template: None,
+                github_checkout: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -16218,6 +16240,7 @@ pub(crate) mod tests {
                 intent_key: None,
                 agent_kind: None,
                 resume_template: None,
+                github_checkout: None,
             },
             ConnectionCtx {
                 tx: &tx,
@@ -16296,6 +16319,7 @@ pub(crate) mod tests {
             intent_key: Some("one-intent".to_string()),
             agent_kind: None,
             resume_template: None,
+            github_checkout: None,
         };
         let reply = |rx: &mut mpsc::Receiver<Frame>| {
             let frame = rx.try_recv().expect("a reply must have been sent");

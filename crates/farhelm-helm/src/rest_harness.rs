@@ -100,6 +100,8 @@ pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
         restart_offer: RestartOffer::default(),
         tabs: Vec::new(),
         source_profile: None,
+        github_repo: None,
+        working_copy: None,
     }
 }
 

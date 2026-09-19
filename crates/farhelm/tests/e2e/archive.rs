@@ -44,6 +44,7 @@ async fn create_profile_child(
                 id: profile.id.clone(),
                 name: profile.name.clone(),
             }),
+            github_checkout: None,
         })
         .await
         .expect("send child create");

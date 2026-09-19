@@ -160,7 +160,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 26;
+const SCHEMA_VERSION: i64 = 27;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -199,6 +199,46 @@ const PROFILES_SCHEMA: &str = "CREATE TABLE profiles (
 const SESSION_SEEN_SCHEMA: &str = "CREATE TABLE session_seen (
                  session_id       TEXT NOT NULL PRIMARY KEY,
                  seen_activity_at INTEGER NOT NULL
+             ) STRICT;";
+
+/// Where fresh checkouts may be created and what runs after cloning
+/// (schema version 27), shared verbatim by the fresh-create branch and the
+/// 26→27 migration step so the two paths produce byte-identical stored DDL
+/// (`a_migrated_database_matches_a_freshly_created_one` pins that).
+///
+/// The inheritance contract lives in the NULLABILITY, so it is worth
+/// stating precisely here:
+///
+/// - `checkout_config` is the global singleton. NULL root/post_clone means
+///   the setting is unset; an EMPTY post_clone string is a stored,
+///   explicit "disabled" — resolved to "no hook" only AFTER per-host
+///   inheritance is applied, so a host cannot accidentally re-enable a
+///   hook by naming it (see `checkout_config.rs` for the resolution rule).
+/// - `checkout_config_host` rows are per-host OVERRIDES keyed by the
+///   registry row's id. NULL (or a missing row) means INHERIT the global
+///   value for that field — never "unset", which for a host is what
+///   clearing the override achieves by removing the row. The foreign key
+///   with `ON DELETE CASCADE` ties the override to the registry row
+///   itself: config survives a retarget or adoption of that row (it
+///   describes the row, not the machine behind it) and disappears with
+///   the row when the host is removed.
+/// - `revision` counts ACTUAL changes to any stored value, global or
+///   overridden, incremented in the same transaction as the change; a
+///   write that stores the value already there bumps nothing. It is the
+///   cheap changed-only signal for future config readers.
+const CHECKOUT_CONFIG_SCHEMA: &str = "\
+             CREATE TABLE checkout_config (
+                 singleton  INTEGER PRIMARY KEY CHECK (singleton = 1),
+                 root       TEXT,
+                 post_clone TEXT,
+                 revision   INTEGER NOT NULL
+             ) STRICT;
+             INSERT INTO checkout_config (singleton, root, post_clone, revision)
+                 VALUES (1, NULL, NULL, 0);
+             CREATE TABLE checkout_config_host (
+                 host_id    INTEGER PRIMARY KEY REFERENCES hosts (id) ON DELETE CASCADE,
+                 root       TEXT,
+                 post_clone TEXT
              ) STRICT;";
 
 /// The prefix reserved for release-owned definitions.
@@ -1752,11 +1792,12 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  fallback_order INTEGER NOT NULL CHECK (fallback_order IN (0, 1)),
                  PRIMARY KEY (host_id, host_identity)
              ) STRICT;
-             {SESSION_SEEN_SCHEMA}
-             -- Must equal SCHEMA_VERSION exactly — see the Rust comment
-             -- above this whole `execute_batch` call for what goes wrong
-             -- when the two drift.
-             PRAGMA user_version = 26;",
+              {SESSION_SEEN_SCHEMA}
+              {CHECKOUT_CONFIG_SCHEMA}
+              -- Must equal SCHEMA_VERSION exactly — see the Rust comment
+              -- above this whole `execute_batch` call for what goes wrong
+              -- when the two drift.
+              PRAGMA user_version = 27;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2462,6 +2503,21 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 26")?;
         version = 26;
     }
+    if version == 26 {
+        // Checkout configuration (see `checkout_config.rs`): the global
+        // settings singleton — created with an already-present row so the
+        // resolution and write paths never need an "absent singleton"
+        // branch — and the per-host override table. Pure additive DDL with
+        // nothing to resolve: no prior schema recorded any of this, so
+        // every upgraded helm starts fully unset at revision 0, exactly
+        // like a fresh one.
+        tx.execute_batch(&format!(
+            "{CHECKOUT_CONFIG_SCHEMA}
+             PRAGMA user_version = 27;"
+        ))
+        .context("migrating helm.db to schema version 27")?;
+        version = 27;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -2579,6 +2635,14 @@ impl HelmStore {
         Self::open_inner(path, true).await
     }
 
+    /// Crate-internal access to the shared connection for sibling modules
+    /// that own their own tables' SQL — `checkout_config` writes its config
+    /// tables beside the methods here without this file having to grow a
+    /// pass-through method for each.
+    pub(crate) fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
     /// Open an existing database without migrating or initializing rows.
     ///
     /// This protects a serving helm when an offline CLI is newer than the
@@ -2587,6 +2651,93 @@ impl HelmStore {
     /// schemas are refused by the same version check as [`Self::open`].
     pub async fn open_without_migration(path: &Path) -> anyhow::Result<HelmStore> {
         Self::open_inner(path, false).await
+    }
+
+    /// Open an EXISTING database at the CURRENT schema, creating and
+    /// migrating nothing (storage rule R1.5, for the checkout-config CLI).
+    ///
+    /// [`Self::open_without_migration`] is not the right tool for an
+    /// offline config command, for three reasons this entry point exists to
+    /// close: it still passes `SQLITE_OPEN_CREATE`, so a mistyped state dir
+    /// would be silently answered with a freshly created, local-row-minting
+    /// helm.db; it accepts OLDER schemas, which may predate the tables the
+    /// command exists to read and write; and it adjusts file permissions as
+    /// a repair step, which a read-only command has no business doing. This
+    /// mode therefore:
+    ///
+    /// - omits `SQLITE_OPEN_CREATE` at the actual open-flags level (an
+    ///   `exists()` precheck narrows the absent-file error message, but the
+    ///   flag omission is the real guarantee — a precheck alone would race
+    ///   the file's deletion),
+    /// - refuses any database whose `user_version` is not exactly
+    ///   [`SCHEMA_VERSION`] — older AND newer — telling the operator to
+    ///   start or update the helm, whose own `open` is the only thing that
+    ///   creates or migrates,
+    /// - never touches the schema, the local row, or the file's mode.
+    ///
+    /// Token control deliberately keeps its older-schema tolerance and is
+    /// untouched by this; the two callers want opposite contracts. The
+    /// read-only variant is for pure readers (`show`); writers need the
+    /// read-write one but get the same never-create, never-migrate rule.
+    pub async fn open_existing_current_schema(path: &Path) -> anyhow::Result<HelmStore> {
+        Self::open_existing_inner(path, false).await
+    }
+
+    /// The read-only form of [`Self::open_existing_current_schema`].
+    ///
+    /// The database is opened with `SQLITE_OPEN_READ_ONLY` only, so even a
+    /// bug in a read command could not alter the serving helm's state —
+    /// same refusal rules, same never-create guarantee, strictly less
+    /// authority.
+    pub async fn open_existing_current_schema_read_only(path: &Path) -> anyhow::Result<HelmStore> {
+        Self::open_existing_inner(path, true).await
+    }
+
+    async fn open_existing_inner(path: &Path, read_only: bool) -> anyhow::Result<HelmStore> {
+        let path = path.to_path_buf();
+        let (conn, schema_version) =
+            tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
+                // The precheck only sharpens the diagnostic for the common
+                // mistyped-path case; the missing CREATE flag below is what
+                // actually guarantees nothing is ever created.
+                if !path.is_file() {
+                    anyhow::bail!(
+                        "no helm database at {} — start (or update) the helm first, then retry",
+                        path.display()
+                    );
+                }
+                let flags = if read_only {
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                } else {
+                    OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                };
+                let conn = Connection::open_with_flags(&path, flags)
+                    .with_context(|| format!("opening helm database {}", path.display()))?;
+                conn.busy_timeout(BUSY_TIMEOUT)
+                    .context("setting sqlite busy timeout")?;
+                // Per-connection like every other open of this schema; the
+                // override table's ON DELETE CASCADE depends on it.
+                conn.pragma_update(None, "foreign_keys", true)
+                    .context("enabling sqlite foreign key enforcement")?;
+                let version: i64 = conn
+                    .query_row("PRAGMA user_version", [], |row| row.get(0))
+                    .context("reading schema version")?;
+                if version != SCHEMA_VERSION {
+                    anyhow::bail!(
+                        "helm.db at {} has schema version {version}, but this command requires the \
+                     current schema ({SCHEMA_VERSION}); start (or update) the helm to create or \
+                     migrate it",
+                        path.display()
+                    );
+                }
+                Ok((conn, version))
+            })
+            .await
+            .context("helm store open task panicked")??;
+        Ok(HelmStore {
+            conn: Arc::new(Mutex::new(conn)),
+            schema_version,
+        })
     }
 
     async fn open_inner(path: &Path, may_migrate: bool) -> anyhow::Result<HelmStore> {
@@ -5946,6 +6097,8 @@ mod tests {
             restart_offer: farhelm_proto::RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         }
     }
 
@@ -8333,6 +8486,8 @@ mod tests {
                  -- `apply_schema`'s own comment on its fresh-create branch
                  -- warns about.
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 22;",
             )
             .expect("replace current history with the schema-22 shape");
@@ -8445,6 +8600,11 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected)
                  VALUES (1, 'title', 'session-before-compact');
+                 -- The checkout-config tables (schema 27) must not outlive
+                 -- this downgrade to 17: the replayed 26→27 step does a
+                 -- plain `CREATE TABLE`.
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 17;",
             )
             .expect("plant schema-17 preferences");
@@ -8483,6 +8643,11 @@ mod tests {
                 "ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
+                 -- Down to schema 25, so the checkout-config tables added
+                 -- by 26→27 must go the same way as the column above: the
+                 -- replayed step does a plain `CREATE TABLE`.
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 25;",
             )
             .expect("plant schema-25 preferences");
@@ -8552,6 +8717,11 @@ mod tests {
                                 REFERENCES hosts (id) ON DELETE CASCADE,
                      profile_id TEXT NOT NULL
                  ) STRICT;
+                 -- Post-version-5 tables of every later rung go too (see
+                 -- session_seen above), including the checkout-config
+                 -- tables the replayed 26→27 step creates.
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 5;",
             )
             .expect("downgrade the table");
@@ -8622,6 +8792,8 @@ mod tests {
                  -- IF EXISTS: the preferences table only exists one stack
                  -- level up; this fixture runs at both.
                  DROP TABLE IF EXISTS preferences;
+                 DROP TABLE IF EXISTS checkout_config_host;
+                 DROP TABLE IF EXISTS checkout_config;
                  PRAGMA user_version = 11;",
             )
             .expect("downgrade the table");
@@ -8691,6 +8863,10 @@ mod tests {
                      profile_id TEXT NOT NULL,
                      host_identity TEXT
                  ) STRICT;
+                 -- The checkout-config tables are post-version-7 the same
+                 -- way: the replayed 26→27 step creates them from nothing.
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 7;",
             )
             .unwrap();
@@ -8769,6 +8945,8 @@ mod tests {
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 16;",
             )
             .expect("downgrade to version 16");
@@ -10032,6 +10210,8 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN compact;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE hosts DROP COLUMN alias;
+                 DROP TABLE checkout_config_host;
+                 DROP TABLE checkout_config;
                  PRAGMA user_version = 15;",
             )
             .expect("downgrade to the version-15 shape");

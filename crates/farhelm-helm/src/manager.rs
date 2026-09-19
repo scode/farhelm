@@ -4699,6 +4699,8 @@ mod tests {
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
             source_profile: None,
+            github_repo: None,
+            working_copy: None,
         }
     }
 
