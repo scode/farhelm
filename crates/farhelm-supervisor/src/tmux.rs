@@ -2480,6 +2480,32 @@ impl TmuxDriver {
         }
     }
 
+    /// Probe a durable tmux name for terminal-less deletion.
+    ///
+    /// This preserves [`Self::has_session`]'s stricter semantics for every
+    /// other caller: a missing private tmux server is normally a driver
+    /// failure, not proof that a particular session is absent. Delete is the
+    /// one exception because it is retiring a durable row that has no terminal
+    /// to kill; tmux's raw missing-session and exact absent-server diagnostics
+    /// prove there is no possible session behind that row. Classification stays
+    /// at the driver boundary, where typed raw stderr is still available,
+    /// rather than searching the rendered error chain in teardown.
+    pub async fn has_session_for_terminal_less_delete(&self, name: &str) -> anyhow::Result<bool> {
+        // Do not delegate to `has_session`: its historical rendered-error
+        // compatibility checks are intentionally retained for its existing
+        // callers, but a socket path containing one of those phrases would
+        // make an inaccessible server look absent here.
+        match self.run(&["has-session", "-t", &format!("={name}")]).await {
+            Ok(_) => Ok(true),
+            Err(error) if session_is_absent_for_terminal_less_delete(&error, &self.socket) => {
+                Ok(false)
+            }
+            Err(error) => {
+                Err(error).context("checking tmux session liveness for terminal-less delete")
+            }
+        }
+    }
+
     /// Kill a tmux session by name, tolerating its absence.
     ///
     /// Four callers, all of them tearing something down: a create
@@ -3559,6 +3585,38 @@ fn tmux_said_any(error: &anyhow::Error, prefixes: &[&str]) -> bool {
         .is_some_and(|failure| {
             let stderr = failure.stderr_trimmed();
             prefixes.iter().any(|prefix| stderr.starts_with(prefix))
+        })
+}
+
+/// Whether raw `has-session` stderr proves the named session or its private
+/// server is absent for terminal-less deletion.
+///
+/// A missing-session response names the requested target and an empty server
+/// has one fixed message; whole-server absence uses its ordinary message or an
+/// ENOENT while connecting to this driver's socket. Permission failures prove
+/// only that liveness is unknown, and caller-controlled text never contributes
+/// because this reads typed stderr rather than rendered command context.
+fn session_is_absent_for_terminal_less_delete(error: &anyhow::Error, socket: &Path) -> bool {
+    error
+        .downcast_ref::<TmuxCommandFailure>()
+        .is_some_and(|failure| {
+            let stderr = failure.stderr_trimmed();
+            stderr.starts_with("can't find session")
+                || stderr == "no current target"
+                || server_is_absent_for_terminal_less_delete(error, socket)
+        })
+}
+
+/// Whether a failed `has-session` proves its server, rather than merely its
+/// named session, is absent for terminal-less deletion.
+fn server_is_absent_for_terminal_less_delete(error: &anyhow::Error, socket: &Path) -> bool {
+    error
+        .downcast_ref::<TmuxCommandFailure>()
+        .is_some_and(|failure| {
+            let stderr = failure.stderr_trimmed();
+            let socket = socket.display();
+            stderr == format!("no server running on {socket}")
+                || stderr == format!("error connecting to {socket} (No such file or directory)")
         })
 }
 
@@ -5353,5 +5411,93 @@ mod tests {
             &rendered_only,
             TmuxDriver::SESSION_ALREADY_GONE_DIAGNOSTICS
         ));
+    }
+
+    /// Terminal-less delete must ask its own raw-stderr classifier, rather
+    /// than inheriting `has_session`'s rendered-error compatibility path.
+    ///
+    /// The fake driver is deliberate: each invocation fails like a tmux
+    /// command but needs no server. Raw diagnostics are checked before the
+    /// classification; negative cases use a socket path containing a missing-
+    /// session phrase to ensure it cannot mask the error. The positive cases cover a
+    /// missing session and both documented absent-server forms.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    async fn terminal_less_delete_classifies_only_raw_session_or_server_absence() {
+        let root = tempfile::tempdir().expect("fixture root");
+        let state = root.path().join("owned'state");
+        std::fs::create_dir(&state).expect("state directory");
+        let socket = state.join("tmux.sock");
+        let fake = root.path().join("pretend-tmux");
+
+        for stderr in [
+            "can't find session: =missing",
+            "no current target",
+            &format!("no server running on {}", socket.display()),
+            &format!(
+                "error connecting to {} (No such file or directory)",
+                socket.display()
+            ),
+        ] {
+            write_executable(
+                &fake,
+                &format!(
+                    "#!/bin/sh\nprintf '%s\\n' {} >&2\nexit 1\n",
+                    shell_words::quote(stderr)
+                ),
+            );
+            let driver = TmuxDriver::new_with_program(&state, TmuxBudgets::default(), fake.clone());
+            let raw = driver
+                .run(&["has-session", "-t", "=missing"])
+                .await
+                .expect_err("stand-in exits unsuccessfully");
+            assert_eq!(
+                raw.downcast_ref::<TmuxCommandFailure>()
+                    .expect("real command failure")
+                    .stderr_trimmed(),
+                stderr,
+                "the stand-in must emit the intended raw diagnostic, not a shell syntax error"
+            );
+            assert!(
+                !driver
+                    .has_session_for_terminal_less_delete("missing")
+                    .await
+                    .expect("raw absence is proven"),
+                "the public delete probe must accept its raw absence diagnostic"
+            );
+        }
+
+        let state = root.path().join("no current target");
+        std::fs::create_dir(&state).expect("negative-case state directory");
+        let socket = state.join("tmux.sock");
+        for stderr in [
+            format!(
+                "error connecting to {} (Permission denied)",
+                socket.display()
+            ),
+            "unexpected tmux failure".to_string(),
+        ] {
+            write_executable(
+                &fake,
+                &format!(
+                    "#!/bin/sh\nprintf '%s\\n' {} >&2\nexit 1\n",
+                    shell_words::quote(&stderr)
+                ),
+            );
+            let driver = TmuxDriver::new_with_program(&state, TmuxBudgets::default(), fake.clone());
+            let error = driver
+                .has_session_for_terminal_less_delete("missing")
+                .await
+                .expect_err(
+                    "unproven liveness must remain an error even with misleading socket-path text",
+                );
+            assert_eq!(
+                error
+                    .downcast_ref::<TmuxCommandFailure>()
+                    .expect("command failure, not spawn or syntax failure")
+                    .stderr_trimmed(),
+                stderr
+            );
+        }
     }
 }

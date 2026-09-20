@@ -81,8 +81,6 @@ One line per open item. This file must always match the feedback files in this d
 - `stripped-agent-marker-forges-killable-tab.md` — stripped agent marker lets a forged tab kill the live agent.
 - `superseded-reap-watchers-never-exit.md` — superseded output-reap watchers never exit, leaking a task per churn cycle.
 - `supervisor-discards-actor-panic-cause.md` — connection actor panic loses its cause in the visible record.
-- `terminal-less-delete-no-server-guards-never-match.md` — terminal-less delete while the server is down is always
-  refused.
 - `tmux-kill-runs-unbounded-under-global-lock.md` — teardown's tmux calls run unbounded under the global lock.
 - `tombstone-eviction-counts-live-transfers.md` — tombstone eviction counts live transfers, deleting too many
   tombstones.

@@ -450,7 +450,10 @@
 - Completion criteria: terminal-less deletion succeeds for proven server absence. Permission errors, unknown diagnostics
   and diagnostic-like target paths remain failures. Preserve other has_session callers' semantics; no broad error-system
   rewrite. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/784/changes. jj change:
+  `rlnoswqskmtlkqzxlowkvxunoswqrzxn`; bookmark: `fix-terminal-less-delete-diagnostics`. The deletion-specific probe
+  accepts proven raw absence and rejects permission failures, unknown diagnostics, and diagnostic-like paths. The
+  corrected fixture passed runtime and independent source review; legacy probe callers remain unchanged.
 
 ## tombstone-eviction-counts-live-transfers.md
 
