@@ -308,7 +308,9 @@
 - Completion criteria: oversized combined parent/cwd/profile-selector/title requests are refused before relay; valid
   requests resolve normally. Preserve the shared ingress check and account for fields actually accepted on each path. No
   queue-policy changes. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/775/changes. jj change:
+  `rmroouutuuvvwyqpzpurqyzuwurmzomp`; bookmark: `fix-profile-size-before-relay`. The authenticated-dispatch regression
+  now refuses the oversized aggregate before a profile upcall and still completes valid profile-based creation.
 
 ## refresh-arm-busy-drains-on-dropped-sender.md
 

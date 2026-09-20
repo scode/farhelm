@@ -43,7 +43,6 @@ One line per open item. This file must always match the feedback files in this d
   wedged connection.
 - `orphaned-install-temps-on-managed-hosts.md` — interrupted installs orphan payload-sized hidden files on managed
   hosts.
-- `oversized-profile-relayed-before-size-check.md` — oversized spawn profile selector relayed before any size check.
 - `pane-pid-recycled-before-sweep-binds-identity.md` — recycled pane pid can bind teardown's kill to an unrelated
   process tree.
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
