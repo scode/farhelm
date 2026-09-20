@@ -54,16 +54,28 @@ export const LIVE_BADGE = /^(running|waiting|idle)$/;
 // A user-stopped session's badge: SPEC.md's "'stopped' is not a distinct
 // status", so the annotation QUALIFIES `exited` rather than replacing it.
 //
-// The exit code is optional in the pattern because a stopped session may or
-// may not have one — a signal death tmux cannot reduce to a code leaves the
-// badge at plain `exited`, and a shell that ran its EXIT trap first reports
-// a real code — and no test can predict which it gets. It is not optional in
+// A stopped session may or may not have an exit code, and no test can
+// predict which it gets: a shell that ran its EXIT trap first reports a real
+// one, while a signal death tmux cannot reduce to a code has none. What the
+// ROW does with that absence is where this pattern goes wrong if it is left
+// alone. SPEC.md requires an ended session to show "an explicit unknown
+// otherwise — never a guess", so the sidebar's full detail line spells the
+// missing datum out as `exited (code unknown)` (`list/row.rs`) rather than
+// dropping it the way the shared concise wording does (`status.rs`'s
+// `Exited` arm, which is also what the header keeps). This pattern accepted
+// only a numeric code, so every assertion on a signal-killed session failed
+// on the word `unknown` — eight cases across two engines, on `main`, from
+// the moment #648 introduced that wording.
+//
+// Hence the alternation. The group stays OPTIONAL because the constant is
+// about the badge's shape wherever it is read, and the concise rendering
+// carries no code at all when there is none to carry. It is not optional in
 // ORDER: the code leads the annotation ("exited (code 7) — stopped by
 // user"), because the badge is capped at 32ch and the older code-last
 // wording let a long annotation ellipsize away the one datum the badge
-// exists to report (`status.rs`'s `Exited` arm). Anchored at both ends so a
-// regression back to code-last fails here rather than passing on a prefix.
-export const STOPPED_BADGE = /^exited( \(code \d+\))? — stopped by user$/;
+// exists to report. Anchored at both ends so a regression back to code-last
+// fails here rather than passing on a prefix.
+export const STOPPED_BADGE = /^exited( \(code (\d+|unknown)\))? — stopped by user$/;
 
 // The same set as `LIVE_BADGE`, for the API-level assertions that read a
 // status out of `/api/sessions` rather than off the DOM.
