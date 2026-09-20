@@ -10,7 +10,6 @@ One line per open item. This file must always match the feedback files in this d
   natural exit.
 - `archived-retry-resurrects-session.md` — retried create resurrects an archived session and launches a stood-down
   agent.
-- `attach-refuses-tombstoned-channel.md` — Attach refuses a channel that only holds a finished upload's tombstone.
 - `cached-session-skips-created-at-check.md` — cached session detail shows a row the list hides as poison.
 - `cancelled-request-leaks-pending-entry.md` — cancelled request without a reply leaks its pending entry for the
   connection's lifetime.

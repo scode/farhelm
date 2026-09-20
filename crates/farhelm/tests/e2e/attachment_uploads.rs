@@ -1270,6 +1270,100 @@ async fn begin_upload_refuses_a_bad_channel_and_an_over_full_connection() {
     ));
 }
 
+/// A live upload owns its channel, but its retained completion receipt does not.
+/// Reuse must establish a real terminal stream on the same connection, not merely
+/// pass validation and fail later while looking up an unrelated session.
+#[farhelm_testtrace::test]
+async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let mut peer = RawPeer::connect(&h.sup).await;
+    let started = peer
+        .begin(1, &session.id, 1, "before-terminal.txt", 4)
+        .await;
+    assert!(
+        matches!(
+            started,
+            ControlMsg::UploadStarted {
+                req_id: 1,
+                channel: 1,
+                ..
+            }
+        ),
+        "the fixture upload must own channel 1: {started:?}"
+    );
+    let attach = ControlMsg::Attach {
+        req_id: 3,
+        session_id: session.id.clone(),
+        channel: 1,
+        cols: 80,
+        rows: 24,
+        terminal: TerminalSelector::default(),
+        lease: "after-upload".to_string(),
+        if_unowned: false,
+    };
+    peer.control(&attach).await;
+    let refused = peer.next_outcome(20).await;
+    assert!(
+        matches!(
+            refused,
+            ControlMsg::Error {
+                req_id: 3,
+                kind: ErrorKind::InvalidRequest,
+                ..
+            }
+        ),
+        "an unfinished upload must still exclude terminal attachment: {refused:?}"
+    );
+    peer.chunk(1, b"file".to_vec()).await;
+    peer.control(&ControlMsg::CommitUpload {
+        req_id: 2,
+        channel: 1,
+    })
+    .await;
+    let committed = peer.next_outcome(20).await;
+    let ControlMsg::UploadCommitted { path, .. } = committed else {
+        panic!("the fixture upload must complete: {committed:?}");
+    };
+    assert_eq!(
+        std::fs::read(path).expect("published fixture upload"),
+        b"file"
+    );
+
+    // Completion is enqueued before the transfer releases its channel. Poll only
+    // that explicit refusal, retaining this connection and its completion receipt.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            peer.control(&attach).await;
+            match peer.next_outcome(20).await {
+                ControlMsg::Attached {
+                    req_id: 3,
+                    channel: 1,
+                } => break,
+                ControlMsg::Error {
+                    req_id: 3,
+                    kind: ErrorKind::InvalidRequest,
+                    message,
+                } if message == "attachment channel 1 is already in use" => {}
+                other => panic!("terminal reuse after upload completion failed: {other:?}"),
+            }
+            // sleep-ok: upload completion releases the channel asynchronously; the correlated in-use reply is the retry oracle.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        loop {
+            match peer.next_control(20).await {
+                ControlMsg::ReplayComplete { channel: 1 } => break,
+                other @ (ControlMsg::Error { .. } | ControlMsg::Detached { .. }) => {
+                    panic!("the reused terminal channel did not establish replay: {other:?}")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the completed upload must yield its channel to a working terminal stream");
+}
+
 /// Startup reconciliation removes a crashed transfer's staging file and
 /// keeps every published attachment — including one whose NAME looks
 /// exactly like staging debris.
