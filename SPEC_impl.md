@@ -309,9 +309,13 @@ that took the menu away from a focused item hands focus back to the toggle rathe
 so the teardown retires its return rather than racing their mount handoff. An item made inert by an in-flight operation
 stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser
 cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every navigation key.
-**Confirm in place:** a destructive item swaps the panel's own contents for the consequence line and a confirm/cancel
-pair with focus on cancel, rather than opening a second surface; that sub-state is a `role="dialog"` inside the same
-positioned box, and it survives the panel closing, which is why it deliberately does not answer Escape.
+The row tint is owned by the menu's open state, not by `:focus-within`: a dismissal may return focus to the toggle while
+the pointer is elsewhere, and that focused toggle must not make the row look as though its menu is still open. The
+focused toggle or menu item retains the normal `:focus-visible` indicator, so pointer-return focus and keyboard focus
+remain visually distinct without changing the dismissal or focus-return contract. **Confirm in place:** a destructive
+item swaps the panel's own contents for the consequence line and a confirm/cancel pair with focus on cancel, rather than
+opening a second surface; that sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel
+closing, which is why it deliberately does not answer Escape.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place

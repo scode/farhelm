@@ -30,9 +30,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Add a `farhelm` command to restart sessions so agents using the `$farhelm` skill can restart sessions.
 - Make `$farhelm help` in agent sessions show a user-friendly introduction and list of available actions instead of the
   underlying command's help output; details are TBD when this TODO is implemented.
-- Fix the session row becoming gray when its action menu is open and the session moves before the delete action. The
-  reported sequence: open the menu, move the mouse toward Delete, the session changes position, the menu disappears, and
-  the session is left gray; this has happened twice.
 
 ## Tricky bugs
 
