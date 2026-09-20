@@ -3469,7 +3469,14 @@ impl HostActor {
                 // drain WITHOUT leaving this connection. The whole
                 // difference from the nudge arm below is that this one does
                 // not `break` — see [`ActorHandle::refresh`].
-                _ = refresh.changed() => {}
+                _ = async {
+                    if refresh.changed().await.is_err() {
+                        // A closed sender has no future wake to deliver.
+                        // Park this branch so it cannot repeatedly win the
+                        // select and turn one closure into a drain loop.
+                        std::future::pending::<()>().await;
+                    }
+                } => {}
                 nudge = next_nudge(nudge) => {
                     let _ = nudge;
                     ended = "the host was reconfigured or an immediate retry was requested";
