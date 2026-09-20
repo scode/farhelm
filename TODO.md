@@ -152,19 +152,6 @@ on the frozen baseline; the menu failure appears pre-existing but did not reprod
 stall failure recurred from the existing entry. Their evidence and remaining uncertainty are below. Neither full command
 is a clean gate.
 
-- Investigate the remaining profiles startup/bridge symptoms in `e2e/tests/profiles.spec.ts` from the loaded 0.3.0-rc.1
-  runs on 2026-09-03. `stale focus-out classifiers cannot clear newer obligations` failed inside `stubFeed`
-  (`e2e/tests/helpers/fleet.ts`) with "the page never opened feed socket #1 (saw 0)", before exercising classifiers. The
-  focus-and-Escape case was also diagnosed then as an exhausted Unknown classification leaving the popup mounted; that
-  product diagnosis remains unproven. Against the baseline above, exact runs reproduced different harness focus races,
-  corrected in #385: a reopened popup was visible before focus entered it, and the Unknown fixture produced known
-  Missing instead. Those corrections passed six initial cases and 120 repetitions (20 per case per engine) with two
-  CPU-load children; the later explicit Unknown oracle passed another twenty per engine without extra load. Neither
-  older fingerprint recurred. The previous event-driven retry/classification-ordinal attempt made pending focus failures
-  more frequent and did not settle Escape dismissal; do not revive it as a proven solution. On recurrence, retain the
-  full browser/bridge trace and feed open/close timestamps, separating no socket request from a late request and a
-  classifier exhausting observations. The controlled regressions for retaining unresolved obligations and honoring later
-  focus events do not establish the cause of these older startup/bridge failures.
 - Investigate `opening the actions menu enters it, and Tab leaves it` in `e2e/tests/sidebar.spec.ts`, WebKit. At
   `6903cf90`, the full run failed to open the menu with ArrowDown. Its trace shows the toggle focus assertion passing,
   then terminal focus in the keyboard-action snapshot about 23 ms later; the menu handler never received that key.
@@ -221,13 +208,6 @@ is a clean gate.
   producer as the explanation for a pass. On recurrence, retain every RSS/progress sample, active sibling identities,
   and a bounded allocator breakdown to attribute growth before changing a queue or bound. The four-thread full binary
   supplies the co-resident allocations an isolated loop omits.
-- Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
-  isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
-  worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
-  race, fixed in #385 and validated twenty times per engine. For this remaining geometry case, retain the pre-open
-  scroll epoch, opening epoch, measured rectangle epoch, focus settlement, and post-open scroll event on recurrence. The
-  test already waits for popup focus before the second scroll. No failing trace yet establishes that its timing or
-  geometry contract should change.
 - Deflake `launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail` in
   `crates/farhelm/tests/e2e/launch_sentinel_error_status.rs`. Twenty exact baseline runs passed. The historical loaded
   four-thread assertion found the expected durable Error state but a surviving sentinel. Source awaits cleanup after
@@ -241,16 +221,6 @@ is a clean gate.
   target. The integration suite remains available for explicit local or worker validation; ordinary CI and the release
   gate do not run it while this exclusion stands. A single clean combined run cannot establish that these latent
   failures are fixed; retain the release exclusion until the evidence supports reversing it.
-
-- Deflake `profile CRUD round-trips from the app-bar popup to the helm` in `e2e/tests/profiles.spec.ts` (profile CRUD
-  edit timeout). The deflake sweep's browser battery failed it once on Chromium: the 60 s test timeout fired in the
-  `openProfileEditor` helper while clicking `.profile-edit` inside the freshly created profile row — the edit control
-  never became actionable. All three classification reruns passed. Sweep failure run
-  `fc4285c8-b667-4f2d-86c1-97dfe260aded`; reruns `b04195c1-6ad7-4c2d-a779-924ba0342b8a`,
-  `cebdd484-c94a-4df4-8b0b-61175ba99b00`, `36a54b08-c525-4bdb-9570-d9517a0d8630`. No hypothesis yet; the retained trace
-  and failure screenshot carry the row's actual state. On recurrence open the trace before changing the helper's wait or
-  the popup's render path — this spec already holds several focus and popup races, and this one is not yet attributed to
-  any of them.
 
 ### Flakes difficult to repro
 
@@ -268,17 +238,6 @@ hunting blind from here.
   the sidebar aliasing test's disposed `route.fetch` response, was the WebKit navigation-disposal mechanism and is
   fixed. Preserve host-row state evidence before changing product behavior; the single failure alone establishes neither
   a composer regression nor a confirmed pre-composer cause.
-
-- Investigate `the profiles popup border box stays inside a constrained viewport`, in `e2e/tests/profiles.spec.ts`.
-  WebKit failed its focus premise (`toBeFocused` received inactive) once in browser run
-  `ed375214-fa16-4b8f-bcad-00117ff59e97`. Moved here from the regular bucket on 2026-09-16: forty more clean executions
-  (20 per engine, runs `b722d4d2-0ce6-46bf-b579-060c304a6b2a` and `eb431d86-6b48-48eb-a0f6-28eaf72194fe`) joined batch
-  `addd38f4-a637-49b0-86f6-b1bd947876de` (twenty attempts, both engines each, forty clean) without a reproduction —
-  eighty verified executions total. An older isolated twenty is claimed in the hunt history but its evidence was not
-  located, so it stays out of the arithmetic. The family attribution (same WebKit initial-focus cluster as the focus
-  entries) is still unproven — the launcher change in the failing run touches only the spec's name-field label, which
-  argues against a composer regression without establishing what it was. Retain focus-event traces before changing the
-  test.
 
 ### Systematic deflake
 

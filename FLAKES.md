@@ -1079,3 +1079,32 @@ retried, so driver latency can cost an iteration and nothing else.
 Class: fixture-premise
 
 Cause: established
+
+## 2026-09-19 — four profiles entries retired for want of a reproduction (e2e/tests/profiles.spec.ts)
+
+Not an observation. A ten-attempt batch selected seven `e2e/tests/profiles.spec.ts` cases by title and ran them on both
+engines, one Playwright worker, zero retries, one execution per engine per attempt: batch
+`03879a41-df56-4699-9e4c-46a96f4adc1a`, 140 executions, two failures, both of them the held-commit fixture window
+recorded in its own entry above. The other six cases passed every execution. Substrate: a four-CPU Ubuntu 24.04
+workstation shared with other agents, pinned tmux 3.7c executable SHA256
+`62c79831e9ffb46570aaee6381c36e045d8c131eff03a34f2bdd7ddc35b01ce4`, `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed, tested
+commit `386e79dc`.
+
+On that evidence, plus what each entry already carried, four TODO.md deflake entries and three
+`deflake/known-flakes.txt` lines are gone. `the profiles popup border box stays inside a constrained viewport` had one
+WebKit focus-premise failure and eighty clean executions behind it before these twenty, and no suspected mechanism.
+`profile CRUD round-trips from the app-bar popup to the helm` had one sweep failure in `openProfileEditor`, three clean
+classification reruns, and no hypothesis. `only layout changes after a profiles opening invalidate its geometry` had one
+full-suite Chromium sighting and twenty isolated clean repetitions, and its own entry said no failing trace established
+that its contract should change. `stale focus-out classifiers cannot clear newer obligations` kept an entry for two
+2026-09-03 fingerprints that its own text records as never having recurred after #385.
+
+Twenty clean executions do not disprove a flake that fires once in twenty, and this entry is not claiming they do. What
+it claims is narrower: these four had a single sighting each, no mechanism anyone could name, and enough clean
+executions since that the entries were describing work nobody could start. The two entries whose failures DID come with
+a named mechanism were kept. If any of them recurs, the sweep no longer excludes it, and a fresh entry with a live trace
+is worth more than the one retired here.
+
+Class: unknown
+
+Cause: unknown
