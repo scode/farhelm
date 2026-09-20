@@ -47,7 +47,7 @@ async fn rename(sup: &Arc<Supervisor>, session_id: &str, title: &str) -> Control
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);
@@ -862,7 +862,7 @@ async fn a_rename_whose_client_vanishes_still_lands() {
         let (client_side, server_side) = tokio::io::duplex(1 << 20);
         let sup = Arc::clone(&h.sup);
         tokio::spawn(async move {
-            let _ = handle_connection(sup, server_side).await;
+            let _ = handle_connection(sup, server_side, None).await;
         });
         let (read_half, write_half) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(read_half);

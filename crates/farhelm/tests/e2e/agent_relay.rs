@@ -151,7 +151,7 @@ pub(crate) async fn connect_helm(
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (r, w) = tokio::io::split(client_side);
     let slot: AgentRequestSlot = Arc::new(std::sync::OnceLock::from(handler));
@@ -178,7 +178,7 @@ async fn connect_helm_tapping_request_ids(
     let (supervisor_side, server_side) = tokio::io::duplex(1 << 20);
     let sup_for_conn = Arc::clone(sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup_for_conn, server_side).await;
+        let _ = handle_connection(sup_for_conn, server_side, None).await;
     });
 
     let (helm_side, tap_side) = tokio::io::duplex(1 << 20);
@@ -245,7 +245,7 @@ impl SessionPeer {
         let (client_side, server_side) = tokio::io::duplex(1 << 20);
         let sup = Arc::clone(sup);
         tokio::spawn(async move {
-            let _ = handle_connection(sup, server_side).await;
+            let _ = handle_connection(sup, server_side, None).await;
         });
         let (r, w) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(r);

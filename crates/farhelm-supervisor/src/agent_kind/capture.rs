@@ -333,9 +333,9 @@ pub enum CaptureVerdict {
 /// Every record under `root` that this scan could read, and whether it
 /// read all of them.
 ///
-/// Deliberately NOT filtered by working directory: `root` is shared by
-/// every Codex session on the host, so the caller scans once per ROOT per
-/// pass and buckets the results by each candidate's recorded `cwd`.
+/// Deliberately NOT filtered by working directory: different directories
+/// can map to the same Claude project root. The caller scans once per ROOT
+/// per pass and buckets the results by each candidate's recorded `cwd`.
 ///
 /// ## Order of work, and why
 ///
@@ -825,7 +825,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_kind::{ClaudeIntegration, CodexIntegration, RECORD_PREFIX_LINES};
+    use crate::agent_kind::{ClaudeIntegration, RECORD_PREFIX_LINES};
 
     /// Window arithmetic is where the no-guessing rule becomes mechanical,
     /// so all three parts are pinned: membership decides whether a record
@@ -1048,9 +1048,8 @@ mod tests {
     /// Two working directories that munge identically share one Claude
     /// project directory, so a scan that trusted the directory would hand
     /// one session the other's conversation. The scan itself deliberately
-    /// does NOT filter by cwd (Codex's root is shared by every session on
-    /// the host), so this pins that both records come back carrying the
-    /// distinguishing field for the caller to bucket on.
+    /// does NOT filter by cwd, so both records must carry the distinguishing
+    /// field for the caller to bucket on.
     #[farhelm_testtrace::test]
     async fn a_munged_cwd_collision_is_separated_by_the_recorded_cwd_field() {
         let home = tempfile::tempdir().unwrap();
@@ -1108,47 +1107,6 @@ mod tests {
                 ]
             );
         }
-    }
-
-    /// Codex's rollout files are nested under a date hierarchy, so the
-    /// walk has to descend — but only as far as the integration declares,
-    /// or a stray deep tree turns a rescan into a filesystem crawl. A
-    /// missing root must also be silent AND complete: an agent that has
-    /// never run on this host is the ordinary case on a fresh machine, and
-    /// reporting it incomplete would block capture for every session
-    /// forever.
-    #[farhelm_testtrace::test]
-    async fn codex_descends_exactly_its_declared_depth_and_a_missing_root_is_complete() {
-        let home = tempfile::tempdir().unwrap();
-        let root = CodexIntegration
-            .record_root(home.path(), "/work")
-            .expect("Codex has a record root");
-        let missing = scan_records(&CodexIntegration, &root, 0).await;
-        assert!(missing.candidates.is_empty());
-        assert!(
-            missing.complete,
-            "a missing root is authoritative emptiness"
-        );
-
-        let line = "{\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
-                    \"payload\":{\"id\":\"roll-1\",\"cwd\":\"/work\"}}\n";
-        let at_depth = root.join("2026").join("07").join("29");
-        tokio::fs::create_dir_all(&at_depth).await.unwrap();
-        tokio::fs::write(at_depth.join("rollout-a.jsonl"), line)
-            .await
-            .unwrap();
-        // One level deeper than declared: the directory is simply not
-        // descended into, so its record is never seen.
-        let too_deep = at_depth.join("extra");
-        tokio::fs::create_dir_all(&too_deep).await.unwrap();
-        tokio::fs::write(too_deep.join("rollout-b.jsonl"), line)
-            .await
-            .unwrap();
-
-        let outcome = scan_records(&CodexIntegration, &root, 0).await;
-        assert!(outcome.complete);
-        assert_eq!(outcome.candidates.len(), 1);
-        assert_eq!(outcome.candidates[0].correlators.conversation, "roll-1");
     }
 
     /// The mtime lower bound is what bounds a rescan's cost, and it is

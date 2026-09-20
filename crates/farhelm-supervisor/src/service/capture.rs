@@ -22,8 +22,8 @@
 //! This does not make farhelm an agent-configuring integration: the hook rides one launch's argv
 //! and touches no user configuration or record directory, and a launch that carries no hook (an
 //! unsupported kind, an argv shape that forbids injection, hooks disabled) can use a scan only
-//! for Claude and Codex. Goose, Pi, and OMP instead reconcile their durable reported row before
-//! constructing offers; no vendor file is opened by that reconciliation.
+//! for Claude. Report-only kinds reconcile their durable row before constructing
+//! offers; Codex also re-verifies its exact attributed file, never a directory.
 //! So the ordering to hold in mind is: identity is REPORTED where it can be,
 //! and inferred where it cannot — the scan is the fallback, never the override.
 
@@ -195,11 +195,10 @@ pub(crate) enum CaptureState {
     Ambiguous { durable: bool },
     /// The identity the agent itself reported through the launch hook.
     ///
-    /// Dominates every scan-derived state, including `Ambiguous`, because
-    /// it is not evidence about which record is ours — it IS the agent's
-    /// own answer, produced inside the agent's process. The guarantee
-    /// `Ambiguous` weakens here existed because scan evidence could not be
-    /// trusted; a report is not scan evidence.
+    /// Dominates every scan-derived state, including `Ambiguous`, after the
+    /// reporting path has applied the kind's attribution requirements. This is
+    /// not blanket trust in inherited credentials: Codex additionally binds the
+    /// emitter to the foreground process and checks root transcript metadata.
     ///
     /// Replaceable only by another `Reported`, and that replacement is the
     /// whole reason this variant exists: `/clear` (Claude) and `/new`
@@ -209,20 +208,19 @@ pub(crate) enum CaptureState {
     /// ## The contract with the durable write
     ///
     /// This state is only ever entered AFTER the store write recording the
-    /// same id has succeeded — never before, never speculatively. Modelled
-    /// on `commit_capture`: the durable write is what decides what is
-    /// claimed, and `committed_conversation` (hence
-    /// `farhelm_proto::RestartOffer::Resume`) promises a restart that there
-    /// is something stored for it to fill in. The reporting path
-    /// (`Supervisor::report_conversation`) owes this ordering; a write that
-    /// fails is logged and leaves memory alone, with no retry list. The
-    /// vendor does not re-attempt that DELIVERY — the hook call has already
+    /// same identity has succeeded — never before, never speculatively.
+    /// Modelled on `commit_capture`: the durable write decides what is
+    /// claimed, while the kind's resume builder decides whether that claim
+    /// is ready to resume. In particular, a pending Codex clear locator
+    /// withdraws the previous target without offering the new one yet.
+    /// The reporting path owes this ordering; a failed write leaves memory
+    /// alone, with no retry list.
+    /// The vendor does not re-attempt that DELIVERY — the hook call has already
     /// returned, and its result is not revisited — which is not the same as
     /// the hook never firing again: a later lifecycle event in the same
     /// process (another `/clear`, a resume, a compaction) fires a fresh
-    /// hook and produces a fresh report. What is lost is this one report,
-    /// and the scan is still running for that session precisely because it
-    /// never reached `Reported`.
+    /// hook and produces a fresh report. What is lost is this one report.
+    /// Only kinds with a supported scan fallback can recover without a report.
     Reported { conversation: String },
 }
 
@@ -735,7 +733,9 @@ fn is_spoken_for(
 /// A startup report can arrive before its in-memory entry is published, and Pi's
 /// restart verifier can withdraw a stale file independently of the report handler.
 /// Neither transition has a vendor scan to repair its mirror. These kinds therefore
-/// read their own row once per capture pass, including when no agent home exists.
+/// read their durable row each capture pass, including when no agent home exists.
+/// Codex reloads under its capture claim before verification, since a report may
+/// have replaced the initial row while this pass waited for the claim.
 /// A different mirrored identity wins over this observation. A change away and
 /// back can still leave a stale offer until the next pass; restart reads the row.
 async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
@@ -743,6 +743,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         if !matches!(
             entry.snapshot.kind,
             farhelm_proto::AgentKind::Goose
+                | farhelm_proto::AgentKind::Codex
                 | farhelm_proto::AgentKind::Pi
                 | farhelm_proto::AgentKind::Omp
         ) {
@@ -754,7 +755,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             .expect("capture mutex poisoned")
             .committed_conversation()
             .map(str::to_string);
-        let row = match sup.store.session(&entry.info.id).await {
+        let mut row = match sup.store.session(&entry.info.id).await {
             Ok(Some(row)) => row,
             Ok(None) => continue,
             Err(error) => {
@@ -767,6 +768,14 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             || row.conversation_source.as_deref() != Some("hook")
         {
             continue;
+        }
+        match sup.refresh_codex_capture(&mut row).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                warn!(session = %entry.info.id, %error, "could not refresh the exact Codex capture");
+                continue;
+            }
         }
         let Some(conversation) = row.captured_conversation else {
             continue;
@@ -809,7 +818,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
 /// as its own request asks for one (`CaptureReason::Reply`) instead of
 /// waiting for a tick.
 ///
-/// The cost envelope, per pass:
+/// The scan portion's cost envelope, per pass:
 ///
 /// - Sessions with a non-integrated kind, no first-input time yet, or a
 ///   SETTLED verdict (`CaptureState::is_settled`) cost ZERO filesystem
@@ -819,12 +828,16 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
 ///   `UncapturedFinal` exists to guarantee for the sessions that never
 ///   produce a record at all.
 /// - An eligible session costs a share of ONE scan per record ROOT (see
-///   `agent_kind::scan_records` for that scan's own three budgets); roots
-///   are shared, which matters most for Codex, where every session on the
-///   host has the same one.
+///   `agent_kind::scan_records` for that scan's own three budgets). Sessions
+///   sharing a Claude project root share that bounded scan.
 /// - An already-captured session costs one `stat` on its own record, and
 ///   re-reads it only when that stamp moved — which is exactly the
 ///   resume-append signal SPEC_impl.md describes.
+///
+/// Report-only reconciliation precedes this scan work. Codex separately
+/// re-reads a bounded header from each captured exact path, including
+/// pending locators, so a settled capture does not imply zero filesystem
+/// work for the pass as a whole.
 ///
 /// ## The claim discipline
 ///
@@ -1071,9 +1084,8 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
     }
 
     // One scan per ROOT, shared by every session that consults it. Claude's
-    // root is per munged directory (so two cwds that munge alike share
-    // one), and Codex's is the whole host's rollout tree — keying on the
-    // path itself is what makes both cases fall out without a special case.
+    // cwd munging is non-injective, so distinct directories can share a root.
+    // Keying by the actual path avoids scanning that tree twice.
     let mut floors: HashMap<&Path, i64> = HashMap::new();
     for scan in &scanning {
         let floor = floors
@@ -1124,9 +1136,8 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
         let outcome = scanned
             .get(&scan.root)
             .expect("every scanning session's root was scanned");
-        // The recorded cwd FIELD, not the directory the record was found
-        // in: the munging is non-injective, and Codex does not partition
-        // by directory at all.
+        // Use the recorded cwd FIELD, not the containing directory: Claude's
+        // project-directory munging is non-injective.
         //
         // Then drop every record whose conversation id another session in
         // this (kind, cwd) group has been TOLD is its own. Placed here,
@@ -1255,15 +1266,11 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
 /// the same way. What separates them is the hook's own trace file, which is
 /// where a diagnosis continues after this line points at a session.
 ///
-/// This is the only way that failure is ever visible at all. A hook that
-/// does not run — a vendor that renamed its flag, a settings file the
-/// injection declined to fight over, a wrapper script that dropped the
-/// appended tail — costs nothing observable: the scan fallback keeps
-/// working, the session looks entirely ordinary, and the resume offer it
-/// produces is the same slightly-less-certain one farhelm made before hooks
-/// existed. Without a tripwire the mechanism could silently stop working
-/// across a vendor release and nobody would learn of it from anything but a
-/// wrong-conversation resume months later.
+/// For Claude, a missing hook can be invisible because the scan fallback
+/// still produces an offer. Report-only kinds instead lose their exact
+/// resume target. This diagnostic distinguishes a launch whose hook was
+/// expected to report from one intentionally running without a hook;
+/// without it, a vendor change can leave the missing identity unexplained.
 ///
 /// The horizon is `first input + after + grace` — the scan's own settling
 /// point, reused rather than given a constant of its own. It is late
@@ -2390,9 +2397,9 @@ mod tests {
         );
     }
 
-    /// The exclusion is scoped to the correlation group, on BOTH halves of
-    /// the key: a report in another directory, or from another agent kind,
-    /// hides nothing.
+    /// The exclusion is scoped to both halves of its correlation group. A
+    /// report in another directory or from another kind hides nothing from
+    /// an otherwise matching record.
     ///
     /// The negative matters as much as the positive. An exclusion keyed too
     /// broadly — on the id alone, say — would silently suppress honest
@@ -2411,13 +2418,13 @@ mod tests {
 
         let now = crate::agent_kind::now_unix();
         let b_at = now - 10;
-        // Same conversation id reported by a session in a DIFFERENT
-        // directory, and by one of a different KIND in the same directory.
-        // Neither shares B's group, so neither may take B's record away.
+        // One report has the same conversation id but another directory. The
+        // other is a valid Goose report in B's directory. Neither shares
+        // Claude's complete group, so neither can take B's record away.
         let far = claude_entry("session-far", &other_cwd, None, reported("conv-b"));
-        let codex = entry_of_kind(
-            AgentKind::Codex,
-            "session-codex",
+        let goose = entry_of_kind(
+            AgentKind::Goose,
+            "session-goose",
             &cwd,
             None,
             reported("conv-b"),
@@ -2427,7 +2434,7 @@ mod tests {
 
         capture_pass(
             &sup,
-            &[Arc::clone(&far), Arc::clone(&codex), Arc::clone(&b)],
+            &[Arc::clone(&far), Arc::clone(&goose), Arc::clone(&b)],
             false,
         )
         .await;

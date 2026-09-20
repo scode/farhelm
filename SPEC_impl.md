@@ -1188,18 +1188,35 @@ failure can leave private evidence, but cannot authorize another directory move.
   `~/.claude/projects/<munged-cwd>/` for the session record. Audited specifics that shape this: the record appears at
   first prompt submission, not at launch, so correlation keys on first-input time and tolerates an unbounded
   launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields
-  (sessionId, cwd, timestamps) are the reliable correlators — file birth times can postdate content after rewrites.
-  Codex: same approach against `~/.codex/sessions` rollout files. An identity is claimed only when the correlation is
-  unambiguous — two near-simultaneous launches in one cwd stay uncaptured, which triggers SPEC.md's explicit fallback
-  instead of a silent wrong guess. Plain resume appends to the existing record under the same id for both agents
-  (audited on current versions; a new id appears only on explicit forks — `--fork-session`, `forked_from_id`), so a
-  captured identity survives restarts; the watcher treats appends as the resume signal and cheaply re-verifies identity
-  after each restart rather than baking in either behavior. Re-verification is a scan-only affair for these two kinds,
-  because only a scan-derived claim carries the record locator an append can confirm. A Claude or Codex hook report
-  carries none and is never re-verified — nothing on disk can improve on the agent's own answer — so it simply stays
-  durable, and the next launch's own hook reports again from inside the new process. The scan is no longer their only
-  identity source, though it is still the only one that works without vendor cooperation — see the hook paragraph below.
-  Pi's typed locator has a separate exact-file verification contract described after it.
+  (sessionId, cwd, timestamps) are the reliable correlators — file birth times can postdate content after rewrites. An
+  identity is claimed only when correlation is unambiguous — two near-simultaneous launches in one cwd stay uncaptured
+  rather than choosing a record arbitrarily. A scan-derived Claude identity retains its exact record locator for
+  append/restart re-verification; a Claude hook report instead remains the agent's direct answer. Codex no longer uses
+  this fallback: even a single matching rollout may belong to a nested invocation rather than the foreground.
+
+  **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
+  start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
+  reach the session's owned live pane and contain exactly one native executable whose basename is `codex`. This accepts
+  package-manager wrappers while refusing a nested native Codex. Unavailable process evidence refuses the report without
+  changing the current identity. This is attribution under inherited credentials, not a security boundary against the
+  same Unix user. Renamed native executables are not recognized.
+
+  Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
+  reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
+  no-follow regular-file reader requires the first complete record to be root `session_meta`, with source `cli` or
+  `exec` rather than a subagent source. Runtime metadata must match the report; once bound, a different persistent
+  thread cannot replace the file's identity. Resume substitutes the persistent thread ID. No directory scan or home
+  inference participates, so a configured custom home works without becoming a second source of truth.
+
+  Only an attributed `SessionStart` with a recognized source is accepted. A foreground `clear` may install a pending
+  locator before the exact file is available, withdrawing the discarded conversation immediately. Capture passes and
+  resume verification re-read that exact file; absent or mismatched evidence cannot advertise a usable resume target.
+  Report and refresh transactions share a capture-only per-session claim and read the current durable binding while
+  holding it. This is separate from the lifecycle claim: a pre-publication hook must not wait for its own launcher.
+  Promotion of the previous record cannot discard a legitimate clear, and a repeated report must preserve an established
+  thread binding. Both writes also compare the generation and complete prior locator, including an initially absent
+  capture. Reports received before in-memory publication use the durable launching row and discover its owned pane from
+  tmux. Historical bare Codex IDs are retained but fail closed rather than being guessed into a new locator.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1222,11 +1239,10 @@ failure can leave private evidence, but cannot authorize another directory move.
   command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either vendor —
   an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the supervisor's
   environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read once at
-  supervisor start and carried as a seam value. Their scan is untouched by all of this and remains the fallback wherever
-  no report has been accepted — an unhooked launch, but also a hook that failed, timed out, or was refused; it is never
-  the override. A reported identity dominates every scan-derived state, the ambiguous verdict included, because it is
-  not evidence about which record is ours — it is the agent's own answer. `docs/agent-hook-injection.md` is the
-  user-facing account of the same mechanism.
+  supervisor start and carried as a seam value. Claude's scan remains the fallback when no report has been accepted;
+  Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted report
+  dominates scan-derived state, including ambiguity. `docs/agent-hook-injection.md` is the user-facing account of the
+  same mechanism.
 
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
@@ -1245,41 +1261,41 @@ failure can leave private evidence, but cannot authorize another directory move.
   protecting a different newer mirrored identity. An identity that changes away and back during the read may briefly
   leave a stale offer until the next pass; restart always checks the durable identity.
 
-  **The OMP reporter and its locator.** OMP (`AgentKind::Omp`, wire `omp`) is a third report-only integration with no
+  **The OMP reporter and its locator.** OMP (`AgentKind::Omp`, wire `omp`) is a report-only integration with no
   record-root scanning, added beside the Goose/Pi pair rather than inside it. The locator is Pi's shape re-generalized:
   one `SessionLocator` type with a closed `LocatorVendor` enum, encoded and parsed per expected vendor, with Pi's `pi:`
   wire bytes, bounds, and deny-unknown-fields layout preserved exactly and `omp:` added beside it. Parsing is always
   dispatched by the vendor the stored kind expects, never by sniffing the prefix, because accepting a locator under the
   wrong vendor's prefix would let one integration's report become another's resume target — a data-integrity bug, not a
   convenience. The plain-id escape routes (restart offers, template substitution, report acceptance for id-based kinds)
-  reject BOTH reserved prefixes through one shared check that does not decode JSON first: a malformed locator must be
-  refused as a locator, not fall through as an id. Pre-resume verification dispatches on the stored kind and gives OMP
-  its own header parser — a bounded no-follow prefix read that skips at most one well-formed leading title slot (the
-  fixed-width 256-byte record OMP 18.2.4 rewrites in place) and then requires a `type:"session"` record at `version: 3`
-  carrying the reported id, refusing anything else. That parser is deliberately separate from Pi's first-record rule,
-  which stays exactly as strict as it was: one vendor's tolerance must not become the other's loosening. The cost of the
-  separation is stated in SPEC.md — a title-less OMP version-3 header is byte-indistinguishable from a Pi-shaped file,
-  so the vendor boundary is enforced by per-kind locator and report acceptance, not by file bytes. OMP's resume template
-  strips OMP's own session selectors before appending `--resume <verified-file>`, because unlike Pi's, OMP's
-  `--resume`/`-r`/`--session` consume optional values (and its `--fork`, `--continue`, and import flags have their own
-  shapes), so Pi's valueless-flag classification would leave an old session source standing between the user and the
-  verified target. An OMP argv containing a GENUINE end-of-options delimiter (an unconsumed `--`, walked with the same
-  argument grammar the stripper and the classifier share) refuses the DERIVED template: everything after `--` is prompt
-  text in OMP, so an appended resume target can never be read as one, and refusing the create fails closed rather than
-  persisting a template that cannot work. A `--` consumed as an option value (`--system-prompt --`, a prompt spelled
-  `--`) is not a delimiter and creates normally, and an explicit template override — filled verbatim, never appended —
-  creates normally behind a genuine delimiter too. Which OMP launches get the extension is decided by an OMP-specific
-  interactive-shape classifier following OMP's own command and flag-consumption tables; Pi's classifier is untouched.
-  The extension asset is materialized per vendor under Farhelm's state directory (`integrations/omp/`) with the same
-  exact-bytes, private-file, no-follow rules Pi's had, loaded with `-e <materialized path>` and pointed at the reporter
-  through `FARHELM_OMP_REPORTER_EXE`. The extension ALWAYS reports the current conversation id, with
-  `session_file: null` when there is no file to name, and a null-file report withdraws the old target instead of
-  retaining it — gating the whole report on file existence would leave the previous conversation's resume target
-  standing after a fileless transition. Reports serialize so a slow report for an old conversation cannot win. OMP
-  18.2.4's `/new` persists eagerly, so a fresh-but-empty conversation can legitimately carry a resume offer immediately;
-  the eventless-relocation and non-file-backend gaps SPEC.md states are accepted here rather than papered over. Protocol
-  22 introduced this kind; protocol 23 added `LaunchHarness::Omp`. Protocol 24 also carries the owned-checkout
-  vocabulary described above.
+  reject all reserved locator prefixes through one shared check that does not decode JSON first: a malformed locator
+  must be refused as a locator, not fall through as an id. Pre-resume verification dispatches on the stored kind and
+  gives OMP its own header parser — a bounded no-follow prefix read that skips at most one well-formed leading title
+  slot (the fixed-width 256-byte record OMP 18.2.4 rewrites in place) and then requires a `type:"session"` record at
+  `version: 3` carrying the reported id, refusing anything else. That parser is deliberately separate from Pi's
+  first-record rule, which stays exactly as strict as it was: one vendor's tolerance must not become the other's
+  loosening. The cost of the separation is stated in SPEC.md — a title-less OMP version-3 header is
+  byte-indistinguishable from a Pi-shaped file, so the vendor boundary is enforced by per-kind locator and report
+  acceptance, not by file bytes. OMP's resume template strips OMP's own session selectors before appending
+  `--resume <verified-file>`, because unlike Pi's, OMP's `--resume`/`-r`/`--session` consume optional values (and its
+  `--fork`, `--continue`, and import flags have their own shapes), so Pi's valueless-flag classification would leave an
+  old session source standing between the user and the verified target. An OMP argv containing a GENUINE end-of-options
+  delimiter (an unconsumed `--`, walked with the same argument grammar the stripper and the classifier share) refuses
+  the DERIVED template: everything after `--` is prompt text in OMP, so an appended resume target can never be read as
+  one, and refusing the create fails closed rather than persisting a template that cannot work. A `--` consumed as an
+  option value (`--system-prompt --`, a prompt spelled `--`) is not a delimiter and creates normally, and an explicit
+  template override — filled verbatim, never appended — creates normally behind a genuine delimiter too. Which OMP
+  launches get the extension is decided by an OMP-specific interactive-shape classifier following OMP's own command and
+  flag-consumption tables; Pi's classifier is untouched. The extension asset is materialized per vendor under Farhelm's
+  state directory (`integrations/omp/`) with the same exact-bytes, private-file, no-follow rules Pi's had, loaded with
+  `-e <materialized path>` and pointed at the reporter through `FARHELM_OMP_REPORTER_EXE`. The extension ALWAYS reports
+  the current conversation id, with `session_file: null` when there is no file to name, and a null-file report withdraws
+  the old target instead of retaining it — gating the whole report on file existence would leave the previous
+  conversation's resume target standing after a fileless transition. Reports serialize so a slow report for an old
+  conversation cannot win. OMP 18.2.4's `/new` persists eagerly, so a fresh-but-empty conversation can legitimately
+  carry a resume offer immediately; the eventless-relocation and non-file-backend gaps SPEC.md states are accepted here
+  rather than papered over. Protocol 22 introduced this kind; protocol 23 added `LaunchHarness::Omp`. Protocol 24 also
+  carries the owned-checkout vocabulary described above.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the

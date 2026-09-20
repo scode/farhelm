@@ -179,23 +179,11 @@ async fn real_agent_captures_its_conversation(
     let work = farhelm_teststate::tempdir().expect("workdir");
     let (agent_home, agent, _agent_home_guard) = prepare(work.path());
     let agent = agent.as_str();
-    let sup = Supervisor::new_with_seams(
-        state.path(),
-        farhelm_bin().into(),
-        // Built directly rather than through `harness()`: this test needs
-        // `agent_home` seamed in before the real vendor agent ever launches.
-        // The suite's loaded-CI tmux floors still apply (this attaches for
-        // real below), so `suite_timeouts()` rather than a bare `Default`.
-        suite_timeouts(),
-        SupervisorSeams {
-            agent_home: Some(agent_home),
-            ..SupervisorSeams::default()
-        },
-    )
-    .await
-    .expect("supervisor");
+    // Codex's hook is a child process, so this audit needs the real Unix
+    // socket rather than only the client's in-process connection. Otherwise
+    // Codex could pass only through the removed record-scan fallback.
+    let (sup, client, accepting) = serving_supervisor(state.path(), agent_home).await;
     let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
-    let client = connect_client(&sup).await;
 
     let session = client
         .create_session(&work.path().to_string_lossy(), agent, None, 100, 30)
@@ -247,9 +235,9 @@ async fn real_agent_captures_its_conversation(
     tokio::time::sleep(Duration::from_secs(1)).await;
     client.send_input(chan, b"\r".to_vec()).await;
 
-    // The record appears at first prompt SUBMISSION, so this poll is
-    // waiting on the agent's own bookkeeping — and then on the production
-    // window plus publication grace to elapse before anything may commit.
+    // Codex emits its hook at first prompt submission. Poll the durable
+    // snapshot because a completed report, rather than an on-disk scan, is
+    // the boundary that makes its resume target available.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
     let conversation = loop {
         client.list_sessions().await.expect("list drives capture");
@@ -280,14 +268,16 @@ async fn real_agent_captures_its_conversation(
     let resume = snapshot
         .resume_argv
         .expect("a Resume offer has a filled argv");
+    let expected = resume_identity(&conversation);
     assert!(
-        resume.iter().any(|element| element == &conversation),
-        "the captured identity must land in the resume argv: {resume:?}"
+        resume.iter().any(|element| element == &expected),
+        "the captured identity's resumable target must land in the resume argv: {resume:?}"
     );
     assert!(
         !resume.iter().any(|element| element == "{conversation}"),
         "no placeholder may survive substitution: {resume:?}"
     );
+    accepting.stop().await;
     drop(slot);
 }
 
@@ -366,8 +356,8 @@ async fn real_codex_session_captures_its_conversation_identity() {
 //
 // What they pin, fact by fact:
 //
-// - The payload field is named `session_id`, and its value is the exact
-//   string a later resume needs. Asserted by the resume argv naming it.
+// - Codex reports `session_id` to correlate the runtime process, while its
+//   root transcript supplies the persistent id a later resume needs.
 // - Claude fires `SessionStart` at PROCESS START, before any prompt — the
 //   identity appears without the test ever typing.
 // - Claude fires it AGAIN after `/clear`, with a NEW `session_id` and
@@ -446,12 +436,10 @@ async fn serving_supervisor(
 /// round trip) sits inside it.
 ///
 /// The identity is not accepted until the hook's own log ACKNOWLEDGES it.
-/// Both agents here also write records the scan can read, and the scan
-/// writes to the very same column — so without that second condition a
-/// vendor that stopped firing `SessionStart` entirely would still satisfy
-/// every assertion in these tests, which exist for no other purpose than to
-/// notice that. An `acked` line names the id the supervisor answered for,
-/// and only a hook process can have put it there.
+/// Claude can still write a scan-visible record, but Codex is report-only;
+/// requiring the acknowledgement keeps either vendor from passing this audit
+/// after its hook stopped firing. An `acked` line names the runtime id the
+/// supervisor answered for, and only a hook process can have put it there.
 async fn wait_for_reported_identity(
     sup: &Supervisor,
     client: &SupervisorClient,
@@ -470,7 +458,8 @@ async fn wait_for_reported_identity(
             .expect("present");
         if let Some(conversation) = snapshot.captured_conversation
             && Some(conversation.as_str()) != previous
-            && hook_acked(state, session_id, &conversation)
+            && snapshot.restart_offer == farhelm_proto::RestartOffer::Resume
+            && hook_acked(state, session_id, &reported_runtime_identity(&conversation))
         {
             return conversation;
         }
@@ -514,8 +503,8 @@ fn hook_log_lines(state: &std::path::Path, session_id: &str) -> Vec<String> {
     text.lines().map(str::to_string).collect()
 }
 
-/// Whether the hook has recorded a supervisor-ACCEPTED report of exactly
-/// `conversation` for this session.
+/// Whether the hook has recorded a supervisor-accepted runtime identity for
+/// this session.
 ///
 /// Tolerates a log file that does not exist yet, because it is called while
 /// polling: before any hook has run there is nothing to read, and that is
@@ -523,14 +512,14 @@ fn hook_log_lines(state: &std::path::Path, session_id: &str) -> Vec<String> {
 /// `<unix-seconds> acked <conversation> <source>` (`crate::hook`'s module
 /// docs), and `acked` carries no detail, so the id is always the third
 /// field.
-fn hook_acked(state: &std::path::Path, session_id: &str, conversation: &str) -> bool {
+fn hook_acked(state: &std::path::Path, session_id: &str, runtime_session_id: &str) -> bool {
     let path = state.join("hook-log").join(format!("{session_id}.log"));
     let Ok(text) = std::fs::read_to_string(&path) else {
         return false;
     };
     text.lines().any(|line| {
         let mut fields = line.split_whitespace().skip(1);
-        fields.next() == Some("acked") && fields.next() == Some(conversation)
+        fields.next() == Some("acked") && fields.next() == Some(runtime_session_id)
     })
 }
 
@@ -568,16 +557,53 @@ async fn assert_identity_stays(
     }
 }
 
-/// Assert the resume the supervisor would run names `conversation`.
+/// Extract the value a resume command must receive from a durable capture.
+///
+/// Claude keeps its persistent conversation id directly in the column. Codex
+/// keeps a locator there so a later refresh can revalidate the exact
+/// transcript; its resume argv must instead name the persistent thread id.
+/// This helper deliberately proves that observable argv effect without
+/// asserting the locator's incidental JSON layout beyond the field needed to
+/// identify the vendor's real resume target.
+fn resume_identity(conversation: &str) -> String {
+    let Some(locator) = conversation.strip_prefix("codex:") else {
+        return conversation.to_string();
+    };
+    serde_json::from_str::<serde_json::Value>(locator)
+        .expect("the stored Codex locator is valid JSON")
+        .get("thread_id")
+        .and_then(serde_json::Value::as_str)
+        .expect("a resumable Codex locator carries its persistent thread id")
+        .to_string()
+}
+
+/// Extract the exact runtime id the hook reported. Codex stores this beside
+/// its persistent thread id so a later transcript recheck can prove both
+/// sides of the vendor's identity contract.
+fn reported_runtime_identity(conversation: &str) -> String {
+    let Some(locator) = conversation.strip_prefix("codex:") else {
+        return conversation.to_string();
+    };
+    serde_json::from_str::<serde_json::Value>(locator)
+        .expect("the stored Codex locator is valid JSON")
+        .get("runtime_session_id")
+        .and_then(serde_json::Value::as_str)
+        .expect("a Codex locator carries the hook's runtime session id")
+        .to_string()
+}
+
+/// Assert the resume the supervisor would run names the captured persistent
+/// conversation target, not necessarily its durable storage representation.
 fn assert_resume_names(snapshot: &SessionSnapshot, conversation: &str) {
     assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
     let resume = snapshot
         .resume_argv
         .as_ref()
         .expect("a Resume offer has a filled argv");
+    let expected = resume_identity(conversation);
     assert!(
-        resume.iter().any(|element| element == conversation),
-        "the reported identity must land in the resume argv: {resume:?}"
+        resume.iter().any(|element| element == &expected),
+        "the reported identity's resumable target must land in the resume argv: {resume:?}"
     );
     assert!(
         !resume.iter().any(|element| element == "{conversation}"),
@@ -886,12 +912,13 @@ async fn real_codex_session_reports_its_identity_across_new() {
         // sleep-ok: pace Enter retries before checking the old conversation's resume marker.
         tokio::time::sleep(Duration::from_secs(2)).await;
         let text = pane_within(&sock, &tmux_name, deadline).await;
-        if text.contains(&format!("codex resume {first}")) {
+        if text.contains(&format!("codex resume {}", resume_identity(&first))) {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "/new never closed conversation {first}; pane:\n{text}"
+            "/new never closed the persistent conversation {}; pane:\n{text}",
+            resume_identity(&first)
         );
     }
 
@@ -917,9 +944,10 @@ async fn real_codex_session_reports_its_identity_across_new() {
 
     let log = hook_log_lines(state.path(), &session.id);
     for conversation in [&first, &renewed] {
+        let runtime = reported_runtime_identity(conversation);
         assert!(
             log.iter()
-                .any(|line| line.contains(conversation) && line.ends_with(" startup")),
+                .any(|line| line.contains(&runtime) && line.ends_with(" startup")),
             "codex reports `startup` both times, before and after /new: {log:?}"
         );
     }

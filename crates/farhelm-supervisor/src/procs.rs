@@ -1,12 +1,10 @@
-//! The three per-platform process-table reads the kill sweep is built on,
-//! and nothing else.
+//! Portable process-table reads for lifecycle sweeps and hook attribution.
 //!
 //! `service::sweep` owns every DECISION a stop, delete, or close makes: the
 //! PPID closure, the environment-marker union that finds reparented
 //! daemons, start-time validation against pid reuse, the
 //! SIGTERM/SIGSTOP-quiesce/SIGKILL escalation, and the confirm-gone poll.
-//! None of that is platform-specific. What is platform-specific is narrow
-//! and mechanical — how one asks the kernel three questions:
+//! None of that is platform-specific. The original sweep needs three reads:
 //!
 //! 1. every process this user owns, with its parent and its start time
 //!    ([`snapshot`]);
@@ -14,8 +12,9 @@
 //!    ([`read_process`]);
 //! 3. one pid's exec-time environment ([`read_environ`]).
 //!
-//! Keeping the seam exactly that small is the whole point. Linux and macOS
-//! must run the SAME sweep rather than two sweeps that happen to agree,
+//! Keeping platform reads separate is the point. Hook attribution additionally
+//! inspects native executable identity through the same platform boundary.
+//! Linux and macOS must run the SAME sweep rather than two sweeps that happen to agree,
 //! because the promise stop and delete make to a user — "nothing this
 //! session started is still running" — is supposed to mean the same thing
 //! on both. Until this module existed the sweep read `/proc` inline, so on
@@ -157,6 +156,68 @@ pub(crate) fn read_process(pid: u32) -> Result<Option<(u32, u64, ProcessState)>,
 /// `a_platform_binary_childs_environment_is_withheld_on_modern_macos`.
 pub(crate) fn read_environ(pid: u32) -> Option<Vec<u8>> {
     imp::read_environ(pid)
+}
+
+/// A PID paired with the kernel token that distinguishes it from PID reuse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProcessIdentity {
+    pub(crate) pid: u32,
+    pub(crate) start: u64,
+}
+
+impl ProcessIdentity {
+    pub(crate) fn read(pid: u32) -> Option<Self> {
+        match read_process(pid).ok()? {
+            Some((_, start, ProcessState::Running)) => Some(Self { pid, start }),
+            _ => None,
+        }
+    }
+}
+
+/// Attribute a hook connection to the one Codex executable under the owned pane.
+///
+/// A package-manager wrapper may sit between the pane and native Codex. A nested
+/// Codex has two native Codex ancestors instead and cannot report for its parent.
+/// This establishes process provenance only; transcript metadata must separately
+/// exclude vendor threads sharing the foreground process.
+pub(crate) fn foreground_codex_emitter(
+    peer: ProcessIdentity,
+    pane_pid: u32,
+) -> Result<ProcessIdentity, String> {
+    const MAX_ANCESTORS: usize = 64;
+    let mut chain = Vec::with_capacity(8);
+    let mut pid = peer.pid;
+    let mut emitter = None;
+    for _ in 0..MAX_ANCESTORS {
+        let Some((parent, start, ProcessState::Running)) = read_process(pid)? else {
+            return Err("the hook ancestry is no longer live".to_string());
+        };
+        if chain.is_empty() && start != peer.start {
+            return Err("the hook connection's process identity changed".to_string());
+        }
+        if imp::is_codex_executable(pid)? {
+            if emitter.is_some() {
+                return Err("a nested Codex process cannot report for the foreground".to_string());
+            }
+            emitter = Some(ProcessIdentity { pid, start });
+        }
+        chain.push((pid, parent, start));
+        if pid == pane_pid {
+            let emitter = emitter
+                .ok_or_else(|| "the hook has no attributable Codex executable".to_string())?;
+            for &(pid, parent, start) in &chain {
+                if read_process(pid)? != Some((parent, start, ProcessState::Running)) {
+                    return Err("the hook ancestry changed during attribution".to_string());
+                }
+            }
+            return Ok(emitter);
+        }
+        if parent == 0 || chain.iter().any(|&(seen, _, _)| seen == parent) {
+            break;
+        }
+        pid = parent;
+    }
+    Err("the hook cannot be attributed to this session's foreground pane".to_string())
 }
 
 /// Extract the environment region of a macOS `KERN_PROCARGS2` buffer,
@@ -434,6 +495,18 @@ mod imp {
     /// collapses to `None`.
     pub(super) fn read_environ(pid: u32) -> Option<Vec<u8>> {
         std::fs::read(format!("/proc/{pid}/environ")).ok()
+    }
+
+    pub(super) fn is_codex_executable(pid: u32) -> Result<bool, String> {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::fs::read_link(format!("/proc/{pid}/exe"))
+            .map_err(|error| format!("reading process {pid} executable: {error}"))?;
+        let name = path
+            .file_name()
+            .map(|name| name.as_bytes())
+            .unwrap_or_default();
+        // procfs marks the image this way after an atomic executable update.
+        Ok(name.strip_suffix(b" (deleted)").unwrap_or(name) == b"codex")
     }
 
     #[cfg(test)]
@@ -950,6 +1023,22 @@ mod imp {
         }
         buf.truncate(len);
         super::parse_procargs2(&buf)
+    }
+
+    pub(super) fn is_codex_executable(pid: u32) -> Result<bool, String> {
+        let pid = i32::try_from(pid).map_err(|_| "process PID is out of range".to_string())?;
+        let mut path = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        // SAFETY: the kernel receives the buffer's exact writable capacity.
+        let len = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+        if len <= 0 {
+            return Err(format!(
+                "reading process {pid} executable: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let bytes = &path[..len as usize];
+        let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+        Ok(bytes.rsplit(|byte| *byte == b'/').next() == Some(b"codex".as_slice()))
     }
 }
 

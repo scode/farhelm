@@ -166,13 +166,19 @@ pub(crate) struct ConnectionCtx<'a> {
 ///
 /// Generic over the byte stream so tests can drive it over an in-process
 /// duplex pipe with the same code path production uses over the unix
-/// socket. An auth-bearing hello is validated against the session row and
-/// enters a restricted create-only dispatcher; an ordinary local peer keeps
-/// the full-authority path it has always used.
-pub async fn handle_connection<S>(sup: Arc<Supervisor>, stream: S) -> anyhow::Result<()>
+/// socket. `peer` is the kernel peer PID and process start token sampled at
+/// accept; a stream without that evidence cannot make a Codex foreground claim.
+/// An auth-bearing hello enters the restricted session dispatcher; an ordinary
+/// local peer keeps the full-authority path.
+pub async fn handle_connection<S>(
+    sup: Arc<Supervisor>,
+    stream: S,
+    peer: Option<(u32, u64)>,
+) -> anyhow::Result<()>
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
+    let peer = peer.map(|(pid, start)| crate::procs::ProcessIdentity { pid, start });
     let (r, w) = tokio::io::split(stream);
     // Byte-level progress on the write half, so the writer task can tell a
     // slow peer from one that has stopped consuming — see `ProgressWrite`.
@@ -546,7 +552,7 @@ where
                 farhelm_proto::FrameKind::Control => {
                     let msg = parse_control(&frame)?;
                     match restricted_auth.as_ref() {
-                        Some(auth) => handle_restricted_control(&sup, msg, &tx, auth).await,
+                        Some(auth) => handle_restricted_control(&sup, msg, &tx, auth, peer).await,
                         // An `AgentResponse` is the answer to something
                         // the SUPERVISOR asked this connection (see
                         // `super::agent_relay`), so it is completed
@@ -1915,7 +1921,7 @@ mod tests {
             .await
             .expect("create authenticating session");
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
-        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let server = tokio::spawn(async move { handle_connection(sup, server_side, None).await });
         let (r, w) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
@@ -1983,7 +1989,7 @@ mod tests {
             .await
             .expect("supervisor");
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
-        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let server = tokio::spawn(async move { handle_connection(sup, server_side, None).await });
         let (r, w) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
@@ -2104,7 +2110,8 @@ mod tests {
             .expect("created session has a credential");
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
         let server_sup = Arc::clone(&sup);
-        let server = tokio::spawn(async move { handle_connection(server_sup, server_side).await });
+        let server =
+            tokio::spawn(async move { handle_connection(server_sup, server_side, None).await });
         let (r, w) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);
@@ -2175,7 +2182,7 @@ mod tests {
     async fn hello_host_identity_over_a_fresh_connection(sup: &Arc<Supervisor>) -> String {
         let sup = Arc::clone(sup);
         let (client_side, server_side) = tokio::io::duplex(64 * 1024);
-        let server = tokio::spawn(async move { handle_connection(sup, server_side).await });
+        let server = tokio::spawn(async move { handle_connection(sup, server_side, None).await });
         let (r, w) = tokio::io::split(client_side);
         let mut reader = FrameReader::new(r);
         let mut writer = FrameWriter::new(w);

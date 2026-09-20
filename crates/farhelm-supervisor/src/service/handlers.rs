@@ -3245,6 +3245,7 @@ pub(crate) async fn handle_restricted_control(
     msg: ControlMsg,
     tx: &mpsc::Sender<Frame>,
     auth: &farhelm_proto::SessionAuth,
+    peer: Option<crate::procs::ProcessIdentity>,
 ) {
     match msg {
         ControlMsg::CreateSession {
@@ -3491,6 +3492,8 @@ pub(crate) async fn handle_restricted_control(
             req_id,
             conversation,
             source,
+            transcript_path,
+            hook_event_name,
         } => {
             // NO lifecycle claim, deliberately, and the contrast with the
             // `CreateSession` arm directly above is the point rather than
@@ -3569,7 +3572,14 @@ pub(crate) async fn handle_restricted_control(
             // newline-laced text into the supervisor's log.
             let source = sanitized_source(&source);
             let reply = match sup
-                .report_conversation(&auth.session_id, conversation, source)
+                .report_conversation(
+                    &auth.session_id,
+                    conversation,
+                    source,
+                    transcript_path,
+                    hook_event_name,
+                    peer,
+                )
                 .await
             {
                 Ok(()) => ControlMsg::ConversationReported { req_id },
@@ -4422,6 +4432,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let reply: ControlMsg =
@@ -4481,6 +4492,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let reply: ControlMsg =
@@ -4547,6 +4559,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let reply: ControlMsg =
@@ -4610,7 +4623,7 @@ mod tests {
         };
         tokio::time::timeout(Duration::from_secs(5), async {
             tokio::select! {
-                () = handle_restricted_control(&sup, invalid, &tx, &auth) => {},
+                () = handle_restricted_control(&sup, invalid, &tx, &auth, None) => {},
                 upcall = helm_rx.recv() => {
                     upcall.expect("the fixture helm link must remain registered");
                     panic!("an oversized create must be refused before profile lookup");
@@ -4661,6 +4674,7 @@ mod tests {
                     },
                     &tx,
                     &auth,
+                    None,
                 )
                 .await;
             }
@@ -5793,6 +5807,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let listing = rx.try_recv().expect("a listing must not wait on the fence");
@@ -5819,6 +5834,7 @@ mod tests {
                     },
                     &tx,
                     &auth,
+                    None,
                 )
                 .await;
             }
@@ -5922,6 +5938,7 @@ mod tests {
                     },
                     &tx,
                     &auth,
+                    None,
                 )
                 .await;
             }
@@ -6026,6 +6043,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
 
@@ -6080,6 +6098,7 @@ mod tests {
                     },
                     &tx,
                     &auth,
+                    None,
                 )
                 .await;
             }
@@ -6150,6 +6169,7 @@ mod tests {
                     },
                     &tx,
                     &auth,
+                    None,
                 )
                 .await;
             }
@@ -6770,7 +6790,14 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let auth = authenticated_parent(&sup, state.path(), "parent-session").await;
 
-        handle_restricted_control(&sup, ControlMsg::ListSessions { req_id: 41 }, &tx, &auth).await;
+        handle_restricted_control(
+            &sup,
+            ControlMsg::ListSessions { req_id: 41 },
+            &tx,
+            &auth,
+            None,
+        )
+        .await;
         let unauthorized: ControlMsg =
             serde_json::from_slice(&rx.recv().await.expect("authority refusal").body).unwrap();
         assert!(matches!(
@@ -6804,6 +6831,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let forged: ControlMsg =
@@ -6867,6 +6895,7 @@ mod tests {
                 },
                 &tx,
                 &auth,
+                None,
             )
             .await;
             let reply: ControlMsg =
@@ -6897,6 +6926,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let reply: ControlMsg =
@@ -6923,6 +6953,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let reply: ControlMsg =
@@ -6972,6 +7003,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
         let reply: ControlMsg =
@@ -7183,6 +7215,7 @@ mod tests {
             },
             &tx,
             &auth,
+            None,
         )
         .await;
 
@@ -7248,7 +7281,7 @@ mod tests {
         };
         // Keep the request future owned by this test: a timeout drops it,
         // rather than detaching a task that might later create a session.
-        let create = handle_restricted_control(&sup, request, &tx, &auth);
+        let create = handle_restricted_control(&sup, request, &tx, &auth, None);
         tokio::pin!(create);
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             tokio::select! {
@@ -7417,7 +7450,7 @@ mod tests {
             launch: None,
             github_checkout: None,
         };
-        let create = handle_restricted_control(&sup, request, &tx, &auth);
+        let create = handle_restricted_control(&sup, request, &tx, &auth, None);
         tokio::pin!(create);
         tokio::time::timeout(Duration::from_secs(5), async {
             tokio::select! {
@@ -7604,12 +7637,15 @@ mod tests {
         handle_restricted_control(
             sup,
             ControlMsg::ReportConversation {
+                transcript_path: None,
+                hook_event_name: None,
                 req_id,
                 conversation: conversation.to_string(),
                 source: source.to_string(),
             },
             &tx,
             auth,
+            None,
         )
         .await;
         serde_json::from_slice(&rx.recv().await.expect("a report is always answered").body)
@@ -7638,6 +7674,8 @@ mod tests {
         let (_tasks, mut rx) = dispatch_for_test(
             &sup,
             ControlMsg::ReportConversation {
+                transcript_path: None,
+                hook_event_name: None,
                 req_id: 61,
                 conversation: "conv-helm".to_string(),
                 source: "startup".to_string(),
@@ -8338,7 +8376,7 @@ mod tests {
             github_checkout: None,
         };
         let mut send = async |msg| {
-            handle_restricted_control(&sup, msg, &tx, &auth).await;
+            handle_restricted_control(&sup, msg, &tx, &auth, None).await;
             serde_json::from_slice::<ControlMsg>(&rx.recv().await.expect("create reply").body)
                 .expect("decode create reply")
         };
