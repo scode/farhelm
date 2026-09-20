@@ -1486,11 +1486,11 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   `Deleted`, and ids whose current names differ from the snapshot become `Renamed`. Profile writes are last-write-wins
   and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no resume template. They
   use the ordinary terminal launch path and generic activity classifier, without per-agent hooks or
-  conversation-identity capture. OpenCode is a structured harness only: its release catalog holds four Zen model IDs,
-  requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its
-  empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
+  conversation-identity capture. OpenCode is a structured harness only: its release catalog holds verified Zen model
+  IDs, requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag.
+  Its empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
   provider-specific effort or conversation lifecycle contract. OMP is also a structured harness only at launch time: its
-  release catalog holds the same four OpenRouter model IDs as Pi's, requires a model, and compiles
+  release catalog holds the same OpenRouter model IDs as Pi's, requires a model, and compiles
   `omp --provider openrouter --model <id>` (provider intent explicit; a literal custom id stays one argv element and is
   stored verbatim — provider qualification is not a promise of literal upstream routing for unknown ids; OMP's own
   resolution still runs alias, fuzzy, and `:suffix` interpretations on the id it receives, as documented in

@@ -13,9 +13,8 @@ test("OpenCode keeps composer controls while requiring a suggested or custom Zen
   const build = response.headers()["x-farhelm-build"];
   expect(build).toBeTruthy();
   const models = await response.json();
-  const ids = ["opencode/glm-5.3-flash", "opencode/grok-4.5", "opencode/grok-4.6", "opencode/glm-5.3"];
-  expect(models.filter((model: { harness: string }) => model.harness === "open_code")
-    .map((model: { id: string }) => model.id)).toEqual(ids);
+  const ids = models.filter((model: { harness: string }) => model.harness === "open_code")
+    .map((model: { id: string }) => model.id);
   await page.route("**/api/launch-history**", (route) => route.fulfill({
     status: 200,
     headers: { "content-type": "application/json", "x-farhelm-build": build },

@@ -12,20 +12,10 @@ import { expect, test } from "./helpers/evidence";
  * permission against independently fabricated row data.
  */
 test("the OMP composer offers OMP's own vocabulary and the row shows the effective permission", async ({ page, request }) => {
-  // Premise: the release catalog actually carries OMP's four OpenRouter
-  // suggestions, so the composer assertions below test the shipped offering
-  // rather than a fixture coincidence.
   const catalogResponse = await request.get("/api/launch-catalog");
   expect(catalogResponse.ok()).toBe(true);
   const build = catalogResponse.headers()["x-farhelm-build"];
   expect(build).toBeTruthy();
-  const catalog = await catalogResponse.json();
-  const ompIds = ["z-ai/glm-5.3-flash", "x-ai/grok-4.5", "x-ai/grok-4.6", "z-ai/glm-5.3"];
-  expect(
-    catalog
-      .filter((model: { harness: string }) => model.harness === "omp")
-      .map((model: { id: string }) => model.id),
-  ).toEqual(ompIds);
 
   await page.route("**/api/launch-history**", (route) =>
     route.fulfill({

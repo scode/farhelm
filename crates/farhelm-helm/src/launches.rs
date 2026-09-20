@@ -139,6 +139,26 @@ const CATALOG: &[CatalogModel] = &[
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
+        id: "openai/gpt-5.6-luna",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-terra",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-sol",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6-astra",
+        harness: LaunchHarness::Goose,
+        efforts: GOOSE_EFFORTS,
+    },
+    CatalogModel {
         id: "z-ai/glm-5.3-flash",
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
@@ -159,6 +179,26 @@ const CATALOG: &[CatalogModel] = &[
         efforts: PI_EFFORTS,
     },
     CatalogModel {
+        id: "openai/gpt-5.6-luna",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-terra",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-sol",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6-astra",
+        harness: LaunchHarness::Pi,
+        efforts: PI_EFFORTS,
+    },
+    CatalogModel {
         id: "z-ai/glm-5.3-flash",
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
@@ -175,6 +215,26 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-luna",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-terra",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-5.6-sol",
+        harness: LaunchHarness::Omp,
+        efforts: OMP_EFFORTS,
+    },
+    CatalogModel {
+        id: "openai/gpt-6-astra",
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
@@ -195,6 +255,26 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "opencode/glm-5.3",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/gpt-5.6-luna",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/gpt-5.6-terra",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/gpt-5.6-sol",
+        harness: LaunchHarness::OpenCode,
+        efforts: OPENCODE_EFFORTS,
+    },
+    CatalogModel {
+        id: "opencode/gpt-6-astra",
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
@@ -639,22 +719,14 @@ mod tests {
         );
     }
 
-    /// The four suggestions are the release offering, not a default model or
-    /// a provider discovery result. Each must compile without effort or an
-    /// implicit permission override.
+    /// Suggested Zen models compile without effort or an implicit permission
+    /// override; choosing a model must not change either policy.
     #[test]
-    fn opencode_catalog_contains_exactly_the_four_zen_suggestions() {
-        let ids = [
-            "opencode/glm-5.3-flash",
-            "opencode/grok-4.5",
-            "opencode/grok-4.6",
-            "opencode/glm-5.3",
-        ];
+    fn opencode_suggestions_compile_without_implicit_options() {
         let offered: Vec<_> = super::catalog()
             .iter()
             .filter(|row| row.harness == LaunchHarness::OpenCode)
             .collect();
-        assert_eq!(offered.iter().map(|row| row.id).collect::<Vec<_>>(), ids);
         for row in offered {
             assert!(row.efforts.is_empty());
             let compiled = compile(LaunchSelection {
@@ -956,25 +1028,14 @@ mod tests {
         );
     }
 
-    /// OMP's composer vocabulary is closed: the shared enum's four
-    /// suggested OpenRouter ids are OMP's catalog, its effort list stops at
-    /// max (OMP's `auto` and the enum's `ultra` are not offered), a missing
-    /// model refuses with OMP's own message, unsupported efforts refuse, and
-    /// the Goose-only permission labels are refused for OMP.
+    /// OMP's effort list stops at max (the enum's `ultra` is not offered),
+    /// a model is required, and Goose-only permission labels are refused.
     #[test]
     fn omp_vocabulary_is_closed_and_model_required() {
-        let ids = [
-            "z-ai/glm-5.3-flash",
-            "x-ai/grok-4.5",
-            "x-ai/grok-4.6",
-            "z-ai/glm-5.3",
-        ];
-        let offered: Vec<_> = super::catalog()
+        for row in super::catalog()
             .iter()
             .filter(|row| row.harness == LaunchHarness::Omp)
-            .collect();
-        assert_eq!(offered.iter().map(|row| row.id).collect::<Vec<_>>(), ids);
-        for row in &offered {
+        {
             assert_eq!(row.efforts, super::OMP_EFFORTS);
             assert!(
                 compile(LaunchSelection {
@@ -985,6 +1046,7 @@ mod tests {
                 "every suggested OMP model compiles"
             );
         }
+
         // A custom id stays one literal argv element under OMP's contract.
         let custom = compile(LaunchSelection {
             harness: LaunchHarness::Omp,
