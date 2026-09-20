@@ -1081,9 +1081,10 @@ pub enum HostStoreError {
     #[error("{0}")]
     InvalidAlias(String),
     /// A write would make two rows share one display name: a proposed alias
-    /// or destination matches another row's current alias, or (alias-clear
-    /// only) a row's restored derived name matches another row's current
-    /// alias. Returned by [`HelmStore::add_ssh_host`],
+    /// or restored derived name matches another row's current effective
+    /// display name, or a proposed destination matches another row's
+    /// explicit alias or unaliased local display name. Returned by
+    /// [`HelmStore::add_ssh_host`],
     /// [`HelmStore::register_probed_ssh_host`], [`HelmStore::ensure_ssh_hosts`],
     /// [`HelmStore::update_ssh_destination`], and [`HelmStore::update_alias`]
     /// alike, which is why the message names no field — the caller did not
@@ -1208,19 +1209,20 @@ fn validate_alias(alias: Option<&str>) -> Result<Option<String>, HostStoreError>
     Ok(Some(alias.to_string()))
 }
 
-/// Whether `candidate` matches another row's current ALIAS — the narrow
-/// half of the display-name uniqueness rule, shared by every write that
-/// touches a DESTINATION rather than an alias: registering
+/// Whether `candidate` matches another row's current explicit alias or the
+/// unaliased local row's effective display name. This is the narrow half of
+/// the display-name uniqueness rule, shared by every write that touches a
+/// DESTINATION rather than an alias: registering
 /// ([`HelmStore::add_ssh_host`], [`HelmStore::register_probed_ssh_host`],
-/// [`HelmStore::ensure_ssh_hosts`]), retargeting
-/// ([`HelmStore::update_ssh_destination`]), and restoring the derived name
-/// by clearing an alias ([`HelmStore::update_alias`]). Destination-versus-
-/// destination collisions are the `hosts_ssh_destination` partial unique
-/// index's job; this only needs to catch the cross-kind case an alias
-/// introduces, which is why it reads the `alias` column alone rather than
-/// every row's full derived display name (contrast `update_alias`'s SET
-/// path, which does need the wide comparison — see that function's own
-/// doc).
+/// [`HelmStore::ensure_ssh_hosts`]), and retargeting
+/// ([`HelmStore::update_ssh_destination`]). Destination-versus-destination
+/// collisions are the `hosts_ssh_destination` partial unique
+/// index's job. The local row has no destination for that index to protect,
+/// so its unaliased derived name is checked too. Other unaliased SSH
+/// destinations remain the index's responsibility; widening this to every
+/// derived name would incorrectly turn ordinary duplicate destinations into
+/// alias conflicts (contrast `update_alias`, which does need the
+/// wide comparison — see that function's own doc).
 ///
 /// `exclude` is the row being written, when there is one to re-affirm its
 /// own value against (registration has none: the row does not exist yet).
@@ -1241,7 +1243,27 @@ fn alias_collision(
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .find(|alias| alias == candidate);
-    Ok(collision)
+    if collision.is_some() {
+        return Ok(collision);
+    }
+
+    // An explicit local alias was part of the query above. Only the default
+    // local display name needs a second check, because it has no destination
+    // for the SSH-only unique index to protect.
+    let local_name = host_display_name(HostKind::Local, None, None);
+    if candidate != local_name {
+        return Ok(None);
+    }
+    let unaliased_local: Option<()> = tx
+        .query_row(
+            "SELECT 1 FROM hosts \
+             WHERE (?1 IS NULL OR id != ?1) AND kind = 'local' AND alias IS NULL",
+            rusqlite::params![exclude],
+            |_| Ok(()),
+        )
+        .optional()
+        .context("checking the local display name before a destination write")?;
+    Ok(unaliased_local.map(|()| local_name))
 }
 
 /// The connection-defining fields an attempt was dialed under, carried
@@ -3467,15 +3489,15 @@ impl HelmStore {
     /// but empty, NUL-containing, and component-less values cannot safely
     /// become provisioning destinations later.
     ///
-    /// A destination matching another host's current ALIAS is refused as
+    /// A destination matching another host's explicit alias or the
+    /// unaliased local display name is refused as
     /// [`HostStoreError::AliasTaken`], inside the same transaction as the
-    /// insert (`alias_collision`'s own doc explains why only aliases, not
-    /// every derived name, are compared here). Without this, a fresh
-    /// registration could land a row whose derived name collides with an
-    /// existing alias — nothing in the unique index would catch it, since
-    /// the index only knows about destinations — and `resolve_host` would
-    /// then correctly refuse the ambiguous name, silently breaking the
-    /// alias as an agent target.
+    /// insert (`alias_collision`'s own doc explains the deliberately narrow
+    /// comparison). Without this, a fresh registration could land a row
+    /// whose derived name collides with an existing display name — nothing
+    /// in the SSH destination index catches the local row — and
+    /// `resolve_host` would then correctly refuse the ambiguous name,
+    /// silently breaking it as an agent target.
     pub async fn add_ssh_host(
         &self,
         destination: &str,
@@ -3542,8 +3564,9 @@ impl HelmStore {
     /// caller whose live-registry reconciliation fails can roll back only
     /// the row it owns rather than deleting a concurrent registration.
     ///
-    /// A genuinely NEW destination matching another host's current ALIAS is
-    /// refused as [`HostStoreError::AliasTaken`] before the insert — see
+    /// A genuinely NEW destination matching another host's explicit alias
+    /// or unaliased local display name is refused as
+    /// [`HostStoreError::AliasTaken`] before the insert — see
     /// [`HelmStore::add_ssh_host`]'s doc for why this check exists at all.
     /// The CONVERGE branch (an already-registered destination) never runs
     /// it: that branch never writes `destination`, so it cannot introduce a
@@ -3682,11 +3705,11 @@ impl HelmStore {
     ///
     /// An entry that is ACTUALLY NEW (not already registered) is refused as
     /// [`HostStoreError::AliasTaken`], aborting the WHOLE batch, if its
-    /// destination matches another host's current alias — see
-    /// [`HelmStore::add_ssh_host`]'s doc for why. Checked only for entries
-    /// this call would actually insert: an entry that is already registered
-    /// changes nothing (ADDITIVE, above), so a pre-existing collision that
-    /// predates this call and that this call is not creating must not fail
+    /// destination matches another host's explicit alias or unaliased local
+    /// display name — see [`HelmStore::add_ssh_host`]'s doc for why. Checked
+    /// only for entries this call would actually insert: an entry that is
+    /// already registered changes nothing (ADDITIVE, above), so a
+    /// pre-existing collision that this call is not creating must not fail
     /// an otherwise ordinary startup.
     pub async fn ensure_ssh_hosts(&self, entries: Vec<EnsureHost>) -> anyhow::Result<Vec<HostId>> {
         for (index, entry) in entries.iter().enumerate() {
@@ -3842,9 +3865,10 @@ impl HelmStore {
                     Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                 }
                 Some((HostKind::Ssh, alias)) => {
-                    // Only ALIASES are compared here — colliding with
-                    // another row's plain, unaliased destination is not
-                    // this check's job. That case is caught below by
+                    // Explicit aliases and the unaliased local display name
+                    // are compared here. Colliding with another SSH row's
+                    // plain, unaliased destination is not this check's job.
+                    // That case is caught below by
                     // `UPDATE OR IGNORE` against the `hosts_ssh_destination`
                     // partial unique index and reported as
                     // `DuplicateDestination`, the more specific refusal for
@@ -3856,7 +3880,8 @@ impl HelmStore {
                     // destination collision as an alias conflict even where
                     // no alias is involved on either side, and would shadow
                     // `DuplicateDestination` entirely since this check runs
-                    // first.
+                    // first. The local row is the exception because it has
+                    // no SSH destination for that index to protect.
                     if alias.is_none()
                         && let Some(name) = alias_collision(&tx, Some(host), &destination)?
                     {
@@ -10511,6 +10536,41 @@ mod tests {
         );
     }
 
+    /// Retargeting an unaliased SSH row onto the local row's current
+    /// display name must be refused before it can make that name resolve to
+    /// two hosts. This is distinct from the SSH destination index: the
+    /// local row has no destination, so only the display-name check can
+    /// protect the collision.
+    #[farhelm_testtrace::test]
+    async fn update_ssh_destination_rejects_the_local_display_name() {
+        let (_dir, store) = fresh_store().await;
+        let mover = store.add_ssh_host("mover@host", None, None).await.unwrap();
+
+        let err = store
+            .update_ssh_destination(mover, "this machine")
+            .await
+            .expect_err("retargeting onto the local display name must be refused");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "the refusal must name the local row's visible name: {err:#}"
+        );
+        let mover = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == mover)
+            .unwrap();
+        assert_eq!(
+            mover.destination.as_deref(),
+            Some("mover@host"),
+            "a refused retarget must retain the old destination"
+        );
+    }
+
     /// An aliased host keeps that alias as its display name while its SSH
     /// destination changes, so a destination matching another alias does not
     /// create a new display-name collision for the edited row.
@@ -10657,6 +10717,32 @@ mod tests {
         );
     }
 
+    /// Direct registration must reserve the local row's effective display
+    /// name too. Unlike an SSH-to-SSH duplicate, this collision has no
+    /// destination index to catch it because the local row has no SSH
+    /// destination at all.
+    #[farhelm_testtrace::test]
+    async fn add_ssh_host_rejects_the_local_display_name() {
+        let (_dir, store) = fresh_store().await;
+
+        let err = store
+            .add_ssh_host("this machine", None, None)
+            .await
+            .expect_err("registration must not duplicate the local display name");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "the refusal must identify the local displayed value: {err:#}"
+        );
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            1,
+            "the refused registration must not create an SSH row"
+        );
+    }
+
     /// The same registration-time collision, through the discovery path
     /// `provisioning/service.rs` calls after a successful probe —
     /// independently, because `register_probed_ssh_host` shares no code
@@ -10688,6 +10774,32 @@ mod tests {
             store.list_hosts().await.unwrap().len(),
             2,
             "a refused discovery-registration must not have created a row"
+        );
+    }
+
+    /// A successful probe still cannot register a destination that would
+    /// duplicate the local display name. The discovery path has its own
+    /// transaction and insert branch, so direct-registration coverage would
+    /// not prove this user-visible route is protected.
+    #[farhelm_testtrace::test]
+    async fn register_probed_ssh_host_rejects_the_local_display_name() {
+        let (_dir, store) = fresh_store().await;
+
+        let err = store
+            .register_probed_ssh_host("this machine", None, None, Some("identity-probed"))
+            .await
+            .expect_err("a probed registration must not duplicate the local display name");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "the refusal must identify the local displayed value: {err:#}"
+        );
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            1,
+            "the refused probe must not create an SSH row"
         );
     }
 
@@ -10844,6 +10956,47 @@ mod tests {
                 .all(|h| h.destination.as_deref() != Some("ensure-clean@host")),
             "the EARLIER entry in the same batch must not have committed either — the whole \
              transaction rolls back on the later entry's refusal"
+        );
+    }
+
+    /// The startup-time ensure path must reject the local display name and
+    /// roll back an earlier entry in that same batch. Otherwise a config
+    /// file could make the local name ambiguous while still appearing to
+    /// have applied its preceding hosts successfully.
+    #[farhelm_testtrace::test]
+    async fn ensure_ssh_hosts_rejects_the_local_display_name_atomically() {
+        let (_dir, store) = fresh_store().await;
+
+        let err = store
+            .ensure_ssh_hosts(vec![
+                EnsureHost {
+                    destination: "ensure-clean@host".to_string(),
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                },
+                EnsureHost {
+                    destination: "this machine".to_string(),
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                },
+            ])
+            .await
+            .expect_err("ensure must not register the local display name");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "the refusal must identify the local displayed value: {err:#}"
+        );
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.destination.as_deref() != Some("ensure-clean@host")),
+            "the earlier batch entry must roll back with the local-name refusal"
         );
     }
 

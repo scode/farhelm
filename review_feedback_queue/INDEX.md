@@ -70,8 +70,6 @@ One line per open item. This file must always match the feedback files in this d
 - `send-upload-ignores-cancellation.md` — the transfer's queue send ignores cancellation, stalling deletes.
 - `sftp-overall-deadline-fails-slow-links.md` — sftp transfer's 60 s overall deadline fails slow links
   deterministically.
-- `ssh-destination-collides-with-local-display-name.md` — ssh destination "this machine" collides with the local host's
-  display name.
 - `staging-holds-claim-across-unbounded-io.md` — upload staging holds the lifecycle claim across unbounded disk I/O.
 - `stale-dial-outcome-publishes-over-retarget-nudge.md` — editing a host mid-dial briefly routes operations to the old
   machine.
