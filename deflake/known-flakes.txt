@@ -23,6 +23,5 @@ playwright sidebar.spec.ts opening the actions menu enters it, and Tab leaves it
 playwright terminal-flood.spec.ts a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays  # flood-stall-zero-pauses
 nextest farhelm::e2e session_lifecycle::non_utf8_terminal_output_survives_live_stream  # non-utf8-marker-missing
 nextest farhelm::e2e terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled  # backpressure-rss-attribution
-nextest farhelm::e2e session_rename::a_renamed_title_survives_a_supervisor_restart  # rename-supervisor-ownership-race
 nextest farhelm::e2e launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail  # sentinel-unlink-surviving-file
 playwright profiles.spec.ts profile CRUD round-trips from the app-bar popup to the helm  # profile-crud-edit-timeout

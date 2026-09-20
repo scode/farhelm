@@ -95,6 +95,17 @@ async fn stored_sessions(state: &std::path::Path) -> Vec<StoredSession> {
 /// last `Supervisor` drops here. Poll the actual `flock` from a blocking thread
 /// so the replacement cannot race that inherited descriptor and silently
 /// start read-only.
+///
+/// The probe then has to give the claim straight back, and closing its own
+/// descriptor is not enough to do that. A `flock` belongs to the open file
+/// description rather than to a descriptor, so a sibling's child that forked
+/// while this file was open holds the lock for as long as it keeps its inherited
+/// copy — the very mechanism the wait above exists to survive, turned around on
+/// the prober. `unlock` releases the lock itself rather than one reference to
+/// it, which is what keeps the handoff independent of how promptly another
+/// thread's child reaches `exec`. `farhelm-teststate`'s
+/// `sweep_never_reaps_a_held_lock` carries the same correction for the same
+/// reason (#384).
 async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tokio::time::Instant) {
     let lock_path = state.join("supervisor.lock");
     tokio::task::spawn_blocking(move || {
@@ -112,6 +123,8 @@ async fn wait_for_state_dir_claim_release(state: &std::path::Path, deadline: tok
             // sleep-ok: retry the actual kernel claim until acquired or the shared deadline expires.
             std::thread::sleep(Duration::from_millis(20));
         }
+        lock.unlock()
+            .expect("the probe must hand the state directory's claim back before the replacement");
     })
     .await
     .expect("the state-directory claim waiter must not panic");

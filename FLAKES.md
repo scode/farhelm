@@ -209,7 +209,13 @@ Chromium, so it was not shipped. Disposition: open (TODO.md, with the attempt's 
 Loaded 4-vCPU sandbox, full binary at `--test-threads=4` beside a looping `cargo build`: 1 of 3 runs panicked in the
 restart helper's own setup assertion in `create_idempotency.rs`, "the replacement must hold the state directory's claim,
 or it reconciles nothing and this test would pass for the wrong reason". The replacement supervisor did not hold the
-claim when the helper checked, under load. Never seen alone; nothing else known. Disposition: open (TODO.md).
+claim when the helper checked, under load. Never seen alone; nothing else known. Disposition: the helper's own claim
+probe was the one mechanism anyone could name for this, and it no longer exists — the probe took the `flock` to prove
+the predecessor had let go and then only CLOSED its descriptor, which does not release a lock another thread's forked
+child inherited, so it could hand the replacement a directory it had itself locked. It now unlocks explicitly, the
+correction #384 made to `farhelm-teststate`'s sweep fixture for the same reason. That is a structural removal of the
+hazard, not a reproduction of this failure: if the assertion fires again, its cause is something else and belongs in a
+new entry.
 
 ## 2026-09-03 — two more profiles cases (e2e/tests/profiles.spec.ts)
 

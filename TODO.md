@@ -195,15 +195,6 @@ is a clean gate.
   producer as the explanation for a pass. On recurrence, retain every RSS/progress sample, active sibling identities,
   and a bounded allocator breakdown to attribute growth before changing a queue or bound. The four-thread full binary
   supplies the co-resident allocations an isolated loop omits.
-- Deflake `session_rename::a_renamed_title_survives_a_supervisor_restart` in
-  `crates/farhelm/tests/e2e/session_rename.rs`. Twenty exact baseline runs passed. The historical loaded four-thread
-  failure was the replacement supervisor ownership assertion in the shared `create_idempotency.rs` handoff helper,
-  before the rename reload assertion. Its successful temporary probe takes a flock and closes the file before creating
-  the replacement. A concurrent fork can retain that open file description until exec, the mechanism demonstrated for
-  the separate sweep fixture fixed in #384. This is a concrete hypothesis here, not a reproduced cause. Trace probe
-  acquisition/release and the replacement claim result during concurrent process creation. If inherited probe ownership
-  is confirmed, explicitly unlocking that probe is a scoped fixture correction. Retain the ownership assertion: a
-  read-only reload could otherwise make the rename test pass without exercising a real successor.
 - Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
   isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
   worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
@@ -219,11 +210,11 @@ is a clean gate.
   paths match and no removal warning exists, inspect the actual directory entry before changing cleanup semantics.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
-  viewer RSS, degenerate-size READY, replacement claim, and malformed-sentinel cases still block restoring the entire
-  `farhelm` integration target in `.github/dist-build-setup.yml`. Browser flakes are separate coverage and do not
-  themselves gate that Rust target. The integration suite remains available for explicit local or worker validation;
-  ordinary CI and the release gate do not run it while this exclusion stands. A single clean combined run cannot
-  establish that these latent failures are fixed; retain the release exclusion until the evidence supports reversing it.
+  viewer RSS, degenerate-size READY, and malformed-sentinel cases still block restoring the entire `farhelm` integration
+  target in `.github/dist-build-setup.yml`. Browser flakes are separate coverage and do not themselves gate that Rust
+  target. The integration suite remains available for explicit local or worker validation; ordinary CI and the release
+  gate do not run it while this exclusion stands. A single clean combined run cannot establish that these latent
+  failures are fixed; retain the release exclusion until the evidence supports reversing it.
 
 - Deflake `profile CRUD round-trips from the app-bar popup to the helm` in `e2e/tests/profiles.spec.ts` (profile CRUD
   edit timeout). The deflake sweep's browser battery failed it once on Chromium: the 60 s test timeout fired in the
