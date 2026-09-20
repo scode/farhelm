@@ -178,7 +178,11 @@
   invocation bundle the reachable full-authority path accepts. Keep admission and accepted request shapes unchanged.
 - Completion criteria: the refusal no longer suggests a selector the next check rejects. No new authority abstraction or
   wording-only regression test. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/767/changes. jj change:
+  `kwnuwumqrztromqskkrlqxtsopzlowom`; bookmark: `fix-full-authority-create-advice`. Before/after dispatcher smoke
+  captured the misleading restricted-selector advice and the corrected invocation-bundle response. Both refusal-contract
+  and normal restricted-create checks pass. Removed temporary output instrumentation and existing wording-only
+  assertions.
 
 ## discarded-replacement-logs-spurious-row-gone-retire.md
 
