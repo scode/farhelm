@@ -103,6 +103,26 @@ use tracing::{debug, warn};
 /// `create_session` has touched storage, tmux, or the filesystem.
 pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
 
+/// Count the fields that share create's combined reply-size allowance.
+///
+/// Restricted profile resolution uses this before sending a selector to the
+/// helm; the normal create path uses the same count before durable work.
+fn create_field_bytes(
+    parent: Option<&str>,
+    cwd: &str,
+    checkout_bytes: usize,
+    profile_name: Option<&str>,
+    profile_id: Option<&str>,
+    title: Option<&str>,
+) -> usize {
+    parent.map_or(0, str::len)
+        + cwd.len()
+        + checkout_bytes
+        + profile_name.map_or(0, str::len)
+        + profile_id.map_or(0, str::len)
+        + title.map_or(0, str::len)
+}
+
 /// Validate the fresh destination before resolution can contact a peer or
 /// reserve an intent. The returned encoded size belongs to the same total
 /// create allowance as the launch fields: the original client identity and
@@ -588,12 +608,14 @@ async fn handle_create_session(
         }
     };
     if let CreateSelector::Profile { name, id } = &selector {
-        let field_len = parent.as_deref().map_or(0, str::len)
-            + cwd.len()
-            + checkout_bytes
-            + name.as_deref().map_or(0, str::len)
-            + id.as_deref().map_or(0, str::len)
-            + title.as_deref().map_or(0, str::len);
+        let field_len = create_field_bytes(
+            parent.as_deref(),
+            &cwd,
+            checkout_bytes,
+            name.as_deref(),
+            id.as_deref(),
+            title.as_deref(),
+        );
         if field_len > CREATE_FIELD_CAP {
             send_reply(
                 tx,
@@ -3344,6 +3366,29 @@ pub(crate) async fn handle_restricted_control(
                 .await;
                 return;
             }
+            let field_len = create_field_bytes(
+                parent.as_deref(),
+                &cwd,
+                0,
+                profile_name.as_deref(),
+                profile_id.as_deref(),
+                title.as_deref(),
+            );
+            if field_len > CREATE_FIELD_CAP {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: format!(
+                            "parent, cwd, profile name, and title together are {field_len} bytes, \
+                             exceeding the {CREATE_FIELD_CAP}-byte limit"
+                        ),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
             let resolved_mode = if !inherit_agent
                 && agent_kind.is_none()
                 && resume_template.is_none()
@@ -4540,6 +4585,56 @@ mod tests {
         let (helm, mut helm_rx) = sup.register_test_helm_link(&auth.session_id).await;
         let intent = sup.claim_intent_for_test("resolve-before-claim").await;
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        // Each field fits alone; their combined request exceeds the shared cap.
+        // An owned, registered helm link makes any attempted lookup observable.
+        let oversized = "x".repeat(CREATE_FIELD_CAP / 2 + 1);
+        assert!(oversized.len() <= CREATE_FIELD_CAP);
+        assert!(oversized.len() * 2 > CREATE_FIELD_CAP);
+        let invalid = ControlMsg::CreateSession {
+            req_id: 90,
+            parent: Some(auth.session_id.clone()),
+            cwd: state.path().to_string_lossy().into_owned(),
+            invocation: None,
+            profile_name: Some(oversized.clone()),
+            profile_id: None,
+            inherit_agent: false,
+            title: Some(oversized),
+            cols: 80,
+            rows: 24,
+            intent_key: None,
+            agent_kind: None,
+            resume_template: None,
+            source_profile: None,
+            launch: None,
+            github_checkout: None,
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                () = handle_restricted_control(&sup, invalid, &tx, &auth) => {},
+                upcall = helm_rx.recv() => {
+                    upcall.expect("the fixture helm link must remain registered");
+                    panic!("an oversized create must be refused before profile lookup");
+                }
+            }
+        })
+        .await
+        .expect("oversized create must receive a local refusal");
+        let refusal: ControlMsg =
+            serde_json::from_slice(&rx.try_recv().expect("local refusal").body)
+                .expect("decode local refusal");
+        assert!(matches!(
+            refusal,
+            ControlMsg::Error {
+                req_id: 90,
+                kind: ErrorKind::InvalidRequest,
+                ..
+            }
+        ));
+        assert!(
+            matches!(helm_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+            "local refusal must not enqueue profile resolution"
+        );
+
         let create = tokio::spawn({
             let sup = Arc::clone(&sup);
             let auth = auth.clone();
