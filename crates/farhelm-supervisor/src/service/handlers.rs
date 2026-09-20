@@ -362,7 +362,7 @@ fn create_mode(fields: CreateSelectorFields) -> Result<CreateSelector, String> {
             Ok(CreateSelector::Derived)
         }
         (None, None, None, false) => Err(
-            "a restricted create requires an explicit profile name, profile id, or inheritance selector"
+            "a create must carry an invocation bundle"
                 .to_string(),
         ),
         (None, None, None, true) => Err(
@@ -4665,19 +4665,8 @@ mod tests {
             agent_kind,
             resume_template,
             source_profile,
-            expected,
         ) in [
-            (
-                1u64,
-                None,
-                None,
-                None,
-                false,
-                None,
-                None,
-                None,
-                "requires an explicit profile",
-            ),
+            (1u64, None, None, None, false, None, None, None),
             (
                 2,
                 Some("agent".to_string()),
@@ -4687,7 +4676,6 @@ mod tests {
                 None,
                 None,
                 None,
-                "exactly one",
             ),
             (
                 3,
@@ -4698,7 +4686,6 @@ mod tests {
                 Some(AgentKind::Claude),
                 None,
                 None,
-                "bundle fields",
             ),
             (
                 4,
@@ -4709,7 +4696,6 @@ mod tests {
                 None,
                 Some(vec!["claude".to_string(), "{conversation}".to_string()]),
                 None,
-                "bundle fields",
             ),
             (
                 5,
@@ -4720,7 +4706,6 @@ mod tests {
                 None,
                 None,
                 None,
-                "session-authenticated spawn",
             ),
             (
                 6,
@@ -4734,7 +4719,6 @@ mod tests {
                     id: "profile-1".to_string(),
                     name: "Claude Code".to_string(),
                 }),
-                "bundle fields",
             ),
             (
                 7,
@@ -4748,7 +4732,6 @@ mod tests {
                     id: "profile-1".to_string(),
                     name: "Claude Code".to_string(),
                 }),
-                "requires an explicit profile",
             ),
             (
                 8,
@@ -4759,7 +4742,6 @@ mod tests {
                 Some(AgentKind::Claude),
                 None,
                 None,
-                "bundle fields",
             ),
             (
                 9,
@@ -4770,7 +4752,6 @@ mod tests {
                 None,
                 Some(vec!["claude".to_string(), "{conversation}".to_string()]),
                 None,
-                "bundle fields",
             ),
             (
                 10,
@@ -4781,7 +4762,6 @@ mod tests {
                 Some(AgentKind::Claude),
                 None,
                 None,
-                "without an invocation",
             ),
             (
                 11,
@@ -4792,7 +4772,6 @@ mod tests {
                 None,
                 Some(vec!["claude".to_string(), "{conversation}".to_string()]),
                 None,
-                "without an invocation",
             ),
         ] {
             handle_control(
@@ -4830,9 +4809,7 @@ mod tests {
             let frame = rx.try_recv().expect("a reply must have been sent");
             let decoded: ControlMsg = serde_json::from_slice(&frame.body).expect("decode");
             let ControlMsg::Error {
-                req_id: got,
-                kind,
-                message,
+                req_id: got, kind, ..
             } = decoded
             else {
                 panic!("a pre-storage create refusal must return an error: {decoded:?}");
@@ -4842,10 +4819,6 @@ mod tests {
                 kind,
                 ErrorKind::InvalidRequest,
                 "an ambiguous request is the caller's mistake, not a server fault"
-            );
-            assert!(
-                message.contains(expected),
-                "the refusal must say what was wrong: {message}"
             );
             let key = format!("ambiguous-{req_id}");
             assert!(

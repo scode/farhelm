@@ -16,7 +16,6 @@ One line per open item. This file must always match the feedback files in this d
 - `clone-audit-log-skips-escape-for-log.md` — clone audit log prints agent-chosen ids raw, letting one id render as
   another.
 - `commit-window-reads-unpublished-outcome.md` — a commit in the close-to-publish window gets the generic error.
-- `create-mode-message-blames-wrong-caller.md` — the no-selector create error blames the wrong caller.
 - `create-runs-inline-on-read-loop.md` — CreateSession runs its full validate-and-launch inline on the read loop.
 - `delete-quarantine-waits-unboundedly.md` — session-delete quarantine awaits the disk unboundedly under the claim.
 - `detach-timeout-abandons-upstream-detach.md` — detach timeout drops the send, leaving the supervisor-side attachment
