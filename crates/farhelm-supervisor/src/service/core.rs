@@ -10945,12 +10945,23 @@ impl Supervisor {
             .err();
         let reaping = self.has_output_reap_for_key(&key);
         drop(sink);
-        notify_detached(&notify, channel, "session restarted".to_string());
-        if let Some(cleanup) = cleanup {
-            anyhow::bail!("{cleanup}");
-        }
-        if reaping {
-            anyhow::bail!("the previous run's terminal-output client is still being cleaned up");
+        let restart_failure = match cleanup {
+            Some(cleanup) => Some(cleanup.to_string()),
+            None if reaping => Some(
+                "the previous run's terminal-output client is still being cleaned up".to_string(),
+            ),
+            None => None,
+        };
+        // The detach is irrevocable even when its cleanup blocks the relaunch.
+        // When this cleanup step refuses the relaunch, its detach notice must
+        // report that failure rather than claim the session restarted.
+        let reason = match &restart_failure {
+            Some(failure) => format!("session ended; restart failed: {failure}"),
+            None => "session restarted".to_string(),
+        };
+        notify_detached(&notify, channel, reason);
+        if let Some(failure) = restart_failure {
+            anyhow::bail!("{failure}");
         }
         Ok(())
     }

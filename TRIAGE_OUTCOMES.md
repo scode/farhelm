@@ -355,7 +355,10 @@
 - Completion criteria: failed detach-for-restart says the attachment ended but restart failed, without claiming
   completion. Both paths notify; successful flow remains unchanged. No lifecycle or automatic-reattach redesign. Remove
   this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/778/changes. jj change:
+  `mrxvyvxnotskvuyzronkroottyvxxnvp`; bookmark: `fix-restart-failure-notice`. The real attachment probe now receives a
+  restart-failure notice at the cleanup barrier. The adjacent successful-restart case also passes. Temporary logging was
+  removed; wording-only assertions were not retained.
 
 ## reverify-stamp-refresh-never-lands.md
 

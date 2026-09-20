@@ -58,7 +58,6 @@ One line per open item. This file must always match the feedback files in this d
 - `refused-delete-discards-in-flight-upload.md` — refused delete still destroys an in-flight upload.
 - `refused-retry-strands-credential-spec.md` — refused create retry strands a credential-bearing launch spec on disk.
 - `reload-adopts-stale-pane.md` — reload adopts a stale dead pane as the new generation's terminal.
-- `restart-failure-says-restarted.md` — failed restart tells the client "session restarted" although nothing restarted.
 - `restart-kills-tabs-reports-present.md` — fresh-terminal restart kills the session's tabs, then reports them as alive.
 - `restricted-create-holds-lifecycle-claim-across-reply.md` — restricted create holds the lifecycle claim across the
   reply send.
