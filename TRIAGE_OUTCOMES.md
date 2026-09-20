@@ -371,7 +371,10 @@
 - Completion criteria: a verified append updates the stamp so unchanged later polls avoid content reads. Concurrent
   Reported state, another conversation or another record is never overwritten. No new cache/polling machinery. Remove
   this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/779/changes. jj change:
+  `xosxqxwvkxkrlzmulkomlwmmryrytoqn`; bookmark: `fix-reverification-capture-stamp`. The append-and-reverify regression
+  now refreshes the stamp while retaining the captured conversation and record. The existing capture-state ladder
+  remains unchanged.
 
 ## seed-eviction-evicts-just-recorded-row.md
 

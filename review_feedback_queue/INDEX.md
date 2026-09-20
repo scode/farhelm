@@ -61,7 +61,6 @@ One line per open item. This file must always match the feedback files in this d
 - `restart-kills-tabs-reports-present.md` — fresh-terminal restart kills the session's tabs, then reports them as alive.
 - `restricted-create-holds-lifecycle-claim-across-reply.md` — restricted create holds the lifecycle claim across the
   reply send.
-- `reverify-stamp-refresh-never-lands.md` — reverify stamp never lands, so appended sessions re-read every pass.
 - `revocation-during-admission-orphans-attachment.md` — revocation racing a slow attach orphans the attachment, pinning
   session ownership.
 - `same-version-cache-generations-never-pruned.md` — same-version payload cache generations from other base URLs are
