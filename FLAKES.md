@@ -1028,3 +1028,26 @@ rather than filed as a second one, with the next step being a receipt that names
 Class: fixture-premise
 
 Cause: unknown
+
+## 2026-09-19 — rotation recovery: reads no longer wait out the writes' deadline (e2e/tests/auth.spec.ts)
+
+Closes the rotation-recovery thread that the 2026-09-10 and 2026-09-12 entries above open and
+`lore/2026-09-16-rotation-recovery-unanswered-reads.md` carries to its fork. Nothing new was observed here; what changed
+is that the maintainer picked the first fork. Idempotent reads now expire after fifteen seconds instead of sharing the
+sixty-second deadline the host mutations need, so a read that never comes back fails into the retry ladder about half a
+second later rather than holding its surface for a minute. The instrumented hunt's own numbers are what made this the
+fix: the unanswered `GET /api/sessions?sort=activity` held the sessions surface past the test's sixty-second budget
+while its own timeout would have fired roughly three seconds too late, so the surface starved with no retry scheduled.
+
+This does not explain the stall, and it is not meant to. Whether the read was shelved in the browser or never answered
+by the helm was unestablished when the hunt stopped and is unestablished now; the funnel receipts added in #666 stay in
+place for whoever wants it. What the change buys is that the client recovers either way, which is why the deflake entry
+and the `deflake/known-flakes.txt` line both go: if that test fails again it will be for a reason this did not cover.
+The cost is a real behavior change for real users on slow networks, which is why the fork needed the maintainer rather
+than an agent — a read that would have completed at twenty seconds now gets abandoned and retried instead. That trade is
+cheap only because reads are idempotent; the writes keep the generous deadline precisely because their expiry is
+ambiguous about whether the far side did the work.
+
+Class: product
+
+Cause: hypothesis

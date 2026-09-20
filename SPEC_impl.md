@@ -68,7 +68,7 @@ fails. Same-field writes are serialized latest-wins in the client, so a burst of
 reverse order; the write queue is process state outside the remounted tree, and after credential recovery the gate
 overlays and replays any local choice whose write never got through, so reauthentication cannot roll the current client
 back to the helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing
-remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort
+remembered", so a stalled preference endpoint cannot blank the page for as long as an ordinary read would wait. The sort
 travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is a bare
 session id (the browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could
 outlive a state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or

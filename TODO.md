@@ -59,18 +59,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- Investigate intermittent recovery assertions in
-  `rotation logs out an open client and drops its feed and terminal
-  sockets`, in `e2e/tests/auth.spec.ts`. Chromium
-  observed an aborted recovery detail read in a broad run and a missing sidebar row after a successful detail read in an
-  exact run. The post-exchange cascade is contained (the suite refresh moved to right after it); what remains is the
-  recovery provenance itself. Hunts through 2026-09-16 established that the missing-row shape is an unanswered
-  recovery-batch read starving the retry ladder past the test's budget, with the stall's location (browser queue vs helm
-  hang) still unestablished. Full evidence trail: `lore/2026-09-16-rotation-recovery-unanswered-reads.md`. The fix fork
-  needs the maintainer: split idempotent reads to a shorter timeout (a product policy change — the funnel docs call 60s
-  "deliberately generous rather than tuned"), or instrument the transport to locate the stall. Do not weaken the
-  recovery assertions meanwhile.
-
 - Investigate the remaining initial profile focus failures in `e2e/tests/profiles.spec.ts`. WebKit failed the editor
   focus premise in `Tab leaving the document preserves busy dismissal intent` and the first client's popup focus in
   `a profile edited in another browser reaches this one over the real feed`. The latter occurs before the separately

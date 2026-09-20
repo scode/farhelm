@@ -964,18 +964,53 @@ fn client() -> reqwest::Client {
 /// connection becomes an ordinary failed read, and the retry ladder takes
 /// over.
 ///
-/// Sixty seconds is deliberately generous rather than tuned. A read is
-/// expected to take milliseconds, but this door is shared with the host
-/// mutations, and those do real work on another machine — an add or an adopt
-/// opens an SSH connection and inspects an install. The number matches the
-/// helm's own stall bounds (`uploads.rs`'s sixty-second deadlines) so the
+/// Sixty seconds is generous on purpose, and it is what the WRITES need
+/// rather than a number anybody tuned for reads: this door is shared with the
+/// host mutations, and those do real work on another machine — an add or an
+/// adopt opens an SSH connection and inspects an install. The number matches
+/// the helm's own stall bounds (`uploads.rs`'s sixty-second deadlines) so the
 /// two sides give up on roughly the same scale. Nothing here streams a large
 /// body: uploads never pass through this module (terminal.js owns them, see
 /// `attachments`), so a total-request deadline cannot cut a transfer short.
 ///
+/// Reads do not wait this long any more; see [`READ_TIMEOUT`].
+///
 /// Applied in [`send`] rather than on the client, so it holds for every
 /// request by construction — the same argument the funnel itself makes.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long an idempotent READ may take before it is abandoned.
+///
+/// Sixty seconds was never a read's number, and sharing it with the writes
+/// had a consequence nobody chose. A surface only recovers from a hung read
+/// when that read FAILS — that is what hands it to the retry ladder — so the
+/// request timeout is also the longest a surface can sit stale with nothing
+/// scheduled. At sixty seconds that is longer than anything waiting on the
+/// surface is willing to wait: a rotation-recovery read that never came back
+/// held the sessions surface past its observer's own sixty-second budget
+/// while its timeout would have fired about three seconds too late
+/// (`lore/2026-09-16-rotation-recovery-unanswered-reads.md` has the receipts;
+/// the stall's own location was never established, and this does not explain
+/// it — it makes the client recover from it).
+///
+/// Fifteen seconds, because a read and a write fail differently rather than
+/// because fifteen is a measured limit. A read is idempotent, so an expiry
+/// costs one retry half a second later and nothing else; a mutation's expiry
+/// is ambiguous about whether the far side did the work, which is why the
+/// writes keep the generous number. Fifteen is the scale the rest of the
+/// client already uses for "this connection is not answering" — the reconnect
+/// ladder's top rung and `HEARTBEAT_IDLE_MS` — and a small JSON body that has
+/// not arrived in fifteen seconds is not usually rescued by forty-five more.
+/// The one read that needs to give up sooner still says so itself: the
+/// preference seed holds the whole authenticated tree, so it keeps its own
+/// stricter [`PREFERENCE_SEED_TIMEOUT`].
+///
+/// Chosen by METHOD in [`send_inner`], not per call site, for the reason the
+/// funnel exists: a rule that has to be remembered at each call is a rule the
+/// next endpoint forgets. GET is the whole of it — `DELETE` does real work on
+/// a session and belongs with the writes, whatever HTTP says about its
+/// idempotence.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Send one protected request and read the helm's build stamp off its reply
 /// (PLAN_M6.md item 6's client↔helm skew edge).
@@ -1002,12 +1037,12 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// cannot turn one request's remaining budget into two fresh ones; browser
 /// builds retain the ordinary full-page token prompt.
 async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
-    send_inner(request, REQUEST_TIMEOUT)
+    send_inner(request, Deadline::ByMethod)
         .await
         .map_err(send_error_text)
 }
 
-/// [`send`] with a caller-chosen deadline instead of [`REQUEST_TIMEOUT`].
+/// [`send`] with a caller-chosen deadline instead of the method's own.
 ///
 /// One caller earns this: the preference seed behind `PreferencesGate`,
 /// which holds the whole authenticated tree and must give up in seconds
@@ -1019,7 +1054,34 @@ async fn send_within(
     request: reqwest::RequestBuilder,
     timeout: std::time::Duration,
 ) -> Result<reqwest::Response, String> {
-    send_inner(request, timeout).await.map_err(send_error_text)
+    send_inner(request, Deadline::Fixed(timeout))
+        .await
+        .map_err(send_error_text)
+}
+
+/// How [`send_inner`] decides one request's deadline.
+///
+/// A policy rather than a `Duration` because the funnel picks reads' and
+/// writes' deadlines apart by METHOD ([`READ_TIMEOUT`] against
+/// [`REQUEST_TIMEOUT`]), and the method is not knowable until the builder has
+/// been built. `Fixed` is the one override, and it wins outright: a caller
+/// that names a deadline has a reason the method cannot see.
+#[derive(Debug, Clone, Copy)]
+enum Deadline {
+    ByMethod,
+    Fixed(std::time::Duration),
+}
+
+impl Deadline {
+    /// GET is the whole of the read side; see [`READ_TIMEOUT`] on why `DELETE`
+    /// is not.
+    fn resolve(self, method: &reqwest::Method) -> std::time::Duration {
+        match self {
+            Deadline::Fixed(timeout) => timeout,
+            Deadline::ByMethod if method == reqwest::Method::GET => READ_TIMEOUT,
+            Deadline::ByMethod => REQUEST_TIMEOUT,
+        }
+    }
 }
 
 /// Failure at the one response-classification point every Rust-side API
@@ -1154,28 +1216,38 @@ fn send_error_text(error: SendError) -> String {
 }
 
 /// [`send`]'s typed body — split only so `send` can flatten the typed
-/// error at one seam; every caller but one goes through `send` and its
-/// [`REQUEST_TIMEOUT`]. (A deadline parameter left when the paged listing
-/// went and returned with the preference seed: [`send_within`] is the one
-/// caller-chosen deadline, and `PreferencesGate`'s docs say why it earns
-/// the exception the paged listing lost.)
+/// error at one seam; every caller but one goes through `send` and the
+/// deadline its method implies. ([`send_within`] is the one caller-chosen
+/// deadline, and `PreferencesGate`'s docs say why it earns the exception the
+/// paged listing lost.)
+///
+/// The request is BUILT before its deadline is known, which is the opposite of
+/// the obvious order and is what a method-derived deadline costs: a
+/// `RequestBuilder` will not say what method it carries, so [`Deadline`] can
+/// only be resolved against the built request. The deadline is then set on
+/// that request rather than on the builder, and the desktop retry still clones
+/// the BUILDER beforehand — a clone taken after the deadline was applied would
+/// carry the first attempt's remaining budget into the second.
 async fn send_inner(
     mut request: reqwest::RequestBuilder,
-    timeout: std::time::Duration,
+    deadline_policy: Deadline,
 ) -> Result<reqwest::Response, SendError> {
-    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
-    let deadline = tokio::time::Instant::now() + timeout;
     if let Some(secret) = crate::auth::device_secret() {
         request = request.bearer_auth(secret);
     }
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     let retry = request.try_clone();
+    let (client, built) = request.build_split();
+    let mut built = built.map_err(|error| SendError::Request(error.to_string()))?;
+    let timeout = deadline_policy.resolve(built.method());
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    let deadline = tokio::time::Instant::now() + timeout;
     #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
     let request_timeout = remaining(deadline)?;
     #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
     let request_timeout = timeout;
-    let (client, built) = request.timeout(request_timeout).build_split();
-    let built = built.map_err(|error| SendError::Request(error.to_string()))?;
+    *built.timeout_mut() = Some(request_timeout);
+    let built = built;
     let resp = execute_with_receipt(&client, built)
         .await
         .map_err(|error| SendError::Request(error.to_string()))?;

@@ -9,7 +9,6 @@
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
-playwright auth.spec.ts rotation logs out an open client and drops its feed and terminal sockets  # rotation-recovery-cascade
 playwright profiles.spec.ts Tab leaving the document preserves busy dismissal intent  # profiles-focus-premise
 playwright profiles.spec.ts a profile edited in another browser reaches this one over the real feed  # profiles-popup-focus-initial
 playwright profiles.spec.ts the profiles popup border box stays inside a constrained viewport  # profiles-webkit-initial-focus
