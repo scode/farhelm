@@ -368,8 +368,14 @@ test.describe("the invalidation feed", () => {
       const renamed = `${session.title}-renamed`;
       await openRowMenu(row(author, session.id));
       await row(author, session.id).locator(".session-row-rename").click();
-      await row(author, session.id).locator(".rename-input").fill(renamed);
-      await row(author, session.id).locator(".rename-submit").click();
+      // The row opens the rename; the form itself is a page-level dialog
+      // (#651, so a session list update cannot unmount a rename in
+      // progress), so these two are NOT row-scoped. Scoped to the row they
+      // simply never resolve, and this test spent its whole budget waiting
+      // for a field that was on screen the entire time.
+      const renameDialog = author.locator(".rename-dialog");
+      await renameDialog.locator(".rename-input").fill(renamed);
+      await renameDialog.locator(".rename-submit").click();
 
       // The observer never reloaded and never polled: the only thing that
       // can put this title on its screen is a revision notification followed
