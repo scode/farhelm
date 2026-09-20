@@ -27,7 +27,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   restart failed with `No saved session found`.
   [Gist investigation](https://gist.github.com/scode/3d9789d37d94218e6385102710290cbe) records the evidence and
   unresolved cause.
-- Add a `farhelm` command to restart sessions so agents using the `$farhelm` skill can restart sessions.
 - Make `$farhelm help` in agent sessions show a user-friendly introduction and list of available actions instead of the
   underlying command's help output; details are TBD when this TODO is implemented.
 

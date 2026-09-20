@@ -868,25 +868,25 @@ only party that can tell them apart; the asking CLI blocks with no deadline of i
 reaches it.
 
 A MUTATING verb is fenced against its own asker being deleted mid-flight, and its failures speak a different vocabulary
-from a listing's. The credential that admits an `AgentRequest` is validated once, but a rename/stop/archive stays in
-flight to the helm and back for as long as thirty seconds, which is ample room for a `DeleteSession` to revoke that very
-credential underneath it. So the supervisor claims a per-asking-session fence (`Supervisor::agent_request_locks`) BEFORE
-it checks the credential — checking first and claiming after leaves a gap a whole delete fits inside — and
-`handle_delete_session` waits on the same key before tearing anything down. The fence is released when the MUTATION
-ends, not when the CLI's answer budget does: a budget expiring says nothing about whether the helm is still working, so
-the guard is held until the helm answers or the connection dies. That is bounded by the LINK's life rather than by a
-clock, which is only a bound if the link can be counted on to end — and it cannot, because a response naming no pending
-entry is dropped, which is right for an ordinary late answer and indistinguishable from a helm answering under an id it
-has already used. So the retention has a last resort of its own (ten minutes), and its expiry RETIRES THE LINK rather
-than dropping the guard: dropping it would be the same budget-shaped release on a longer clock, still guessing that the
-mutation ended, whereas ending the connection makes every pending upcall on it resolve as the delivered-outcome-unknown
-ending the relay already speaks. A response correlated to a `req_id` that was NEVER ISSUED is retired the same way and
-immediately, on both legs of the relay: it cannot be a late answer, so the only readings are a broken peer and a hostile
-one, and on a connection that stays healthy the waiter it strands has nothing else to end it. Correspondingly, a
-connection lost after the request was queued is reported to a mutating caller as `Timeout` ("delivered, outcome
-unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to look at the session
-before retrying — the change may already have taken effect, and the retry-safe kind would be an invitation to apply it
-twice. A listing keeps `Unavailable`, having nothing to double-apply. Which verbs are mutating is
+from a listing's. The credential that admits an `AgentRequest` is validated once, but a rename/stop/archive/restart
+stays in flight to the helm and back for as long as thirty seconds, which is ample room for a `DeleteSession` to revoke
+that very credential underneath it. So the supervisor claims a per-asking-session fence
+(`Supervisor::agent_request_locks`) BEFORE it checks the credential — checking first and claiming after leaves a gap a
+whole delete fits inside — and `handle_delete_session` waits on the same key before tearing anything down. The fence is
+released when the MUTATION ends, not when the CLI's answer budget does: a budget expiring says nothing about whether the
+helm is still working, so the guard is held until the helm answers or the connection dies. That is bounded by the LINK's
+life rather than by a clock, which is only a bound if the link can be counted on to end — and it cannot, because a
+response naming no pending entry is dropped, which is right for an ordinary late answer and indistinguishable from a
+helm answering under an id it has already used. So the retention has a last resort of its own (ten minutes), and its
+expiry RETIRES THE LINK rather than dropping the guard: dropping it would be the same budget-shaped release on a longer
+clock, still guessing that the mutation ended, whereas ending the connection makes every pending upcall on it resolve as
+the delivered-outcome-unknown ending the relay already speaks. A response correlated to a `req_id` that was NEVER ISSUED
+is retired the same way and immediately, on both legs of the relay: it cannot be a late answer, so the only readings are
+a broken peer and a hostile one, and on a connection that stays healthy the waiter it strands has nothing else to end
+it. Correspondingly, a connection lost after the request was queued is reported to a mutating caller as `Timeout`
+("delivered, outcome unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to
+look at the session before retrying — the change may already have taken effect, and the retry-safe kind would be an
+invitation to apply it twice. A listing keeps `Unavailable`, having nothing to double-apply. Which verbs are mutating is
 `AgentVerb::is_mutating`, one exhaustive match in the protocol crate that both the supervisor and the helm read, so a
 verb added later cannot be fenced on one side and not the other.
 
@@ -949,13 +949,16 @@ became `Option<String>`, so a reply carrying a row the helm just mutated or crea
 no host name I can vouch for" instead of encoding that as an empty string indistinguishable from a real value. A decoder
 built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not
 stretch to cover it under any reading — so it is allowed here only because nothing released speaks 13 yet. It must not
-be carried forward the same way once 13 ships: the identical edit made afterwards needs a version of its own. Each verb
-is routed and recorded through the exact same `sessions.rs` functions the corresponding REST route uses —
-`route_session`, the client call and `record_session` for the lifecycle three, and `do_create_session` (the shared
-internal function `POST /api/sessions` was refactored onto) for the creating two. So a refusal that comes out of the
-SHARED operation — an unknown session, a disconnected host, a title the owning supervisor rejects — is the identical
-sentence the UI would have shown, and a session an agent creates is seeded into the helm's cache and published exactly
-as one the create dialog made.
+be carried forward the same way once 13 ships: the identical edit made afterwards needs a version of its own.
+
+Version 25 adds `AgentVerb::Restart`, `AgentReply::Restarted`, and the non-secret `AgentSession::restart_offer`
+discovery field. The new tagged request and reply require an exact-version handshake refusal for older peers. Each verb
+is routed and recorded through the same `sessions.rs` functions the corresponding REST route uses — `route_session`, the
+client call and `record_session` for the lifecycle four, and `do_create_session` (the shared internal function
+`POST /api/sessions` was refactored onto) for the creating two. So a refusal that comes out of the SHARED operation — an
+unknown session, a disconnected host, a title the owning supervisor rejects — is the identical sentence the UI would
+have shown, and a session an agent creates is seeded into the helm's cache and published exactly as one the create
+dialog made.
 
 The equivalence covers that shared path and stops there, deliberately, in two places. The relay adds a doorway check of
 its own (`validate_agent_verb`) that the REST surface has no counterpart for, since only the relay puts an
@@ -1968,20 +1971,27 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
   refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
   model quoting its own shell output. The JSON form uses schema version 1, includes exact IDs, caller identity, and
-  completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration. Every
-  dynamic table cell is escaped to one printable line and every non-final column is capped at 48 characters: these
-  values are fleet-wide user text printed straight to a terminal, so a raw newline forges a row, an ESC drives the
-  terminal, and one long title would otherwise be padded onto every other row. A cut listing prints its rows on stdout
-  and one warning on stderr, so a script capturing stdout still gets nothing but the table. It has no timeout of its
-  own: the supervisor bounds the relay and is the only party that can distinguish its two failures (see the transport
-  section's version-20 paragraph).
-- `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
-  `farhelm agent archive --session <id>` — the in-session ACTING CLI, on the same relay and credential. Every target is
-  explicit, including a deliberate self-action. Rename compares the observed title and changes it atomically in the
-  owning supervisor; a mismatch is a conflict with no mutation. Success prints one plain confirmation line on stdout
-  (`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), its dynamic cells run through the same escaping the
-  listing tables use, so a scripted caller gets exactly one line rather than a table with one row. An explicit self-stop
-  or self-archive may terminate the CLI before that line is printed because it belongs to the process tree being ended.
+  completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration. A
+  session row's non-secret `OFFER` capability is the exact mode its restart command may request; it does not disclose
+  the template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is escaped to one
+  printable line and every non-final column is capped at 48 characters: these values are fleet-wide user text printed
+  straight to a terminal, so a raw newline forges a row, an ESC drives the terminal, and one long title would otherwise
+  be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so a script
+  capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the relay and
+  is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
+- `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`,
+  `farhelm agent archive --session <id>`, and
+  `farhelm agent restart --session <id> --mode <resume|fallback-template|fresh>
+  [--stop-if-running]` — the in-session
+  ACTING CLI, on the same relay and credential. Every target is explicit, including a deliberate self-action. Rename
+  compares the observed title and changes it atomically in the owning supervisor; a mismatch is a conflict with no
+  mutation. Success prints one plain confirmation line on stdout (`renamed <id> to "<title>"`, `stopped <id>`,
+  `archived <id>`, `restarted <id>`), its dynamic cells run through the same escaping the listing tables use, so a
+  scripted caller gets exactly one line rather than a table with one row. Restart forwards the mode and consent
+  unchanged to the owning supervisor, which rechecks both current offer and liveness; the CLI never infers consent from
+  discovery. An explicit self-stop, self-archive, or self-restart may terminate the CLI before its line is printed
+  because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown warning
+  before dispatch and treats a lost reply as unknown rather than success.
 - SPEC.md's "with confirmation when anything is still running" rule for archive is a UI affordance and does NOT apply to
   `farhelm agent archive`. It is written for the panel, where a person is one click from ending work they may not know
   is running and a dialog is what puts the fact in front of them. This CLI has no such reader: its caller is the agent

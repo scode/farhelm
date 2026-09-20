@@ -270,11 +270,9 @@ pub enum SupervisorTransportError {
     /// "something is broken, try again" can kill an agent somebody restarted
     /// in between — and one that answers a `CreateSession` with anything but
     /// a `SessionCreated` may well have started a session whose id the
-    /// caller can now never be told. Only the wrappers for verbs that travel
-    /// the agent relay AND change something construct it — the three
-    /// lifecycle ones and the three creates; everywhere else a wrong reply
-    /// stays the untyped protocol error it has always been, because
-    /// `Internal` is the right reading when nothing durable was at stake.
+    /// caller can now never be told. Wrappers used by the agent relay retain
+    /// this classification; the relay interprets it according to whether the
+    /// failed request was mutating or read-only.
     #[error("the supervisor answered {request} with an unexpected {reply}")]
     SentWrongReply {
         /// The request this client sent, named as its `ControlMsg` variant.
@@ -2767,7 +2765,7 @@ impl SupervisorClient {
             .await?
         {
             ControlMsg::SessionRestarted { session, .. } => Ok(session),
-            other => bail!("unexpected reply to restart_session: {other:?}"),
+            other => Err(wrong_reply("RestartSession", &other)),
         }
     }
 
@@ -7174,6 +7172,7 @@ mod tests {
             status: "running".to_string(),
             current: false,
             archived: false,
+            restart_offer: Default::default(),
             stale: false,
         };
         let cases = [
@@ -7441,6 +7440,7 @@ mod tests {
                 status: "running".to_string(),
                 current: true,
                 archived: false,
+                restart_offer: Default::default(),
                 stale: false,
             }],
             truncated: false,

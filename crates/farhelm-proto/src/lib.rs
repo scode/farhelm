@@ -231,7 +231,13 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// stale base without OMP. Its number does not identify the OMP vocabulary
 /// described above; version 24 refuses both that build and OMP-only peers.
 ///
-/// `protocol_version_is_pinned_at_24` (renamed at every bump since `_at_4`)
+/// Version 25 adds the tagged `AgentVerb::Restart` request and the
+/// non-secret `AgentSession::restart_offer` discovery field. Both change
+/// what an attached-session caller can safely request, so serde tolerance
+/// is not compatibility: the exact-version handshake refuses an older peer
+/// before it can ignore the capability or reject the new verb mid-relay.
+///
+/// `protocol_version_is_pinned_at_25` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -243,7 +249,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1726,7 +1732,7 @@ pub enum RestartMode {
 /// give an agent a fleet view that is sometimes the fleet and sometimes
 /// one machine, with nothing on the wire saying which.
 ///
-/// The three lifecycle verbs share one target shape: `session_id:
+/// The four lifecycle verbs share one target shape: `session_id:
 /// Option<String>`. The optional wire representation lets the authoritative
 /// boundaries reject old requests with a correlated error; protocol 20
 /// requires `Some(id)`, including for deliberate self-actions. A named id
@@ -1782,6 +1788,20 @@ pub enum AgentVerb {
     Archive {
         /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
+    },
+    /// Relaunch one session through the owning supervisor's ordinary
+    /// restart lifecycle. The chosen mode must match the CURRENT offered
+    /// capability, and a live target is stopped only when the caller sends
+    /// explicit consent. Answered with [`AgentReply::Restarted`].
+    Restart {
+        /// The exact target id, including for an intentional self action.
+        session_id: Option<String>,
+        /// The restart behavior the caller chose from discovery. The target
+        /// revalidates it rather than trusting a cached offer.
+        mode: RestartMode,
+        /// Permission to stop a target found live at handling time. False
+        /// is a refusal for a live target, not a request to wait or retry.
+        stop_if_running: bool,
     },
     /// Resolve a spawn-only profile name against the helm catalog. The
     /// supervisor relays this because it no longer owns that catalog.
@@ -1877,7 +1897,7 @@ impl AgentVerb {
             | AgentVerb::Profiles {}
             | AgentVerb::ResolveProfile { .. } => false,
             // The creating verbs sit on this side for a stronger reason
-            // than the lifecycle three: what they leave behind is a session
+            // than the lifecycle four: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
             // create whose answer is lost is the one outcome a caller can
             // neither observe nor safely repeat, so it must never be
@@ -1885,6 +1905,7 @@ impl AgentVerb {
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
             | AgentVerb::Archive { .. }
+            | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. } => true,
         }
@@ -1961,6 +1982,11 @@ pub enum AgentReply {
     /// names for the same fact with no behavioral difference a caller could
     /// key on.
     Session { session: AgentSession },
+    /// Answers `Restart` with the session's post-relaunch row. This is a
+    /// distinct tag from [`AgentReply::Session`] because a restart's
+    /// acknowledged relaunch is not interchangeable with a rename or
+    /// archive merely because all three project one row.
+    Restarted { session: AgentSession },
     /// Answers `Stop`. Empty on purpose, matching the REST `/stop` route's
     /// own empty-object success body: a stop has nothing fresher to report
     /// than "it happened", and the session's `status` is whatever the next
@@ -2032,7 +2058,7 @@ pub const AGENT_UNAVAILABLE_REMEDY: &str = "open the session in the farhelm UI a
 /// step that is safe whichever way the ambiguity resolved.
 ///
 /// The creating verbs are the sharpest case, and the reason this sentence
-/// says "the change" rather than naming the lifecycle three: a lost
+/// says "the change" rather than naming the lifecycle four: a lost
 /// `Create`/`Clone` answer may have left a session RUNNING on some host
 /// whose id the asking process was never told, so a blind retry is how one
 /// ask becomes two live sessions. An `intent_key` is what makes that retry
@@ -2093,8 +2119,9 @@ pub struct AgentProfile {
 ///
 /// The same narrowing rule [`AgentHost`] follows: what an agent can name,
 /// reason about, or act on later, and nothing else. Timestamps, parentage,
-/// tabs and restart offers are all real parts of the helm's session model
-/// that no verb here consumes.
+/// and tabs remain private; `restart_offer` is included because an agent
+/// must deliberately choose the only legal restart mode without learning a
+/// resume template, conversation locator, or launch command.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentSession {
     pub id: String,
@@ -2108,7 +2135,7 @@ pub struct AgentSession {
     ///
     /// `None` means the helm had no name it could VOUCH for, which is a
     /// different statement from a host whose name happens to be short or
-    /// odd. It arises on every MUTATING verb's reply — the lifecycle three
+    /// odd. It arises on every MUTATING verb's reply — the lifecycle four
     /// and the two creating ones, which share one projection: the row's
     /// host is pinned to the connection the mutation actually routed
     /// through, and a retarget, adoption or removal in the window between
@@ -2163,9 +2190,10 @@ pub struct AgentSession {
     /// an agent has no archive switch to flip. The flag is what keeps them
     /// interpretable: an archived session is durable history rather than a
     /// live one, which a reader should weigh before acting on it — not a
-    /// row the lifecycle verbs refuse to touch. `Rename`, `Stop` and
-    /// `Archive` may all target an archived session's id exactly as they
-    /// would any other: a `Rename` or a repeat `Archive` succeeds normally.
+    /// row the lifecycle verbs refuse to touch. `Rename`, `Stop`, `Archive`,
+    /// and `Restart` may all target an archived session's id exactly as they
+    /// would any other: restart unarchives it through the ordinary lifecycle
+    /// contract.
     ///
     /// `Stop` on an archived session is the one to be careful describing.
     /// It is not a request the supervisor short-circuits: it runs the same
@@ -2176,6 +2204,16 @@ pub struct AgentSession {
     /// so a caller must not read "already archived" as "this call cannot
     /// fail".
     pub archived: bool,
+    /// The currently advertised non-secret restart capability. It tells a
+    /// caller which mode may be requested, but not the command or captured
+    /// conversation that would implement it; the target still revalidates
+    /// the offer immediately before it mutates anything.
+    ///
+    /// `FreshOnly` names the discovery offer, while `fresh` is the CLI
+    /// spelling of [`RestartMode::Fresh`]. That mode is valid only while
+    /// the current offer remains `FreshOnly`; it cannot decline or replace
+    /// an available `Resume` or `FallbackTemplate` offer.
+    pub restart_offer: RestartOffer,
     /// True when this row is last-known knowledge rather than a live
     /// report — the host it belongs to is not currently connected.
     ///
@@ -4540,8 +4578,9 @@ mod tests {
     /// lost `total`/`next_cursor` and gained `truncated`) — field removals,
     /// the other non-additive case. The bump to 24 adds the GitHub-checkout
     /// messages and the optional `CreateSession::github_checkout` payload;
-    /// see the constant's own docs for why that payload forces a handshake
-    /// refusal rather than silent tolerance. Pinning the
+    /// version 25 adds the agent restart tag and its discovery capability,
+    /// which likewise need a handshake refusal rather than silent
+    /// tolerance. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
     /// drift discovered only by two builds refusing to talk to each other.
@@ -4549,24 +4588,24 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test and the literal-23 skew check below are
+    /// an edit per bump; this test and the literal-24 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_24() {
-        assert_eq!(PROTOCOL_VERSION, 24);
+    fn protocol_version_is_pinned_at_25() {
+        assert_eq!(PROTOCOL_VERSION, 25);
     }
 
     /// Pins the skew direction the GitHub-checkout bump exists to create, in
     /// BOTH directions, against the LITERAL previous version rather than the
     /// constant-relative ± 1 the `io.rs` skew test uses:
     ///
-    /// - A peer still speaking v23 is refused by this build's handshake with
+    /// - A peer still speaking v24 is refused by this build's handshake with
     ///   the explicit skew error and the connection torn down — never
-    ///   tolerated into silently dropping a fresh-checkout intent.
-    /// - A v24 hello is refused by a hand-rolled v23 receiver, which sees a
+    ///   tolerated into silently dropping an agent restart capability.
+    /// - A v25 hello is refused by a hand-rolled v24 receiver, which sees a
     ///   version it does not know and hangs up. This test models the old
     ///   receiver with its refusal rule: accept
-    ///   exactly 23, refuse anything else. It is what keeps this test
+    ///   exactly 24, refuse anything else. It is what keeps this test
     ///   honest about the old side instead of asserting only the new side's
     ///   opinion.
     ///
@@ -4575,7 +4614,7 @@ mod tests {
     /// rename; this test is the one that fails when the constant and the
     /// version history disagree.
     #[farhelm_testtrace::test]
-    async fn v23_and_v24_peers_refuse_each_other() {
+    async fn v24_and_v25_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4584,7 +4623,7 @@ mod tests {
             auth: None,
         };
 
-        // A literal-v23 peer against THIS build's handshake.
+        // A literal-v24 peer against THIS build's handshake.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
@@ -4595,7 +4634,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(23)).await.unwrap();
+        w.write_control(&stale_hello(24)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4611,22 +4650,22 @@ mod tests {
         let err = receiver.await.unwrap().unwrap_err();
         assert!(
             err.to_string().contains("protocol version mismatch"),
-            "a literal v23 peer must be refused: {err}"
+            "a literal v24 peer must be refused: {err}"
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 23);
-        assert_eq!(skew.our_protocol, 24);
+        assert_eq!(skew.peer_protocol, 24);
+        assert_eq!(skew.our_protocol, 25);
 
-        // The reverse direction: a v23 receiver (the refusal rule itself,
-        // modeled by its exact-version check) meets a v24 hello and hangs up.
+        // The reverse direction: a v24 receiver (the refusal rule itself,
+        // modeled by its exact-version check) meets a v25 hello and hangs up.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
-        let v23_receiver = tokio::spawn(async move {
+        let v24_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(23)).await.unwrap();
+            w.write_control(&stale_hello(24)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4635,7 +4674,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 23 {
+            if protocol_version != 24 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4645,7 +4684,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-                Err("refused a v24 peer".to_string())
+                Err("refused a v25 peer".to_string())
             } else {
                 Ok(())
             }
@@ -4655,11 +4694,11 @@ mod tests {
         w.write_control(&stale_hello(PROTOCOL_VERSION))
             .await
             .unwrap();
-        // Hellos cross first; the v23 peer's hello precedes its refusal.
+        // Hellos cross first; the v24 peer's hello precedes its refusal.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
         assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
-        assert!(v23_receiver.await.unwrap().is_err());
+        assert!(v24_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -8174,6 +8213,7 @@ mod tests {
                         status: "running".to_string(),
                         current: true,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: true,
                     }],
                     truncated: true,
@@ -8202,6 +8242,7 @@ mod tests {
                             "status": "running",
                             "current": true,
                             "archived": false,
+                            "restart_offer": "fresh_only",
                             "stale": true,
                         }],
                     },
@@ -8250,7 +8291,7 @@ mod tests {
         );
     }
 
-    /// Golden JSON for the three lifecycle verbs and their two reply tags,
+    /// Golden JSON for the four lifecycle verbs and their reply tags,
     /// pinned for the same three-independent-programs reason
     /// `agent_relay_pair_has_pinned_json_tags` documents: the CLI encodes a
     /// request, the supervisor decodes and re-encodes it unchanged, and the
@@ -8355,6 +8396,39 @@ mod tests {
             })
         );
 
+        // Restart is a new tagged mutation, not a stop/create composition:
+        // the mode and live-stop consent must cross the relay together so
+        // the target can revalidate them under its lifecycle claim.
+        let restart = ControlMsg::AgentRequest {
+            req_id: 9,
+            session_id: "s1".to_string(),
+            request: AgentVerb::Restart {
+                session_id: Some("s2".to_string()),
+                mode: RestartMode::Resume,
+                stop_if_running: true,
+            },
+        };
+        assert_eq!(restart.request_req_id(), Some(9));
+        assert_eq!(restart.reply_req_id(), None);
+        assert!(matches!(
+            &restart,
+            ControlMsg::AgentRequest { request, .. } if request.is_mutating()
+        ));
+        assert_eq!(
+            serde_json::to_value(&restart).unwrap(),
+            serde_json::json!({
+                "type": "agent_request",
+                "req_id": 9,
+                "session_id": "s1",
+                "request": {
+                    "verb": "restart",
+                    "session_id": "s2",
+                    "mode": "resume",
+                    "stop_if_running": true,
+                },
+            })
+        );
+
         let session_reply = ControlMsg::AgentResponse {
             req_id: 5,
             outcome: AgentOutcome::Ok {
@@ -8369,6 +8443,7 @@ mod tests {
                         status: "running".to_string(),
                         current: true,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -8395,6 +8470,7 @@ mod tests {
                             "status": "running",
                             "current": true,
                             "archived": false,
+                            "restart_offer": "fresh_only",
                             "stale": false,
                         },
                     },
@@ -8562,6 +8638,7 @@ mod tests {
                         status: "running".to_string(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -8594,6 +8671,7 @@ mod tests {
                             "status": "running",
                             "current": false,
                             "archived": false,
+                            "restart_offer": "fresh_only",
                             "stale": false,
                         },
                     },
@@ -8648,6 +8726,7 @@ mod tests {
                     status: "running".to_string(),
                     current: true,
                     archived: true,
+                    restart_offer: Default::default(),
                     stale: true,
                 }],
                 truncated: true,
@@ -8665,9 +8744,9 @@ mod tests {
         }
     }
 
-    /// The two lifecycle reply shapes round-trip with every field intact —
-    /// `agent_listing_replies_roundtrip`'s twin, for `Session` and
-    /// `Stopped`.
+    /// The lifecycle reply shapes round-trip with every field intact —
+    /// `agent_listing_replies_roundtrip`'s twin, for `Session`, `Restarted`,
+    /// and `Stopped`.
     ///
     /// `Session` gets the same `current`/`archived`/`stale` treatment as a
     /// listing row, for the identical reason: each defaults to `false` on a
@@ -8690,7 +8769,27 @@ mod tests {
                     status: "idle".to_string(),
                     current: true,
                     archived: true,
+                    restart_offer: Default::default(),
                     stale: true,
+                },
+            },
+            // `Restarted` carries the same row payload as `Session`, but a
+            // caller may acknowledge it only when this distinct tag proves
+            // that the requested relaunch, rather than another lifecycle
+            // operation, was observed.
+            AgentReply::Restarted {
+                session: AgentSession {
+                    id: "s1".to_string(),
+                    host_id: "1".to_string(),
+                    host: Some("builder".to_string()),
+                    title: "resumed".to_string(),
+                    cwd: "/home/u/ws".to_string(),
+                    agent: "codex".to_string(),
+                    status: "running".to_string(),
+                    current: true,
+                    archived: false,
+                    restart_offer: RestartOffer::Resume,
+                    stale: false,
                 },
             },
             AgentReply::Stopped {},
@@ -8709,6 +8808,7 @@ mod tests {
                     status: String::new(),
                     current: false,
                     archived: false,
+                    restart_offer: Default::default(),
                     stale: false,
                 },
             },

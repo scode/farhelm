@@ -959,12 +959,18 @@ whichever machine they are on — with the asking session and its host marked. T
 own-host-only rule above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way,
 including questions about the session's own host, so there is one answer to what an agent sees. The failure this defines
 is "no helm is attached to this session", reported as such, with opening the session in a client as the remedy — never a
-silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive — on
-any session named by id, including the asking session when the caller deliberately supplies its id, with the helm
-applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the title
-the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
-concurrent rename. There is no `farhelm agent replace`: an agent replacing its own session would be killing itself
-mid-request, which is a design question this version leaves open rather than answers by accident.
+silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive,
+restart — on any session named by id, including the asking session when the caller deliberately supplies its id, with
+the helm applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the
+title the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
+concurrent rename. Restart requires an explicit `--session` target, one mode selected from that session's discovery
+offer (`resume`, `fallback-template`, or `fresh`), and an explicit `--stop-if-running` consent when the target is live.
+The owning supervisor revalidates both the offer and liveness at handling time: a stale mode is refused rather than
+changed into another mode, and Fresh never discards an available resumable conversation. An explicit self restart warns
+before dispatch that it can interrupt the invoking CLI, lose its acknowledgement, and leave resumed task continuation
+unconfirmed; it never prints an unobserved completion as success. There is no `farhelm agent replace`: an agent
+replacing its own session would be killing itself mid-request, which is a design question this version leaves open
+rather than answers by accident.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
@@ -978,7 +984,8 @@ refused with its state named. The new session appears in every client the way an
 Agent-requested cross-host create and clone are temporary exceptions to the host-to-host security boundary below. They
 currently allow arbitrary execution on the target host; this exposure is explicitly accepted pending the guardrails
 tracked in TODO.md's Maybe later bucket. Their existence does not authorize additional cross-host execution
-capabilities. Cross-host stop, archive, and rename are separately permitted bounded operations.
+capabilities. Cross-host stop, archive, rename, and restart are separately permitted bounded operations. Restart uses
+only the selected session's stored launch configuration on its owning host; it accepts no replacement command.
 
 `create --profile` resolves an exact NAME in the helm's catalog; duplicate names are refused. `create --profile-id`
 selects an exact ID without falling back to a matching name. A clone follows its explicitly selected source's
@@ -1209,10 +1216,10 @@ user-initiated paste is intentional delivery of the pasted content to the select
 program-initiated clipboard reads. Clipboard writes remain best-effort as specified in Terminal experience; an opt-out
 control is not a current requirement.
 
-Agents may intentionally stop, archive, and rename sessions on other hosts through the helm. Those named, bounded
-effects are authorized even when invoked by a malicious agent. Existing agent-requested session creation and cloning
-across hosts are the only temporary execution exceptions: they permit arbitrary execution on the target today, and that
-exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TODO.md#maybe-later). Existing
+Agents may intentionally stop, archive, rename, and restart sessions on other hosts through the helm. Those named,
+bounded effects are authorized even when invoked by a malicious agent. Existing agent-requested session creation and
+cloning across hosts are the only temporary execution exceptions: they permit arbitrary execution on the target today,
+and that exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TODO.md#maybe-later). Existing
 agent/supervisor-originated creation retries share that acceptance; permanent retention of their retry records is not
 required. This does not waive correctness of user-initiated GUI requests or select a pruning implementation.
 
