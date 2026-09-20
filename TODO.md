@@ -74,6 +74,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   fixture-diagnosis history warns against treating that as proven. The test is also named under "Difficult deflake"
   below.
 
+  That hypothesis got its first direct corroboration on 2026-09-19, from a different test in the same file.
+  `an outside
+  click overrides a delayed opening focus commit` reproduced twice in twenty WebKit executions (batch
+  `03879a41-df56-4699-9e4c-46a96f4adc1a`) with a receipt that says the budget expired in so many words —
+  `inBudget: false`, every other field as expected — which is the same "driver round trips outrun `FOCUS_SETTLE_MS` on
+  loaded WebKit" mechanism this entry could only infer from reading. It is corroboration and not proof for THESE two
+  tests: the receipt belongs to the other case, and neither of these reproduced in twenty executions each in that same
+  batch. What it does suggest is the shape of the fix — the held-commit case was fixed by retrying its fixture's premise
+  rather than by waiting harder for a focus that had already been consumed — and that a focus premise these tests cannot
+  guarantee is worth retrying rather than asserting.
+
 - Investigate two retained WebKit attachment-fixture failures in `e2e/tests/terminal-tabs.spec.ts`, from browser run
   `7fd44a19-ce3f-42fb-a3df-410da327634a`.
   `stalling one tab's writes pauses only that tab; the agent and a sibling stay
@@ -113,6 +124,15 @@ The 2026-09-08 browser gate added these follow-ups, with retained evidence in FL
   session-deletion setup after the large-paste case, before the input assertions: `deleted.ok()` was false. Both passed
   in narrow candidate and baseline sequences. Inspect the deletion response and session lifecycle evidence to
   distinguish paste contamination from an independent failure; do not infer a cause from a retry.
+
+  Another non-reproduction, 2026-09-19: the whole spec file in its own order, both engines, run
+  `624df274-f183-47e8-9cd4-3884698a68fb` — 12 passed, including the large paste this entry says precedes the failure.
+  That was one pass of the file on a quiet machine, not the loaded full-suite shape the failure came from, so it narrows
+  nothing. Worth knowing before the next attempt: the assertion that fails, in `resetStack`
+  (`e2e/tests/helpers/terminal-suite.ts`), is `expect(deleted.ok()).toBe(true)` with the session title in its message
+  and nothing about the RESPONSE. The status and body the entry asks to inspect are discarded at the moment they exist,
+  which is why the retained evidence cannot answer the question. Carrying them into that assertion's message is the
+  cheap thing to do before hunting further.
 - Stabilize the popup focus readiness of `a profile edited in another browser reaches this one over the real feed` in
   `e2e/tests/profiles.spec.ts`. WebKit missed it before the behavior under test. A baseline pass does not establish that
   the new layout is uninvolved. Preserve trusted-pointer, unexpired-release, and focus assertions.
@@ -188,6 +208,10 @@ is a clean gate.
   does not prove that cause. Retain detach-reason and queue receipts alongside gate send, received bytes, pending
   writes, pauses, replay state, and FLOOD-DONE to distinguish helm backpressure from supervisor stall, producer
   completion, and replay cutover. Do not widen the budget before locating why HIGH_WATER was never reached.
+
+  Non-reproduction 2026-09-19, both engines, in the spec file's own order (run `624df274-f183-47e8-9cd4-3884698a68fb`).
+  One quiet pass against a failure this entry records from loaded full-suite runs, so it changes nothing; noted so the
+  next pass does not spend its first hour on a narrow rerun.
 - Deflake `session_lifecycle::non_utf8_terminal_output_survives_live_stream` in
   `crates/farhelm/tests/e2e/session_lifecycle.rs`. The baseline failed on the fifth exact execution (four passed): READY
   arrived but BINARY-MARKER did not arrive within forty seconds. Earlier command-acknowledgement diagnostics localized
@@ -214,6 +238,13 @@ is a clean gate.
   `transition_many` commits; removal is best-effort and logs non-NotFound errors. It is not an unawaited deletion race.
   On recurrence capture unlink path/errno, planted versus derived generation paths, and the committed session ID. If the
   paths match and no removal warning exists, inspect the actual directory entry before changing cleanup semantics.
+
+  The three Rust entries above were given a fresh go on 2026-09-19 and none reproduced: batch
+  `b9f88455-efea-426e-8ab1-877feac7e7f8`, five attempts of all three together through the recorder, `--run-ignored all`
+  so the binary-output case ran too, 4 nextest slots, zero retries, fifteen executions, all passed. That is the wrong
+  substrate for all three by their own text — each names loaded four-thread runs with co-resident allocations, and this
+  machine was quiet — so it is recorded as a go rather than as evidence. They stay parked on recurrence, and the capture
+  lists above are still what a recurrence should produce.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
   viewer RSS, degenerate-size READY, and malformed-sentinel cases still block restoring the entire `farhelm` integration
