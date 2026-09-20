@@ -980,6 +980,17 @@ struct ActorHandle {
     seed_epoch: Arc<std::sync::atomic::AtomicU64>,
 }
 
+/// What the gated actor task did before its supervisor observed completion.
+///
+/// A dropped start gate is not an actor lifecycle event: slot arbitration
+/// discarded the replacement before it could publish. The supervisor needs a
+/// distinct result so an actor that genuinely ran and ended still retires its
+/// published state, while that dormant replacement stays silent.
+enum ActorCompletion {
+    NeverStarted,
+    Ran,
+}
+
 /// One connection actor per registry host, plus the entry points a user
 /// decision arrives through.
 ///
@@ -1603,9 +1614,10 @@ impl ConnectionManager {
                 // A dropped gate means the manager decided not to keep this
                 // actor: it never runs at all, and its task ends here.
                 if gate_rx.await.is_err() {
-                    return;
+                    return ActorCompletion::NeverStarted;
                 }
                 actor.run(row, nudge_rx, refresh_rx).await;
+                ActorCompletion::Ran
             }
         };
         let actor_task = tokio::spawn(gated.instrument(span));
@@ -1624,7 +1636,13 @@ impl ConnectionManager {
         let task = tokio::spawn(async move {
             let _abort_actor = AbortOnDrop(actor_task.abort_handle());
             let reason = match actor_task.await {
-                Ok(()) => "the connection actor stopped because its registry row is gone",
+                // A replacement that lost slot arbitration never entered
+                // the actor. It published nothing, so it has no state to
+                // retire and must not invalidate the fleet.
+                Ok(ActorCompletion::NeverStarted) => return,
+                Ok(ActorCompletion::Ran) => {
+                    "the connection actor stopped because its registry row is gone"
+                }
                 // A cancelled actor is this manager stopping it on purpose
                 // (shutdown, or the row's removal), and the handle goes
                 // with it — there is nobody left to publish to.
@@ -7456,6 +7474,46 @@ mod tests {
         tokio::time::advance(REPROBE_INTERVAL * 4).await;
         tokio::task::yield_now().await;
         assert_eq!(fixture.transport.attempts(host).len(), dials);
+    }
+
+    /// Discarding a gated replacement produces no actor lifecycle event.
+    ///
+    /// Slot arbitration creates this shape before a replacement has entered
+    /// `HostActor::run`. Its supervisor must distinguish that completion
+    /// from a started actor ending, or merely dropping the gate retires an
+    /// unpublished row and wakes every fleet subscriber.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_discarded_replacements_dropped_start_gate_is_silent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = HelmStore::open(&dir.path().join("helm.db"))
+            .await
+            .expect("open store");
+        let row = store.list_hosts().await.unwrap()[0].clone();
+        // No previously released actor may publish into this observation.
+        // Build the manager before registry reconciliation starts any actors.
+        let manager = ConnectionManager {
+            incarnations: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            store,
+            transport: ScriptedTransport::new(),
+            cadence: Cadence::default(),
+            events: Arc::new(FleetEvents::new()),
+            reconcile: tokio::sync::Mutex::new(()),
+            actors: Mutex::new(ActorMap::default()),
+            agent_requests: Arc::new(std::sync::OnceLock::new()),
+        };
+        let revision = manager.events().revision();
+        let mut discarded = manager.spawn_actor(row);
+        drop(discarded.start.take());
+
+        tokio::time::timeout(Duration::from_secs(10), &mut discarded.task)
+            .await
+            .expect("the discarded supervisor must finish")
+            .expect("the discarded supervisor must not panic");
+        assert_eq!(
+            manager.events().revision(),
+            revision,
+            "a never-started replacement must not publish retirement or invalidate the fleet"
+        );
     }
 
     /// The status pair — state and client — must be coherent at EVERY

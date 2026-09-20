@@ -195,7 +195,10 @@
 - Completion criteria: discarded gated replacements produce no false retirement or fleet invalidation; started actors
   ending or panicking still publish retirement. No new supervision framework. Remove this feedback file and its index
   entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/768/changes. jj change:
+  `nukzlnkqkpqpmkpppyopkpnxzwtslmwo`; bookmark: `fix-discarded-actor-retirement`. The dropped-gate regression reproduced
+  the false retirement and fleet revision. Four focused actor checks pass; the regression also passes with an isolated
+  fixture that starts no unrelated actor.
 
 ## disconnect-publishes-keep-stale-contested-claims.md
 

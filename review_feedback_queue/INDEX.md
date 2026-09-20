@@ -22,8 +22,6 @@ One line per open item. This file must always match the feedback files in this d
   live.
 - `directory-source-staging-leak.md` — crash-orphaned extraction staging files are never pruned.
 - `discard-quarantined-hangs-response.md` — post-delete quarantine discard hangs the response on a wedged disk.
-- `discarded-replacement-logs-spurious-row-gone-retire.md` — a never-started handler logs a spurious row-gone warning
-  and wakes all clients.
 - `disconnect-publishes-keep-stale-contested-claims.md` — disconnect keeps dead hosts' claims, spuriously refusing
   session actions.
 - `duplicate-freeze-clobbers-retarget-nudge.md` — retargeting a duplicate-frozen host loses the edit until a second
