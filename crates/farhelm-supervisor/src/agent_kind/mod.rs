@@ -118,6 +118,7 @@ use std::path::{Path, PathBuf};
 mod capture;
 pub(crate) mod codex;
 pub(crate) mod grok;
+pub(crate) mod omp;
 pub use capture::{
     CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordCorrelators, RecordStamp,
@@ -2655,8 +2656,8 @@ impl IntegrationSnapshot {
 /// preserved, not re-blessed, until their kind flips.
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
-        AgentKind::Codex | AgentKind::Grok => true,
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Omp => false,
+        AgentKind::Codex | AgentKind::Grok | AgentKind::Omp => true,
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi => false,
         AgentKind::Generic => false,
     }
 }
@@ -4228,10 +4229,23 @@ mod tests {
 
             let snapshot =
                 IntegrationSnapshot::resolve(&[argv0.to_string()], None, None).expect("integrated");
-            assert_eq!(
-                snapshot.restart_offer(Some(&encoded), 0),
+            // OMP's ownership proof is implemented, so an unproven
+            // (version 0) binding offers fresh-only until its first proven
+            // report; Pi keeps today's offer until its own proof flips the
+            // predicate.
+            let unproven_offer = if vendor == LocatorVendor::Omp {
+                RestartOffer::FreshOnly
+            } else {
                 RestartOffer::Resume
-            );
+            };
+            assert_eq!(snapshot.restart_offer(Some(&encoded), 0), unproven_offer);
+            if vendor == LocatorVendor::Omp {
+                assert_eq!(
+                    snapshot.restart_offer(Some(&encoded), 1),
+                    RestartOffer::Resume,
+                    "a proven OMP binding resumes"
+                );
+            }
             let fileless = encode_locator(
                 vendor,
                 SessionLocator {

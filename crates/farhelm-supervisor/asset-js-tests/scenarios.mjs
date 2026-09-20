@@ -84,7 +84,14 @@ function assert_in_text(text, needle) {
 }
 
 /** A scripted session manager: the id and file the events observe, plus an
- * optional one-shot throwing getter used to pin the failure contract. */
+ * optional one-shot throwing getter used to pin the failure contract.
+ *
+ * The default ctx is the ROOT TUI shape (`hasUI: true, mode: "tui"`) the
+ * gated asset accepts — the harness simulates the foreground parent unless
+ * a scenario builds a child-shaped ctx instead. `makeChildCtx` builds an
+ * ineligible ctx with its OWN session manager, mirroring upstream's
+ * per-run child manager (`sessionManagerForRun`): a child's stale-id check
+ * is self-consistent, so only the context gate can refuse it. */
 function makeHarness() {
     const handlers = {};
     const omp = {
@@ -109,8 +116,30 @@ function makeHarness() {
             return state.file;
         },
     };
-    const ctx = { sessionManager: manager };
+    const ctx = { hasUI: true, mode: "tui", sessionManager: manager };
     return { omp, handlers, state, ctx };
+}
+
+/** An ineligible child-shaped ctx with an independent session manager.
+ * `mode` varies per scenario: upstream pins `hasUI: false` for built-in
+ * task/workpool/revival children while the exact child mode value is not
+ * established, so the gate must refuse on the hasUI leg for every mode. */
+function makeChildCtx(mode) {
+    const state = { id: "child-9", file: undefined };
+    const manager = {
+        getSessionId() {
+            return state.id;
+        },
+        getSessionFile() {
+            return state.file;
+        },
+    };
+    const ctx = { sessionManager: manager };
+    if (mode !== undefined) {
+        ctx.hasUI = false;
+        ctx.mode = mode;
+    }
+    return { ctx, state };
 }
 
 function readLog(path) {
@@ -127,9 +156,11 @@ function readLog(path) {
 const logPath = join(workspace, "reports.log");
 
 /** One report per event; every handler's returned promise is awaited so the
- * scenario is deterministic about which queued reports have run. */
-async function fire(harness, name, event) {
-    const returned = harness.handlers[name](event ?? {}, harness.ctx);
+ * scenario is deterministic about which queued reports have run. An explicit
+ * ctx fires the event as another context (a child shape) sharing the same
+ * factory import — the same-process delegation the gate must refuse. */
+async function fire(harness, name, event, ctx) {
+    const returned = harness.handlers[name](event ?? {}, ctx ?? harness.ctx);
     if (returned && typeof returned.then === "function") {
         await returned;
     }
@@ -353,6 +384,129 @@ if (scenario === "transition-events") {
         reports.length === 1 &&
             reports[0].session_id === "conv-1" &&
             reports[0].source === "agent_end",
+        `a later healthy event reports normally: ${JSON.stringify(reports)}`,
+    );
+} else if (scenario === "child-contexts-silent") {
+    // Every non-interactive context shape stays silent across every
+    // subscribed event: hasUI:false under each known mode (the child mode
+    // value itself is not pinned upstream, so all four are covered), plus
+    // a ctx missing the fields entirely. Each child ctx carries its OWN
+    // session manager whose stale-id check is self-consistent — the gate,
+    // not the id check, must refuse. Afterwards the parent still reports:
+    // refused children cost nothing, not even queue position.
+    const harness = makeHarness();
+    factory(harness.omp);
+    harness.state.id = "conv-1";
+    harness.state.file = undefined;
+    const events = ["session_start", "session_switch", "session_branch", "agent_end"];
+    for (const mode of ["print", "rpc", "json", "tui", undefined]) {
+        const child = makeChildCtx(mode);
+        for (const name of events) {
+            await fire(harness, name, { reason: "new" }, child.ctx);
+        }
+    }
+    check(
+        readLog(logPath).length === 0,
+        `all child-shaped contexts must stay silent: ${JSON.stringify(readLog(logPath))}`,
+    );
+    await fire(harness, "session_start");
+    const reports = readLog(logPath);
+    check(
+        reports.length === 1 && reports[0].session_id === "conv-1",
+        `the parent still reports after refused children: ${JSON.stringify(reports)}`,
+    );
+    results.reports = reports.length;
+} else if (scenario === "child-session-start-no-dispatch") {
+    // A child-shaped session_start sharing the parent's factory import
+    // dispatches nothing — while the parent's own start and a later switch
+    // both report in order. The child manager names a live id of its own,
+    // so a stale-id check alone would accept it.
+    const harness = makeHarness();
+    factory(harness.omp);
+    harness.state.id = "conv-1";
+    harness.state.file = undefined;
+    const child = makeChildCtx("rpc");
+    await fire(harness, "session_start");
+    await fire(harness, "session_start", {}, child.ctx);
+    harness.state.id = "conv-2";
+    await fire(harness, "session_switch", { reason: "resume" });
+    await fire(harness, "agent_end", {}, child.ctx);
+    const reports = readLog(logPath);
+    check(
+        reports.length === 2 &&
+            reports[0].session_id === "conv-1" &&
+            reports[0].source === "session_start" &&
+            reports[1].session_id === "conv-2" &&
+            reports[1].source === "session_switch:resume",
+        `only the parent's events report, in order: ${JSON.stringify(reports)}`,
+    );
+} else if (scenario === "two-reporter-ordering") {
+    // Same-process parent + child factories (two extension instances, one
+    // import — the built-in delegation shape): the child's events must
+    // neither dispatch nor disturb the parent's queue. A parent report
+    // queued AROUND child events still dispatches promptly and in order.
+    const parent = makeHarness();
+    factory(parent.omp);
+    const childHandlers = {};
+    const recording = { on: (name, handler) => { childHandlers[name] = handler; } };
+    factory(recording);
+    parent.state.id = "conv-a";
+    parent.state.file = undefined;
+    const child = makeChildCtx("print");
+    const first = fire(parent, "session_start");
+    await first;
+    await childHandlers["session_start"]({}, child.ctx);
+    await childHandlers["session_switch"]({ reason: "new" }, child.ctx);
+    parent.state.id = "conv-b";
+    await fire(parent, "session_switch", { reason: "fork" });
+    await childHandlers["agent_end"]({}, child.ctx);
+    const reports = readLog(logPath);
+    check(
+        reports.length === 2 &&
+            reports[0].session_id === "conv-a" &&
+            reports[1].session_id === "conv-b",
+        `the parent queue is unpoisoned and ordered: ${JSON.stringify(reports)}`,
+    );
+    check(
+        !reports.some((r) => r.session_id === "child-9"),
+        `the child factory dispatched nothing: ${JSON.stringify(reports)}`,
+    );
+} else if (scenario === "throwing-context") {
+    // A ctx whose eligibility read throws is a complete no-op — the gate
+    // runs before identity, so the throwing getter below is never even
+    // reached for dispatch — and the reporter recovers for later events.
+    const harness = makeHarness();
+    factory(harness.omp);
+    harness.state.id = "conv-1";
+    harness.state.file = undefined;
+    const hostile = {
+        get hasUI() {
+            throw new Error("context contract violation");
+        },
+        get mode() {
+            throw new Error("context contract violation");
+        },
+        sessionManager: {
+            getSessionId() {
+                throw new Error("must not be read past the gate");
+            },
+            getSessionFile() {
+                throw new Error("must not be read past the gate");
+            },
+        },
+    };
+    let escaped = false;
+    try {
+        await fire(harness, "session_start", {}, hostile);
+    } catch {
+        escaped = true;
+    }
+    check(!escaped, "a throwing context must not escape into OMP");
+    check(readLog(logPath).length === 0, "a throwing context produces no report");
+    await fire(harness, "agent_end");
+    const reports = readLog(logPath);
+    check(
+        reports.length === 1 && reports[0].session_id === "conv-1",
         `a later healthy event reports normally: ${JSON.stringify(reports)}`,
     );
 } else {

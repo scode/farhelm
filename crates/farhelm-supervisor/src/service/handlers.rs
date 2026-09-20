@@ -3511,6 +3511,26 @@ pub(crate) async fn handle_restricted_control(
                 .await;
                 return;
             }
+            // OMP's subscribed vocabulary likewise: the four event tags
+            // the asset emits, with `session_switch` carrying its opaque
+            // upstream reason. Unknown tags refuse at the doorway, before
+            // the discriminator's second check and long before any
+            // vendor I/O — admission re-checks against the same
+            // allowlist.
+            if vendor == farhelm_proto::ReportVendor::Omp
+                && !crate::agent_kind::omp::is_omp_foreground_source(&source)
+            {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "OMP reported an unsupported foreground transition".to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
             // Bounded and stripped of control characters HERE, at the
             // doorway, so nothing downstream has to remember that this
             // field is attacker-chosen: `report_conversation` puts it in
@@ -4064,6 +4084,8 @@ mod tests {
                 crate::store::StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4129,6 +4151,8 @@ mod tests {
                 crate::store::StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4930,6 +4954,8 @@ mod tests {
                 crate::store::StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: session_id.to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -6945,6 +6971,8 @@ mod tests {
                 crate::store::StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),

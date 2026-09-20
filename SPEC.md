@@ -910,15 +910,24 @@ supplies its path. If Grok exits or crashes before the replacement `SessionStart
 can remain Farhelm's last known selection; this accepted delivery race does not weaken validation of callbacks that do
 arrive.
 
-Every conversation-identity report carries a closed vendor discriminator naming the adapter that produced it — the
-injected hook command, the Goose helper, or a shipped asset — and a report addressed to a session of another kind is
-refused before any vendor state is consulted. The discriminator routes; it does not prove. Codex and Grok admission
-require foreground and record proofs, and their exact resume additionally requires versioned proof that the binding was
-admitted under those proofs, with the historical Codex exception described in SPEC_impl.md. OMP, Goose, Claude, and Pi
-retain their existing admission and resume rules; the discriminator alone adds no foreground protection. Old senders
-that predate the discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored
-identity, no offer, no ambiguity verdict, no pending state. Resume is never silently turned into fresh, and historical
-captures are never rewritten to look proven.
+OMP reports must come from the foreground OMP runtime under the session's owned pane — the Bun-executed bundle or
+source-tree entry, or the compiled target — reached through the launch's own launcher and trampoline shapes and nothing
+else: not a nested OMP process that inherited its credential, not a Node-executed entry, not an unknown wrapper. Farhelm
+also requires the session's durable launch record to show the current gated reporter asset was installed for that
+launch, with the installed file's bytes re-verified; the gated reporter emits only from the interactive context, so a
+delegated task, workpool, or revival child stays silent, while a separately launched interactive child — genuinely
+interactive — is refused by process attribution instead. Sessions launched under the old gateless asset fail closed,
+runnable with no capture, until a relaunch installs the current asset. A parent lineage field never rejects: legitimate
+forks carry one. OMP captures admitted under the proof carry version 1 like Codex, with no historical exception: every
+older OMP row offers fresh-only until its first proven report. Every conversation-identity report carries a closed
+vendor discriminator naming the adapter that produced it — the injected hook command, the Goose helper, or a shipped
+asset — and a report addressed to a session of another kind is refused before any vendor state is consulted. The
+discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
+resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
+exception described in SPEC_impl.md. Goose, Claude, and Pi retain their existing admission and resume rules; the
+discriminator alone adds no foreground protection. Old senders that predate the discriminator fail closed rather than
+reporting untagged. A refused report changes nothing: no stored identity, no offer, no ambiguity verdict, no pending
+state. Resume is never silently turned into fresh, and historical captures are never rewritten to look proven.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
