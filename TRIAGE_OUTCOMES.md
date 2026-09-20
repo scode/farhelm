@@ -403,7 +403,9 @@
 - Completion criteria: add, probed registration, ensure and retarget cannot introduce a visible local-name collision.
   Local alias changes naturally change the comparison. No literal-string blacklist or new SSH syntax policy. Remove this
   feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/781/changes. jj change:
+  `wkpkvnsxnprqtpnxkmxrxmllwmqpxvlw`; bookmark: `fix-ssh-local-display-collision`. Add, probed registration, atomic
+  ensure, and retarget regressions now reject the visible local-name collision using the existing transactional refusal.
 
 ## stop-actor-skips-client-retirement.md
 
