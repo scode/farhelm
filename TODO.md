@@ -129,10 +129,11 @@ The 2026-09-08 browser gate added these follow-ups, with retained evidence in FL
   `624df274-f183-47e8-9cd4-3884698a68fb` — 12 passed, including the large paste this entry says precedes the failure.
   That was one pass of the file on a quiet machine, not the loaded full-suite shape the failure came from, so it narrows
   nothing. Worth knowing before the next attempt: the assertion that fails, in `resetStack`
-  (`e2e/tests/helpers/terminal-suite.ts`), is `expect(deleted.ok()).toBe(true)` with the session title in its message
-  and nothing about the RESPONSE. The status and body the entry asks to inspect are discarded at the moment they exist,
-  which is why the retained evidence cannot answer the question. Carrying them into that assertion's message is the
-  cheap thing to do before hunting further.
+  (`e2e/tests/helpers/terminal-suite.ts`) used to report the session title and nothing about the RESPONSE, discarding
+  the status and body this entry asks to inspect at the one moment they existed — which is why no retained trace could
+  answer the question it was retained for. That is fixed: a failed delete now carries the helm's status and a bounded
+  body excerpt into the failure message. The next recurrence should therefore arrive already saying what the helm
+  replied, which is where this entry's own instruction starts.
 - Stabilize the popup focus readiness of `a profile edited in another browser reaches this one over the real feed` in
   `e2e/tests/profiles.spec.ts`. WebKit missed it before the behavior under test. A baseline pass does not establish that
   the new layout is uninvolved. Preserve trusted-pointer, unexpired-release, and focus assertions.
@@ -259,16 +260,6 @@ Single sightings with unsuccessful targeted hunts and no actionable investigativ
 reproduction since, no suspected mechanism to chase. What parks an entry here is the absence of a live lead, not a claim
 about any other bucket. On recurrence, move the entry back to the regular bucket with the new evidence rather than
 hunting blind from here.
-
-- Investigate the retained host-action fixture failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`:
-  `a failed removal stays visible with details collapsed`, in `e2e/tests/terminal-multihost.spec.ts`, could not find
-  `.host-details-toggle`. Moved here from the regular bucket on 2026-09-16: forty more clean executions (20 per engine,
-  runs `5d900ad2-9c84-4560-a5d6-c28502ba6418` and `b1fbf426-49b3-465e-9fb7-9206b4d334c4`) joined the earlier batch
-  `fca9d4df-ed2a-4dbd-9665-630d11d2f6f7` (twenty attempts, both engines each, forty clean) without a reproduction —
-  eighty executions total, all clean — and there is still no suspected mechanism to chase. The run's sibling failure,
-  the sidebar aliasing test's disposed `route.fetch` response, was the WebKit navigation-disposal mechanism and is
-  fixed. Preserve host-row state evidence before changing product behavior; the single failure alone establishes neither
-  a composer regression nor a confirmed pre-composer cause.
 
 ### Systematic deflake
 

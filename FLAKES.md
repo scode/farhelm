@@ -1108,3 +1108,22 @@ is worth more than the one retired here.
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-19 — the host-removal details toggle retires unreproduced (e2e/tests/terminal-multihost.spec.ts)
+
+Not an observation either. `a failed removal stays visible with details collapsed` got one more targeted hunt: batch
+`e84146ef-9e75-4e04-b852-8e5220f5ed65`, eight attempts, both engines per attempt, one Playwright worker, zero retries,
+sixteen executions, all passed. Substrate: a four-CPU Ubuntu 24.04 workstation shared with other agents, pinned tmux
+3.7c executable SHA256 `62c79831e9ffb46570aaee6381c36e045d8c131eff03a34f2bdd7ddc35b01ce4`, `LANG=C.UTF-8`, ambient
+`FARHELM_*` scrubbed, tested commit `07409e8c` clean for this spec.
+
+That makes ninety-six clean executions behind one failure from browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`, where
+the test could not find `.host-details-toggle`, and no mechanism has ever been suggested for it. Its TODO.md entry and
+its `deflake/known-flakes.txt` line are gone on that basis, so the sweep runs the test again. The same caveat as the
+profiles retirement above applies and is worth repeating: clean executions do not disprove a rare flake, and the
+argument for removal is that an entry with no reproducible sighting and no mechanism is a note rather than a task. The
+retained failure from that original run stays here, which is where a note belongs.
+
+Class: unknown
+
+Cause: unknown
