@@ -2549,12 +2549,12 @@ fn with_hook_argv_using(
         return (argv, enabled);
     }
     if snapshot.kind == AgentKind::Omp {
-        match omp_injection_decision(&argv) {
-            OmpInjection::Leave(reason) => {
+        match crate::agent_kind::omp::omp_injection_decision(&argv) {
+            crate::agent_kind::omp::OmpInjection::Leave(reason) => {
                 skip(reason);
                 return (argv, false);
             }
-            OmpInjection::Inject { pointer } => {
+            crate::agent_kind::omp::OmpInjection::Inject { pointer } => {
                 if !hooks.allows(snapshot.kind) {
                     skip("disabled by FARHELM_AGENT_HOOKS");
                     return (argv, false);
@@ -2827,265 +2827,11 @@ fn pi_interactive_invocation(argv: &[String]) -> bool {
     true
 }
 
-/// OMP's registered top-level commands and aliases EXCEPT `launch` — the
-/// command table (`OMP/cli-commands.ts`) whose dispatch makes the process a
-/// utility rather than an interactive conversation. `launch` is the one
-/// command token that IS an ordinary launch, and any unregistered word is a
-/// prompt, so both stay out of this list.
-const OMP_UTILITY_COMMANDS: &[&str] = &[
-    "acp",
-    "auth-broker",
-    "auth-gateway",
-    "agents",
-    "bench",
-    "browser-relay",
-    "cleanse",
-    "collab",
-    "commit",
-    "completions",
-    "__complete",
-    "compress",
-    "config",
-    "dry-balance",
-    "gc",
-    "grep",
-    "gallery",
-    "git",
-    "grievances",
-    "images",
-    "img",
-    "if-bench",
-    "install",
-    "join",
-    "models",
-    "plugin",
-    "plugins",
-    "ps",
-    "say",
-    "share",
-    "setup",
-    "shell",
-    "read",
-    "render",
-    "ssh",
-    "stats",
-    "update",
-    "usage",
-    "tiny-models",
-    "token",
-    "ttsr",
-    "worktree",
-    "wt",
-    "search",
-    "q",
-];
-
-/// Options whose OCCURRENCE anywhere in the argv makes the launch
-/// non-interactive or exiting: print and explicit modes, export, the alias
-/// installer, help, version, license, and the obsolete list-models. Inline
-/// `--flag=value` spellings count.
-const OMP_EXCLUDED_OPTIONS: &[&str] = &[
-    "-p",
-    "--print",
-    "--export",
-    "--alias",
-    "--mode",
-    "-h",
-    "--help",
-    "-v",
-    "--version",
-    "--license",
-    "--list-models",
-];
-
-/// OMP's reserved plugin/marketplace words, rejected ONLY in the forms
-/// `reservedTopLevelWordMessage` rejects: a bare verb, a `marketplace`
-/// sub-action, or any later argument carrying a `name@marketplace` plugin id.
-/// A prompt such as `omp list all my files` still launches, so the word
-/// alone decides nothing.
-const OMP_RESERVED_WORDS: &[&str] = &[
-    "extensions",
-    "list",
-    "remove",
-    "uninstall",
-    "marketplace",
-    "discover",
-    "upgrade",
-    "enable",
-    "disable",
-];
-
-/// The sub-actions that make `omp marketplace <sub>` unambiguously a
-/// management command (`OMP/cli-commands.ts` MARKETPLACE_SUBCOMMANDS).
-const OMP_MARKETPLACE_SUBCOMMANDS: &[&str] = &["add", "remove", "rm", "update", "list"];
-
-/// Whether a reserved word in OMP's command position is one of the REJECTING
-/// forms OMP itself turns into an error message (and exits) rather than a
-/// launch — mirroring `reservedTopLevelWordMessage`. Only the FIRST CLI token
-/// is ever this word: OMP's guard runs on argv[0] before flag-hoisted
-/// subcommand resolution, so `omp --model x list` is a prompt "list", not a
-/// rejected management command.
-fn omp_reserved_word_rejects(command: &str, rest: &[String]) -> bool {
-    if !OMP_RESERVED_WORDS.contains(&command) {
-        return false;
-    }
-    let Some(second) = rest.first() else {
-        return true;
-    };
-    if command == "marketplace" && OMP_MARKETPLACE_SUBCOMMANDS.contains(&second.as_str()) {
-        return true;
-    }
-    rest.iter()
-        .any(|argument| !argument.starts_with('-') && argument.contains('@'))
-}
-
-/// What injection should do with one OMP invocation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OmpInjection {
-    /// Leave the invocation untouched, runnable as the user wrote it. The
-    /// reason is the skip-log line, and it is the only evidence for why
-    /// identity capture did not ride along.
-    Leave(&'static str),
-    /// Inject the reporter. `pointer` says the instructions pointer may also
-    /// ride: false when the user's own argv already carries an
-    /// `--append-system-prompt` occurrence, whose value OMP's last-wins
-    /// assignment would otherwise silently replace with Farhelm's pointer.
-    Inject { pointer: bool },
-}
-
-/// Classify one OMP invocation for reporter injection.
-///
-/// The scan identifies the ONE command position and then walks the ENTIRE
-/// option stream, because OMP keeps parsing options after its first
-/// positional: `omp launch --print`, a prompt followed by `--mode rpc`, and
-/// `omp @input.txt --export saved.jsonl` are all excluded shapes, and a
-/// trailing string option left without its value would swallow an injected
-/// flag as its own. Fail-closed choices, and why:
-///
-/// - a GENUINE end-of-options delimiter (an unconsumed `--`, per the shared
-///   grammar) declines: everything after it is prompt text, so an appended
-///   hook flag has no defined meaning — while a `--` consumed as an option
-///   value is just a value, and the walk never reinterprets one;
-/// - `--trusted-extension` declines the WHOLE injection: OMP refuses to
-///   combine it with `-e`/`--extension`/`--hook`, so appending Farhelm's
-///   extension would turn a valid launch into an error before the session
-///   starts. Never inferred from an opaque value;
-/// - an excluded option occurrence (`--print`, `--mode`, help, version,
-///   license, export, alias, inline forms included) declines, because each
-///   either exits before an interactive session exists or selects a
-///   non-interactive output mode;
-/// - an unknown long flag followed by a value-like token declines ONLY
-///   before the command position is settled: the successor might be the
-///   command (`omp --extflag acp` with a boolean extension flag runs the
-///   `acp` command). Once a prompt or `launch` is established, later words
-///   are not subcommands and the pair is consumed opaquely;
-/// - a string flag left without its successor declines: the injected `-e`
-///   would become that option's value.
-///
-/// Values of KNOWN flags stay opaque: `omp --system-prompt --help` is a
-/// prompt that says `--help`, not a help request, exactly as OMP's own
-/// parser reads it.
-fn omp_injection_decision(argv: &[String]) -> OmpInjection {
-    let Some(program) = effective_program_index(argv) else {
-        return OmpInjection::Leave("invocation has no effective program to classify");
-    };
-    if Path::new(&argv[program])
-        .file_name()
-        .and_then(|name| name.to_str())
-        != Some("omp")
-    {
-        return OmpInjection::Leave("invocation is not an omp launch");
-    }
-    let args = &argv[program + 1..];
-    let mut command_classified = false;
-    let mut user_appends_prompt = false;
-    let mut index = 0;
-    while index < args.len() {
-        let argument = args[index].as_str();
-        let Some(flag) = crate::agent_kind::omp_flag_occurrence(argument) else {
-            if argument == "--" {
-                // A `--` the walk reached is, by construction, unconsumed:
-                // every value a flag claimed was skipped past wholesale.
-                return OmpInjection::Leave(
-                    "invocation contains an end-of-options boundary; appended hook flags \
-                     would be prompt text",
-                );
-            }
-            if !command_classified {
-                // The command position: the first token OMP could dispatch
-                // as a subcommand, or the start of the prompt. `help`,
-                // worker selectors, and the reserved words are rejected
-                // only from the literal first CLI position, mirroring where
-                // OMP checks them. Later positionals are prompt words.
-                if index == 0 && argument.starts_with('@') {
-                    // `@file` tokens are prompts, never subcommands.
-                } else if index == 0
-                    && (argument == "help" || argument.starts_with("__omp_worker_"))
-                {
-                    return OmpInjection::Leave("invocation is a help or worker-selector form");
-                } else if OMP_UTILITY_COMMANDS.contains(&argument) {
-                    return OmpInjection::Leave("invocation runs a utility command");
-                } else if index == 0 && omp_reserved_word_rejects(argument, &args[index + 1..]) {
-                    return OmpInjection::Leave(
-                        "invocation is a reserved management form OMP itself rejects",
-                    );
-                }
-                command_classified = true;
-            }
-            index += 1;
-            continue;
-        };
-        // Option occurrences are checked ANYWHERE in the stream, before
-        // their values are consumed.
-        if OMP_EXCLUDED_OPTIONS.contains(&flag.name) {
-            return OmpInjection::Leave("invocation carries a non-interactive or exiting option");
-        }
-        if flag.name == "--trusted-extension" {
-            return OmpInjection::Leave(
-                "invocation declares --trusted-extension, which OMP refuses to combine with \
-                 an injected -e",
-            );
-        }
-        if flag.name == "--append-system-prompt" {
-            user_appends_prompt = true;
-        }
-        let next = args.get(index + 1).map(String::as_str);
-        // Both successor-based refusals apply ONLY to non-inline
-        // occurrences: an inline `=value` belongs to the token itself, so
-        // `--model=<model>` as the FINAL token needs no successor, and an
-        // inline unknown option cannot be eating the command-position word.
-        if flag.arity == crate::agent_kind::OmpFlagArity::UnknownLong
-            && !flag.inline_value
-            && !command_classified
-            && next.is_some_and(|value| !value.starts_with('-'))
-        {
-            // Before the command position is settled, an unknown long flag
-            // might be an extension string flag eating the very token that
-            // would have named the command — or a boolean flag leaving it in
-            // command position. No guess.
-            return OmpInjection::Leave(
-                "an unknown long flag makes the command position ambiguous",
-            );
-        }
-        if flag.arity == crate::agent_kind::OmpFlagArity::String
-            && !flag.inline_value
-            && next.is_none()
-        {
-            return OmpInjection::Leave(
-                "invocation ends in a string option with no value; an injected flag would \
-                 become its value",
-            );
-        }
-        if crate::agent_kind::omp_flag_consumes_next(&flag, next) {
-            index += 2;
-        } else {
-            index += 1;
-        }
-    }
-    OmpInjection::Inject {
-        pointer: !user_appends_prompt,
-    }
-}
+// OMP's interactive-shape grammar (utility commands, excluded options,
+// reserved words, and the injection decision) lives in
+// `crate::agent_kind::omp`, shared by injection and live runtime
+// verification. It moved there with the OMP proof so the two readers
+// cannot drift.
 
 /// Add launch-local reporter controls without persisting them in vendor metadata.
 fn with_launch_environment(argv: Vec<String>, assignments: &[String]) -> Vec<String> {
@@ -8771,6 +8517,8 @@ impl Supervisor {
             let row = StoredSession {
                 conversation_source: None,
                 capture_ownership_version: 0,
+                omp_reporter_asset: None,
+                omp_launch_program: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 archived: false,
@@ -8914,6 +8662,8 @@ impl Supervisor {
             let mut row = StoredSession {
                 conversation_source: None,
                 capture_ownership_version: 0,
+                omp_reporter_asset: None,
+                omp_launch_program: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 archived: false,
@@ -12514,6 +12264,47 @@ impl Supervisor {
             ));
         }
 
+        // Launch provenance for the OMP ownership proof, recorded for
+        // EVERY OMP launch from the one place that decides injection:
+        // the gated asset's file name when the launch hooked it (`None`
+        // when injection was skipped), and the classification of the
+        // argv this generation actually starts — after Fresh/Resume
+        // selection, hook tail included (the classifier skips the
+        // injected `env` prefix, so the program is the launch's own).
+        //
+        // BEFORE tmux starts anything, not after: a report requires a
+        // live agent, which requires the tmux start below, so
+        // publishing here means no report of this generation can ever
+        // arrive ahead of its provenance. The write is best-effort — a
+        // failure degrades to no capture (a create starts unknown, and a
+        // relaunch cleared both columns when it opened this generation, so
+        // a failed write leaves them unknown rather than stale) rather
+        // than failing a healthy launch — and it is fenced on the
+        // generation, so a slow spawn cannot mark a run a relaunch has
+        // replaced.
+        //
+        // A spec-publish failure above records nothing, and that is
+        // safe rather than stale: it provably started nothing, so no
+        // reporter exists to read any marker. A tmux failure below
+        // keeps the decided values: the argv was fixed, so an
+        // ambiguous survivor runs exactly what the row describes.
+        if snapshot.kind == AgentKind::Omp {
+            let asset = hooked.then_some(crate::pi_extension::OMP_ASSET.file_name);
+            let program = crate::agent_kind::omp::classify_omp_launch(&spec.argv).column_value();
+            if let Err(error) = self
+                .store
+                .record_omp_launch_provenance(id, generation, asset, program)
+                .await
+            {
+                warn!(
+                    session = %id,
+                    error = %format!("{error:#}"),
+                    "could not record this launch's OMP provenance; \
+                     the session stays runnable without capture"
+                );
+            }
+        }
+
         let shell = self.launch_shell().await;
         // The scope wrapper, or nothing at all. Note the asymmetry with the
         // rest of this function: `scope` is DECIDED and RECORDED durably by
@@ -13263,6 +13054,10 @@ impl Supervisor {
                 self.report_codex_conversation(id, report, kind, generation, entry)
                     .await
             }
+            AgentKind::Omp => {
+                self.report_omp_conversation(id, report, kind, generation, entry)
+                    .await
+            }
             _ => Err(RequestError::new(
                 ErrorKind::Conflict,
                 "no foreground ownership proof is implemented for this session's agent kind",
@@ -13404,6 +13199,181 @@ impl Supervisor {
             // The capture claim excludes refresh/report interleavings, while
             // the durable precondition also fences lifecycle changes and
             // preserves the exact binding that authorized verification.
+            _ => {
+                self.store
+                    .admit_ownership_proven_conversation(
+                        id,
+                        generation,
+                        row.captured_conversation.as_deref(),
+                        row.capture_ownership_version,
+                        &conversation,
+                    )
+                    .await
+            }
+        };
+        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+    }
+
+    /// OMP admission: launch provenance plus foreground process attribution,
+    /// wired through the shared claim, CAS, and mirror discipline rather
+    /// than its own.
+    ///
+    /// The root leg is a composition, because neither half implies the
+    /// asset gate alone. Launch provenance — the session's durable launch
+    /// record naming the current gated asset, with the file's bytes
+    /// re-verified — establishes that this launch installed the
+    /// context-gated reporter. Process attribution — the walked corridor
+    /// over the shared mechanics, repeated around the evidence —
+    /// establishes that THIS reporter descends from that launched runtime.
+    /// Together they imply the report passed the asset's interactive-context
+    /// gate: a separately launched interactive child passes the gate but
+    /// fails attribution, while an old gateless asset fails provenance
+    /// before any process is inspected. The session-file header stays a
+    /// pre-resume file↔id check rather than ownership evidence, and a
+    /// parent lineage field never rejects: legitimate forks carry one.
+    async fn report_omp_conversation(
+        &self,
+        id: &str,
+        report: ReportedConversation,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        let ReportedConversation {
+            vendor: _,
+            conversation,
+            source,
+            transcript_path: _,
+            hook_event_name: _,
+            peer,
+        } = report;
+        if !crate::agent_kind::omp::is_omp_foreground_source(&source) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "OMP reported an unsupported foreground transition",
+            ));
+        }
+        // Step 1 tail: the cheap shape gate before any file or process I/O
+        // — the token must parse as this kind's locator, exactly as the
+        // legacy path checks after its reload.
+        if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the reported conversation identity does not match this session's agent kind",
+            ));
+        }
+        // Step 2: the bounded capture claim, then the authoritative reload
+        // and kind/generation comparison — the same ordering the Codex
+        // branch reads its binding under.
+        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's capture is being updated; the report was not recorded",
+                )
+            })?;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| RequestError::new(ErrorKind::Internal, "could not verify the OMP launch"))?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the OMP session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
+        }
+        let peer = peer.ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "the OMP report has no kernel-attributed local process",
+            )
+        })?;
+        // Step 3a: launch provenance. The row must name the current gated
+        // asset for this launch — a session launched under the old gateless
+        // asset carries nothing (or a stale name) and fails closed here,
+        // runnable with no capture — and the file must re-read
+        // byte-identical to this binary's asset, so a supervisor reload is
+        // proven against the current asset rather than trusted.
+        if row.omp_reporter_asset.as_deref() != Some(crate::pi_extension::OMP_ASSET.file_name) {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session's launch did not install the current OMP reporter; \
+                 the report was not recorded",
+            ));
+        }
+        let asset_path = self
+            .state_dir
+            .join("integrations")
+            .join(crate::pi_extension::OMP_ASSET.directory)
+            .join(crate::pi_extension::OMP_ASSET.file_name);
+        match crate::agent_kind::read_bounded_regular_file(&asset_path).await {
+            Ok(Some(text)) if text.as_bytes() == crate::pi_extension::OMP_ASSET.source => {}
+            Ok(_) => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "the installed OMP reporter does not match this build; \
+                     the report was not recorded",
+                ));
+            }
+            Err(error) => {
+                warn!(
+                    session = %id,
+                    error = %format!("{error:#}"),
+                    "could not verify the installed OMP reporter; the report is discarded"
+                );
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "the installed OMP reporter could not be verified; \
+                     the report was not recorded",
+                ));
+            }
+        }
+        // Step 3b: the live runtime proof. The RETAINED launch program —
+        // classified from the argv this generation actually started, and
+        // published beside the asset marker before the launch's first
+        // process could exist — selects the installation descriptor;
+        // without it there is nothing to bind the live chain to. The
+        // resume template is a future resume's command and is never
+        // consulted here: a supported direct launch with an independent
+        // resume override still proves what it runs.
+        let program = crate::agent_kind::omp::OmpLaunchProgram::from_column_value(
+            row.omp_launch_program.as_deref(),
+        );
+        let emitter = self.omp_foreground(&row, peer, program).await?;
+        if self.omp_foreground(&row, peer, program).await? != emitter {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the OMP foreground changed during verification",
+            ));
+        }
+        info!(
+            session = %id, generation, emitter_pid = emitter.pid,
+            conversation = %conversation, source = %source,
+            "attributed an OMP foreground conversation report"
+        );
+        // Step 4: the atomic CAS over the COMPLETE prior binding,
+        // committing identity, locator, provenance 1, source, readiness,
+        // and the ambiguity reset together — the same transaction Codex
+        // uses, fenced the same way.
+        //
+        // The injected failure STANDS IN for the store call rather than
+        // preceding it, so a test can exercise this function's own failure
+        // path without a store that is genuinely broken.
+        let injected = self
+            .seams
+            .capture_store_fault
+            .as_ref()
+            .map(|fault| fault(super::capture::CaptureWrite::Report, id));
+        let written = match injected {
+            Some(Err(e)) => Err(e),
             _ => {
                 self.store
                     .admit_ownership_proven_conversation(
@@ -13599,19 +13569,18 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Recover the agent pane during publication gaps, then bind the socket peer
-    /// to its native Codex process. No lifecycle lock: the reporting hook may be
-    /// running inside the launch whose publication that lock protects.
-    async fn codex_foreground(
-        &self,
-        row: &StoredSession,
-        peer: crate::procs::ProcessIdentity,
-    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+    /// Resolve the session's owned pane to its live foreground process id,
+    /// recovering the pane from tmux during publication gaps. Shared by the
+    /// per-kind foreground proofs: the pane binding is framework evidence,
+    /// and only the walk past it differs per kind. No lifecycle lock: the
+    /// reporting hook may be running inside the launch whose publication
+    /// that lock protects.
+    async fn owned_pane_pid(&self, row: &StoredSession, kind: &str) -> Result<u32, RequestError> {
         let pane = if row.pane.is_empty() {
             let states = self.tmux.pane_states().await.map_err(|_| {
                 RequestError::new(
                     ErrorKind::Conflict,
-                    "the Codex foreground pane could not be inspected",
+                    format!("the {kind} foreground pane could not be inspected"),
                 )
             })?;
             agent_pane_from_states(&states, &row.tmux_name, &row.id)
@@ -13619,7 +13588,7 @@ impl Supervisor {
                 .ok_or_else(|| {
                     RequestError::new(
                         ErrorKind::Conflict,
-                        "the Codex foreground pane is unavailable",
+                        format!("the {kind} foreground pane is unavailable"),
                     )
                 })?
         } else {
@@ -13632,29 +13601,64 @@ impl Supervisor {
             .map_err(|_| {
                 RequestError::new(
                     ErrorKind::Conflict,
-                    "the Codex foreground process could not be inspected",
+                    format!("the {kind} foreground process could not be inspected"),
                 )
             })?;
         let crate::tmux::PaneProbe::Owned(process) = process else {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "the Codex foreground pane is no longer owned by this session",
+                format!("the {kind} foreground pane is no longer owned by this session"),
             ));
         };
         if process.dead {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "the Codex foreground process has exited",
+                format!("the {kind} foreground process has exited"),
             ));
         }
+        Ok(process.pid)
+    }
+
+    /// Recover the agent pane during publication gaps, then bind the socket peer
+    /// to its native Codex process. No lifecycle lock: the reporting hook may be
+    /// running inside the launch whose publication that lock protects.
+    async fn codex_foreground(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        let pid = self.owned_pane_pid(row, "Codex").await?;
+        tokio::task::spawn_blocking(move || crate::procs::foreground_codex_emitter(peer, pid))
+            .await
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    "Codex process attribution could not complete",
+                )
+            })?
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
+    }
+
+    /// Recover the agent pane during publication gaps, then bind the socket peer
+    /// to the OMP runtime the launch installed: the Bun-executed bundle (or
+    /// source tree) or the compiled target, reached through the launch's own
+    /// launcher and trampoline shapes and nothing else. No lifecycle lock,
+    /// for the same reason as [`Supervisor::codex_foreground`].
+    async fn omp_foreground(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+        program: crate::agent_kind::omp::OmpLaunchProgram,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        let pid = self.owned_pane_pid(row, "OMP").await?;
         tokio::task::spawn_blocking(move || {
-            crate::procs::foreground_codex_emitter(peer, process.pid)
+            crate::procs::foreground_omp_emitter(peer, pid, &program)
         })
         .await
         .map_err(|_| {
             RequestError::new(
                 ErrorKind::Internal,
-                "Codex process attribution could not complete",
+                "OMP process attribution could not complete",
             )
         })?
         .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
@@ -14963,6 +14967,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: entry.info.id.clone(),
                     parent: None,
                     archived: false,
@@ -15624,6 +15630,8 @@ pub(crate) mod tests {
                     StoredSession {
                         conversation_source: None,
                         capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
                         id: id.to_string(),
                         parent: None,
                         archived: false,
@@ -15774,6 +15782,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -15932,6 +15942,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: scoped_id.clone(),
                     parent: None,
                     archived: false,
@@ -16019,6 +16031,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: source.map(str::to_string),
                     capture_ownership_version: version,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -16379,6 +16393,8 @@ pub(crate) mod tests {
                     StoredSession {
                         conversation_source: source,
                         capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
                         id: id.clone(),
                         parent: None,
                         archived: false,
@@ -16517,6 +16533,8 @@ pub(crate) mod tests {
                     source_profile: None,
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                 },
                 None,
             )
@@ -16569,280 +16587,1709 @@ pub(crate) mod tests {
         assert!(relaunch_argv(RestartMode::Fresh, &fresh, "pi").is_ok());
     }
 
-    /// The OMP twin of the Pi offer test above, exercising OMP's own seams:
-    /// a report before publication and a later withdrawal must both reach the
-    /// offer users see; the pre-resume verifier dispatches OMP's header parser
-    /// (the fixture carries a real leading title slot) and refuses a file
-    /// whose header id disagrees with the reported one; a Pi locator never
-    /// passes as an OMP report; and a refreshed file for the SAME id keeps the
-    /// offer pointed at the new path. The fixture has no terminal: the store,
-    /// capture pass, verifier, and reply builder are the real boundaries
-    /// under test, without launching a model.
-    #[farhelm_testtrace::test]
-    async fn omp_report_before_publication_and_missing_file_refresh_the_offer() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .unwrap();
-        let id = uuid::Uuid::new_v4().to_string();
-        let file = state.path().join("omp session.jsonl");
-        std::fs::write(
-            &file,
-            "{\"type\":\"title\",\"v\":1,\"title\":\"t\",\"updatedAt\":\"u\",\"pad\":\"   \"}\n\
-             {\"type\":\"session\",\"version\":3,\"id\":\"omp-exact\"}\n",
-        )
-        .unwrap();
-        let encode = |session_id: &str, path: Option<&std::path::Path>| {
-            crate::agent_kind::encode_locator(
-                crate::agent_kind::LocatorVendor::Omp,
-                crate::agent_kind::SessionLocator {
-                    version: 1,
-                    session_id: session_id.to_string(),
-                    session_file: path.map(|p| p.to_str().unwrap().to_owned()),
-                },
-            )
-            .unwrap()
-        };
-        let integration = IntegrationSnapshot::resolve(&["omp".into()], None, None).unwrap();
-        sup.store
-            .insert_session(
-                StoredSession {
-                    id: id.clone(),
-                    parent: None,
-                    archived: false,
-                    title: "Omp".into(),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: state.path().to_str().unwrap().into(),
-                    invocation: "omp".into(),
-                    launch: None,
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
-                    outcome: LastOutcome::Exited {
-                        exit_code: Some(0),
-                        annotation: None,
-                    },
-                    agent_kind: AgentKind::Omp,
-                    resume_template: integration.resume_template.clone(),
-                    canonical_cwd: None,
-                    captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: None,
-                    conversation_source: None,
-                    capture_ownership_version: 0,
-                },
-                None,
-            )
-            .await
-            .unwrap();
-        assert!(!sup.sessions.lock().await.contains_key(&id));
-
-        // A Pi locator is refused for an OMP session BEFORE any write: the
-        // vendors' report channels are closed to each other in both
-        // directions, so no durable state can be poisoned cross-kind.
-        let pi_token = crate::agent_kind::encode_locator(
-            crate::agent_kind::LocatorVendor::Pi,
-            crate::agent_kind::SessionLocator {
-                version: 1,
-                session_id: "omp-exact".into(),
-                session_file: Some(file.to_str().unwrap().to_owned()),
-            },
-        )
-        .unwrap();
-        let error = sup
-            .report_conversation(
-                &id,
-                reported(farhelm_proto::ReportVendor::Omp, pi_token, "startup"),
-            )
-            .await
-            .expect_err("a Pi locator cannot report for an OMP session");
-        assert_eq!(error.kind, ErrorKind::InvalidRequest);
-
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                encode("omp-exact", Some(&file)),
-                "startup",
-            ),
-        )
-        .await
-        .unwrap();
-        let mut entry = entry_with(
-            None,
-            LastOutcome::Exited {
-                exit_code: Some(0),
-                annotation: None,
-            },
-        );
-        entry.info.id = id.clone();
-        entry.snapshot = integration;
-        let entry = Arc::new(entry);
-        assert_eq!(entry.capture.lock().unwrap().committed_conversation(), None);
-        sup.sessions
-            .lock()
-            .await
-            .insert(id.clone(), Arc::clone(&entry));
-        sup.capture_now().await;
-        assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::Resume
-        );
-        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
-        sup.verify_report_only_resume(&id, &snapshot)
-            .await
-            .expect("a title-slotted header with the matching id verifies");
-
-        // A file whose header id disagrees with the reported locator refuses,
-        // replaces the exact locator with a fileless token, and the stale
-        // offer collapses to FreshOnly.
-        let other = state.path().join("omp other.jsonl");
-        std::fs::write(
-            &other,
-            "{\"type\":\"session\",\"version\":3,\"id\":\"omp-different\"}\n",
-        )
-        .unwrap();
-        let mismatched = encode("omp-exact", Some(&other));
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                mismatched.clone(),
-                "agent_end",
-            ),
-        )
-        .await
-        .unwrap();
-        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
-        let error = sup
-            .verify_report_only_resume(&id, &snapshot)
-            .await
-            .expect_err("a mismatched id cannot resume");
-        assert_eq!(error_kind(&error), ErrorKind::Conflict);
-        sup.capture_now().await;
-        assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::FreshOnly
-        );
-
-        // A title slot whose `source` OMP itself refuses (anything but
-        // absent, "auto", or "user") makes the whole file an invalid session
-        // header to OMP, so Farhelm must refuse it too — BEFORE the resume
-        // launches — and collapse the durable offer to FreshOnly, exactly
-        // like a mismatched id.
-        let invalid_source = state.path().join("omp invalid source.jsonl");
-        std::fs::write(
-            &invalid_source,
-            "{\"type\":\"title\",\"v\":1,\"title\":\"t\",\"source\":\"bogus\",\"updatedAt\":\"u\",\"pad\":\"   \"}\n\
-             {\"type\":\"session\",\"version\":3,\"id\":\"omp-exact\"}\n",
-        )
-        .unwrap();
-        let invalid_token = encode("omp-exact", Some(&invalid_source));
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                invalid_token.clone(),
-                "agent_end",
-            ),
-        )
-        .await
-        .unwrap();
-        sup.capture_now().await;
-        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
-        let error = sup
-            .verify_report_only_resume(&id, &snapshot)
-            .await
-            .expect_err("a title slot OMP itself refuses cannot resume");
-        assert_eq!(error_kind(&error), ErrorKind::Conflict);
-        sup.capture_now().await;
-        assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::FreshOnly
-        );
-        let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
-        assert!(relaunch_argv(RestartMode::Fresh, &fresh, "omp").is_ok());
-        std::fs::remove_file(&invalid_source).unwrap();
-
-        // A refreshed file for the SAME id puts the offer back, now pointing
-        // at the new path — the fileless withdrawal is a state, not a tombstone.
-        let refreshed = encode("omp-exact", Some(&file));
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                refreshed.clone(),
-                "agent_end",
-            ),
-        )
-        .await
-        .unwrap();
-        sup.capture_now().await;
-        assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::Resume
-        );
-        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
-
-        std::fs::remove_file(&file).unwrap();
-        let error = sup
-            .verify_report_only_resume(&id, &snapshot)
-            .await
-            .expect_err("missing file cannot resume");
-        assert_eq!(error_kind(&error), ErrorKind::Conflict);
-        sup.capture_now().await;
-        assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::FreshOnly
-        );
-        let fresh = sup.session_snapshot(&id).await.unwrap().unwrap();
-        assert!(relaunch_argv(RestartMode::Fresh, &fresh, "omp").is_ok());
+    /// The OMP proven-admission fixture: a supervisor whose tmux answers
+    /// pane queries from files beside the fake binary — script-relative,
+    /// never through the test process's environment, which this repo
+    /// forbids tests to mutate — and, where the test needs it, a REAL
+    /// Bun-executed entry-shaped runtime that spawns a hook-shaped
+    /// reporter child and publishes its pid. The runtime is launched
+    /// through an `omp-shim` symlink to the bundle entry, reproducing
+    /// the installed `omp` command's shape (the kernel hands Bun the
+    /// launched spelling), so the live admission also proves the
+    /// entry-resolution half of the descriptor.
+    ///
+    /// What is real here, and what is stood in: the store, the
+    /// claim/CAS discipline, the `/proc` walk over live processes, the
+    /// Bun interpreter image, the entry-point and reporter argv, the
+    /// asset publish/verify, and the offer computation are all real.
+    /// Stood in are the tmux→pid mapping (the PR-1 framework leg the
+    /// Codex journey covers — the fake answers pane queries with the
+    /// fixture's own live pids) and the vendor session itself (a
+    /// deterministic entry-shaped script instead of the interactive CLI,
+    /// whose pinned context semantics the asset-js suite pins against
+    /// the real asset). Tests needing the Bun interpreter return early
+    /// with a `SKIPPED` line when it is absent from `PATH`; the
+    /// corridor's shape rules are pinned without Bun by the `procs`
+    /// unit tests, and the skip is read back from the retained output
+    /// rather than trusted silently.
+    struct OmpAdmission {
+        state: StateDir,
+        scratch: farhelm_teststate::TestDir,
+        sup: Option<Arc<Supervisor>>,
+        runtimes: Vec<OwnedRuntime>,
     }
 
-    /// The fileless TRANSITION path, end to end and WITHOUT invoking
-    /// pre-resume verification: a session holding a verified Resume offer for
-    /// conversation A receives a report for conversation B with NO session
-    /// file, and the durable identity becomes B (fileless) while the offer
-    /// collapses to FreshOnly. If a fileless transition retained the previous
-    /// target instead, the user would be offered a resume of a conversation
-    /// the agent has left — the central regression this sequence pins. When B
-    /// then persists, the SAME session id's report restores the offer and the
-    /// filled resume argv names B's file exactly in the placeholder slot.
-    #[farhelm_testtrace::test]
-    async fn omp_fileless_transition_withdraws_and_persistence_restores_the_substituted_path() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+    /// One fixture runtime and the process group it leads: the group is
+    /// the cleanup boundary, not any pid the runtime publishes. Bun
+    /// spawns its reporter before the pid file exists, and the fixture
+    /// yields while waiting to read it — a group owned from spawn
+    /// covers the reporter across the whole pre-publication window,
+    /// including timeout, panic, and cancellation paths that never
+    /// learn its pid.
+    struct OwnedRuntime {
+        child: std::process::Child,
+        /// The group id: `process_group(0)` makes the leader's pid the
+        /// group id, so this is `child.id()` captured at spawn.
+        group: u32,
+    }
+
+    impl OwnedRuntime {
+        /// Signal the whole owned group, then kill and reap the direct
+        /// child. The group goes first, while the unreaped leader still
+        /// reserves the id; the direct kill is then a no-op against an
+        /// already-signaled leader, and the wait reaps it. Grandchild
+        /// reporters are signaled, never waited — this process cannot
+        /// wait on them — under their bounded `sleep 25`.
+        fn teardown(self) {
+            kill_process_group(self.group);
+            let mut child = self.child;
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Signal a fixture-owned process group. A group that is already
+    /// gone answers ESRCH, which is the outcome this wants anyway.
+    #[cfg(unix)]
+    fn kill_process_group(group: u32) {
+        // SAFETY: `kill` with a negative pid signals a process group and
+        // touches no memory.
+        unsafe {
+            let _ = libc::kill(-(group as i32), libc::SIGKILL);
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn kill_process_group(_group: u32) {}
+
+    /// The reporter-wait timeout diagnostic: whether the owned runtime
+    /// is still alive, not just that publication never happened. A
+    /// live runtime means the entry is slow or stuck; an exited one
+    /// means the premise — a running runtime with a reporter to
+    /// publish — is gone and the wait could never have succeeded.
+    fn reporter_timeout_diagnostic(runtime: &mut std::process::Child) -> String {
+        let pid = runtime.id();
+        match runtime.try_wait() {
+            Ok(None) => format!(
+                "the entry script never published its reporter; \
+                 the owned runtime (pid {pid}) is still alive"
+            ),
+            Ok(Some(status)) => format!(
+                "the entry script never published its reporter; \
+                 the owned runtime (pid {pid}) had already exited: {status}"
+            ),
+            Err(error) => format!(
+                "the entry script never published its reporter; \
+                 the owned runtime (pid {pid}) could not be polled: {error}"
+            ),
+        }
+    }
+
+    /// Wait until `pid` is gone — no such process, its id recycled to
+    /// a process with a different start time, or exited but not yet
+    /// reaped — or panic at the bound. The start-time guard is what
+    /// makes "gone" mean THIS process is gone rather than its id being
+    /// momentarily free.
+    ///
+    /// A zombie counts as gone, per the [`ProcessState`](crate::procs::ProcessState)
+    /// contract: it has exited and cannot run code. Group SIGKILL can
+    /// leave a grandchild reporter an orphan zombie until whatever
+    /// adopted it reaps it, and this fixture cannot wait on a
+    /// grandchild or force that reap — on a non-reaping PID 1 the
+    /// same pid and start time can sit there past any deadline even
+    /// though cleanup worked. Requiring disappearance would test the
+    /// substrate's reaper, not the teardown. The zombie arm cannot
+    /// pass vacuously: callers prove the reporter Running under the
+    /// runtime BEFORE teardown, so a zombie here means teardown
+    /// killed something that was alive; direct children are
+    /// additionally reaped by an explicit `Child::wait` in teardown.
+    async fn wait_pid_gone(pid: u32, start_time: u64, what: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match crate::procs::read_process(pid).expect("read the fixture process") {
+                None => return,
+                Some((_, observed, _)) if observed != start_time => return,
+                Some((_, _, crate::procs::ProcessState::Zombie)) => return,
+                Some(_) if std::time::Instant::now() >= deadline => {
+                    panic!("{what} (pid {pid}) survived 10s past its group's teardown signal")
+                }
+                Some(_) => {
+                    // sleep-ok: the group's SIGKILL lands asynchronously; retry the reaped-or-recycled oracle at a fixed cadence inside the bound.
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            }
+        }
+    }
+
+    /// Whether the Bun interpreter answers, printing the fixture's
+    /// `SKIPPED` line when it does not. Every live-runtime test gates
+    /// on this: the substrate is absent, not the proof.
+    async fn require_bun() -> bool {
+        let present = tokio::process::Command::new("bun")
+            .arg("--version")
+            .output()
             .await
-            .unwrap();
-        let id = uuid::Uuid::new_v4().to_string();
-        let file_a = state.path().join("omp-a.jsonl");
-        std::fs::write(
-            &file_a,
-            "{\"type\":\"session\",\"version\":3,\"id\":\"conv-a\"}\n",
-        )
-        .unwrap();
-        let encode = |session_id: &str, path: Option<&std::path::Path>| {
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if !present {
+            eprintln!(
+                "SKIPPED: the Bun interpreter is absent from PATH; OMP live admission is unproven on this substrate"
+            );
+        }
+        present
+    }
+
+    impl OmpAdmission {
+        /// The fixture root: entry-shaped runtime, hook-shaped sleeper
+        /// script, fake tmux, and the pane-answer files it reads. The
+        /// current asset is published for real, since admission verifies
+        /// its bytes.
+        async fn launch() -> Self {
+            let state = StateDir::new();
+            let scratch = farhelm_teststate::tempdir().expect("fixture directory");
+            let root = scratch.path();
+            let entry_dir = root.join("node_modules/@oh-my-pi/pi-coding-agent/dist");
+            std::fs::create_dir_all(&entry_dir).expect("entry directory");
+            std::fs::write(
+                entry_dir.join("cli.js"),
+                r#"import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const dir = process.argv[2];
+const child = spawn("sh", ["internal", "hook", "--vendor", "omp"], {
+  cwd: dir,
+  env: { PATH: `${dir}:/usr/bin:/bin` },
+  stdio: "ignore",
+});
+writeFileSync(`${dir}/reporter.pid`, `${child.pid}\n`);
+await new Promise(() => {});
+"#,
+            )
+            .expect("entry script");
+            std::fs::write(
+                entry_dir.join("cli-delayed.js"),
+                r#"import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+const dir = process.argv[2];
+const child = spawn("sh", ["internal", "hook", "--vendor", "omp"], {
+  cwd: dir,
+  env: { PATH: `${dir}:/usr/bin:/bin` },
+  stdio: "ignore",
+});
+// Test-only evidence that the reporter exists: the fixture's wait
+// reads reporter.pid, which this entry publishes only after a delay
+// no test waits out — so a live, group-owned reporter exists while
+// registration never happens.
+writeFileSync(`${dir}/reporter-actual.pid`, `${child.pid}\n`);
+await new Promise((resolve) => setTimeout(resolve, 120_000));
+writeFileSync(`${dir}/reporter.pid`, `${child.pid}\n`);
+await new Promise(() => {});
+"#,
+            )
+            .expect("delayed entry script");
+            // Deliberately WITHOUT `exec`: the reporter's hook-shaped
+            // argv (`sh internal hook --vendor omp`) is what admission
+            // reads, and an `exec` would replace it with `sleep`'s. The
+            // sleep child this leaves behind dies with the owned process
+            // group teardown signals; the 25s bound caps any linger if a
+            // signal lands late.
+            std::fs::write(root.join("internal"), "#!/bin/sh\nsleep 25\n").expect("sleeper script");
+            // The production launch shape: the installed `omp` command is
+            // a symlink to the bundle, and the kernel hands Bun the
+            // launched spelling. The fixture reproduces it so the live
+            // admission proves the shape production takes — including the
+            // entry-resolution half of the descriptor — rather than only
+            // the direct-entry spelling. The delayed shim reproduces the
+            // same shape for the entry that publishes late.
+            std::os::unix::fs::symlink(entry_dir.join("cli.js"), root.join("omp-shim"))
+                .expect("entry symlink");
+            std::os::unix::fs::symlink(
+                entry_dir.join("cli-delayed.js"),
+                root.join("omp-shim-delayed"),
+            )
+            .expect("delayed entry symlink");
+            let fake_tmux = root.join("fake-tmux.sh");
+            std::fs::write(
+                &fake_tmux,
+                r#"#!/bin/sh
+# Fake tmux for the OMP admission tests. Version probes answer with the
+# pinned shape; pane queries answer from files beside this script, written
+# per test with the fixture's own live pids; everything else succeeds.
+here=$(dirname "$0")
+# The driver prefixes every invocation with `-S <socket> -f <config>`,
+# so the command word is found by scanning, never positionally.
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    -V) echo "tmux 3.7c"; exit 0;;
+    *version*) echo "3.7c"; exit 0;;
+    list-panes|display-message) cmd="$arg";;
+  esac
+done
+if [ "$cmd" = "list-panes" ]; then cat "$here/panes_answer"; exit 0; fi
+if [ "$cmd" = "display-message" ]; then cat "$here/pane_answer"; exit 0; fi
+exit 0
+"#,
+            )
+            .expect("fake tmux");
+            use std::os::unix::fs::PermissionsExt;
+            for path in [root.join("internal"), fake_tmux.clone()] {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("fixture executable");
+            }
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    tmux_program: fake_tmux,
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .expect("supervisor");
+            crate::pi_extension::materialize_asset(state.path(), &crate::pi_extension::OMP_ASSET)
+                .await
+                .expect("asset publish");
+            Self {
+                state,
+                scratch,
+                sup: Some(sup),
+                runtimes: Vec::new(),
+            }
+        }
+
+        /// Point the fake pane answer at one live pid under one session.
+        fn write_pane_answer(&self, pid: u32, tmux_name: &str) {
+            std::fs::write(
+                self.scratch.path().join("pane_answer"),
+                format!("{pid} 0 {tmux_name}\n"),
+            )
+            .expect("pane answer");
+        }
+
+        /// Answer a `list-panes` sweep with one live pane for the
+        /// publication-gap path, which recovers the pane from tmux.
+        fn write_panes_list(&self, tmux_name: &str) {
+            std::fs::write(
+                self.scratch.path().join("panes_answer"),
+                format!("%0 @0 0 0 s {tmux_name}\n"),
+            )
+            .expect("panes answer");
+        }
+
+        /// Spawn the entry-shaped runtime and wait for its hook-shaped
+        /// reporter, returning the reporter's kernel-attributed identity.
+        /// The pane answer names the runtime under `id`'s session. A
+        /// missing Bun interpreter is a `SKIPPED` early return, never a
+        /// failure: the substrate is absent, not the proof.
+        async fn spawn_runtime(&mut self, id: &str) -> Option<crate::procs::ProcessIdentity> {
+            let peer = self.spawn_one().await?;
+            let runtime_pid = self.runtimes.last().expect("runtime child").child.id();
+            self.write_pane_answer(runtime_pid, &format!("fh-{id}"));
+            Some(peer)
+        }
+
+        /// A second live chain for the same fixture — a separately
+        /// launched interactive runtime whose reporter passes the asset
+        /// gate but must fail process attribution. Both chains stay
+        /// owned: the sibling's runtime is appended beside the parent's,
+        /// so teardown reaps every tree it started and the parent remains
+        /// owned and live while the sibling's rejection is measured.
+        /// The pane answer is left naming the first runtime: this
+        /// chain's ancestry can never reach it.
+        async fn spawn_sibling(&mut self) -> Option<crate::procs::ProcessIdentity> {
+            let root = self.scratch.path().to_path_buf();
+            std::fs::remove_file(root.join("reporter.pid")).ok();
+            self.spawn_one().await
+        }
+
+        /// Spawn one runtime, premise-assert its reporter's parentage,
+        /// and return the reporter's kernel-attributed identity. The
+        /// runtime's process group is owned from spawn — before the
+        /// readiness wait and the premise assertions — so a timeout, a
+        /// failed assertion, or a cancelled wait still leaves every
+        /// started process owned, including reporters whose pid was
+        /// never published. The premise comes before any measurement
+        /// that depends on it: the reporter must be alive AND parented
+        /// under the runtime, or the chain the walk must find does not
+        /// exist and the test would refuse for the wrong reason.
+        async fn spawn_one(&mut self) -> Option<crate::procs::ProcessIdentity> {
+            if !require_bun().await {
+                return None;
+            }
+            let (runtime_pid, pid_file) = self.start_runtime("omp-shim");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let Some(reporter_pid) = Self::await_reporter(&pid_file, deadline).await else {
+                let runtime = self.runtimes.last_mut().expect("the owned runtime");
+                panic!("{}", reporter_timeout_diagnostic(&mut runtime.child));
+            };
+            let (ppid, _, liveness) = crate::procs::read_process(reporter_pid)
+                .expect("read the reporter")
+                .expect("the reporter is alive");
+            assert_eq!(
+                liveness,
+                crate::procs::ProcessState::Running,
+                "the reporter must be running when the report is measured"
+            );
+            assert_eq!(
+                ppid, runtime_pid,
+                "the reporter must be parented under the runtime, or the walked chain does not exist"
+            );
+            let peer = crate::procs::ProcessIdentity::read(reporter_pid)
+                .expect("the reporter must have a kernel-attributed identity");
+            Some(peer)
+        }
+
+        /// Spawn the entry-shaped runtime behind `shim` in its own
+        /// process group and register the guard immediately, before any
+        /// wait: the readiness wait and premise assertions can time
+        /// out, panic, or be cancelled, and an unregistered child would
+        /// leak past teardown on exactly those paths. Returns the
+        /// runtime pid and the pid-file path the caller awaits.
+        ///
+        /// The group is the cleanup boundary, not the pid file: Bun
+        /// spawns its reporter before the pid file exists, so pid
+        /// registration can never own the pre-publication window — the
+        /// group owned here does.
+        fn start_runtime(&mut self, shim: &str) -> (u32, std::path::PathBuf) {
+            let root = self.scratch.path().to_path_buf();
+            let entry = root.join(shim);
+            let mut command = std::process::Command::new("bun");
+            command
+                .arg(&entry)
+                .arg(&root)
+                .arg("--resume")
+                .arg(root.join("conv.jsonl"))
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            // Its OWN process group. That is what makes teardown own the
+            // reporter before its pid is published: Bun spawns the
+            // reporter first and publishes second, and every descendant
+            // inherits the group — one kill reaches the whole tree no
+            // matter where in that window the wait stops.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                command.process_group(0);
+            }
+            let child = command.spawn().expect("spawn the Bun runtime");
+            let runtime_pid = child.id();
+            // Owned from the first instruction after the spawn.
+            // `process_group(0)` makes the leader's pid the group id.
+            self.runtimes.push(OwnedRuntime {
+                child,
+                group: runtime_pid,
+            });
+            (runtime_pid, root.join("reporter.pid"))
+        }
+
+        /// Wait for an entry script to publish a reporter's pid at
+        /// `pid_file`, up to `deadline`. `None` is a failed readiness
+        /// wait, never itself a failure: the caller decides whether
+        /// that panics (the live path, with the runtime-liveness
+        /// diagnostic) or is the measured outcome (the
+        /// timeout-cleanup test).
+        async fn await_reporter(
+            pid_file: &std::path::Path,
+            deadline: std::time::Instant,
+        ) -> Option<u32> {
+            // Readiness oracle, not a delay: the entry script publishes
+            // the reporter's pid once it has spawned it.
+            loop {
+                if let Ok(text) = std::fs::read_to_string(pid_file)
+                    && let Ok(pid) = text.trim().parse()
+                {
+                    return Some(pid);
+                }
+                if std::time::Instant::now() >= deadline {
+                    return None;
+                }
+                // sleep-ok: the separately spawned runtime publishes its reporter pid asynchronously; retry readability at a fixed cadence inside the caller's bound.
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+
+        /// Kill every owned runtime tree without dropping the
+        /// supervisor: the durable capture must outlive the processes
+        /// that reported it. Idempotent — owned runtimes are drained, so
+        /// a later teardown finds nothing left to kill. Each teardown
+        /// signals the runtime's whole process group — covering
+        /// reporters the fixture never learned the pid of — then kills
+        /// and reaps the direct child.
+        fn kill_owner(&mut self) {
+            for runtime in std::mem::take(&mut self.runtimes) {
+                runtime.teardown();
+            }
+        }
+
+        /// Seed one OMP session row: the marker and program carry the
+        /// launch provenance (both `None` for a pre-upgrade launch), the
+        /// pane selects direct recovery (`%0`) or the publication-gap
+        /// path (`""`), and the template is the future resume command —
+        /// never the launch program, which is what `program` seeds.
+        async fn seed_omp_session(
+            &self,
+            id: &str,
+            marker: Option<&str>,
+            program: Option<&str>,
+            pane: &str,
+            template: Vec<String>,
+        ) {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .insert_session(
+                    StoredSession {
+                        id: id.to_string(),
+                        parent: None,
+                        archived: false,
+                        title: "Omp".into(),
+                        created_at: now_unix(),
+                        last_activity_at: now_unix(),
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        cwd: self.state.path().to_str().unwrap().into(),
+                        invocation: "omp".into(),
+                        launch: None,
+                        tmux_name: format!("fh-{id}"),
+                        pane: pane.into(),
+                        outcome: LastOutcome::Exited {
+                            exit_code: Some(0),
+                            annotation: None,
+                        },
+                        agent_kind: farhelm_proto::AgentKind::Omp,
+                        resume_template: Some(template),
+                        canonical_cwd: None,
+                        captured_conversation: None,
+                        captured_record: None,
+                        capture_ambiguous: false,
+                        first_input_at: None,
+                        generation: 0,
+                        launch_scoped: false,
+                        source_profile: None,
+                        conversation_source: None,
+                        capture_ownership_version: 0,
+                        omp_reporter_asset: marker.map(str::to_string),
+                        omp_launch_program: program.map(str::to_string),
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        /// One vendor session file with the title-slotted header the OMP
+        /// parser verifies, so pre-resume checks meet a genuinely
+        /// resumable record rather than a shape that could only refuse.
+        fn session_file(&self, name: &str, session_id: &str) -> std::path::PathBuf {
+            let path = self.scratch.path().join(name);
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"type\":\"title\",\"v\":1,\"title\":\"t\",\"updatedAt\":\"u\",\"pad\":\"   \"}}\n\
+                     {{\"type\":\"session\",\"version\":3,\"id\":\"{session_id}\"}}\n"
+                ),
+            )
+            .expect("session file");
+            path
+        }
+
+        /// The `omp:` locator token for one session id and an optional
+        /// file — the exact wire shape the hook client sends.
+        fn locator_token(&self, session_id: &str, file: Option<&std::path::Path>) -> String {
             crate::agent_kind::encode_locator(
                 crate::agent_kind::LocatorVendor::Omp,
                 crate::agent_kind::SessionLocator {
                     version: 1,
                     session_id: session_id.to_string(),
-                    session_file: path.map(|p| p.to_str().unwrap().to_owned()),
+                    session_file: file.map(|path| path.to_str().unwrap().to_owned()),
                 },
             )
             .unwrap()
+        }
+
+        /// One external report down the real admission path.
+        async fn report(
+            &self,
+            id: &str,
+            token: String,
+            source: &str,
+            peer: Option<crate::procs::ProcessIdentity>,
+        ) -> Result<(), RequestError> {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .report_conversation(
+                    id,
+                    ReportedConversation {
+                        vendor: farhelm_proto::ReportVendor::Omp,
+                        conversation: token,
+                        source: source.to_string(),
+                        transcript_path: None,
+                        hook_event_name: None,
+                        peer,
+                    },
+                )
+                .await
+        }
+
+        /// The exact durable binding: locator token plus ownership
+        /// version, asserted together because neither alone is the
+        /// contract.
+        async fn binding(&self, id: &str) -> (Option<String>, i64) {
+            let row = self
+                .sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session(id)
+                .await
+                .unwrap()
+                .unwrap();
+            (row.captured_conversation, row.capture_ownership_version)
+        }
+
+        /// The public restart offer through the real offer path.
+        async fn offer(&self, id: &str) -> farhelm_proto::RestartOffer {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .session_snapshot(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .restart_offer
+        }
+    }
+
+    impl Drop for OmpAdmission {
+        /// Reap every owned runtime, including failure paths: each
+        /// direct child is killed and waited on, and its whole process
+        /// group is signaled first — so reporters spawned before their
+        /// pid was ever published, and runtimes whose readiness wait
+        /// timed out or was cancelled, are still covered. Panic and
+        /// cancellation paths land here too, since every runtime is
+        /// registered before any fallible wait. Grandchildren are
+        /// signaled, never waited (this process cannot wait on them),
+        /// under their bounded `sleep 25`, which caps any linger if a
+        /// signal lands late.
+        fn drop(&mut self) {
+            self.kill_owner();
+        }
+    }
+
+    /// An unknown transition tag refuses at admission with `InvalidRequest`
+    /// before any store, file, or process is touched: no row is even
+    /// needed, since the vocabulary check precedes the claim.
+    ///
+    /// Why this test matters: the asset's four tags are the whole
+    /// contract — a future vendor tag must arrive as a deliberate
+    /// allowlist addition with evidence, never by falling through.
+    #[farhelm_testtrace::test]
+    async fn omp_unknown_transition_is_refused_before_any_evidence() {
+        let fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                None,
+                None,
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let error = fixture
+            .report(
+                &id,
+                "omp:{\"version\":1,\"session_id\":\"x\"}".into(),
+                "session_end",
+                None,
+            )
+            .await
+            .expect_err("an unknown tag must be refused");
+        assert!(
+            error.kind == ErrorKind::InvalidRequest,
+            "unexpected refusal: {error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains("unsupported foreground transition"),
+            "the refusal names the vocabulary: {error:#}"
+        );
+    }
+
+    /// A session launched under the old gateless asset fails closed: its
+    /// row names no reporter asset, so the report is refused with a
+    /// launch-provenance diagnostic and the session stays runnable with
+    /// no capture — version 0, no token, a `FreshOnly` offer.
+    ///
+    /// Why this test matters: it is the upgrade cutover. The wire cannot
+    /// distinguish the old asset's reports from the gated one's, so this
+    /// refusal is what keeps a pre-upgrade launch from capturing under
+    /// the new binary. No live processes are needed: provenance precedes
+    /// the walk, so the refusal is observable with a bare kernel
+    /// identity.
+    #[farhelm_testtrace::test]
+    async fn omp_report_for_a_launch_without_provenance_fails_closed() {
+        let fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                None,
+                None,
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let peer = crate::procs::ProcessIdentity::read(std::process::id())
+            .expect("the test process has a kernel identity");
+        let error = fixture
+            .report(
+                &id,
+                fixture.locator_token("omp-old", None),
+                "session_start",
+                Some(peer),
+            )
+            .await
+            .expect_err("an unprovenanced launch must fail closed");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains("did not install the current OMP reporter"),
+            "the refusal names launch provenance: {error:#}"
+        );
+        assert_eq!(fixture.binding(&id).await, (None, 0));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly
+        );
+    }
+
+    /// A launch marker naming the gated asset is not enough on its own:
+    /// a missing or byte-diverged asset file refuses with a build-identity
+    /// diagnostic. Both halves are pinned because they fail differently —
+    /// a deleted publish versus a swapped one — and both must fail
+    /// closed rather than trusting the marker.
+    #[farhelm_testtrace::test]
+    async fn omp_report_with_an_unverifiable_asset_file_fails_closed() {
+        let fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let peer = crate::procs::ProcessIdentity::read(std::process::id())
+            .expect("the test process has a kernel identity");
+        let asset_path = fixture
+            .state
+            .path()
+            .join("integrations")
+            .join(crate::pi_extension::OMP_ASSET.directory)
+            .join(crate::pi_extension::OMP_ASSET.file_name);
+        std::fs::write(&asset_path, b"not the gated asset").expect("tamper with the asset");
+        let error = fixture
+            .report(
+                &id,
+                fixture.locator_token("omp-tampered", None),
+                "session_start",
+                Some(peer),
+            )
+            .await
+            .expect_err("a diverged asset must fail closed");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains("does not match this build"),
+            "the refusal names the build identity: {error:#}"
+        );
+        std::fs::remove_file(&asset_path).expect("remove the asset");
+        let error = fixture
+            .report(
+                &id,
+                fixture.locator_token("omp-tampered", None),
+                "session_start",
+                Some(peer),
+            )
+            .await
+            .expect_err("a missing asset must fail closed");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(fixture.binding(&id).await, (None, 0));
+    }
+
+    /// A legitimate parent's persistent report admits under the proof:
+    /// version 1 with the exact token durably bound, a `Resume` offer
+    /// through the real offer path, and a restart command that resumes
+    /// the verified file.
+    ///
+    /// Why this test matters: it is the fixed path the whole PR exists
+    /// for — the one shape that must keep capturing after the flip —
+    /// asserted on the real admission path (store, claim, CAS, mirror)
+    /// rather than on any parser in isolation.
+    #[farhelm_testtrace::test]
+    async fn omp_proven_parent_report_admits_version_1_with_resume() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("parent.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
         };
-        let integration = IntegrationSnapshot::resolve(&["omp".into()], None, None).unwrap();
+        let token = fixture.locator_token("omp-parent", Some(&file));
+        fixture
+            .report(&id, token.clone(), "session_start", Some(peer))
+            .await
+            .expect("the parent report admits under the proof");
+        assert_eq!(fixture.binding(&id).await, (Some(token.clone()), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume
+        );
+        let snapshot = fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .session_snapshot(&id)
+            .await
+            .unwrap()
+            .unwrap();
+        let argv = relaunch_argv(RestartMode::Resume, &snapshot, "omp --provider test")
+            .expect("a proven capture restarts by resuming");
+        assert!(
+            argv.iter().any(|element| element == file.to_str().unwrap()),
+            "the verified file substitutes into the resume command: {argv:?}"
+        );
+    }
+
+    /// A supported direct launch with a shell-based resume override still
+    /// admits: the corridor reads the RETAINED launch program (`omp`),
+    /// not the resume template's (`sh`). The template is decodable on
+    /// purpose — placeholder-bearing, like a real override — so the
+    /// admission isolates the program source rather than a malformed
+    /// row. Classifying the template instead would refuse this
+    /// legitimate launch upfront as a shell shape.
+    ///
+    /// Why this test matters: the resume template is a future resume's
+    /// command, and an operator may legitimately point it at a wrapper
+    /// or helper. Binding the live chain to it would deny capture to
+    /// launches that run the supported program directly.
+    #[farhelm_testtrace::test]
+    async fn omp_direct_launch_with_a_shell_resume_template_still_admits() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "sh".into(),
+                    "-c".into(),
+                    "resume-helper".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        // Premise: provenance says this generation started the
+        // installed program directly, whatever the template names.
+        let seeded = fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .store
+            .session(&id)
+            .await
+            .expect("the seeded row reads back")
+            .expect("the seeded row is present");
+        assert_eq!(seeded.omp_launch_program.as_deref(), Some("omp"));
+        let file = fixture.session_file("override.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let token = fixture.locator_token("omp-parent", Some(&file));
+        fixture
+            .report(&id, token.clone(), "session_start", Some(peer))
+            .await
+            .expect("a direct launch admits despite its resume override");
+        assert_eq!(fixture.binding(&id).await, (Some(token), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume
+        );
+    }
+
+    /// A shell WRAPPER launch refuses even with an OMP resume template:
+    /// wrapper refusal applies when the wrapper is what actually
+    /// launched. The live chain is fully legitimate — the same runtime
+    /// the parent tests admit — so the refusal isolates the retained
+    /// program rather than the walk. Reading the template instead
+    /// would admit this launch as a direct one.
+    ///
+    /// Why this test matters: it is the converse the primary test
+    /// needs. Either test alone could pass with the program source
+    /// ignored; together they pin that the retained program — not the
+    /// template, not the live shape alone — decides.
+    #[farhelm_testtrace::test]
+    async fn omp_shell_launch_program_refuses_despite_an_omp_resume_template() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("shell"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("wrapped.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let error = fixture
+            .report(
+                &id,
+                fixture.locator_token("omp-parent", Some(&file)),
+                "session_start",
+                Some(peer),
+            )
+            .await
+            .expect_err("a shell launch program must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert!(
+            format!("{error:#}").contains("not a supported runtime"),
+            "the refusal names the launch shape: {error:#}"
+        );
+        assert_eq!(fixture.binding(&id).await, (None, 0));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly
+        );
+    }
+
+    /// Every subscribed transition admits in order for the legitimate
+    /// parent — start, switch (with an opaque upstream reason), branch,
+    /// end — and the binding always names the latest one at version 1.
+    /// The `session_switch` reason stays passthrough: the proof never
+    /// depends on it, so a version-varying reason cannot break admission.
+    #[farhelm_testtrace::test]
+    async fn omp_proven_transitions_report_in_order() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("transitions.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let mut last = String::new();
+        for source in [
+            "session_start",
+            "session_switch:resume",
+            "session_branch",
+            "session_switch:fork",
+            "agent_end",
+        ] {
+            last = fixture.locator_token("omp-parent", Some(&file));
+            fixture
+                .report(&id, last.clone(), source, Some(peer))
+                .await
+                .unwrap_or_else(|error| panic!("transition {source} admits: {error:#}"));
+        }
+        assert_eq!(fixture.binding(&id).await, (Some(last), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume
+        );
+    }
+
+    /// The parent's own fileless report withdraws through the proof: it
+    /// admits (a foreground withdrawal is legitimate evidence), the
+    /// binding keeps version 1 with the fileless token, the public offer
+    /// collapses to `FreshOnly`, and resuming is refused as a staleness
+    /// conflict rather than best-effort substituted.
+    ///
+    /// Why this test matters: it re-homes the legacy fileless-transition
+    /// coverage under the proof — the withdraw/restore behavior stays,
+    /// the trust does not.
+    #[farhelm_testtrace::test]
+    async fn omp_proven_fileless_parent_withdraws_to_fresh_only() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("withdraw.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        fixture
+            .report(
+                &id,
+                fixture.locator_token("omp-parent", Some(&file)),
+                "session_start",
+                Some(peer),
+            )
+            .await
+            .expect("the persistent parent report admits");
+        let fileless = fixture.locator_token("omp-parent", None);
+        fixture
+            .report(&id, fileless.clone(), "agent_end", Some(peer))
+            .await
+            .expect("the parent's own withdrawal admits");
+        assert_eq!(fixture.binding(&id).await, (Some(fileless), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly
+        );
+        let snapshot = fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .session_snapshot(&id)
+            .await
+            .unwrap()
+            .unwrap();
+        let error = relaunch_argv(RestartMode::Resume, &snapshot, "omp --provider test")
+            .expect_err("resume is refused against a withdrawn offer");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+    }
+
+    /// A separately launched interactive child's persistent report —
+    /// which passes the asset gate on its own context — establishes
+    /// nothing when it arrives first: process attribution refuses it,
+    /// and the session keeps no token, version 0, and a `FreshOnly`
+    /// offer.
+    ///
+    /// Why this test matters: the child-first race is the attack the
+    /// asset gate cannot stop (the child's context is genuinely
+    /// interactive), so this is where the supervisor half of the proof
+    /// earns its keep.
+    #[farhelm_testtrace::test]
+    async fn omp_child_report_before_parent_establishes_nothing() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        // The parent chain exists (the pane answer names it) but has not
+        // reported yet; the child's chain is fully live beside it.
+        let Some(_) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let Some(sibling) = fixture.spawn_sibling().await else {
+            return;
+        };
+        let file = fixture.session_file("child.jsonl", "omp-child");
+        let error = fixture
+            .report(
+                &id,
+                fixture.locator_token("omp-child", Some(&file)),
+                "session_start",
+                Some(sibling),
+            )
+            .await
+            .expect_err("the child-first report must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        // Past provenance, refused in attribution: the row names the
+        // gated asset, so only the walk can refuse. The exact walk
+        // diagnostic is substrate-dependent (a foreign ancestry climbs
+        // into unreadable processes on some hosts and past the depth
+        // bound on others), so this pins the family — not provenance —
+        // rather than the sentence.
+        assert!(
+            !format!("{error:#}").contains("did not install the current OMP reporter"),
+            "the refusal must come after provenance, from attribution: {error:#}"
+        );
+        assert_eq!(fixture.binding(&id).await, (None, 0));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly
+        );
+    }
+
+    /// After the parent is admitted, neither the child's persistent
+    /// report nor its fileless withdrawal moves the binding: both
+    /// refuse, and the exact saved target, the ownership version, and
+    /// the public offer stay the parent's — durably and through the
+    /// real offer path.
+    #[farhelm_testtrace::test]
+    async fn omp_child_reports_after_parent_leave_the_binding() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("kept.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let token = fixture.locator_token("omp-parent", Some(&file));
+        fixture
+            .report(&id, token.clone(), "session_start", Some(peer))
+            .await
+            .expect("the parent report admits");
+        let Some(sibling) = fixture.spawn_sibling().await else {
+            return;
+        };
+        // Premise: the parent stays owned AND live while the sibling's
+        // rejection is measured — a dead parent would refuse the child
+        // reports for the wrong reason (no chain to walk past).
+        let parent_pid = fixture.runtimes.first().expect("parent runtime").child.id();
+        let (_, _, liveness) = crate::procs::read_process(parent_pid)
+            .expect("read the parent runtime")
+            .expect("the parent runtime is alive");
+        assert_eq!(
+            liveness,
+            crate::procs::ProcessState::Running,
+            "the parent must be running while the sibling's rejection is measured"
+        );
+        let child_file = fixture.session_file("intruder.jsonl", "omp-child");
+        for (child_token, source) in [
+            (
+                fixture.locator_token("omp-child", Some(&child_file)),
+                "session_start",
+            ),
+            (fixture.locator_token("omp-child", None), "agent_end"),
+        ] {
+            let error = fixture
+                .report(&id, child_token, source, Some(sibling))
+                .await
+                .expect_err("a child report must never move the binding");
+            assert!(
+                error.kind == ErrorKind::Conflict,
+                "unexpected refusal: {error:#}"
+            );
+        }
+        assert_eq!(fixture.binding(&id).await, (Some(token), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume
+        );
+    }
+
+    /// Parent and child reports racing each other resolve to the parent:
+    /// the child fails attribution before any CAS contention, so the
+    /// outcome is deterministic — the parent admits, the child refuses,
+    /// and the binding is the parent's.
+    #[farhelm_testtrace::test]
+    async fn omp_concurrent_child_and_parent_reports_resolve_to_the_parent() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("racer.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let Some(sibling) = fixture.spawn_sibling().await else {
+            return;
+        };
+        let parent_token = fixture.locator_token("omp-parent", Some(&file));
+        let child_file = fixture.session_file("racer-child.jsonl", "omp-child");
+        let child_token = fixture.locator_token("omp-child", Some(&child_file));
+        let (parent_outcome, child_outcome) = tokio::join!(
+            fixture.report(&id, parent_token.clone(), "session_start", Some(peer)),
+            fixture.report(&id, child_token, "session_start", Some(sibling)),
+        );
+        parent_outcome.expect("the parent wins the race");
+        let child_error = child_outcome.expect_err("the child loses the race");
+        assert!(
+            child_error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {child_error:#}"
+        );
+        assert_eq!(fixture.binding(&id).await, (Some(parent_token), 1));
+    }
+
+    /// A parent report before publication succeeds through pane recovery:
+    /// with no pane id on the row, the supervisor finds the owned pane
+    /// through the tmux sweep and attributes the runtime beneath it.
+    ///
+    /// Why this test matters: it re-homes the legacy before-publication
+    /// coverage under the proof — startup reports during the
+    /// publication gap keep working, now with ownership evidence.
+    #[farhelm_testtrace::test]
+    async fn omp_publication_gap_parent_report_succeeds() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        fixture.write_panes_list(&format!("fh-{id}"));
+        let file = fixture.session_file("gap.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let token = fixture.locator_token("omp-parent", Some(&file));
+        fixture
+            .report(&id, token.clone(), "session_start", Some(peer))
+            .await
+            .expect("the publication-gap report admits");
+        assert_eq!(fixture.binding(&id).await, (Some(token), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume
+        );
+    }
+
+    /// An admitted capture outlives its owner and a supervisor reload:
+    /// after the runtime and reporter are gone and the supervisor is
+    /// reopened over the same state dir, the `Resume` offer stands on
+    /// the durable binding and the verified file alone.
+    #[farhelm_testtrace::test]
+    async fn omp_accepted_capture_survives_owner_exit_and_reload() {
+        let mut fixture = OmpAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_omp_session(
+                &id,
+                Some(crate::pi_extension::OMP_ASSET.file_name),
+                Some("omp"),
+                "%0",
+                vec![
+                    "omp".into(),
+                    "--resume".into(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                ],
+            )
+            .await;
+        let file = fixture.session_file("durable.jsonl", "omp-parent");
+        let Some(peer) = fixture.spawn_runtime(&id).await else {
+            return;
+        };
+        let token = fixture.locator_token("omp-parent", Some(&file));
+        fixture
+            .report(&id, token.clone(), "session_start", Some(peer))
+            .await
+            .expect("the parent report admits");
+        fixture.kill_owner();
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the offer stands after the owner exits"
+        );
+        let old = fixture.sup.take().expect("supervisor");
+        assert!(
+            old.owns_state_dir(),
+            "the handoff test must release a supervisor that owns its state dir"
+        );
+        drop(old);
+        let reopened = Supervisor::new_with_seams(
+            fixture.state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                tmux_program: fixture.scratch.path().join("fake-tmux.sh"),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("reopened supervisor");
+        assert!(
+            reopened.owns_state_dir(),
+            "the reopened supervisor must own the state dir, or the handoff exercised read-only mode"
+        );
+        fixture.sup = Some(reopened);
+        assert_eq!(fixture.binding(&id).await, (Some(token), 1));
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the offer stands after the supervisor reloads"
+        );
+    }
+
+    /// Cancelling the reporter wait before publication still reaps the
+    /// whole tree: the delayed entry spawns its reporter at once but
+    /// publishes the awaited pid file only after a delay no test waits
+    /// out, so a live reporter exists that registration never learns.
+    /// Dropping the waiter mid-flight (genuine future cancellation)
+    /// and then the fixture must leave neither the runtime nor its
+    /// never-registered reporter behind — the owned process group is
+    /// the cleanup boundary, not pid publication.
+    ///
+    /// Why this test matters: Bun spawns the reporter before the pid
+    /// file exists, and the fixture yields while waiting to read it.
+    /// Pid-based teardown cannot own that window; only the group
+    /// owned at spawn covers cancellation inside it.
+    #[farhelm_testtrace::test]
+    async fn omp_fixture_cancellation_before_reporter_registration_reaps_the_tree() {
+        let mut fixture = OmpAdmission::launch().await;
+        if !require_bun().await {
+            return;
+        }
+        let root = fixture.scratch.path().to_path_buf();
+        let (runtime_pid, pid_file) = fixture.start_runtime("omp-shim-delayed");
+        // Readiness oracle for the hole being exercised: the test-only
+        // pid file proves the reporter was spawned...
+        let actual_file = root.join("reporter-actual.pid");
+        let far = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let reporter_pid = OmpAdmission::await_reporter(&actual_file, far)
+            .await
+            .expect("the delayed entry spawns its reporter");
+        // ...and the premise pins it where the hole is: alive, under
+        // the runtime, and never registered — the awaited file absent.
+        let (ppid, reporter_start, liveness) = crate::procs::read_process(reporter_pid)
+            .expect("read the reporter")
+            .expect("the reporter is alive");
+        assert_eq!(
+            liveness,
+            crate::procs::ProcessState::Running,
+            "the reporter must be running when cancellation is measured"
+        );
+        assert_eq!(
+            ppid, runtime_pid,
+            "the reporter must be parented under the runtime, or the walked chain does not exist"
+        );
+        assert!(
+            !pid_file.exists(),
+            "the awaited pid file must still be unpublished: cancellation is measured before registration"
+        );
+        // Genuine cancellation: drop the awaiting future mid-wait.
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            OmpAdmission::await_reporter(&pid_file, far),
+        )
+        .await;
+        assert!(
+            outcome.is_err(),
+            "the delayed entry must still be unpublished when the wait is cancelled"
+        );
+        assert!(
+            !pid_file.exists(),
+            "registration must never have happened on the cancelled path"
+        );
+        let (_, runtime_start, _) = crate::procs::read_process(runtime_pid)
+            .expect("read the runtime")
+            .expect("the runtime is alive at teardown");
+        drop(fixture);
+        wait_pid_gone(runtime_pid, runtime_start, "the runtime").await;
+        wait_pid_gone(
+            reporter_pid,
+            reporter_start,
+            "the never-registered reporter",
+        )
+        .await;
+    }
+
+    /// A reporter wait that never publishes still reaps the owned
+    /// tree: the delayed entry spawns its reporter at once but the
+    /// awaited pid file stays unpublished inside the test's window, so
+    /// the wait fails — and teardown must cover the runtime and the
+    /// never-registered reporter alike. The timeout diagnostic names
+    /// the owned runtime as still alive while it is.
+    ///
+    /// Why this test matters: the publication-timeout path is the one
+    /// that never learns any reporter pid at all. Pinning cleanup
+    /// there proves the group owns the whole pre-publication window,
+    /// not just the paths where the pid was consumed.
+    #[farhelm_testtrace::test]
+    async fn omp_fixture_reporter_timeout_still_reaps_the_owned_tree() {
+        let mut fixture = OmpAdmission::launch().await;
+        if !require_bun().await {
+            return;
+        }
+        let root = fixture.scratch.path().to_path_buf();
+        let (runtime_pid, pid_file) = fixture.start_runtime("omp-shim-delayed");
+        // The failed readiness wait: nothing publishes inside the window.
+        let short = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        assert_eq!(
+            OmpAdmission::await_reporter(&pid_file, short).await,
+            None,
+            "the delayed entry publishes nothing inside the window"
+        );
+        // The diagnostic reports the owned runtime as still alive —
+        // the wait failed for lack of publication, not for lack of a
+        // runtime to publish it.
+        let diagnostic = reporter_timeout_diagnostic(
+            &mut fixture
+                .runtimes
+                .last_mut()
+                .expect("the owned runtime")
+                .child,
+        );
+        assert!(
+            diagnostic.contains("still alive"),
+            "the timeout diagnostic must report runtime liveness: {diagnostic}"
+        );
+        // The reporter the wait never learned: spawned at once (its
+        // test-only evidence is awaited, not assumed)...
+        let actual_file = root.join("reporter-actual.pid");
+        let far = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let reporter_pid = OmpAdmission::await_reporter(&actual_file, far)
+            .await
+            .expect("the delayed entry spawns its reporter");
+        // The premise pins the exit oracle: the reporter must be
+        // Running AND parented under the runtime, or an already-dead
+        // fixture would satisfy the zombie-accepting wait below
+        // without teardown having killed anything. Same shape as the
+        // cancellation test's premise.
+        let (reporter_ppid, reporter_start, reporter_liveness) =
+            crate::procs::read_process(reporter_pid)
+                .expect("read the reporter")
+                .expect("the reporter is alive at teardown");
+        assert_eq!(
+            reporter_liveness,
+            crate::procs::ProcessState::Running,
+            "the reporter must be running when timeout cleanup is measured"
+        );
+        assert_eq!(
+            reporter_ppid, runtime_pid,
+            "the reporter must be parented under the runtime, or the walked chain does not exist"
+        );
+        let (_, runtime_start, _) = crate::procs::read_process(runtime_pid)
+            .expect("read the runtime")
+            .expect("the runtime is alive at teardown");
+        drop(fixture);
+        wait_pid_gone(runtime_pid, runtime_start, "the runtime").await;
+        wait_pid_gone(
+            reporter_pid,
+            reporter_start,
+            "the never-registered reporter",
+        )
+        .await;
+    }
+
+    /// The reporter-wait timeout diagnostic reports whether the owned
+    /// runtime is still alive: an exited runtime (with its status)
+    /// reads differently from a live one, so a timeout against a dead
+    /// runtime is not misread as a slow entry.
+    ///
+    /// Why this test matters: the diagnostic is the only evidence the
+    /// timeout path leaves about WHICH premise failed — publication
+    /// never happened in both cases, but a live runtime means slow or
+    /// stuck while an exited one means the wait could never have
+    /// succeeded.
+    #[farhelm_testtrace::test]
+    fn omp_reporter_timeout_diagnostic_reports_runtime_liveness() {
+        let mut exited = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("exit 3")
+            .spawn()
+            .expect("spawn the exiting child");
+        let status = exited.wait().expect("reap the exiting child");
+        assert_eq!(
+            status.code(),
+            Some(3),
+            "the premise needs a known exit status to recognize"
+        );
+        let diagnostic = reporter_timeout_diagnostic(&mut exited);
+        assert!(
+            diagnostic.contains("already exited") && diagnostic.contains('3'),
+            "an exited runtime must read as exited, with its status: {diagnostic}"
+        );
+        let mut living = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn the living child");
+        let diagnostic = reporter_timeout_diagnostic(&mut living);
+        assert!(
+            diagnostic.contains("still alive"),
+            "a live runtime must read as alive: {diagnostic}"
+        );
+        living.kill().expect("stop the living child");
+        living.wait().expect("reap the living child");
+    }
+
+    /// Releases the ordering test's held-open fake-tmux start on every
+    /// exit path, not just the passing one.
+    ///
+    /// The fake blocks inside `new-session` until `release-start`
+    /// appears, and the `spawn_agent` under test drives it through
+    /// `run_bytes`, which is `Command::output()` without
+    /// `kill_on_drop`: dropping that future — as the `join!` does
+    /// when the observer fails — leaves the shell running. The only
+    /// thing that ends it is the release file, so the release is a
+    /// guard established before the concurrent operation rather than
+    /// a write after the assertions. The ordinary path releases
+    /// explicitly once the observation is collected (see
+    /// [`release`](Self::release)); cancellation of the test future
+    /// lands in [`drop`](Self::drop) instead, which publishes the
+    /// same file.
+    ///
+    /// Publishing the file is necessary but not sufficient: teardown
+    /// deletes the scratch directory microseconds after a failure,
+    /// and the shell polls every 20ms, so a release written and then
+    /// immediately unlinked sleeps through its whole lifetime unseen
+    /// (demonstrated, not theorized — the shell survived a landed
+    /// `Ok(())` release twice). The panic path therefore does not
+    /// rely on `drop`: the observer catches the panic while the
+    /// outer future is still healthy (see [`catch_panic`]), releases,
+    /// waits for the shell's deletion-ack, and only then resumes the
+    /// unwind into teardown. The shell provably saw the release
+    /// before anything can remove it.
+    ///
+    /// What this does NOT do: kill anything. The shell's pid is
+    /// inside the driver's `output()` future where the fixture cannot
+    /// name it, so the fallback for a release that cannot land at all
+    /// (the scratch directory is gone, so the write has nowhere to
+    /// go) or is never acknowledged (the 5s ack bound expires) is the
+    /// fake's own iteration cap, which touches no files and ends the
+    /// shell on its own. Cancellation likewise gets the release
+    /// without the ack — `drop` cannot await — so a cancelled hold
+    /// ends at the cap; nothing in this test cancels the future, so
+    /// that arm is defense in depth, not an exercised path.
+    struct ReleaseHeldStart {
+        release: std::path::PathBuf,
+    }
+
+    impl ReleaseHeldStart {
+        /// Publish the release now: the observation is already
+        /// collected (or the observer has failed), so holding the
+        /// start open longer only lengthens the window a later
+        /// failure would have to cover. Best-effort — the fake may
+        /// have hit its own cap and exited already, and drop repeats
+        /// this write.
+        fn release(&self) {
+            let _ = std::fs::write(&self.release, b"released\n");
+        }
+    }
+
+    impl Drop for ReleaseHeldStart {
+        /// Cancellation fallback: publish the same release the
+        /// ordinary path would have. Must not panic — this runs
+        /// during unwinding — so the write's error is discarded; if
+        /// the directory is gone, or the shell never sees the file
+        /// before teardown removes it, the fake's iteration cap is
+        /// what ends the shell. This covers cancellation only: the
+        /// panic path needs the ack wait, which `drop` cannot await,
+        /// so it goes through [`catch_panic`] instead.
+        fn drop(&mut self) {
+            self.release();
+        }
+    }
+
+    /// Drive `future` to completion, catching a panic from it instead
+    /// of letting the panic unwind through the caller.
+    ///
+    /// The caller is the ordering test's observer, and the catch is
+    /// what makes the release unconditional: the caught arm releases
+    /// and awaits the shell's deletion-ack BEFORE the unwind resumes
+    /// into teardown, which plain `Drop` ordering cannot do — the
+    /// guard drops microseconds before the directory does, and the
+    /// shell would sleep through the file's lifetime. A `Result`
+    /// return would need every future assertion to remember the
+    /// release; the catch covers panics the test has not been taught
+    /// about yet.
+    ///
+    /// `AssertUnwindSafe` is sound here because nothing observes the
+    /// caught future's state afterwards: the inner future is never
+    /// polled again (a caught payload resolves immediately), the only
+    /// things that run between the catch and the resumed unwind are
+    /// the release write and the ack wait, and the observer touches
+    /// no shared mutable state — it only reads the store and the
+    /// filesystem.
+    async fn catch_panic<T>(
+        future: impl Future<Output = T>,
+    ) -> Result<T, Box<dyn std::any::Any + Send>> {
+        let mut future = std::pin::pin!(future);
+        std::future::poll_fn(|cx| {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                future.as_mut().poll(cx)
+            })) {
+                Ok(output) => output.map(Ok),
+                Err(payload) => std::task::Poll::Ready(Err(payload)),
+            }
+        })
+        .await
+    }
+
+    /// OMP launch provenance is durable before tmux can start anything:
+    /// the fake tmux publishes an entered-start signal from INSIDE the
+    /// session start and blocks there, and the test reads the committed
+    /// row while the start is held open — then releases it. Driven
+    /// through the real `spawn_agent` with initially empty provenance,
+    /// so the test pins the actual boundary — publish, then start —
+    /// rather than the store call in isolation.
+    ///
+    /// Why this test matters: a report requires a live agent, which
+    /// requires the tmux start. Reading the durable row while the start
+    /// is still held open proves the write preceded it: a publish moved
+    /// to just after the start returns — before the result is even
+    /// matched — would leave the held-open read empty while still
+    /// passing any assertion made after the failure returns. Under the
+    /// old post-spawn publish, this same launch would leave both
+    /// columns empty at the hold point.
+    #[farhelm_testtrace::test]
+    async fn omp_launch_provenance_is_published_before_tmux_starts() {
+        let state = StateDir::new();
+        let scratch = farhelm_teststate::tempdir().expect("fixture directory");
+        let fake_tmux = scratch.path().join("fake-tmux.sh");
+        std::fs::write(
+            &fake_tmux,
+            r#"#!/bin/sh
+# Fake tmux for the provenance-ordering test: version probes answer
+# with the pinned shape, the session start publishes that it was
+# entered and then blocks until released, everything else succeeds.
+here=$(dirname "$0")
+for arg in "$@"; do
+  case "$arg" in
+    -V) echo "tmux 3.7c"; exit 0;;
+    *version*) echo "3.7c"; exit 0;;
+    new-session)
+      : > "$here/entered-start"
+      # Finite failure bound: a release that never lands (the guard's
+      # write has nowhere to go once the scratch directory is gone)
+      # still ends the shell. The count touches no files, so it
+      # survives scratch removal; exit 42 names the cap-hit for
+      # anyone reading a failure, distinct from the expected exit 1.
+      n=0
+      while [ ! -e "$here/release-start" ]; do
+        n=$((n + 1))
+        if [ "$n" -gt 1500 ]; then exit 42; fi
+        sleep 0.02
+      done
+      # Ack: delete the release to prove it was observed, and leave a
+      # consumed-release marker proving the release path — not the cap
+      # path — ended the hold. The failure path waits for the deletion
+      # before letting teardown delete the directory — without the
+      # wait, the file's microsecond lifetime would end inside one
+      # 20ms sleep and the shell would never see it. No ack or marker
+      # on the cap path: nothing waits there, and the post-join marker
+      # assertion must fail if the cap freed the start ahead of the
+      # observation.
+      : > "$here/consumed-release"
+      rm -f "$here/release-start"
+      exit 1;;
+  esac
+done
+exit 0
+"#,
+        )
+        .expect("fake tmux");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake_tmux, std::fs::Permissions::from_mode(0o755))
+                .expect("fixture executable");
+        }
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                tmux_program: fake_tmux,
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
         sup.store
             .insert_session(
                 StoredSession {
-                    id: id.clone(),
+                    id: id.to_string(),
                     parent: None,
                     archived: false,
                     title: "Omp".into(),
@@ -16855,12 +18302,13 @@ pub(crate) mod tests {
                     launch: None,
                     tmux_name: format!("fh-{id}"),
                     pane: String::new(),
-                    outcome: LastOutcome::Exited {
-                        exit_code: Some(0),
-                        annotation: None,
-                    },
-                    agent_kind: AgentKind::Omp,
-                    resume_template: integration.resume_template.clone(),
+                    outcome: LastOutcome::Launching,
+                    agent_kind: farhelm_proto::AgentKind::Omp,
+                    resume_template: Some(vec![
+                        "omp".into(),
+                        "--resume".into(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                    ]),
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
@@ -16871,115 +18319,163 @@ pub(crate) mod tests {
                     source_profile: None,
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                 },
                 None,
             )
             .await
-            .unwrap();
-        let mut entry = entry_with(
-            None,
-            LastOutcome::Exited {
-                exit_code: Some(0),
-                annotation: None,
-            },
-        );
-        entry.info.id = id.clone();
-        entry.snapshot = integration;
-        let entry = Arc::new(entry);
-        sup.sessions
-            .lock()
-            .await
-            .insert(id.clone(), Arc::clone(&entry));
-
-        // 1. Conversation A, persisted: the offer is Resume for A.
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                encode("conv-a", Some(&file_a)),
-                "session_start",
+            .expect("seed the launching row");
+        let tmux_name = format!("fh-{id}");
+        let snapshot = hook_snapshot(AgentKind::Omp);
+        let entered = scratch.path().join("entered-start");
+        // The guard is established BEFORE the concurrent operation, so
+        // the release it owns covers the entered-wait, the row read,
+        // and cancellation — every path except the ordinary one, which
+        // releases explicitly below. Declared after `scratch` so it
+        // drops first, while the directory its write lands in still
+        // exists.
+        let held_start = ReleaseHeldStart {
+            release: scratch.path().join("release-start"),
+        };
+        // The spawn and the held-open read run together: the fake holds
+        // the start until the read below releases it, so the row the
+        // read observes provably precedes anything the start could run.
+        let (outcome, observed) = tokio::join!(
+            sup.spawn_agent(
+                &id,
+                "test-spawn-credential",
+                0,
+                &tmux_name,
+                vec!["omp".to_string()],
+                &snapshot,
+                state.path().to_str().unwrap(),
+                80,
+                24,
+                None,
+                None,
+                None,
             ),
-        )
-        .await
-        .unwrap();
-        sup.capture_now().await;
-        assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::Resume
-        );
-
-        // 2. The agent switches to conversation B, which has NO file yet. The
-        // report carries B's id with a null file — and the durable identity
-        // becomes B. No verifier runs in this sequence: the withdrawal is the
-        // report path's own work.
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                encode("conv-b", None),
-                "session_switch:new",
-            ),
-        )
-        .await
-        .unwrap();
-        sup.capture_now().await;
-        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
-        assert_eq!(
-            snapshot.captured_conversation.as_deref(),
-            Some(encode("conv-b", None).as_str()),
-            "the durable identity is the fileless B locator, not the retained A target"
-        );
-        assert_eq!(
-            snapshot.restart_offer,
-            RestartOffer::FreshOnly,
-            "a fileless transition withdraws the old resume offer"
+            async {
+                // Panics in here are caught, never left to unwind
+                // straight into teardown: the caught arm releases and
+                // awaits the shell's ack FIRST, so the shell provably
+                // saw the release before the resumed unwind lets
+                // teardown delete the directory out from under it.
+                match catch_panic(async {
+                    // Readiness oracle, not a delay: the fake publishes
+                    // entered-start from inside the start, before it blocks.
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                    loop {
+                        if entered.exists() {
+                            break;
+                        }
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "the fake tmux never entered the session start"
+                        );
+                        // sleep-ok: the spawn runs concurrently on this same task; retry file readability at a fixed cadence inside the original bound.
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    // THE ordering observation: the start is held open inside
+                    // the fake, so anything durable here preceded it. A
+                    // post-start publish would not be visible yet. Collected
+                    // first, released second, asserted after the join.
+                    let row = sup
+                        .store
+                        .session(&id)
+                        .await
+                        .expect("the row reads back while the start is held")
+                        .expect("the row is present while the start is held");
+                    (
+                        row.omp_reporter_asset.clone(),
+                        row.omp_launch_program.clone(),
+                    )
+                })
+                .await
+                {
+                    Ok(observed) => {
+                        held_start.release();
+                        observed
+                    }
+                    Err(payload) => {
+                        held_start.release();
+                        // The release alone is not enough: teardown
+                        // deletes the directory microseconds after the
+                        // unwind resumes, and the 20ms-polling shell
+                        // would sleep through the file's whole lifetime.
+                        // Wait for its deletion-ack first, so the shell
+                        // provably saw the release before anything can
+                        // remove it. Bounded: on expiry the unwind
+                        // proceeds anyway and the shell falls back to
+                        // its own iteration cap.
+                        let ack_deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(5);
+                        while held_start.release.exists()
+                            && std::time::Instant::now() < ack_deadline
+                        {
+                            // sleep-ok: the fake shell polls the release file every 20ms and deletes it to acknowledge; await that deletion at the same cadence inside a 5s bound before letting teardown remove the directory.
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        }
+                        if held_start.release.exists() {
+                            eprintln!(
+                                "the held-open fake never acknowledged its release; \
+                                 teardown proceeds and the shell falls back to its iteration cap"
+                            );
+                        }
+                        std::panic::resume_unwind(payload);
+                    }
+                }
+            }
         );
         assert!(
-            snapshot.resume_argv.is_none(),
-            "nothing may substitute for a fileless target"
+            matches!(outcome, Err(SpawnFailure::Tmux { .. })),
+            "the fake's failed start must surface as a tmux failure"
+        );
+        // The cap-hit exit is the same Tmux error as the expected one,
+        // so the assertion above cannot tell them apart — and a cap-hit
+        // means the start finished before the held-open read, which is
+        // exactly the ordering this test exists to pin. The marker is
+        // written only after the fake saw the release, which the
+        // observer publishes only after collecting the row, so its
+        // presence proves the hold was still up when the row was read.
+        assert!(
+            scratch.path().join("consumed-release").exists(),
+            "the fake must have consumed the observer's release: a cap-hit \
+             exit would mean the start finished before the held-open observation"
         );
         assert_eq!(
-            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
-            RestartOffer::FreshOnly
+            observed.0.as_deref(),
+            Some(crate::pi_extension::OMP_ASSET.file_name),
+            "the asset marker is durable while the start was still held open"
         );
-
-        // 3. B persists under its own file; the SAME id's report restores the
-        // offer, and the substituted resume argv names that file exactly in
-        // the placeholder slot.
-        let file_b = state.path().join("omp-b.jsonl");
-        std::fs::write(
-            &file_b,
-            "{\"type\":\"session\",\"version\":3,\"id\":\"conv-b\"}\n",
-        )
-        .unwrap();
-        sup.report_conversation(
-            &id,
-            reported(
-                farhelm_proto::ReportVendor::Omp,
-                encode("conv-b", Some(&file_b)),
-                "agent_end",
-            ),
-        )
-        .await
-        .unwrap();
-        sup.capture_now().await;
-        let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
         assert_eq!(
-            snapshot.restart_offer,
-            RestartOffer::Resume,
-            "the same id's persisted file restores the offer"
+            observed.1.as_deref(),
+            Some("omp"),
+            "the retained program is durable while the start was still held open"
         );
-        let mut template = snapshot.resume_template.clone().expect("derived template");
-        assert_eq!(
-            template.pop().as_deref(),
-            Some(crate::agent_kind::CONVERSATION_PLACEHOLDER)
+        // Premise: the spec published — the barrier is anchored on
+        // that write, so a missing spec would fail the row assertions
+        // below for the wrong reason.
+        assert!(
+            crate::launch::spec_path_for_launch(&sup.state_dir, &id, 0).exists(),
+            "the launch spec publishes before the tmux start is attempted"
         );
-        let filled = snapshot.resume_argv.expect("the offer fills");
-        assert_eq!(&filled[..template.len()], &template[..]);
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .expect("the row reads back")
+            .expect("the row is present");
         assert_eq!(
-            filled.last().map(String::as_str),
-            Some(file_b.to_str().unwrap()),
-            "the verified B file substitutes exactly, never the withdrawn A target"
+            row.omp_reporter_asset.as_deref(),
+            Some(crate::pi_extension::OMP_ASSET.file_name),
+            "the asset marker is durable although tmux never started anything"
+        );
+        assert_eq!(
+            row.omp_launch_program.as_deref(),
+            Some("omp"),
+            "the retained program is durable although tmux never started anything"
         );
     }
 
@@ -17021,6 +18517,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: doomed.to_string(),
                     parent: None,
                     archived: false,
@@ -17116,6 +18614,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -17197,6 +18697,8 @@ pub(crate) mod tests {
                     StoredSession {
                         conversation_source: None,
                         capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
                         id: id.to_string(),
                         parent: None,
                         archived: false,
@@ -17298,6 +18800,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -17392,6 +18896,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -17483,6 +18989,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -18308,8 +19816,8 @@ pub(crate) mod tests {
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                19,
-                "the v17 fixture now migrates through the provenance migration too"
+                21,
+                "the v17 fixture now migrates through the provenance, OMP asset, and OMP program migrations too"
             );
             assert_eq!(
                 conn.query_row(
@@ -18523,6 +20031,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -19416,6 +20926,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -19504,6 +21016,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "ended".to_string(),
                     parent: None,
                     archived: false,
@@ -20035,6 +21549,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -20132,6 +21648,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -20559,6 +22077,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -20670,6 +22190,8 @@ pub(crate) mod tests {
         let stranded = StoredSession {
             conversation_source: None,
             capture_ownership_version: 0,
+            omp_reporter_asset: None,
+            omp_launch_program: None,
             id: "stranded".to_string(),
             parent: None,
             archived: false,
@@ -20840,6 +22362,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -21064,6 +22588,8 @@ pub(crate) mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,

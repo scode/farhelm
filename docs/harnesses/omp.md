@@ -4,7 +4,9 @@ OMP is the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI — a fork of Pi, 
 private extension Farhelm supplies at launch reports which conversation you are in, and Farhelm does not scan OMP's own
 state directory to guess at anything it was not told. The one bounded exception: before a resume, Farhelm reads a
 bounded prefix of the exact session file the report named — wherever it lives, usually inside OMP's state directory — to
-verify it still belongs to that conversation. This page describes the integration as built against OMP 18.2.4.
+verify it still belongs to that conversation. This page describes the integration as built against OMP 18.2.4 and
+18.2.6, both pinned at the source with the same rules for which launches count. 18.2.6 is the version I ran the live
+lifecycle evidence against.
 
 ## What the integration deliberately does not do
 
@@ -23,6 +25,22 @@ symlinks and requires the session header inside it to match the conversation it 
 belongs to a different conversation, or does not read as the session it was reported to be, Farhelm refuses Resume and
 offers a fresh launch instead — it never silently starts a new conversation under a Resume request. This matters because
 OMP itself can silently start a new conversation when given a missing session file.
+
+## How Farhelm knows the report is yours
+
+The extension only talks from the interactive window. If the conversation id changes inside a background task, a
+workpool child, or anything else that is not the TUI you are looking at, the extension stays quiet — those contexts
+never update the resume offer, so a child cannot steal your session's identity.
+
+That still leaves the question of who sent a report that did arrive. Farhelm answers it in two parts. First, the launch
+has to be one Farhelm made: the session's launch record names the exact extension file that launch installed, and
+Farhelm re-reads that file's bytes before believing the record, so a launch from before the gated extension existed
+fails here instead of being grandfathered in. Second, the report has to come from that launch's own process tree —
+Farhelm walks from its owned terminal down to the process and checks each link against OMP's known installation shapes
+(the Bun runtime running OMP's bundle, the compiled binary, the `bun x` / `npx` launcher spellings, the transparent
+shell trampoline). Anything else in the chain — a nested runtime, an unknown wrapper, Node running OMP, a process that
+started as the TUI and exec'd into something else — gets the report dropped. Either half failing means no resume offer,
+never a best guess.
 
 ## How your model id is resolved
 
@@ -48,6 +66,11 @@ existing harness-compatibility checks on which harness owns which id.
   same way — fail closed, never a silent fresh start.
 - A session file with no title slot in front of its header cannot be told apart from a Pi-shaped file by its bytes, so
   Farhelm tells OMP and Pi apart by the reports and locators they exchange, not by file contents.
+- A report from an OMP session you started outside Farhelm is dropped, not offered: with no launch record naming
+  Farhelm's extension there is nothing to verify it against.
+- OMP running under Node instead of Bun, or through a launcher chain shaped differently from the known `bun x` / `npx`
+  spellings, is not recognized — no offer rather than a guess. These shapes stay refused until there is real evidence
+  for what their process trees look like.
 
 The extension Farhelm loads with `-e` is supplied per launch and is not saved with the conversation. Reopening an OMP
 conversation outside Farhelm does not require Farhelm to be installed.

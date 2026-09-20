@@ -953,7 +953,13 @@ fn launch_child_command(
         .env_remove(GOOSE_REPORTER_ENABLED_ENV_VAR)
         .env_remove(GOOSE_INSTRUCTIONS_ENV_VAR)
         .env_remove(GOOSE_REPORTER_EXE_ENV_VAR)
-        .env_remove(PI_REPORTER_EXE_ENV_VAR);
+        .env_remove(PI_REPORTER_EXE_ENV_VAR)
+        // The OMP reporter's executable pointer: preparation children
+        // never receive `-e`, so the variable is inert there — the same
+        // reason the Goose/Pi reporter variables are scrubbed. Its only
+        // in-support consumer is the OMP asset itself, which reads it from
+        // the agent command's environment, installed separately.
+        .env_remove(OMP_REPORTER_EXE_ENV_VAR);
     command
 }
 

@@ -1171,6 +1171,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1384,6 +1386,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1525,6 +1529,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1617,6 +1623,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.clone(),
                     parent: None,
                     archived: false,
@@ -1682,6 +1690,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,

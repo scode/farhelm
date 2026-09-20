@@ -1074,6 +1074,8 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     archived: false,
                     id: format!("extra-{i}"),
                     parent: None,

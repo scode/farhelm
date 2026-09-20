@@ -1260,15 +1260,24 @@ failure can leave private evidence, but cannot authorize another directory move.
   Relaunch clears provenance to 0 exactly when it clears the capture (Fresh/fallback) and preserves both together on
   Resume; the restart claim compares the version alongside the identity, so a provenance change under an unchanged
   conversation still invalidates a stale claim. Protocol 26 carries the required closed-enum report discriminator that
-  the doorway gates on; senders predating it fail closed at decode and at the missing CLI flag alike.
+  the doorway gates on; senders predating it fail closed at decode and at the missing CLI flag alike. Migration 20 adds
+  `omp_reporter_asset` (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as
+  installed by the session's current launch, written pre-spawn — after the launch spec publishes, before tmux can start
+  anything — from the one place that decides injection and fenced on the launch generation, so no report of the
+  generation can arrive ahead of its provenance. Migration 21 adds `omp_launch_program` the same way: the program that
+  launch's argv started, retained beside the marker so admission classifies the current launch rather than the resume
+  template (a future resume's command). OMP admission requires the marker to name the current binary's asset with the
+  file's bytes re-verified; pre-20 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception: every older
+  OMP row offers fresh-only until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution proofs for OMP, Goose, Claude, and Pi land separately; until each lands, its kind keeps its existing
-  acceptance behind the discriminator gate, and new framework entry points default to deny rather than allow. The offer
-  gate has its final shape but flips per kind: only Codex requires version 1 today, while the other kinds keep today's
-  offer behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults.
-  There is no report epoch, and no vendor event ordering beyond what the Codex proof establishes. Old processes and
-  assets fail closed after the upgrade; nothing is grandfathered.
+  OMP's attribution proof has landed alongside Codex's; Goose, Claude, and Pi keep their existing acceptance behind the
+  discriminator gate until each proof lands, and new framework entry points default to deny rather than allow. The offer
+  gate has its final shape but flips per kind: Codex and OMP require version 1, while the other kinds keep today's offer
+  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
+  no report epoch, and no vendor event ordering beyond what the Codex proof establishes and the OMP serial fences (a
+  cancellation fence, not a cross-reporter chronology). Old processes and assets fail closed after the upgrade; nothing
+  is grandfathered.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1341,16 +1350,46 @@ failure can leave private evidence, but cannot authorize another directory move.
   option value (`--system-prompt --`, a prompt spelled `--`) is not a delimiter and creates normally, and an explicit
   template override — filled verbatim, never appended — creates normally behind a genuine delimiter too. Which OMP
   launches get the extension is decided by an OMP-specific interactive-shape classifier following OMP's own command and
-  flag-consumption tables; Pi's classifier is untouched. The extension asset is materialized per vendor under Farhelm's
-  state directory (`integrations/omp/`) with the same exact-bytes, private-file, no-follow rules Pi's had, loaded with
-  `-e <materialized path>` and pointed at the reporter through `FARHELM_OMP_REPORTER_EXE`. The extension ALWAYS reports
-  the current conversation id, with `session_file: null` when there is no file to name, and a null-file report withdraws
-  the old target instead of retaining it — gating the whole report on file existence would leave the previous
-  conversation's resume target standing after a fileless transition. Reports serialize so a slow report for an old
-  conversation cannot win. OMP 18.2.4's `/new` persists eagerly, so a fresh-but-empty conversation can legitimately
-  carry a resume offer immediately; the eventless-relocation and non-file-backend gaps SPEC.md states are accepted here
-  rather than papered over. Protocol 22 introduced this kind; protocol 23 added `LaunchHarness::Omp`. Protocol 24 also
-  carries the owned-checkout vocabulary described above.
+  flag-consumption tables; Pi's classifier is untouched. The gated extension asset is materialized per vendor under
+  Farhelm's state directory (`integrations/omp/farhelm-conversation-v2.ts`, sourced from `assets/omp-conversation-v1.ts`
+  — the published name is versioned past the gateless `v1` bytes, published beside them never over them) with the same
+  exact-bytes, private-file, no-follow rules Pi's had, loaded with `-e <materialized path>` and pointed at the reporter
+  through `FARHELM_OMP_REPORTER_EXE` (scrubbed from preparation children like the Goose/Pi reporter variables; its only
+  in-support consumer is the asset itself). The extension reports the current conversation id ONLY from the interactive
+  context (`hasUI === true && mode === "tui"`, checked before identity, queueing, or any state): a child-shaped callback
+  — native task, workpool, revived child, or throwing context — is a complete no-op that never touches parent state, and
+  the queued closure re-checks a per-factory serial, advanced only on eligible parent events, as the cancellation fence
+  before the stale-id/file reads and subprocess creation. With `session_file: null` when there is no file to name, and a
+  null-file report withdraws the old target instead of retaining it — gating the whole report on file existence would
+  leave the previous conversation's resume target standing after a fileless transition. Reports serialize so a slow
+  report for an old conversation cannot win. OMP 18.2.4's `/new` persists eagerly, so a fresh-but-empty conversation can
+  legitimately carry a resume offer immediately; the eventless-relocation and non-file-backend gaps SPEC.md states are
+  accepted here rather than papered over. Protocol 22 introduced this kind; protocol 23 added `LaunchHarness::Omp`.
+  Protocol 24 also carries the owned-checkout vocabulary described above.
+
+  **The OMP ownership proof.** Admission is one explicit branch (`report_omp_conversation`), wired through the shared
+  claim discipline, the atomic compare-and-swap over the complete prior binding, and the shared mirror with version 1 —
+  flipped in the same change as the per-kind predicate, since flipping alone would deny every OMP report. The root leg
+  is a composition: launch provenance (the session's durable launch record naming the current gated asset, with the
+  file's bytes re-verified, so a reload is proven rather than trusted) establishes that the launch installed the gated
+  reporter, and process attribution establishes that the reporter descends from that launched runtime — together they
+  imply the report passed the asset's context gate. Attribution walks the shared mechanics to the current owned pane and
+  applies OMP's restrictive corridor over the installation descriptor the durable launch argv selects — classified at
+  spawn and retained with the generation's provenance, never re-derived from the resume template: `Oj` (the selected Bun
+  running the selected bundle `dist/cli.js` or source-tree `src/cli.ts`, entry spellings resolved through symlinks
+  because the installed `omp` command is one), `Ob` (the compiled target with TUI grammar), `L` (an exact `bun x`/`bunx`
+  or npm/npx package selection above the runtime, Bun-resulting only), `S` (a known transparent `sh -c 'exec <runtime>'`
+  trampoline, or an exec'd-away shell that leaves no link). Nested or additional session-hosting runtimes of any kind,
+  unclassified intermediaries, Node-executed OMP, unknown wrappers, and ambiguous package scripts all refuse; the live
+  runtime argv is re-read through the same grammar injection uses, so a process that exec'd from a TUI launch into a
+  utility or print shape refuses too. Attribution repeats around the evidence and the identities are compared. The
+  source vocabulary is the asset's four tags (`session_start`, `session_switch` with its opaque upstream reason,
+  `session_branch`, `agent_end`), allowlisted at the doorway and re-checked at admission; `agent_id` stays a rejection
+  signal. The session-file header stays a pre-resume file↔id check, not ownership evidence, and a parent lineage field
+  never rejects. Supported versions are 18.2.4 and 18.2.6 with equal gate-semantic pins verified at the pinned sources
+  (static claim, no runtime probe); compiled-vs-Bun packaging and Node execution stay fail-closed for lack of evidence,
+  as do `bun x`/npm launcher chains beyond chain-level shape rules — each labeled in `docs/harnesses/omp.md` rather than
+  claimed.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the

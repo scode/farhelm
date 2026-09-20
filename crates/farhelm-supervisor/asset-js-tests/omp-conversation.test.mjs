@@ -12,10 +12,10 @@ import { fileURLToPath } from "node:url";
  * executable supplied through the child's environment — the test process's
  * own environment is never mutated. The scenario stands in a scripted
  * session manager and either a payload-appending reporter shell script or a
- * controlled `execFile` mock for OMP and the supervisor, so the promise-chain
- * ordering, stale-id cancellation, file-existence recheck timing, subscribed
- * transition events, and the silent-failure boundary are all exercised
- * against the REAL asset module.
+ * controlled `execFile` mock for OMP and the supervisor, so the interactive
+ * context gate, the promise-chain ordering, stale-id cancellation,
+ * file-existence recheck timing, subscribed transition events, and the
+ * silent-failure boundary are all exercised against the REAL asset module.
  *
  * Two kinds of waiting appear here, and they are different on purpose:
  *
@@ -126,4 +126,20 @@ test("a stale queued report is cancelled and leaves the current identity alone",
 
 test("a throwing sessionManager getter is absorbed silently and reporting recovers", () => {
     expectScenarioPass("throwing-getter");
+});
+
+test("non-interactive task, workpool, and revival contexts stay silent on every event", () => {
+    expectScenarioPass("child-contexts-silent");
+});
+
+test("a child-shaped session_start sharing the parent import dispatches nothing", () => {
+    expectScenarioPass("child-session-start-no-dispatch");
+});
+
+test("a same-process child factory neither dispatches nor disturbs the parent queue", () => {
+    expectScenarioPass("two-reporter-ordering");
+});
+
+test("a throwing context is a complete no-op before identity and reporting recovers", () => {
+    expectScenarioPass("throwing-context");
 });

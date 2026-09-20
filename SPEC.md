@@ -854,6 +854,17 @@ Compaction preserves the conversation, and a verified new conversation replaces 
 remain stored but are not offered as exact resume targets. Missing or changed transcript evidence refuses Resume rather
 than silently launching fresh or selecting a different historical conversation.
 
+OMP reports must come from the foreground OMP runtime under the session's owned pane — the Bun-executed bundle or
+source-tree entry, or the compiled target — reached through the launch's own launcher and trampoline shapes and nothing
+else: not a nested OMP process that inherited its credential, not a Node-executed entry, not an unknown wrapper. Farhelm
+also requires the session's durable launch record to show the current gated reporter asset was installed for that
+launch, with the installed file's bytes re-verified; the gated reporter emits only from the interactive context, so a
+delegated task, workpool, or revival child stays silent, while a separately launched interactive child — genuinely
+interactive — is refused by process attribution instead. Sessions launched under the old gateless asset fail closed,
+runnable with no capture, until a relaunch installs the current asset. A parent lineage field never rejects: legitimate
+forks carry one. OMP captures admitted under the proof carry version 1 like Codex, with no historical exception: every
+older OMP row offers fresh-only until its first proven report.
+
 Every conversation-identity report carries a closed vendor discriminator naming the adapter that produced it — the
 injected hook command, the Goose helper, or a shipped asset — and a report addressed to a session of another kind is
 refused before any vendor state is consulted. The discriminator routes; it does not prove. Admission still requires the

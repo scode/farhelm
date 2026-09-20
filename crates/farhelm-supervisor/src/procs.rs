@@ -497,6 +497,510 @@ fn codex_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
     emitter.ok_or_else(|| "the hook has no attributable Codex executable".to_string())
 }
 
+/// OMP's installation-descriptor evidence, matched over walked chain links.
+///
+/// The installed `omp` command is a script: the kernel runs its `bun`
+/// shebang, so the live runtime image is the Bun binary and the entry point
+/// is the bundle path in program-argument position. The compiled target is
+/// a native `omp` image instead. Both shapes are recognized by exact
+/// bundle/entry suffixes, never by basename alone.
+const OMP_DIST_ENTRY_SUFFIX: &[u8] = b"node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js";
+const OMP_SRC_ENTRY_SUFFIX: &[u8] = b"packages/coding-agent/src/cli.ts";
+const OMP_PACKAGE: &[u8] = b"@oh-my-pi/pi-coding-agent";
+/// OMP's selected command under npm/npx: the package's own bin, spelled
+/// exactly as the launcher resolves it. Anything else after the option
+/// boundary is a foreign command the package merely makes available.
+const OMP_BIN: &[u8] = b"omp";
+
+/// The raw image basename, over bytes the caller already captured, with the
+/// procfs atomic-update suffix stripped the way the emitter check strips
+/// it. Shared by every OMP image test so no caller re-derives it.
+fn omp_image_basename(exe: &[u8]) -> &[u8] {
+    let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    name.strip_suffix(b" (deleted)").unwrap_or(name)
+}
+
+/// Whether the image is a Bun interpreter: the only interpreter whose
+/// execution of OMP is a supported shape. Node execution is unverified and
+/// refused elsewhere, never inferred from a `.js` suffix.
+fn is_bun_image(exe: &[u8]) -> bool {
+    omp_image_basename(exe) == b"bun"
+}
+
+/// Whether the image is a Node interpreter: observed only to refuse with a
+/// diagnostic naming the mechanism rather than a generic unclassified
+/// intermediary.
+fn is_node_image(exe: &[u8]) -> bool {
+    matches!(omp_image_basename(exe), b"node" | b"nodejs")
+}
+
+/// Whether the image is a compiled OMP target: the native binary the
+/// pinned `build-binary.ts` emits as `dist/omp` (or a `dist/omp-<id>`
+/// cross build). A script named `omp` never matches: scripts resolve to
+/// their interpreter's image before this comparison runs.
+fn is_compiled_omp_image(exe: &[u8]) -> bool {
+    let name = omp_image_basename(exe);
+    name == b"omp" || name.starts_with(b"omp-")
+}
+
+/// Whether raw argv spells the selected OMP entry point: the installed
+/// bundle or the explicitly selected source-tree `src/cli.ts`, matched as
+/// a path suffix so a same-named file elsewhere is not evidence.
+fn is_omp_bundle_entry(arg: &[u8]) -> bool {
+    arg.ends_with(OMP_DIST_ENTRY_SUFFIX) || arg.ends_with(OMP_SRC_ENTRY_SUFFIX)
+}
+
+/// Whether a Bun launcher link spells a supported package launch: `bun x`
+/// or `bunx` selecting exactly OMP's package. Only the head is
+/// constrained; trailing tokens are OMP's own arguments and the runtime
+/// grammar below judges them. Any other spelling — flags before the
+/// subcommand, `--package` forms, package scripts — is not an observed
+/// shape and refuses.
+fn is_omp_bun_launcher(argv: &[Vec<u8>]) -> bool {
+    match argv {
+        [program, subcommand, package, ..]
+            if omp_image_basename(program) == b"bun"
+                && subcommand == b"x"
+                && package == OMP_PACKAGE =>
+        {
+            true
+        }
+        [program, package, ..]
+            if omp_image_basename(program) == b"bunx" && package == OMP_PACKAGE =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Whether a token past npx's positional package could change what the
+/// launcher runs: a command-string mode in any spelling, or a package
+/// selection. npx parses options across the whole argv rather than only
+/// before the command, so any of these trailing the package refuses —
+/// this rule does not reimplement that splitting to decide which ones
+/// npx would actually consume.
+fn is_npm_launcher_level_token(token: &[u8]) -> bool {
+    token == b"-c"
+        || token == b"--call"
+        || token.starts_with(b"--call=")
+        || token == b"--package"
+        || token.starts_with(b"--package=")
+        || token == b"-p"
+        || token == b"--package-name"
+}
+
+/// Whether a Node launcher link spells a supported npm/npx launch of
+/// OMP: the `npm-cli.js`/`npx-cli.js` entry with the subcommand, the
+/// package selection, the option boundary, and the selected bin each in
+/// its proper position. Three forms, and only these three:
+/// - `npm exec --package=<omp> -- omp`: the `exec` subcommand first,
+///   then the option grammar below;
+/// - `npx --package=<omp> -- omp`: the same option grammar, with no
+///   subcommand — npx takes options directly;
+/// - `npx <omp>`: the bare positional package form, with no
+///   launcher-level option trailing it.
+///
+/// The option grammar is one or more exact `--package` selectors —
+/// each joined (`--package=<pkg>`) or separated (`--package <pkg>`),
+/// repeats allowed — then the `--` boundary, then OMP's bin. At
+/// least one selector is required: a bare `-- omp` selects nothing
+/// and refuses.
+///
+/// Everything else refuses: command-string modes (`-c`, `--call`,
+/// `--call=...`), short package selectors, unknown options, flags
+/// before the subcommand, the `x` alias, version-pinned selections, a
+/// missing boundary or command, and any foreign command. Tokens past
+/// the selected command are the command's own arguments and are never
+/// launcher evidence — and nothing past an unrecognized shape is
+/// either. The Bun-resulting rule is enforced by the runtime below,
+/// not here: this recognizes the launcher, and only the launcher.
+fn is_omp_npm_launcher(argv: &[Vec<u8>]) -> bool {
+    let [program, entry, rest @ ..] = argv else {
+        return false;
+    };
+    if !is_node_image(program) {
+        return false;
+    }
+    let is_npm = entry.ends_with(b"npm/bin/npm-cli.js");
+    let is_npx = entry.ends_with(b"npm/bin/npx-cli.js");
+    if !is_npm && !is_npx {
+        return false;
+    }
+    // npx's bare positional package form: the FIRST token names the
+    // package and npx runs its bin. No options precede it — anything
+    // before the command position would make the token a command
+    // spelling instead, which a package id never is.
+    if is_npx
+        && rest
+            .first()
+            .is_some_and(|token| token.as_slice() == OMP_PACKAGE)
+    {
+        return rest[1..]
+            .iter()
+            .all(|token| !is_npm_launcher_level_token(token));
+    }
+    // The option form: npm names its `exec` subcommand first — flags
+    // before the subcommand are not an observed shape — while npx
+    // takes options directly. Past this point the two parse
+    // identically: exact `--package` selections, one `--` boundary,
+    // then OMP's bin.
+    let options = if is_npm {
+        let [subcommand, options @ ..] = rest else {
+            return false;
+        };
+        if subcommand != b"exec" {
+            return false;
+        }
+        options
+    } else {
+        rest
+    };
+    let mut selected = false;
+    let mut index = 0;
+    while index < options.len() {
+        let token = &options[index];
+        if token == b"--" {
+            // The option boundary: the next token is the selected
+            // command, and it must be OMP's own bin. Everything past
+            // it is the command's arguments — never launcher evidence.
+            return selected
+                && options
+                    .get(index + 1)
+                    .is_some_and(|command| command.as_slice() == OMP_BIN);
+        }
+        if token == b"--package" {
+            let Some(value) = options.get(index + 1) else {
+                return false;
+            };
+            if value != OMP_PACKAGE {
+                return false;
+            }
+            selected = true;
+            index += 2;
+            continue;
+        }
+        if let Some(value) = token.strip_prefix(b"--package=") {
+            // Exact selection only: a version pin or any other package
+            // is not this launch's OMP, and refuses rather than
+            // selecting.
+            if value != OMP_PACKAGE {
+                return false;
+            }
+            selected = true;
+            index += 1;
+            continue;
+        }
+        // Anything else before the boundary — a command string in any
+        // spelling, a short selector, an unknown option, or a bare
+        // command without its boundary — is not the supported form.
+        return false;
+    }
+    // Options exhausted with no boundary and no command: a bare
+    // `--package` selection names no bin to run.
+    false
+}
+
+/// Whether a shell link is the known transparent trampoline for the
+/// expected runtime program: `sh -c 'exec <runtime> ...'` as exactly one
+/// simple command. The target program must be the launch's own
+/// runtime/launcher binary — a trampoline exec'ing anything else is not
+/// this launch's transparency. An `exec` that leaves no link (the usual
+/// case) needs no rule at all.
+fn is_omp_shell_trampoline(exe: &[u8], argv: &[Vec<u8>], expected: &[&[u8]]) -> bool {
+    let name = omp_image_basename(exe);
+    if !matches!(name, b"sh" | b"bash" | b"dash") {
+        return false;
+    }
+    let [_, flag, command] = argv else {
+        return false;
+    };
+    if flag != b"-c" {
+        return false;
+    }
+    let command = match std::str::from_utf8(command) {
+        Ok(command) => command,
+        Err(_) => return false,
+    };
+    if has_unquoted_shell_syntax(command) {
+        return false;
+    }
+    match shell_words::split(command) {
+        Ok(words) => match words.as_slice() {
+            [exec, target, ..] if exec == "exec" => expected.contains(&target.as_bytes()),
+            _ => false,
+        },
+        Err(_) => false,
+    }
+}
+
+/// OMP's instance of the restrictive corridor, over an already-walked
+/// chain: the reporter (first link, never itself a runtime candidate) must
+/// be the supported hook invocation; exactly one link must be the launched
+/// runtime's descriptor (Bun plus the selected entry, or the compiled
+/// target with TUI grammar); the pane anchor (last link) is accepted by
+/// position; links below the runtime must be narrow hook trampolines, and
+/// links above it must be recognized launchers or transparent shell
+/// trampolines for the launch's own program. Any additional
+/// session-hosting runtime of any kind and every unclassified intermediary
+/// refuses.
+///
+/// `program` is the durable launch's program classification: it selects
+/// which launcher spellings may appear above the runtime, so a chain whose
+/// live shape contradicts its launch refuses rather than being re-explained.
+///
+/// The launcher predicate plus the trampoline target spellings one OMP
+/// launch program admits above its runtime.
+type OmpLauncherRules<'a> = (fn(&[Vec<u8>]) -> bool, &'a [&'a [u8]]);
+
+/// OMP's instance of the restrictive corridor, over an already-walked
+/// chain: the reporter (first link, never itself a runtime candidate) must
+/// be the supported hook invocation; exactly one link must be the launched
+/// runtime's descriptor (Bun plus the selected entry, or the compiled
+/// target with TUI grammar); the pane anchor (last link) is accepted by
+/// position; links below the runtime must be narrow hook trampolines, and
+/// links above it must be recognized launchers or transparent shell
+/// trampolines for the launch's own program. Any additional
+/// session-hosting runtime of any kind and every unclassified intermediary
+/// refuses.
+///
+/// `program` is the durable launch's program classification: it selects
+/// which launcher spellings may appear above the runtime, so a chain whose
+/// live shape contradicts its launch refuses rather than being re-explained.
+///
+/// Pure over the chain so the shapes are unit-testable without live
+/// processes; [`foreground_omp_emitter`] supplies the walked chain.
+fn omp_corridor(
+    chain: &[ChainLink],
+    program: &crate::agent_kind::omp::OmpLaunchProgram,
+) -> Result<ProcessIdentity, String> {
+    use crate::agent_kind::omp::OmpLaunchProgram;
+    let reporter = chain
+        .first()
+        .ok_or_else(|| "the hook ancestry is empty".to_string())?;
+    match reporter.argv.as_deref() {
+        Some(argv) if is_hook_invocation_argv(argv) => {}
+        _ => {
+            return Err("the reporting process is not the supported hook invocation".to_string());
+        }
+    }
+    // Which launcher spellings and trampoline targets this launch program
+    // admits above its runtime. Direct Node execution and unknown programs
+    // refuse before any link is examined.
+    let (launchers, trampoline_targets): OmpLauncherRules<'_> = match program {
+        OmpLaunchProgram::Omp => (no_omp_launcher, &[b"omp".as_slice()]),
+        OmpLaunchProgram::Bun => (
+            is_omp_bun_launcher,
+            &[b"bun".as_slice(), b"bunx".as_slice()],
+        ),
+        OmpLaunchProgram::Npm => (
+            is_omp_npm_launcher,
+            &[b"npm".as_slice(), b"npx".as_slice(), b"node".as_slice()],
+        ),
+        OmpLaunchProgram::Node => {
+            return Err("Node-executed OMP is not a supported runtime".to_string());
+        }
+        OmpLaunchProgram::Shell | OmpLaunchProgram::Unknown => {
+            return Err("the OMP launch shape is not a supported runtime".to_string());
+        }
+    };
+    // The emitter search excludes the reporter: the hook invocation is the
+    // reporter by definition, never the session-hosting runtime, even when
+    // its image name would otherwise match.
+    let mut emitter = None;
+    let mut emitter_index = 0;
+    for (index, link) in chain.iter().enumerate().skip(1) {
+        if is_omp_runtime_link(link) {
+            if emitter.is_some() {
+                return Err("a nested OMP process cannot report for the foreground".to_string());
+            }
+            emitter = Some(ProcessIdentity {
+                pid: link.pid,
+                start: link.start,
+            });
+            emitter_index = index;
+        }
+    }
+    let Some(emitter) = emitter else {
+        // Name the unverified execution shape when it is the reason: a
+        // Node-executed entry point is deliberately unsupported, not
+        // merely unrecognized.
+        if chain.iter().skip(1).any(|link| is_node_image(&link.exe)) {
+            return Err("Node-executed OMP is not a supported runtime".to_string());
+        }
+        return Err("the hook has no attributable OMP runtime".to_string());
+    };
+    // The live runtime argv must still describe an interactive TUI
+    // conversation: the launch passed this grammar at spawn, but a process
+    // that exec'd into a utility or print shape afterwards is no longer
+    // the interactive runtime the proof admitted.
+    omp_runtime_tui_grammar(&chain[emitter_index])?;
+    for (index, link) in chain.iter().enumerate() {
+        if index == 0 || index == emitter_index || index + 1 == chain.len() {
+            continue;
+        }
+        let below_runtime = index < emitter_index;
+        if below_runtime {
+            let trampoline = link
+                .argv
+                .as_deref()
+                .is_some_and(|argv| is_hook_trampoline(&link.exe, argv));
+            if trampoline {
+                continue;
+            }
+        } else {
+            let recognized = link.argv.as_deref().is_some_and(|argv| {
+                launchers(argv) || is_omp_shell_trampoline(&link.exe, argv, trampoline_targets)
+            });
+            if recognized {
+                continue;
+            }
+        }
+        if is_other_session_runtime(&link.exe) {
+            return Err(
+                "another session-hosting runtime sits between the reporter and the foreground"
+                    .to_string(),
+            );
+        }
+        // A Node interpreter off the emitter is "Node-executed OMP" only
+        // when its argv shows it running the OMP entry: npm tooling above
+        // the runtime is node too, and labeling that "Node-executed" would
+        // send debugging after the wrong shape. Anything else
+        // unrecognized stays a generic intermediary.
+        if is_node_image(&link.exe)
+            && link.argv.as_deref().is_some_and(|argv| {
+                argv.len() >= 2
+                    && (is_omp_bundle_entry(&argv[1])
+                        || omp_resolved_entry_matches(link.pid, &argv[1]))
+            })
+        {
+            return Err("Node-executed OMP is not a supported runtime".to_string());
+        }
+        return Err(
+            "an unclassified intermediary sits between the reporter and the foreground".to_string(),
+        );
+    }
+    Ok(emitter)
+}
+
+/// A launcher matcher that admits nothing: launches of the installed `omp`
+/// command run the runtime directly under the pane, so any launcher-shaped
+/// link above the emitter contradicts the launch.
+fn no_omp_launcher(_argv: &[Vec<u8>]) -> bool {
+    false
+}
+
+/// Whether one non-reporter link is an OMP runtime image: Bun (the entry
+/// check needs its argv, so an argv-less Bun link is not a candidate here
+/// and refuses downstream as unclassified) or the compiled target.
+///
+/// The entry may be named through a symlink: the installed `omp` command
+/// IS one, and the kernel hands Bun the launched spelling — observed live
+/// as `bun <home>/.bun/bin/omp ...` — rather than the resolved
+/// bundle path. The raw suffix match runs first; when it misses, the
+/// spelling is resolved (against the process's own working directory for
+/// a relative spelling) and the canonical path is matched instead. An
+/// unresolvable spelling falls back to the raw bytes, which then refuse.
+/// Resolution corroborates which code the interpreter was handed; it
+/// does not identify anything by itself, and a same-user mimic of the
+/// shape stays outside the proof's non-adversarial boundary.
+fn is_omp_runtime_link(link: &ChainLink) -> bool {
+    if is_compiled_omp_image(&link.exe) {
+        return true;
+    }
+    if !is_bun_image(&link.exe) {
+        return false;
+    }
+    link.argv.as_deref().is_some_and(|argv| {
+        argv.len() >= 2
+            && omp_image_basename(&argv[0]) == b"bun"
+            && (is_omp_bundle_entry(&argv[1]) || omp_resolved_entry_matches(link.pid, &argv[1]))
+    })
+}
+
+/// Whether the canonical path behind one entry spelling is the selected
+/// OMP bundle or source tree. `None` on any failure — undecodable bytes,
+/// an unreadable working directory, a dangling link — so callers treat
+/// unresolvable spellings as the raw bytes they already refused.
+fn omp_resolved_entry_matches(pid: u32, entry: &[u8]) -> bool {
+    resolved_omp_entry(pid, entry).is_some_and(|resolved| is_omp_bundle_entry(&resolved))
+}
+
+/// The canonical path behind one entry spelling, or `None` when it
+/// cannot be established. Blocking filesystem I/O: callers run on the
+/// attribution thread, never the report path's async context.
+fn resolved_omp_entry(pid: u32, entry: &[u8]) -> Option<Vec<u8>> {
+    let entry = std::str::from_utf8(entry).ok()?;
+    let path = std::path::Path::new(entry);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        // A relative spelling resolves against the SUBJECT's working
+        // directory, read from the kernel — never this process's.
+        let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
+        cwd.join(path)
+    };
+    std::fs::canonicalize(absolute)
+        .ok()
+        .map(|canonical| os_bytes(&canonical))
+}
+
+/// The raw bytes behind one path, for byte-level matching over kernel
+/// evidence. Unix-only, like every other reader in this module.
+fn os_bytes(path: &std::path::Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().to_vec()
+}
+
+/// Whether the emitter link's live argv still describes an interactive TUI
+/// conversation, read through the same grammar injection uses: Bun-executed
+/// entries contribute everything after interpreter and entry point, and the
+/// compiled target everything after its program. Missing or undecodable
+/// argv is missing evidence and refuses — an interpreted runtime without
+/// its entry point is not attributable — as does any non-interactive or
+/// exiting shape.
+fn omp_runtime_tui_grammar(link: &ChainLink) -> Result<(), String> {
+    let argv = link.argv.as_deref().ok_or_else(|| {
+        "the OMP runtime's command line could not be read; the report is refused".to_string()
+    })?;
+    let omp_args = if is_compiled_omp_image(&link.exe) {
+        argv.get(1..).unwrap_or_default()
+    } else {
+        argv.get(2..).unwrap_or_default()
+    };
+    let decoded: Option<Vec<String>> = omp_args
+        .iter()
+        .map(|arg| std::str::from_utf8(arg).map(str::to_string).ok())
+        .collect();
+    let Some(decoded) = decoded else {
+        return Err(
+            "the OMP runtime's command line is not valid UTF-8; the report is refused".to_string(),
+        );
+    };
+    match crate::agent_kind::omp::omp_tui_args_decision(&decoded) {
+        crate::agent_kind::omp::OmpInjection::Inject { .. } => Ok(()),
+        crate::agent_kind::omp::OmpInjection::Leave(reason) => Err(format!(
+            "the live OMP runtime no longer describes an interactive conversation: {reason}"
+        )),
+    }
+}
+
+/// Attribute a hook connection to the one OMP runtime under the owned pane
+/// that the launch installed.
+///
+/// The walk is the shared [`walk_to_pane`] mechanics; the corridor applied
+/// below is OMP's instance of the restrictive rule. `program` is the
+/// durable launch's program classification, so the live chain must agree
+/// with how the session was launched, not merely look like some OMP shape.
+pub(crate) fn foreground_omp_emitter(
+    peer: ProcessIdentity,
+    pane_pid: u32,
+    program: &crate::agent_kind::omp::OmpLaunchProgram,
+) -> Result<ProcessIdentity, String> {
+    let chain = walk_to_pane(peer, pane_pid)?;
+    omp_corridor(&chain, program)
+}
+
 /// Extract the environment region of a macOS `KERN_PROCARGS2` buffer,
 /// re-joined as the NUL-delimited block [`read_environ`] promises.
 ///
@@ -2324,5 +2828,614 @@ mod tests {
         let refusal =
             codex_corridor(&chain).expect_err("an unreadable intermediary must be refused");
         assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// The installed hook command for OMP reports, as the kernel captures
+    /// it on the reporter.
+    fn omp_hook_argv() -> Vec<&'static str> {
+        vec![
+            "/opt/test/bin/farhelm",
+            "internal",
+            "hook",
+            "--vendor",
+            "omp",
+        ]
+    }
+
+    /// The installed-shape runtime link: the Bun image running the bundle
+    /// entry at the observed install path, with TUI argv behind it.
+    fn omp_runtime_link(pid: u32, tail: &[&str]) -> ChainLink {
+        let mut argv = vec![
+            "bun",
+            "/opt/omp/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js",
+        ];
+        argv.extend(tail.iter().copied());
+        corridor_link(pid, "/opt/bun/bin/bun", &argv)
+    }
+
+    /// The installed `omp` launch admits a direct hook child of the
+    /// Bun-executed bundle: interpreter plus canonical entry plus TUI
+    /// grammar, with the pane anchor accepted by position.
+    ///
+    /// Why this test matters: it is the primary supported shape — the one
+    /// production launches take — so the corridor must keep admitting it
+    /// while every refusal below stays closed.
+    #[farhelm_testtrace::test]
+    fn an_installed_omp_runtime_with_a_direct_hook_child_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &[]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("the installed shape must be admitted");
+        assert_eq!(emitter.pid, 11, "the emitter is the Bun runtime");
+    }
+
+    /// The pane anchor may itself be the runtime: a pane that exec'd into
+    /// the launch has no wrapper link left, and position must not cost it
+    /// the emitter role.
+    #[farhelm_testtrace::test]
+    fn a_pane_execd_into_the_runtime_is_still_the_emitter() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &["--resume", "conv.jsonl"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("an exec'd pane runtime must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// The compiled target admits with the same TUI grammar: a native
+    /// `omp` image whose argv stays interactive.
+    #[farhelm_testtrace::test]
+    fn a_compiled_omp_target_with_tui_argv_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(11, "/opt/test/bin/omp", &["omp", "--resume", "conv.jsonl"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("the compiled shape must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// Two OMP runtimes refuse: a nested interactive child passes the
+    /// asset gate on its own context, so only process attribution can
+    /// refuse it — this is the central regression the corridor pins.
+    #[farhelm_testtrace::test]
+    fn a_nested_omp_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            omp_runtime_link(11, &[]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("nested OMP must be refused");
+        assert!(refusal.contains("nested OMP"), "{refusal}");
+    }
+
+    /// Node-executed OMP refuses with its own diagnostic: execution and
+    /// lifecycle parity for Node is unverified, so the shape fails closed
+    /// rather than riding the `.js` suffix into the Bun rule.
+    #[farhelm_testtrace::test]
+    fn a_node_executed_omp_entry_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/omp/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("Node execution must be refused");
+        assert!(refusal.contains("Node-executed OMP"), "{refusal}");
+    }
+
+    /// A direct Node launch program refuses before any link is examined:
+    /// there is no descriptor in which it could be legitimate.
+    #[farhelm_testtrace::test]
+    fn a_node_launch_program_is_refused_upfront() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &[]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Node)
+            .expect_err("a Node launch program must be refused");
+        assert!(refusal.contains("Node-executed OMP"), "{refusal}");
+    }
+
+    /// An unknown launch program refuses: the live chain must agree with
+    /// how the session was launched, not merely look like some OMP shape.
+    #[farhelm_testtrace::test]
+    fn an_unknown_launch_program_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &[]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Unknown)
+            .expect_err("an unknown launch program must be refused");
+        assert!(refusal.contains("not a supported runtime"), "{refusal}");
+    }
+
+    /// A same-named entry elsewhere is not the selected bundle: suffix
+    /// matching keeps a decoy `dist/cli.js` out of the descriptor.
+    #[farhelm_testtrace::test]
+    fn a_same_named_entry_outside_the_bundle_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(11, "/opt/bun/bin/bun", &["bun", "/tmp/dist/cli.js"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a decoy entry must be refused");
+        assert!(refusal.contains("no attributable OMP runtime"), "{refusal}");
+    }
+
+    /// A Bun runtime without readable argv is missing evidence, not an
+    /// emitter: the descriptor binds interpreter AND entry point, and an
+    /// entry point that cannot be read cannot be bound.
+    #[farhelm_testtrace::test]
+    fn a_bun_runtime_without_readable_argv_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link_no_argv(11, "/opt/bun/bin/bun"),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("an argv-less Bun link must be refused");
+        assert!(refusal.contains("no attributable OMP runtime"), "{refusal}");
+    }
+
+    /// The live runtime argv must still describe an interactive
+    /// conversation: a process that exec'd from a TUI launch into `--print`
+    /// is no longer the interactive runtime, even though its launch was.
+    #[farhelm_testtrace::test]
+    fn a_runtime_execd_into_print_shape_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &["-p", "summarize this"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a print-shaped runtime must be refused");
+        assert!(
+            refusal.contains("no longer describes an interactive conversation"),
+            "{refusal}"
+        );
+    }
+
+    /// A utility subcommand in the live runtime argv refuses the same way:
+    /// the grammar is the launch classifier's, re-read live.
+    #[farhelm_testtrace::test]
+    fn a_runtime_execd_into_a_utility_command_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(11, &["models"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a utility-shaped runtime must be refused");
+        assert!(
+            refusal.contains("no longer describes an interactive conversation"),
+            "{refusal}"
+        );
+    }
+
+    /// A hook trampoline between reporter and runtime admits: the vendor
+    /// runs hook commands through a shell, and the corridor must not
+    /// refuse production's own shape.
+    #[farhelm_testtrace::test]
+    fn a_hook_trampoline_below_an_omp_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(
+                12,
+                "/bin/sh",
+                &["sh", "-c", "farhelm internal hook --vendor omp"],
+            ),
+            omp_runtime_link(11, &[]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("a hook trampoline must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// An interactive shell between reporter and runtime refuses: only the
+    /// narrow hook trampoline may sit below the runtime.
+    #[farhelm_testtrace::test]
+    fn an_interactive_shell_below_an_omp_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(12, "/bin/bash", &["bash"]),
+            omp_runtime_link(11, &[]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("an interactive shell must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A mixed-harness intermediary refuses with its own diagnostic: an
+    /// outer OMP with a Pi descendant between runtime and reporter traveled
+    /// through a different harness, even with inherited credentials.
+    #[farhelm_testtrace::test]
+    fn a_mixed_harness_intermediary_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(12, "/opt/test/bin/pi", &["pi", "-p", "hi"]),
+            omp_runtime_link(11, &[]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a mixed-harness intermediary must be refused");
+        assert!(
+            refusal.contains("another session-hosting runtime"),
+            "{refusal}"
+        );
+    }
+
+    /// A `bun x` launcher above the runtime admits for a Bun launch: the
+    /// package manager sits above the managed runtime, never below it.
+    #[farhelm_testtrace::test]
+    fn a_bun_package_launcher_above_the_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/bun/bin/bun",
+                &["bun", "x", "@oh-my-pi/pi-coding-agent"],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Bun)
+            .expect("a bun package launcher must be admitted");
+        assert_eq!(emitter.pid, 12);
+    }
+
+    /// A launcher selecting another package refuses: the exact package
+    /// selection is what makes a launcher this launch's, and an unrelated
+    /// package above the runtime contradicts it.
+    #[farhelm_testtrace::test]
+    fn a_bun_launcher_for_another_package_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(11, "/opt/bun/bin/bun", &["bun", "x", "some-other-tool"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Bun)
+            .expect_err("a foreign package launcher must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A launcher between runtime and pane anchor contradicts an
+    /// installed-`omp` launch: the installed command runs its runtime
+    /// directly under the pane, so a package manager in between is not
+    /// this launch's shape. (The pane anchor itself is accepted by
+    /// position — the framework trusts the owned pane's own process, and
+    /// this test keeps a real anchor below the launcher to pin the
+    /// middle-link rule rather than the anchor rule.)
+    #[farhelm_testtrace::test]
+    fn a_launcher_above_an_installed_omp_launch_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/bun/bin/bun",
+                &["bun", "x", "@oh-my-pi/pi-coding-agent"],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a launcher above an installed launch must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// An npm launcher selecting OMP's exact package admits for an npm
+    /// launch, with the Bun-resulting runtime below it carrying the proof.
+    #[farhelm_testtrace::test]
+    fn an_npm_launcher_with_exact_package_selection_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npm-cli.js",
+                    "exec",
+                    "--package=@oh-my-pi/pi-coding-agent",
+                    "--",
+                    "omp",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect("an exact npm selection must be admitted");
+        assert_eq!(emitter.pid, 12);
+    }
+
+    /// An npm command string refuses even with an otherwise valid OMP
+    /// package selection, boundary, and command: `-c` runs its string
+    /// as a script instead of the selected bin. The selection is valid
+    /// on purpose — the admitted-selection test above accepts this
+    /// chain minus the `-c`, so the refusal isolates the command
+    /// string rather than a missing selection.
+    #[farhelm_testtrace::test]
+    fn an_npm_command_string_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npm-cli.js",
+                    "exec",
+                    "--package=@oh-my-pi/pi-coding-agent",
+                    "-c",
+                    "omp --version",
+                    "--",
+                    "omp",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect_err("an npm command string must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// The inline command-string spelling refuses too: `--call=...`
+    /// is the same script mode as `-c`, and the valid selection,
+    /// boundary, and command around it isolate the spelling as the
+    /// reason, the way the `-c` test above does.
+    #[farhelm_testtrace::test]
+    fn an_npm_inline_command_string_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npm-cli.js",
+                    "exec",
+                    "--package=@oh-my-pi/pi-coding-agent",
+                    "--call=omp --version",
+                    "--",
+                    "omp",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect_err("an inline npm command string must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A foreign command after the boundary refuses: the package being
+    /// available is not the bin being selected. Paired with the
+    /// admitted-selection test, which differs only in the command
+    /// token, so the refusal isolates the selection.
+    #[farhelm_testtrace::test]
+    fn a_foreign_command_after_the_npm_boundary_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npm-cli.js",
+                    "exec",
+                    "--package=@oh-my-pi/pi-coding-agent",
+                    "--",
+                    "some-other-command",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect_err("a foreign command after the boundary must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// npx's bare positional package form admits: the first token names
+    /// OMP's package and npx runs its bin, with the Bun-resulting
+    /// runtime below carrying the proof as in the npm case.
+    #[farhelm_testtrace::test]
+    fn an_npx_positional_package_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npx-cli.js",
+                    "@oh-my-pi/pi-coding-agent",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect("a positional npx package selection must be admitted");
+        assert_eq!(emitter.pid, 12);
+    }
+
+    /// npx's option form admits with the same option grammar as npm's:
+    /// exact `--package` selectors in mixed joined and separated
+    /// spellings, repeats allowed, then the `--` boundary and OMP's
+    /// bin. This pins the third accepted form and the selector
+    /// multiplicity the grammar documents — the `selected` flag the
+    /// refusal test below checks is what these repeats set.
+    #[farhelm_testtrace::test]
+    fn an_npx_option_form_with_repeated_selectors_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npx-cli.js",
+                    "--package=@oh-my-pi/pi-coding-agent",
+                    "--package",
+                    "@oh-my-pi/pi-coding-agent",
+                    "--",
+                    "omp",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect("an npx option-form selection must be admitted");
+        assert_eq!(emitter.pid, 12);
+    }
+
+    /// A boundary with no package selector refuses: the option grammar
+    /// requires at least one exact selector, so a bare `-- omp` names
+    /// no package to run the bin from. The admitted option-form test
+    /// above differs only in carrying selectors, isolating the
+    /// lower bound of the documented multiplicity.
+    #[farhelm_testtrace::test]
+    fn an_npm_boundary_without_a_package_selection_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(
+                11,
+                "/opt/node/bin/node",
+                &[
+                    "node",
+                    "/opt/node/lib/node_modules/npm/bin/npm-cli.js",
+                    "exec",
+                    "--",
+                    "omp",
+                ],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Npm)
+            .expect_err("a selector-less boundary must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A transparent shell trampoline exec'ing the launch's runtime admits:
+    /// the wrapper disappears into the runtime it names.
+    #[farhelm_testtrace::test]
+    fn a_shell_trampoline_execing_the_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "exec omp --resume conv.jsonl"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("a transparent trampoline must be admitted");
+        assert_eq!(emitter.pid, 12);
+    }
+
+    /// A shell trampoline exec'ing another program is not this launch's
+    /// transparency: the target must name the launch's own runtime.
+    #[farhelm_testtrace::test]
+    fn a_shell_trampoline_execing_another_program_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "exec some-wrapper"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a foreign trampoline target must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A chained trampoline command mentions the runtime without being
+    /// only the runtime: substring presence must not pass.
+    #[farhelm_testtrace::test]
+    fn a_chained_trampoline_mentioning_the_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            omp_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "echo ready; exec omp"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a chained trampoline must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// An entry spelling through a symlink resolves to the bundle: the
+    /// installed `omp` command is a symlink, and the kernel hands Bun
+    /// the launched spelling rather than the resolved bundle path —
+    /// observed live as `bun <home>/.bun/bin/omp ...`, which the
+    /// raw suffix alone would refuse. A dangling spelling resolves to
+    /// nothing and refuses through the raw fallback.
+    ///
+    /// Why this test matters: without resolution, every production
+    /// launch fails the descriptor while synthetic direct-entry chains
+    /// pass — the suite would prove a shape production never takes.
+    #[farhelm_testtrace::test]
+    fn an_entry_spelling_through_a_symlink_resolves_to_the_bundle() {
+        let scratch = farhelm_teststate::tempdir().expect("fixture directory");
+        let entry = scratch
+            .path()
+            .join("node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js");
+        std::fs::create_dir_all(entry.parent().expect("bundle parent")).expect("bundle layout");
+        std::fs::write(&entry, b"fixture entry").expect("entry file");
+        let shim = scratch.path().join("omp-shim");
+        std::os::unix::fs::symlink(&entry, &shim).expect("entry symlink");
+        let me = std::process::id();
+        let resolved = resolved_omp_entry(me, &os_bytes(&shim)).expect("the shim resolves");
+        assert!(
+            is_omp_bundle_entry(&resolved),
+            "the canonical path names the bundle: {resolved:?}"
+        );
+        assert!(
+            resolved_omp_entry(me, b"/nonexistent-omp-entry-xyz").is_none(),
+            "a dangling spelling resolves to nothing"
+        );
+        let shim_arg = shim.to_str().expect("UTF-8 fixture path").to_owned();
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &omp_hook_argv()),
+            corridor_link(11, "/opt/bun/bin/bun", &["bun", shim_arg.as_str()]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect("the symlinked entry admits");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// A non-hook reporter refuses even with a clean chain behind it: the
+    /// corridor never admits on ancestry shape alone.
+    #[farhelm_testtrace::test]
+    fn an_omp_reporter_without_hook_shape_is_refused() {
+        let chain = vec![
+            corridor_link(
+                12,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "agent", "instructions"],
+            ),
+            omp_runtime_link(11, &[]),
+        ];
+        let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
+            .expect_err("a non-hook reporter must be refused");
+        assert!(refusal.contains("supported hook invocation"), "{refusal}");
     }
 }
