@@ -33,8 +33,6 @@ One line per open item. This file must always match the feedback files in this d
 - `folder-history-rename-unique-failure.md` — folder-history rename fails the whole refinement on duplicate spellings.
 - `folder-merge-drops-newer-alias-into-proven.md` — folder merge deletes a newer alias without transferring it to a
   proven row.
-- `forget-splits-guarded-update-drops-fresh-contested.md` — session delete strips a fresh collision record from the new
-  connection.
 - `generic-session-accepts-placeholder-template.md` — placeholder resume template silently accepted for generic sessions
   it can never serve.
 - `getent-colonless-line-accepted-as-shell.md` — malformed colon-less getent output accepted as the login shell.

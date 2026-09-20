@@ -229,7 +229,10 @@
 - Completion criteria: stale claims cannot remove replacement-connection collision evidence or report stale in-memory
   changes; valid deletes still clear their own row and claim. Remove this feedback file and its index entry in its
   execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/770/changes. jj change:
+  `xznxtnmtlsmypqmpkoxtkszkrpzkqwlu`; bookmark: `fix-stale-delete-collision-publication`. The gated durable-delete
+  regression reproduced loss of a newer collision claim. It and two related deletion/adoption checks pass with atomic
+  guarded publication.
 
 ## in-memory-seed-skips-id-length-bound.md
 
