@@ -339,7 +339,10 @@
   cached owner and return the existing SessionOwnerAmbiguous error, preserving its ordered pair and subsequent checks.
 - Completion criteria: owner X with claimants [X, Y] is refused regardless of ordering; a sole self-claim is not falsely
   ambiguous. No routing-policy redesign. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/777/changes. jj change:
+  `tmnzxtzlzzxwzusqxzstvsuvslxmtswn`; bookmark: `fix-owner-contested-claimants`. The cache-handoff regression now
+  refuses the later competing claim and restores routing when that competitor withdraws, preserving a harmless sole
+  self-claim.
 
 ## restart-failure-says-restarted.md
 

@@ -5718,6 +5718,128 @@ async fn a_second_host_claiming_a_session_id_never_steals_its_routing() {
     );
 }
 
+/// Every contested claimant must be compared with the cached owner, not
+/// merely the first claimant in host-id order. A cache handoff can leave an
+/// old contested observation in place until its next refresh; if that host
+/// is now the cached owner, a later claimant must still keep routing closed.
+///
+/// The fixture performs that handoff through the real cache API after two
+/// actors have reported their standing collision. It then proves both sides
+/// of the boundary: `[owner, other]` refuses the route, while the remaining
+/// sole self-claim is not itself ambiguous once the other actor refreshes.
+#[farhelm_testtrace::test]
+async fn resolve_owner_rejects_a_later_contested_claimant_after_a_self_claim() {
+    let (builder, original_owner) = rest_harness::FleetBuilder::new()
+        .await
+        .ssh(
+            "user@original-owner",
+            rest_harness::HostScript {
+                identity: Some("identity-original-owner".to_string()),
+                sessions: vec![rest_harness::session("contested-handoff", 100)],
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let (builder, cached_owner) = builder
+        .ssh(
+            "user@cached-owner",
+            rest_harness::HostScript {
+                identity: Some("identity-cached-owner".to_string()),
+                sessions: vec![rest_harness::session("contested-handoff", 100)],
+                reachable: false,
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let (builder, later_claimant) = builder
+        .ssh(
+            "user@later-claimant",
+            rest_harness::HostScript {
+                identity: Some("identity-later-claimant".to_string()),
+                sessions: vec![rest_harness::session("contested-handoff", 100)],
+                reachable: false,
+                ..rest_harness::HostScript::default()
+            },
+        )
+        .await;
+    let harness = builder.start().await;
+    harness.await_refreshed(original_owner).await;
+
+    for claimant in [cached_owner, later_claimant] {
+        harness
+            .fleet
+            .edit(claimant, |script| script.reachable = true);
+        harness
+            .manager
+            .retry_now(claimant)
+            .await
+            .expect("the claimant actor is registered");
+        harness.await_refreshed(claimant).await;
+    }
+    assert_eq!(
+        harness.manager.contested_claimants("contested-handoff"),
+        vec![cached_owner, later_claimant],
+        "both actors must still report the id before moving the cache owner"
+    );
+
+    harness
+        .store
+        .replace_host_sessions(original_owner, "identity-original-owner", Vec::new(), false)
+        .await
+        .expect("clear the original cache owner");
+    harness
+        .store
+        .replace_host_sessions(
+            cached_owner,
+            "identity-cached-owner",
+            vec![rest_harness::session("contested-handoff", 100)],
+            false,
+        )
+        .await
+        .expect("move the cache entry while the actor observations remain live");
+    assert_eq!(
+        harness
+            .store
+            .host_of_session("contested-handoff")
+            .await
+            .unwrap(),
+        Some(cached_owner),
+        "the cached owner must be the first sorted contested claimant"
+    );
+
+    let err = resolve_owner(&harness.state, "contested-handoff")
+        .await
+        .err()
+        .expect("a later different claimant must keep the route fail-closed");
+    assert!(
+        matches!(
+            err.downcast_ref::<store::HostStoreError>(),
+            Some(store::HostStoreError::SessionOwnerAmbiguous { session, first, second })
+                if session == "contested-handoff"
+                    && *first == cached_owner
+                    && *second == later_claimant
+        ),
+        "the refusal must preserve the sorted cache-owner and claimant pair: {err:#}"
+    );
+
+    harness
+        .fleet
+        .edit(later_claimant, |script| script.sessions = Vec::new());
+    harness.fleet.kill_connection(later_claimant);
+    harness
+        .await_refreshed_as(later_claimant, "identity-later-claimant", 0)
+        .await;
+    assert_eq!(
+        harness.manager.contested_claimants("contested-handoff"),
+        vec![cached_owner],
+        "the remaining claimant is the cached owner itself"
+    );
+    let (owner, _) = resolve_owner(&harness.state, "contested-handoff")
+        .await
+        .expect("a sole self-claim must remain routable");
+    assert_eq!(owner, cached_owner);
+}
+
 /// A refresh whose drain PREDATES a create must not erase the create.
 ///
 /// The window is wide and entirely ordinary: a refresh drains a host's

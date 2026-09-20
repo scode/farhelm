@@ -749,15 +749,17 @@ async fn resolve_owner(
     // made it.
     let contested = state.manager.contested_claimants(session_id);
     let cached = state.store.host_of_session(session_id).await?;
-    if let Some(claimant) = contested.first()
-        && let Some(owner) = cached
-        && owner != *claimant
+    // The list is sorted for stable reporting, not for authority: its first
+    // claimant can be the cached owner while a later claimant still makes
+    // the route unsafe. A sole self-claim remains harmless.
+    if let Some(owner) = cached
+        && let Some(claimant) = contested.into_iter().find(|claimant| *claimant != owner)
     {
         return Err(anyhow::Error::new(
             store::HostStoreError::SessionOwnerAmbiguous {
                 session: session_id.to_string(),
-                first: owner.min(*claimant),
-                second: owner.max(*claimant),
+                first: owner.min(claimant),
+                second: owner.max(claimant),
             },
         ));
     }
