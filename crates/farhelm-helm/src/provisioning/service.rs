@@ -610,7 +610,9 @@ impl ProvisioningService {
     pub(super) async fn plan_update(&self, host: HostId) -> anyhow::Result<UpdatePlanResponse> {
         let row = self.host_row(host).await?;
         if row.kind == HostKind::Local {
-            bail!(self.local_handoff_reason().await?);
+            return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                self.local_handoff_reason().await?,
+            )));
         }
         self.plan_update_unguarded(host).await
     }

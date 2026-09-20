@@ -3051,6 +3051,41 @@ mod tests {
         assert!(service.memory.lock().await.plans.is_empty());
     }
 
+    /// The local UPDATE handoff is a conflict response, not a server fault.
+    ///
+    /// The route must not return an update plan for the helm's own machine:
+    /// setup owns that installation, and a client needs a recoverable status
+    /// rather than a 500 that suggests the panel failed unexpectedly.
+    #[farhelm_testtrace::test]
+    async fn local_update_handoff_is_an_http_conflict_without_a_plan() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let local = local_row(&harness).await;
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend, root.path());
+        let state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        ));
+        harness.state = Arc::clone(&state);
+        let response = harness
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/hosts/{local}/update"))
+                    .header("host", "127.0.0.1:7433")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(service.memory.lock().await.plans.is_empty());
+    }
+
     /// A unit file that exists but names no command this parser can
     /// classify must fail CLOSED. "I cannot tell what this runs" is not
     /// "there is nothing here": answering the generic run-setup message
