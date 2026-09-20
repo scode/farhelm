@@ -324,7 +324,10 @@
 - Completion criteria: closure cannot drive repeated drains; timer, client-closure and nudge branches remain selectable.
   Normal notifications still refresh without reconnecting. Remove this feedback file and its index entry in its
   execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/776/changes. jj change:
+  `loqoozyupyzxrqskquntnvtsnstmvuyu`; bookmark: `fix-closed-refresh-watch`. The closed-watch probe stayed at one
+  completed request instead of 106; timer refresh and nudge-driven reconnect still completed. The temporary probe was
+  removed after verification.
 
 ## resolve-owner-compares-first-claimant-only.md
 

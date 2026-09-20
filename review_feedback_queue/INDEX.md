@@ -51,7 +51,6 @@ One line per open item. This file must always match the feedback files in this d
 - `quarantine-sweep-silently-aborts.md` — the quarantine sweep silently stops at the first unreadable entry.
 - `reap-competing-sink-waits-unboundedly.md` — losing a sink-install race can hang an attach forever.
 - `redirect-hop-bound-off-by-one.md` — redirect hop bound enforces 4 hops while the policy documents 5.
-- `refresh-arm-busy-drains-on-dropped-sender.md` — orphaned connection actor drains refreshes with no backoff.
 - `refresh-publish-races-retarget-in-check-then-act-gap.md` — retarget in the check-then-publish gap is briefly
   overwritten by the old connection.
 - `refresh-timeout-misses-profile-and-commit-tail.md` — refresh timeout misses the profile and commit tail, freezing a
