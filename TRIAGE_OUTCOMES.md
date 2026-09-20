@@ -261,7 +261,10 @@
 - Completion criteria: local discovery identity conflicts produce actionable conflict responses without changing
   identity or dial coordinates. Successful registration and internal errors retain their behavior. Remove this feedback
   file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/772/changes. jj change:
+  `soyrnolxnmwzvkzkykypvpprkskyormm`; bookmark: `fix-local-discovery-identity-conflict`. The endpoint regression
+  reproduced HTTP 500 before the fix and now returns HTTP 409 while retaining the recorded identity. Its fixture
+  explicitly verifies that the original identity was stored.
 
 ## local-update-refusal-returns-500.md
 

@@ -477,9 +477,25 @@ impl ProvisioningService {
                         .await?
                     {
                         FirstContactOutcome::Recorded => {}
-                        outcome => bail!(
-                            "the local supervisor identity could not be registered: {outcome:?}"
-                        ),
+                        FirstContactOutcome::Mismatch { recorded, reported } => {
+                            return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                                host: row.id,
+                                expected: recorded,
+                                actual: Some(reported),
+                            }));
+                        }
+                        FirstContactOutcome::Collision { owner } => {
+                            return Err(anyhow::Error::new(HostStoreError::IdentityClaimed {
+                                host: row.id,
+                                identity,
+                                owner,
+                            }));
+                        }
+                        FirstContactOutcome::StaleAttempt { .. } => {
+                            return Err(anyhow::Error::new(HostStoreError::StaleAttempt {
+                                host: row.id,
+                            }));
+                        }
                     }
                 }
                 (row.id, false)
