@@ -105,9 +105,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
 
-- Make the raw-byte fixture in `e2e/tests/terminal-keys.spec.ts` use a dumper that emits live bytes on supported test
-  substrates. Ubuntu 26.04's uutils od withheld the sentinel; GNU od passed all ten cases without source changes.
-  Preserve the complete byte sequence and single-write assertions rather than ending the stream early to flush output.
 - Investigate the full-run backspace/Ctrl+C failures in `e2e/tests/terminal-flood.spec.ts`. Both engines failed during
   session-deletion setup after the large-paste case, before the input assertions: `deleted.ok()` was false. Both passed
   in narrow candidate and baseline sequences. Inspect the deletion response and session lifecycle evidence to

@@ -522,8 +522,10 @@ plain Enter after the chord all reached `RAWREADY` but missed the final sentinel
 in the isolated runner made all ten key cases pass in `25c38eeb-c7f5-4e6e-af1b-50d6934f8db6`, which selected
 `terminal-keys.spec.ts profiles.spec.ts -g 'Shift.Enter|plain Enter|Ctrl.Shift.Enter|outside click overrides a delayed|profile edited in another browser'`
 on the same clean revision, both engines, one worker and zero retries. No product or fixture source changed. The
-full-run failures therefore do not establish lost Farhelm input. Disposition: open fixture portability follow-up in
-TODO.md; require a live-output dumper without weakening the complete byte-sequence oracle.
+full-run failures therefore do not establish lost Farhelm input. Disposition: fixed in #786. The dump now spends a `dd`
+and a short-lived `od` per byte, so a process exit is what flushes it and no dumper's buffering can withhold a sentinel;
+the complete byte-sequence and single-write oracles are unchanged. Reproduced deterministically before the fix by
+putting a uutils `od` 0.0.24 alone on PATH for the spec's own recorded browser run.
 
 Class: substrate
 

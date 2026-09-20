@@ -29,7 +29,7 @@
 // receives back onto the screen, so the assertions below read the actual
 // terminal buffer rather than a client-side interception.
 //
-// ## The exact `stty`/`od` incantation, and why each flag is there
+// ## The exact `stty` incantation, and why each flag is there
 //
 // `stty raw` alone is the wrong tool here even though it is the usual
 // one-liner for "show me raw keystrokes": it disables BOTH input processing
@@ -47,19 +47,46 @@
 //
 //   stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0
 //
-// `od`'s own defaults are equally unsafe for a byte-at-a-time proof: any
-// dump width greater than one buffers input until it has a FULL row before
-// printing anything — verified directly against a real pty (an 8-byte
-// width, fed a two-byte write, produced no output at all until an eighth
-// byte arrived) — so a two- or one-byte keystroke would simply never
-// appear on its own. `-w1` fixes that (one byte, one line, flushed
-// immediately), but introduces a second trap: `od` silently collapses a run
-// of IDENTICAL consecutive lines into a bare `*`, which would make "exactly
-// one `\r` arrived" indistinguishable from "several arrived, collapsed to
-// one glyph" — exactly the ambiguity the shift-enter fix's whole promise
-// (one `\r`, not a duplicate) has to rule out. `-v` (`--output-duplicates`)
-// disables that collapsing. All four flags were confirmed against a real
-// pty pair (a Python `pty.openpty()` harness) before writing this file.
+// ## Why `od` runs once per byte instead of streaming
+//
+// One long-lived `od` reading the pty directly is the obvious dumper, and
+// it is what this file used to do: `od -v -An -tx1 -w1`, where `-w1` got a
+// line per byte flushed as it arrived (any wider dump withholds input until
+// it has a FULL row — an 8-byte width fed a two-byte write produced no
+// output at all until an eighth byte arrived) and `-v` stopped `od`
+// collapsing a run of IDENTICAL lines into a bare `*`.
+//
+// That works on GNU coreutils and does not work on uutils, which is what
+// Ubuntu 26.04 ships as its coreutils. Eight of this file's ten cases
+// failed there on uutils `od` 0.8.0, each one reaching `RAWREADY` and then
+// timing out waiting for its sentinel byte (FLAKES.md, 2026-09-08). Probed
+// since against a real pty pair (a Python `pty.openpty()` harness, the same
+// way the flags above were confirmed), uutils `od` 0.0.24 fed a byte at a
+// time printed the first couple of bytes and then withheld everything after
+// them, sentinel included. Where it stops is not stable even between
+// probes of that identical invocation: one emitted nothing at all. I have
+// not chased which buffer the bytes sit in, and for this file's purposes it
+// does not matter; what the probes establish is only the negative, that a
+// uutils `od` does not promise a line per byte as the byte arrives.
+// `stdbuf -o0` is not the escape hatch it looks like: it works by
+// preloading a shim over libc's stdio, and a Rust `od` never goes through
+// libc's stdio.
+//
+// So nothing here depends on how any dumper buffers. Each byte gets its own
+// `dd bs=1 count=1` feeding its own short-lived `od`, and a process that has
+// exited has flushed. Both flags above retire with the streaming: a single
+// byte cannot exceed any row width, and a single byte is not a run of
+// identical lines — which still matters, because "exactly one `\r` arrived"
+// and "several arrived, collapsed to one glyph" have to stay
+// distinguishable for the shift-enter fix's promise to be testable at all.
+// The output text is byte-for-byte what the old fixture produced, leading
+// space included, on both implementations.
+//
+// The loop stops at a genuine end of input rather than spinning on it: `dd`
+// yields nothing at EOF, the `[ -n "$b" ]` test fails, and the shell exits.
+// That is not the early stop this fixture has to avoid — no byte can arrive
+// after EOF — and it keeps a fixture whose pane went away from burning a
+// core on a machine other agents are timing their own tests on.
 //
 // ## Reading GROWTH, not a text SLICE
 //
@@ -96,8 +123,8 @@ import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, termText, waitForTermText } from "./helpers/term";
 
 /**
- * Every hex byte VALUE `od -v -An -tx1 -w1` has printed so far, in order,
- * read off the CURRENT full terminal buffer.
+ * Every hex byte VALUE the fixture's per-byte `od -An -tx1` has printed so
+ * far, in order, read off the CURRENT full terminal buffer.
  *
  * Each of `od`'s lines is matched WHOLE — `/^ ?[0-9a-f]{2}$/` against the
  * complete (already right-trimmed) row text — rather than searching for a
@@ -128,8 +155,9 @@ function hasEscCrPair(bytes: string[]): boolean {
 
 /**
  * The fixture invocation: a noncanonical, no-echo, byte-exact hex dump of
- * everything the pty receives — see this file's header for why each `stty`
- * and `od` flag is there.
+ * everything the pty receives, one line per byte — see this file's header
+ * for why each `stty` flag is there, and why the dump spends a `dd` and an
+ * `od` per byte rather than leaving one `od` streaming.
  *
  * Gated behind `read _gate`, the same idiom terminal-clipboard.spec.ts's
  * OSC 52 test uses and for the analogous reason, but for a DIFFERENT race:
@@ -148,7 +176,9 @@ function hasEscCrPair(bytes: string[]): boolean {
  */
 const RAW_DUMP_INVOCATION =
   "sh -c 'read _gate && stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0 && " +
-  "printf \"RAWREADY\\n\" && od -v -An -tx1 -w1'";
+  "printf \"RAWREADY\\n\" && " +
+  "while :; do b=$(dd bs=1 count=1 2>/dev/null | od -An -tx1); " +
+  "[ -n \"$b\" ] || break; printf \"%s\\n\" \"$b\"; done'";
 
 /**
  * The read-boundary variant of [`RAW_DUMP_INVOCATION`]: same gate and
@@ -167,6 +197,12 @@ const RAW_DUMP_INVOCATION =
  * DETERMINISTIC half of the claim therefore lives beside it in the same
  * test: a websocket-frame capture asserting the chord leaves the browser
  * as exactly one two-byte frame, which no pty timing can blur.
+ *
+ * This variant never had the uutils problem the header describes, and for
+ * the same reason the fix there works: its `od` is handed a closed pipe
+ * every iteration, so it exits and flushes per read without anyone having
+ * to trust its buffering. `-v` does still earn its place here, unlike in
+ * the per-byte fixture — one read can carry 4096 identical bytes.
  */
 const READ_GROUPED_DUMP_INVOCATION =
   "sh -c 'read _gate && stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0 && " +
