@@ -21,8 +21,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Add the major OpenAI models to the model choices for every supported provider-independent harness (all supported
-  harnesses except Claude and OpenAI).
 - Fix the Codex restart/resume bug where Farhelm can capture the wrong session ID and then resume a nonexistent
   conversation even though the original transcript remains intact. The reported case stored
   `01a0a9fb-e20c-7741-9450-138bd276ad9a`, while the visible conversation was `01a07eed-44dd-7a53-be64-54190d4c645e`, and
