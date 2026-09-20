@@ -263,17 +263,18 @@ pub fn run_with(
     payload: impl Read + Send + 'static,
     budget: Duration,
     hook_log: Option<PathBuf>,
+    entry_vendor: farhelm_proto::ReportVendor,
 ) {
     // Two nested catches, for two different failures. The inner one turns
     // a panic in the work into the `panic` outcome, so the log still gets
     // its one line; the outer one guarantees that even a panic while
     // logging cannot escape into the caller, which must reach `exit(0)`.
-    let outcome =
-        match std::panic::catch_unwind(AssertUnwindSafe(|| run_inner(credential, payload, budget)))
-        {
-            Ok(outcome) => outcome,
-            Err(_) => Outcome::word("panic"),
-        };
+    let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+        run_inner(credential, payload, budget, entry_vendor)
+    })) {
+        Ok(outcome) => outcome,
+        Err(_) => Outcome::word("panic"),
+    };
     let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
         append_log(hook_log.as_deref(), &outcome.render(unix_seconds()));
     }));
@@ -290,6 +291,7 @@ fn run_inner(
     credential: Option<HookCredential>,
     payload: impl Read + Send + 'static,
     budget: Duration,
+    entry_vendor: farhelm_proto::ReportVendor,
 ) -> Outcome {
     let deadline = Instant::now() + budget;
     let Some(credential) = credential else {
@@ -307,7 +309,7 @@ fn run_inner(
             return Outcome::detail("bad-payload", format!("no-reader: {err}"));
         }
     };
-    let request = match parse_payload(&bytes) {
+    let request = match parse_payload(&bytes, entry_vendor) {
         Ok(parsed) => parsed,
         Err(reason) => return Outcome::detail("bad-payload", reason),
     };
@@ -391,11 +393,27 @@ fn read_payload(
 
 /// Build a bounded report without interpreting vendor-specific evidence.
 ///
+/// `entry_vendor` is the `--vendor` flag on this hook's own command line —
+/// the vendor-specific entry point Farhelm installed — and it alone
+/// decides the report's discriminator. It is never inferred from the
+/// payload: the supervisor rejects a discriminator/kind mismatch before
+/// any vendor I/O, so guessing here would only move the refusal later.
+///
 /// Only the supervisor knows the session's durable agent kind. Preserve the
-/// exact transcript and event fields for its Codex checks; malformed evidence
-/// must not disappear into a missing value or change another vendor's parser.
-/// Unknown vendor fields remain ignored.
-fn parse_payload(bytes: &[u8]) -> Result<ControlMsg, &'static str> {
+/// exact transcript, event, and agent-identity fields for its checks;
+/// malformed evidence must not disappear into a missing value or change
+/// another vendor's parser. Unknown vendor fields remain ignored.
+///
+/// The payload's own `vendor` field, where the Pi/OMP assets send one, is
+/// kept purely as a consistency check: present-and-mismatched rejects,
+/// absent-or-agreeing passes. Agreement grants nothing — the entry point
+/// is authoritative either way.
+fn parse_payload(
+    bytes: &[u8],
+    entry_vendor: farhelm_proto::ReportVendor,
+) -> Result<ControlMsg, &'static str> {
+    use farhelm_proto::ReportVendor;
+    use farhelm_supervisor::agent_kind::LocatorVendor;
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
     let session_id = match value.get("session_id") {
         None | Some(serde_json::Value::Null) => return Err("missing-session-id"),
@@ -412,48 +430,61 @@ fn parse_payload(bytes: &[u8]) -> Result<ControlMsg, &'static str> {
         Some(serde_json::Value::String(source)) => source.clone(),
         _ => String::new(),
     };
-    // A vendor-prefixed payload encodes the durable locator under its own
-    // vendor's spelling; the two locator vendors never accept each other's
-    // tokens downstream, which starts here with a per-vendor encode.
-    const LOCATOR_VENDORS: &[(&str, farhelm_supervisor::agent_kind::LocatorVendor)] = &[
-        ("pi", farhelm_supervisor::agent_kind::LocatorVendor::Pi),
-        ("omp", farhelm_supervisor::agent_kind::LocatorVendor::Omp),
-    ];
+    // The entry point is authoritative; a payload `vendor` that disagrees
+    // with it is a misrouted report, not a second opinion.
+    let entry_name = match entry_vendor {
+        ReportVendor::Claude => "claude",
+        ReportVendor::Codex => "codex",
+        ReportVendor::Goose => "goose",
+        ReportVendor::Pi => "pi",
+        ReportVendor::Omp => "omp",
+    };
     match value.get("vendor") {
-        Some(serde_json::Value::String(vendor)) => {
-            let Some((_, expected)) = LOCATOR_VENDORS.iter().find(|(name, _)| name == vendor)
-            else {
-                return Err("unknown-vendor");
-            };
-            let session_file = match value.get("session_file") {
-                None | Some(serde_json::Value::Null) => None,
-                Some(serde_json::Value::String(path)) => Some(path.clone()),
-                Some(_) => return Err("session-file-not-a-string"),
-            };
-            let locator = farhelm_supervisor::agent_kind::SessionLocator {
-                version: 1,
-                session_id: session_id.clone(),
-                session_file,
-            };
-            let encoded = farhelm_supervisor::agent_kind::encode_locator(*expected, locator)
-                .map_err(|_| "invalid-locator")?;
-            return Ok(ControlMsg::ReportConversation {
-                req_id: REQUEST_ID,
-                conversation: encoded,
-                source,
-                transcript_path: None,
-                hook_event_name: None,
-            });
-        }
+        None | Some(serde_json::Value::Null) => {}
+        Some(serde_json::Value::String(vendor)) if vendor == entry_name => {}
+        Some(serde_json::Value::String(_)) => return Err("vendor-mismatch"),
         Some(_) => return Err("vendor-not-a-string"),
-        None => {}
+    }
+    // A locator-vendor entry point encodes the durable locator under its
+    // own vendor's spelling; the two locator vendors never accept each
+    // other's tokens downstream, which starts here with a per-vendor
+    // encode. Every other entry point forwards the id verbatim with its
+    // raw evidence attached.
+    if let Some(expected) = match entry_vendor {
+        ReportVendor::Pi => Some(LocatorVendor::Pi),
+        ReportVendor::Omp => Some(LocatorVendor::Omp),
+        ReportVendor::Claude | ReportVendor::Codex | ReportVendor::Goose => None,
+    } {
+        let session_file = match value.get("session_file") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::String(path)) => Some(path.clone()),
+            Some(_) => return Err("session-file-not-a-string"),
+        };
+        let locator = farhelm_supervisor::agent_kind::SessionLocator {
+            version: 1,
+            session_id: session_id.clone(),
+            session_file,
+        };
+        let encoded = farhelm_supervisor::agent_kind::encode_locator(expected, locator)
+            .map_err(|_| "invalid-locator")?;
+        return Ok(ControlMsg::ReportConversation {
+            req_id: REQUEST_ID,
+            vendor: entry_vendor,
+            conversation: encoded,
+            source,
+            transcript_path: None,
+            hook_event_name: None,
+            agent_id: value.get("agent_id").cloned(),
+        });
     }
     Ok(ControlMsg::ReportConversation {
         req_id: REQUEST_ID,
+        vendor: entry_vendor,
         conversation: session_id.clone(),
         source,
         transcript_path: value.get("transcript_path").cloned(),
         hook_event_name: value.get("hook_event_name").cloned(),
+        agent_id: value.get("agent_id").cloned(),
     })
 }
 
@@ -761,6 +792,7 @@ fn append_log(path: Option<&Path>, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use farhelm_proto::ReportVendor;
     use farhelm_teststate::thread::FixtureThread;
     use std::io::Cursor;
 
@@ -1004,7 +1036,8 @@ mod tests {
             conversation: id,
             source,
             ..
-        } = parse_payload(CLAUDE_PAYLOAD.as_bytes()).expect("claude payload parses")
+        } = parse_payload(CLAUDE_PAYLOAD.as_bytes(), ReportVendor::Claude)
+            .expect("claude payload parses")
         else {
             panic!("expected a conversation report");
         };
@@ -1022,7 +1055,8 @@ mod tests {
             conversation: id,
             source,
             ..
-        } = parse_payload(CODEX_PAYLOAD.as_bytes()).expect("codex payload parses")
+        } = parse_payload(CODEX_PAYLOAD.as_bytes(), ReportVendor::Codex)
+            .expect("codex payload parses")
         else {
             panic!("expected a conversation report");
         };
@@ -1042,7 +1076,8 @@ mod tests {
             conversation: id,
             source,
             ..
-        } = parse_payload(payload.as_bytes()).expect("unknown fields are ignored")
+        } = parse_payload(payload.as_bytes(), ReportVendor::Claude)
+            .expect("unknown fields are ignored")
         else {
             panic!("expected a conversation report");
         };
@@ -1059,7 +1094,8 @@ mod tests {
             conversation: id,
             source,
             ..
-        } = parse_payload(br#"{"session_id":"abc"}"#).expect("id alone is enough")
+        } = parse_payload(br#"{"session_id":"abc"}"#, ReportVendor::Claude)
+            .expect("id alone is enough")
         else {
             panic!("expected a conversation report");
         };
@@ -1086,7 +1122,8 @@ mod tests {
             (oversized.as_bytes(), "oversized-session-id"),
         ];
         for (payload, expected) in cases {
-            let reason = parse_payload(payload).expect_err("payload should be rejected");
+            let reason = parse_payload(payload, ReportVendor::Claude)
+                .expect_err("payload should be rejected");
             assert_eq!(
                 reason,
                 expected,
@@ -1104,7 +1141,8 @@ mod tests {
         let payload = format!(r#"{{"session_id":"{}"}}"#, "x".repeat(MAX_SESSION_ID_BYTES));
         let ControlMsg::ReportConversation {
             conversation: id, ..
-        } = parse_payload(payload.as_bytes()).expect("an id at the cap is fine")
+        } = parse_payload(payload.as_bytes(), ReportVendor::Claude)
+            .expect("an id at the cap is fine")
         else {
             panic!("expected a conversation report");
         };
@@ -1129,7 +1167,8 @@ mod tests {
         let payload = format!(r#"{{"session_id":"{at_cap}"}}"#);
         let ControlMsg::ReportConversation {
             conversation: id, ..
-        } = parse_payload(payload.as_bytes()).expect("128 bytes is at the cap")
+        } = parse_payload(payload.as_bytes(), ReportVendor::Claude)
+            .expect("128 bytes is at the cap")
         else {
             panic!("expected a conversation report");
         };
@@ -1139,26 +1178,35 @@ mod tests {
         let over_cap = "😀".repeat(MAX_SESSION_ID_BYTES / 4 + 1);
         let payload = format!(r#"{{"session_id":"{over_cap}"}}"#);
         assert_eq!(
-            parse_payload(payload.as_bytes()).expect_err("132 bytes is over the cap"),
+            parse_payload(payload.as_bytes(), ReportVendor::Claude)
+                .expect_err("132 bytes is over the cap"),
             "oversized-session-id"
         );
     }
 
-    /// A locator-reporting vendor's payload encodes the durable locator under
-    /// that vendor's own prefix, an unknown vendor keeps being refused, and a
-    /// non-string vendor is never silently read as a plain id. These are the
-    /// three branches of [`parse_payload`]'s vendor handling; pinning them
-    /// together keeps a new vendor from accidentally widening the plain-id
-    /// path or from cross-reporting through the other vendor's prefix.
+    /// The entry point's `--vendor` decides the discriminator and the
+    /// locator encoding; the payload's own `vendor` is only a consistency
+    /// check. Pinning them together keeps a new vendor from accidentally
+    /// widening the plain-id path, from cross-reporting through another
+    /// vendor's prefix, or from inferring the envelope from payload text
+    /// the supervisor would then have to distrust.
+    ///
+    /// Why this test matters: the discriminator is what lets the
+    /// supervisor reject a cross-kind report before any vendor I/O. If
+    /// the hook inferred it from the payload, a credential-holding child
+    /// could choose its own kind; sourcing it from the installed entry
+    /// point keeps that choice with the injector.
     #[farhelm_testtrace::test]
     fn vendor_payloads_encode_locators_per_vendor_and_stay_closed() {
         let ControlMsg::ReportConversation {
             conversation: id,
             source,
+            vendor,
             ..
         } = parse_payload(
             br#"{"vendor":"omp","session_id":"omp-id-1",
             "session_file":"/tmp/s/conv.jsonl","source":"session_start"}"#,
+            ReportVendor::Omp,
         )
         .expect("omp payload parses")
         else {
@@ -1169,32 +1217,105 @@ mod tests {
             "OMP reports under its own prefix: {id}"
         );
         assert_eq!(source, "session_start");
+        assert_eq!(vendor, ReportVendor::Omp);
 
         let ControlMsg::ReportConversation {
-            conversation: id, ..
-        } = parse_payload(br#"{"vendor":"pi","session_id":"pi-1"}"#).expect("pi payload parses")
+            conversation: id,
+            vendor,
+            ..
+        } = parse_payload(br#"{"vendor":"pi","session_id":"pi-1"}"#, ReportVendor::Pi)
+            .expect("pi payload parses")
         else {
             panic!("expected a conversation report");
         };
         assert!(id.starts_with("pi:"), "Pi's spelling is unchanged: {id}");
+        assert_eq!(vendor, ReportVendor::Pi);
 
+        // The entry point is authoritative without a payload vendor: a Pi
+        // entry encodes the locator even when the JSON names none.
+        let ControlMsg::ReportConversation {
+            conversation: id,
+            vendor,
+            ..
+        } = parse_payload(br#"{"session_id":"pi-2"}"#, ReportVendor::Pi)
+            .expect("a vendorless pi payload still encodes")
+        else {
+            panic!("expected a conversation report");
+        };
+        assert!(id.starts_with("pi:"), "entry decides the encoding: {id}");
+        assert_eq!(vendor, ReportVendor::Pi);
+
+        // Present-and-mismatched rejects; the payload never overrides the
+        // entry point.
         assert_eq!(
-            parse_payload(br#"{"vendor":"goose","session_id":"x"}"#)
-                .expect_err("an unknown vendor is refused"),
-            "unknown-vendor"
+            parse_payload(br#"{"vendor":"pi","session_id":"x"}"#, ReportVendor::Omp,)
+                .expect_err("a payload vendor disagreeing with the entry is refused"),
+            "vendor-mismatch"
         );
         assert_eq!(
-            parse_payload(br#"{"vendor":7,"session_id":"x"}"#)
+            parse_payload(
+                br#"{"vendor":"goose","session_id":"x"}"#,
+                ReportVendor::Claude,
+            )
+            .expect_err("a foreign payload vendor is refused"),
+            "vendor-mismatch"
+        );
+        assert_eq!(
+            parse_payload(br#"{"vendor":7,"session_id":"x"}"#, ReportVendor::Claude)
                 .expect_err("a non-string vendor is refused"),
             "vendor-not-a-string"
         );
         // A session_file that is not a string is refused rather than
         // stringified into a resume target.
         assert_eq!(
-            parse_payload(br#"{"vendor":"omp","session_id":"x","session_file":42}"#)
-                .expect_err("a non-string session file is refused"),
+            parse_payload(
+                br#"{"vendor":"omp","session_id":"x","session_file":42}"#,
+                ReportVendor::Omp,
+            )
+            .expect_err("a non-string session file is refused"),
             "session-file-not-a-string"
         );
+    }
+
+    /// Raw subagent evidence crosses the socket verbatim: the hook never
+    /// interprets it, so a typed marker survives for the supervisor to
+    /// reject before sanitation, and absence stays distinguishable from a
+    /// malformed value.
+    ///
+    /// Why this test matters: `agent_id` is the signal that separates a
+    /// foreground `SessionStart` from a delegated subagent event. If the
+    /// hook dropped it (as it once did) or coerced a wrong-typed value
+    /// to absent, the doorway could not tell the two apart.
+    #[farhelm_testtrace::test]
+    fn agent_identity_crosses_verbatim_for_the_doorway() {
+        let ControlMsg::ReportConversation { agent_id, .. } = parse_payload(
+            br#"{"session_id":"abc","agent_id":"sub-1"}"#,
+            ReportVendor::Claude,
+        )
+        .expect("an agent identity parses") else {
+            panic!("expected a conversation report");
+        };
+        assert_eq!(
+            agent_id,
+            Some(serde_json::Value::String("sub-1".to_string()))
+        );
+
+        let ControlMsg::ReportConversation { agent_id, .. } =
+            parse_payload(br#"{"session_id":"abc"}"#, ReportVendor::Claude)
+                .expect("absence parses")
+        else {
+            panic!("expected a conversation report");
+        };
+        assert_eq!(agent_id, None);
+
+        let ControlMsg::ReportConversation { agent_id, .. } = parse_payload(
+            br#"{"session_id":"abc","agent_id":7}"#,
+            ReportVendor::Claude,
+        )
+        .expect("a wrong-typed identity still parses here") else {
+            panic!("expected a conversation report");
+        };
+        assert_eq!(agent_id, Some(serde_json::Value::from(7)));
     }
 
     /// Without a credential the run must stop before any socket work, and
@@ -1211,6 +1332,7 @@ mod tests {
             Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         assert!(
             started.elapsed() < TEST_BUDGET,
@@ -1250,7 +1372,13 @@ mod tests {
     fn no_credential_never_touches_stdin() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = dir.path().join("hook-log").join("s.log");
-        run_with(None, PanicOnRead, TEST_BUDGET, Some(log.clone()));
+        run_with(
+            None,
+            PanicOnRead,
+            TEST_BUDGET,
+            Some(log.clone()),
+            ReportVendor::Claude,
+        );
         let line = single_line(&log);
         assert!(line.ends_with(" no-credential"), "line was {line:?}");
     }
@@ -1290,6 +1418,7 @@ mod tests {
                 Cursor::new(payload.to_vec()),
                 TEST_BUDGET,
                 Some(log.clone()),
+                ReportVendor::Claude,
             );
             let line = single_line(&log);
             assert!(
@@ -1328,6 +1457,7 @@ mod tests {
                 Cursor::new(payload.to_string().into_bytes()),
                 TEST_BUDGET,
                 Some(log.clone()),
+                ReportVendor::Claude,
             );
             let line = single_line(&log);
             assert!(
@@ -1358,6 +1488,7 @@ mod tests {
             Cursor::new(Vec::new()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         run_with(
             Some(HookCredential {
@@ -1368,6 +1499,7 @@ mod tests {
             Cursor::new(b"not json at all".to_vec()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
 
         let text = std::fs::read_to_string(&log).expect("hook log should exist");
@@ -1398,6 +1530,7 @@ mod tests {
             Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         let line = single_line(&log);
         let detail = line.splitn(3, ' ').nth(2).expect("outcome word and detail");
@@ -1434,6 +1567,7 @@ mod tests {
             read_half,
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         assert!(
             started.elapsed() < TEST_BUDGET + Duration::from_millis(500),
@@ -1478,6 +1612,7 @@ mod tests {
             Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         assert!(
             started.elapsed() < TEST_BUDGET + Duration::from_millis(500),
@@ -1601,6 +1736,7 @@ mod tests {
             Cursor::new(CLAUDE_PAYLOAD.to_string().into_bytes()),
             Duration::from_secs(5),
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         server
             .finish(SERVER_DEADLINE)
@@ -1669,6 +1805,7 @@ mod tests {
             Cursor::new(Vec::new()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
 
         let mode = std::fs::metadata(log.parent().expect("parent"))
@@ -1695,6 +1832,7 @@ mod tests {
             Cursor::new(Vec::new()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
 
         assert!(!log.exists(), "nothing should have been created");
@@ -1718,6 +1856,7 @@ mod tests {
             Cursor::new(Vec::new()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
 
         let line = single_line(&log);
@@ -1756,6 +1895,7 @@ mod tests {
             Cursor::new(payload.to_string().into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         let line = single_line(&log);
         assert!(
@@ -1792,6 +1932,7 @@ mod tests {
             Cursor::new(payload.into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         let line = single_line(&log);
         assert!(line.ends_with(" a_b_c d_e"), "line was {line:?}");
@@ -1818,6 +1959,7 @@ mod tests {
             Cursor::new(payload.into_bytes()),
             TEST_BUDGET,
             Some(log.clone()),
+            ReportVendor::Claude,
         );
         assert!(single_line(&log).contains(" bad-payload oversized"));
     }

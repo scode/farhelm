@@ -29,7 +29,10 @@ export default function farhelmConversation(pi) {
                 return;
             }
             try {
-                const child = execFile(executable, ["internal", "hook"], {
+                // The envelope discriminator, sourced from this
+                // asset's own entry point: the payload `vendor`
+                // above stays as a consistency check only.
+                const child = execFile(executable, ["internal", "hook", "--vendor", "pi"], {
                     timeout: 2000,
                     maxBuffer: 8192,
                 }, () => resolve());

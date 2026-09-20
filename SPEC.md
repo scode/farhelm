@@ -854,6 +854,15 @@ Compaction preserves the conversation, and a verified new conversation replaces 
 remain stored but are not offered as exact resume targets. Missing or changed transcript evidence refuses Resume rather
 than silently launching fresh or selecting a different historical conversation.
 
+Every conversation-identity report carries a closed vendor discriminator naming the adapter that produced it — the
+injected hook command, the Goose helper, or a shipped asset — and a report addressed to a session of another kind is
+refused before any vendor state is consulted. The discriminator routes; it does not prove. Admission still requires the
+session kind's own foreground and record proofs, and exact resume additionally requires versioned proof that the binding
+was admitted under those proofs (with the historical exceptions stated below). Old senders that predate the
+discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored identity, no
+offer, no ambiguity verdict, no pending state. Resume is never silently turned into fresh, and historical captures are
+never rewritten to look proven.
+
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
 subcommands, print/mode/export/alias/help/version/license/list-models occurrences, the reserved-word rejecting forms,

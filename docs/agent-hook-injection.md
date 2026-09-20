@@ -100,16 +100,19 @@ forms such as `env -i …` remain untouched.
 
 ## What the hook does
 
-The farhelm binary itself is the hook, invoked as `farhelm internal hook --announce` by an absolute path — the flag is
-present by default; see "Turning it off" below for the switch that removes it. It reads the agent's `SessionStart`
-payload from stdin and forwards the conversation id, the vendor's `source`, and any transcript path and event name.
-Claude uses the source for diagnostics. Codex requires `SessionStart` with source `startup`, `resume`, `clear`, or
-`compact`, plus foreground attribution and exact-record validation. These fields go over `supervisor.sock` in the
-supervisor's state directory, authenticated with the per-session credential already in the launch environment. There is
-no per-session socket. The hook always exits 0 — including on a panic — and gives up after two seconds, stdin read
-included. Outside a farhelm session there is no credential, so identity reporting exits immediately and touches no
-socket — though if `--announce` was passed on the command line, the pointer line described below still prints
-regardless, since it needs no credential at all.
+The farhelm binary itself is the hook, invoked as `farhelm internal hook --vendor <adapter> --announce` by an absolute
+path — the announce flag is present by default; see "Turning it off" below for the switch that removes it. The
+`--vendor` flag names which adapter this hook invocation is (Claude, Codex, Pi, or OMP from an injected command; the
+Goose helper supplies its own internally), so the supervisor can refuse a report addressed to a session of another kind
+before consulting any vendor state. It reads the agent's `SessionStart` payload from stdin and forwards the conversation
+id, the vendor's `source`, and any transcript path, event name, and subagent identity. Claude uses the source for
+diagnostics. Codex requires `SessionStart` with source `startup`, `resume`, `clear`, or `compact`, plus foreground
+attribution and exact-record validation. These fields go over `supervisor.sock` in the supervisor's state directory,
+authenticated with the per-session credential already in the launch environment. There is no per-session socket. The
+hook always exits 0 — including on a panic — and gives up after two seconds, stdin read included. Outside a farhelm
+session there is no credential, so identity reporting exits immediately and touches no socket — though if `--announce`
+was passed on the command line, the pointer line described below still prints regardless, since it needs no credential
+at all.
 
 It never prints a diagnostic, on either descriptor. It does print one deliberate line, on stdout, unless you have turned
 that off: the pointer telling the agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that

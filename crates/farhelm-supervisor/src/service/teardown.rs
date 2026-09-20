@@ -1170,6 +1170,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1382,6 +1383,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1522,6 +1524,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1613,6 +1616,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.clone(),
                     parent: None,
                     archived: false,
@@ -1677,6 +1681,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     archived: false,

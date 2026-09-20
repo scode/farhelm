@@ -145,6 +145,30 @@ async fn wait_for_offer(
     .await;
 }
 
+/// Read the durable capture binding without disturbing the running
+/// supervisor: the exact saved target, its ownership provenance, and its
+/// source. Every ownership assertion below goes through this real row —
+/// never through an in-memory mirror — paired with the real public
+/// offer the listing serves.
+async fn durable_binding(
+    state: &std::path::Path,
+    session_id: &str,
+) -> (Option<String>, i64, Option<String>) {
+    let store = SessionStore::open(&state.join("supervisor.db"), false)
+        .await
+        .expect("open owned store");
+    let row = store
+        .session(session_id)
+        .await
+        .expect("read reported launch")
+        .expect("row survives");
+    (
+        row.captured_conversation,
+        row.capture_ownership_version,
+        row.conversation_source,
+    )
+}
+
 /// Send one terminal command and wait for its response only after the pty has
 /// echoed that command. Repeated fixture markers therefore cannot satisfy a
 /// later action from replayed scrollback or an earlier generation.
@@ -273,6 +297,11 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         row.captured_conversation.is_some(),
         "the foreground hook must commit its identity before publication"
     );
+    assert_eq!(
+        row.capture_ownership_version, 1,
+        "reservation before publication still commits provenance 1: the \
+         pre-publication report passed the full ownership contract"
+    );
     drop(store);
 
     serving.stop().await;
@@ -395,6 +424,127 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     );
     assert_nested_hook_reached_supervisor(&h, &session.id, &ephemeral_child);
 
+    // Shell descendants are refused by the corridor — the live shell
+    // between reporter and runtime matches no narrow trampoline — no
+    // matter how valid the rest of the report is. The persisted case
+    // carries a real record for its own runtime (verified against the
+    // file before reporting), so only ancestry can refuse it; the
+    // fileless case reports `clear`, the descendant's strongest weapon,
+    // and doubles as the live descendant-clear regression. The native
+    // case wraps a second Codex image in a live shell, pinning that the
+    // nested rule is not bypassed by shell wrapping. Every case leaves
+    // the complete saved binding and the public offer byte-identical.
+    let shell_log = h
+        .state
+        .path()
+        .join("hook-log")
+        .join(format!("{}.log", session.id));
+    let pre_shell = durable_binding(h.state.path(), &session.id).await;
+    for (command, kind, source) in [
+        ("nested-shell-persisted", "persisted", "startup"),
+        ("nested-shell-fileless", "fileless", "clear"),
+    ] {
+        let log_offset = std::fs::read(&shell_log)
+            .expect("read prior hook outcomes")
+            .len();
+        let shell_from = seen.len();
+        send_and_wait(
+            &h.client,
+            channel,
+            &mut stream,
+            &mut seen,
+            command,
+            "CODEX-NESTED-SHELL:",
+        )
+        .await;
+        let shell_child = marker_id(&seen[shell_from..], &format!("CODEX-NESTED-SHELL:{kind}:"));
+        assert_ne!(
+            shell_child, root_a,
+            "a shell descendant must have its own conversation id"
+        );
+        // The intermediary witnessed itself from the live shell process —
+        // before the report in the script shape, after it in the hook-first
+        // `-c` shape (one invocation either way, which the completion
+        // marker proves) — not a fixture constant, and never the runtime
+        // the corridor counts.
+        let intermediary = String::from_utf8_lossy(&seen[shell_from..])
+            .lines()
+            .find_map(|line| line.strip_prefix("SHELL-INTERMEDIARY:"))
+            .expect("the live intermediary witnessed its own image")
+            .to_string();
+        assert_ne!(
+            intermediary, "codex",
+            "the intermediary is a shell, not a second runtime"
+        );
+        assert!(
+            String::from_utf8_lossy(&seen[shell_from..]).contains(&format!(
+                "CODEX-NESTED-SHELL:{kind}:{shell_child}:{intermediary}"
+            )),
+            "the completion witness must tie the runtime to its observed intermediary"
+        );
+        assert_hook_reply_since(&shell_log, log_offset, &shell_child, source, " refused ");
+        assert_eq!(
+            durable_binding(h.state.path(), &session.id).await,
+            pre_shell,
+            "a refused descendant report must leave the complete saved binding untouched"
+        );
+        assert_eq!(
+            listed(&h.client, &session.id).await.restart_offer,
+            farhelm_proto::RestartOffer::Resume,
+            "the foreground root stays resumable through shell-descendant {kind} reports"
+        );
+    }
+
+    // Shell-launched native Codex: shell script, nested image, hook —
+    // all three live. Two Codex images refuse this regardless of the
+    // shell between them.
+    {
+        let log_offset = std::fs::read(&shell_log)
+            .expect("read prior hook outcomes")
+            .len();
+        let shell_from = seen.len();
+        send_and_wait(
+            &h.client,
+            channel,
+            &mut stream,
+            &mut seen,
+            "nested-shell-native",
+            "CODEX-NESTED-SHELLNATIVE:",
+        )
+        .await;
+        let shell_child = marker_id(&seen[shell_from..], "CODEX-NESTED-SHELLNATIVE:persisted:");
+        assert_ne!(
+            shell_child, root_a,
+            "a shell-launched nested runtime must have its own conversation id"
+        );
+        let intermediary = String::from_utf8_lossy(&seen[shell_from..])
+            .lines()
+            .find_map(|line| line.strip_prefix("SHELL-INTERMEDIARY:"))
+            .expect("the launching shell witnessed itself")
+            .to_string();
+        assert_ne!(
+            intermediary, "codex",
+            "the launcher is a shell, not a runtime"
+        );
+        assert!(
+            String::from_utf8_lossy(&seen[shell_from..]).contains(&format!(
+                "CODEX-NESTED-SHELLNATIVE:persisted:{shell_child}:codex"
+            )),
+            "the nested image witness must survive its shell wrapping"
+        );
+        assert_hook_reply_since(&shell_log, log_offset, &shell_child, "startup", " refused ");
+        assert_eq!(
+            durable_binding(h.state.path(), &session.id).await,
+            pre_shell,
+            "a refused shell-wrapped nested report must leave the complete saved binding untouched"
+        );
+        assert_eq!(
+            listed(&h.client, &session.id).await.restart_offer,
+            farhelm_proto::RestartOffer::Resume,
+            "the foreground root stays resumable through shell-wrapped nested reports"
+        );
+    }
+
     h.client
         .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
         .await
@@ -450,6 +600,18 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         farhelm_proto::RestartOffer::FreshOnly,
     )
     .await;
+    // An admitted fileless foreground transition writes provenance 1
+    // with no Resume offer: 1 proves ownership, not file readiness.
+    let (saved, version, _) = durable_binding(h.state.path(), &session.id).await;
+    let saved = saved.expect("the fileless clear still commits a binding");
+    assert!(
+        saved.contains(&cleared_b),
+        "the fileless clear must name B's runtime: {saved}"
+    );
+    assert_eq!(
+        version, 1,
+        "the admitted fileless transition carries provenance 1"
+    );
 
     let refusal = h
         .client
@@ -711,6 +873,20 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::Resume
+    );
+    // Post-relaunch survivor: the proven binding — exact target plus
+    // provenance — survives the owner exit and the Resume relaunch that
+    // replaced the foreground process, and the public offer still serves
+    // Resume from it.
+    let (saved, version, _) = durable_binding(h.state.path(), &session.id).await;
+    let saved = saved.expect("the proven binding survives relaunch");
+    assert!(
+        saved.contains(&cleared_b),
+        "relaunch must preserve B's exact saved target: {saved}"
+    );
+    assert_eq!(
+        version, 1,
+        "relaunch must preserve the proven binding's provenance"
     );
     serving.stop().await;
 }

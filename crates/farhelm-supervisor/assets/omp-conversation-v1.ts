@@ -50,7 +50,10 @@ export default function farhelmConversation(omp) {
                         session_file: file && existsSync(file) ? file : null,
                         source,
                     });
-                    const child = execFile(executable, ["internal", "hook"], {
+                    // The envelope discriminator, sourced from this
+                    // asset's own entry point: the payload `vendor`
+                    // above stays as a consistency check only.
+                    const child = execFile(executable, ["internal", "hook", "--vendor", "omp"], {
                         timeout: 2000,
                         maxBuffer: 8192,
                     }, () => resolve());

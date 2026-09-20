@@ -174,50 +174,327 @@ impl ProcessIdentity {
     }
 }
 
-/// Attribute a hook connection to the one Codex executable under the owned pane.
+/// How far up one attribution may climb: the pane must be reachable
+/// within this many live edges, or the ancestry is too deep to be the
+/// foreground runtime's (and the walk refuses rather than sampling it).
+pub(crate) const MAX_ATTRIBUTION_ANCESTORS: usize = 64;
+
+/// Per-process command-line evidence budget. A process whose argv cannot
+/// be captured completely within this bound contributes NO argv evidence
+/// (`None`) rather than a truncated prefix a later proof could mistake
+/// for the whole command line; the walk itself continues, because the
+/// runtime decision for current kinds rests on the image, not the args.
+pub(crate) const MAX_ARGV_BYTES_PER_PROCESS: usize = 64 * 1024;
+
+/// Whole-walk command-line budget. Unlike the per-process bound this one
+/// refuses the walk: megabytes of argv across the ancestry is not a
+/// foreground runtime, it is a denial-of-observation, and accepting the
+/// report without the evidence would bless exactly the gap the caps
+/// exist to close.
+pub(crate) const MAX_ARGV_BYTES_PER_WALK: usize = 1024 * 1024;
+
+/// One live edge of an attribution walk: the process, its parent, the
+/// kernel start token distinguishing it from PID reuse, and the image
+/// and argv evidence captured while the edge was observed.
 ///
-/// A package-manager wrapper may sit between the pane and native Codex. A nested
-/// Codex has two native Codex ancestors instead and cannot report for its parent.
-/// This establishes process provenance only; transcript metadata must separately
-/// exclude vendor threads sharing the foreground process.
-pub(crate) fn foreground_codex_emitter(
-    peer: ProcessIdentity,
-    pane_pid: u32,
-) -> Result<ProcessIdentity, String> {
-    const MAX_ANCESTORS: usize = 64;
-    let mut chain = Vec::with_capacity(8);
+/// `exe` is REQUIRED — an unreadable image refuses the walk, the same
+/// way it always refused the emitter check — while `argv` is `None`
+/// whenever that process's command line was unreadable or exceeded its
+/// per-process bound (see the constants above for why those differ).
+#[derive(Debug, Clone)]
+pub(crate) struct ChainLink {
+    pub(crate) pid: u32,
+    pub(crate) ppid: u32,
+    pub(crate) start: u64,
+    pub(crate) exe: Vec<u8>,
+    pub(crate) argv: Option<Vec<Vec<u8>>>,
+}
+
+/// The command-line evidence for one process, bounded per
+/// [`MAX_ARGV_BYTES_PER_PROCESS`]. Linux reads `/proc/<pid>/cmdline`;
+/// macOS re-reads the `KERN_PROCARGS2` buffer the environ reader
+/// fetches and parses out the argv region instead of the environ one.
+/// Every failure — gone, foreign uid, non-dumpable, truncated,
+/// over-budget — collapses to `None`: missing argv evidence is a fact
+/// the per-kind proof interprets, never a walk failure by itself.
+pub(crate) fn read_process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
+    imp::read_process_argv(pid)
+}
+
+/// Walk the live ancestry from a hook connection's process to the owned
+/// pane, capturing image and argv evidence per edge.
+///
+/// This is the shared mechanics every foreground-runtime proof builds
+/// on: at most [`MAX_ATTRIBUTION_ANCESTORS`] live `Running` edges, the
+/// peer's start token verified before anything else, loops and a missing
+/// pane refused, edges plus image observations re-read before return,
+/// and the whole walk repeatable by the repeat attribution before
+/// commit. It decides NOTHING about vendors — the per-kind step applies
+/// its own corridor and runtime recognition to the returned chain — so
+/// a new proof reuses the walk rather than re-arguing liveness, PID
+/// reuse, and budgets.
+/// Refuse a walked chain whose command-line evidence totals past
+/// [`MAX_ARGV_BYTES_PER_WALK`]. A separate pass over the captured chain
+/// rather than inline accounting, so the bound reads the same evidence
+/// the per-kind proofs will match against — not a parallel count kept
+/// beside it — and so later proofs reuse the check instead of
+/// re-arguing the budget.
+fn check_walk_argv_budget(chain: &[ChainLink]) -> Result<(), String> {
+    let total: usize = chain
+        .iter()
+        .filter_map(|link| link.argv.as_ref())
+        .flatten()
+        .map(Vec::len)
+        .sum();
+    if total > MAX_ARGV_BYTES_PER_WALK {
+        return Err("the hook ancestry's command lines exceed the attribution budget".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn walk_to_pane(peer: ProcessIdentity, pane_pid: u32) -> Result<Vec<ChainLink>, String> {
+    let mut chain: Vec<ChainLink> = Vec::with_capacity(8);
     let mut pid = peer.pid;
-    let mut emitter = None;
-    for _ in 0..MAX_ANCESTORS {
+    for _ in 0..MAX_ATTRIBUTION_ANCESTORS {
         let Some((parent, start, ProcessState::Running)) = read_process(pid)? else {
             return Err("the hook ancestry is no longer live".to_string());
         };
         if chain.is_empty() && start != peer.start {
             return Err("the hook connection's process identity changed".to_string());
         }
-        if imp::is_codex_executable(pid)? {
-            if emitter.is_some() {
-                return Err("a nested Codex process cannot report for the foreground".to_string());
-            }
-            emitter = Some(ProcessIdentity { pid, start });
-        }
-        chain.push((pid, parent, start));
+        // The image comes from the same source the emitter check has
+        // always read; an unreadable one refuses the walk exactly as it
+        // always refused the report.
+        let exe = imp::process_exe(pid)?;
+        let argv = read_process_argv(pid);
+        chain.push(ChainLink {
+            pid,
+            ppid: parent,
+            start,
+            exe,
+            argv,
+        });
         if pid == pane_pid {
-            let emitter = emitter
-                .ok_or_else(|| "the hook has no attributable Codex executable".to_string())?;
-            for &(pid, parent, start) in &chain {
-                if read_process(pid)? != Some((parent, start, ProcessState::Running)) {
+            // Re-read every edge plus every image before returning: a
+            // process that exec'd between the walk and this check is no
+            // longer the process the walk observed, and the report must
+            // not be admitted on the earlier observation. Edges or image
+            // changed both refuse; argv is per-observation evidence the
+            // repeat attribution re-captures rather than an identity
+            // input, so it is not compared here.
+            for link in &chain {
+                if read_process(link.pid)? != Some((link.ppid, link.start, ProcessState::Running))
+                    || imp::process_exe(link.pid)
+                        .map_err(|_| ())
+                        .unwrap_or_default()
+                        != link.exe
+                {
                     return Err("the hook ancestry changed during attribution".to_string());
                 }
             }
-            return Ok(emitter);
+            check_walk_argv_budget(&chain)?;
+            return Ok(chain);
         }
-        if parent == 0 || chain.iter().any(|&(seen, _, _)| seen == parent) {
+        if parent == 0 || chain.iter().any(|link| link.pid == parent) {
             break;
         }
         pid = parent;
     }
     Err("the hook cannot be attributed to this session's foreground pane".to_string())
+}
+
+/// Attribute a hook connection to the one Codex executable under the owned pane.
+///
+/// A package-manager wrapper may sit between the pane and native Codex. A nested
+/// Codex has two native Codex ancestors instead and cannot report for its parent.
+/// This establishes process provenance only; transcript metadata must separately
+/// exclude vendor threads sharing the foreground process.
+///
+/// The walk is the shared [`walk_to_pane`] mechanics; the corridor applied
+/// below is Codex's instance of the restrictive rule.
+pub(crate) fn foreground_codex_emitter(
+    peer: ProcessIdentity,
+    pane_pid: u32,
+) -> Result<ProcessIdentity, String> {
+    let chain = walk_to_pane(peer, pane_pid)?;
+    codex_corridor(&chain)
+}
+
+/// Whether raw argv spells the supported hook invocation: the installed
+/// hook command's shape (`<farhelm> internal hook ...`), matched
+/// syntactically, never by path — an upgraded supervisor must still
+/// accept hooks installed by its predecessor, and the install path is
+/// attacker-influenced anyway. `argv[0]` is the executable spelling
+/// (anything); what matters is the verb sequence after it.
+fn is_hook_invocation_argv(argv: &[Vec<u8>]) -> bool {
+    matches!(argv, [_, internal, hook, ..] if internal == b"internal" && hook == b"hook")
+}
+
+/// Whether a `-c` command string carries executable shell syntax outside
+/// string literals: separators and backgrounding (`;`, `&`), pipes
+/// (`|`), grouping (`(`, `)`), redirections (`<`, `>`), substitution
+/// (backquote, `$`), negation/history (`!`), comments (`#`), and line
+/// breaks. Single quotes protect everything to the next `'`; double
+/// quotes protect everything except a backslash escape; elsewhere a
+/// backslash escapes the next character (including a newline
+/// continuation). Metacharacters inside literals — notably inside a
+/// quoted executable path — are path characters, not syntax, and pass.
+///
+/// The word splitter alone cannot carry the trampoline contract: it has
+/// no operator recognition, so `<hook> <payload>; printf done` splits
+/// with the hook in the first three words and looks like the supported
+/// command while the shell runs a redirection and a second command.
+fn has_unquoted_shell_syntax(command: &str) -> bool {
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+    let mut quote = Quote::None;
+    let mut chars = command.chars();
+    while let Some(next) = chars.next() {
+        match quote {
+            Quote::Single => {
+                if next == '\'' {
+                    quote = Quote::None;
+                }
+            }
+            Quote::Double => {
+                if next == '\\' {
+                    chars.next();
+                } else if next == '"' {
+                    quote = Quote::None;
+                } else if next == '$' || next == '`' {
+                    // Expansions stay live inside double quotes: a quoted
+                    // `"$(evil)"` still executes, unlike single quotes.
+                    return true;
+                }
+            }
+            Quote::None => match next {
+                '\'' => quote = Quote::Single,
+                '"' => quote = Quote::Double,
+                '\\' => {
+                    chars.next();
+                }
+                ';' | '&' | '|' | '(' | ')' | '<' | '>' | '`' | '$' | '!' | '#' | '\n' | '\r' => {
+                    return true;
+                }
+                _ => {}
+            },
+        }
+    }
+    false
+}
+
+/// A narrow trampoline: a POSIX shell directly invoking the supported hook
+/// command and nothing else — the shape vendor hook runners produce
+/// (`sh -c '<farhelm> internal hook ...'`). The command must be exactly
+/// one simple command: any unquoted control operator, redirection,
+/// substitution, or other executable shell syntax refuses, even when the
+/// hook comes first. An interactive shell, a script, a chained command,
+/// or any other image is an unclassified intermediary and refuses, as
+/// does any other session-hosting runtime.
+///
+/// Argv is self-reported by the intermediary, so this classifies honest
+/// trampolines; it cannot unmask a descendant that forges the exact hook
+/// shape. That forgery is outside the attribution model (inherited
+/// credentials are not a same-user security boundary — see the module
+/// docs): the value is refusing every delegated path that does NOT
+/// bother to mimic, while the resumable-or-clear gate still bounds what
+/// a mimicking reporter can establish without a valid record.
+fn is_hook_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
+    let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    if !matches!(name, b"sh" | b"bash" | b"dash") {
+        return false;
+    }
+    let [_, flag, command] = argv else {
+        return false;
+    };
+    if flag != b"-c" {
+        return false;
+    }
+    let command = match std::str::from_utf8(command) {
+        Ok(command) => command,
+        Err(_) => return false,
+    };
+    if has_unquoted_shell_syntax(command) {
+        return false;
+    }
+    // Real shell lexing, not a substring search: `evil; <hook>` and
+    // `sh -c <script>` must not pass on the strength of mentioning the
+    // hook somewhere in the command string.
+    match shell_words::split(command) {
+        Ok(words) => {
+            matches!(words.as_slice(), [_, internal, hook, ..] if internal == "internal" && hook == "hook")
+        }
+        Err(_) => false,
+    }
+}
+
+/// Whether raw `exe` bytes name another integrated agent runtime: a
+/// session-hosting image that is not the Codex emitter this corridor
+/// counts. Such an intermediary means the report traveled through a
+/// different harness, and refuses with its own message so the diagnostic
+/// names the mechanism rather than a generic unclassified intermediary.
+fn is_other_session_runtime(exe: &[u8]) -> bool {
+    let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    matches!(name, b"claude" | b"goose" | b"pi" | b"omp")
+}
+
+/// Codex's instance of the restrictive corridor, over an already-walked
+/// chain: the reporter (first link, the kernel-attributed socket peer)
+/// must be the supported hook invocation; exactly one native `codex`
+/// image is the emitter (this accepts package-manager wrappers while
+/// refusing a nested native Codex); the pane anchor (last link, the
+/// owned foreground) is accepted by position; every other link must be
+/// a narrow [`is_hook_trampoline`] trampoline. Any other session-hosting
+/// runtime or unclassified intermediary refuses.
+///
+/// Pure over the chain so the shapes are unit-testable without live
+/// processes; [`foreground_codex_emitter`] supplies the walked chain.
+fn codex_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
+    let reporter = chain
+        .first()
+        .ok_or_else(|| "the hook ancestry is empty".to_string())?;
+    match reporter.argv.as_deref() {
+        Some(argv) if is_hook_invocation_argv(argv) => {}
+        _ => {
+            return Err("the reporting process is not the supported hook invocation".to_string());
+        }
+    }
+    let mut emitter = None;
+    for (index, link) in chain.iter().enumerate() {
+        if imp::is_codex_image(&link.exe) {
+            if emitter.is_some() {
+                return Err("a nested Codex process cannot report for the foreground".to_string());
+            }
+            emitter = Some(ProcessIdentity {
+                pid: link.pid,
+                start: link.start,
+            });
+            continue;
+        }
+        if index == 0 || index + 1 == chain.len() {
+            continue;
+        }
+        let trampoline = link
+            .argv
+            .as_deref()
+            .is_some_and(|argv| is_hook_trampoline(&link.exe, argv));
+        if trampoline {
+            continue;
+        }
+        if is_other_session_runtime(&link.exe) {
+            return Err(
+                "another session-hosting runtime sits between the reporter and the foreground"
+                    .to_string(),
+            );
+        }
+        return Err(
+            "an unclassified intermediary sits between the reporter and the foreground".to_string(),
+        );
+    }
+    emitter.ok_or_else(|| "the hook has no attributable Codex executable".to_string())
 }
 
 /// Extract the environment region of a macOS `KERN_PROCARGS2` buffer,
@@ -297,6 +574,53 @@ fn parse_procargs2(buf: &[u8]) -> Option<Vec<u8>> {
         rest = &rest[end + 1..];
     }
     Some(environ)
+}
+
+/// Extract the argv region of a macOS `KERN_PROCARGS2` buffer: exactly
+/// `argc` NUL-terminated strings after the exec path and its alignment
+/// padding.
+///
+/// The header skip mirrors [`parse_procargs2`] — same buffer, same
+/// layout, only a different region — but the failure direction is the
+/// opposite: running out of buffer mid-argv is `None`, never an empty
+/// argv. An empty argv would be a prefix a later proof could mistake for
+/// the whole command line ("the process was invoked bare"), while the
+/// truth is that the observation was cut short; refusing the evidence
+/// keeps a truncated read from becoming a false entry-point match. The
+/// byte total is capped at [`MAX_ARGV_BYTES_PER_PROCESS`] for the same
+/// reason the fetch buffer is sized to it.
+///
+/// Like its sibling, the `test` arm of the cfg keeps it (and its tests)
+/// alive in ordinary Linux CI.
+#[cfg(any(target_os = "macos", test))]
+fn parse_procargs2_argv(buf: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let argc_bytes: [u8; 4] = buf.get(..4)?.try_into().ok()?;
+    let argc = i32::from_ne_bytes(argc_bytes).max(0) as usize;
+    // A garbage argc must not size the collection: the loop below would
+    // stop at the buffer end anyway, but the capacity reservation happens
+    // first.
+    if argc > 4096 {
+        return None;
+    }
+
+    let mut rest = buf.get(4..)?;
+    let path_end = rest.iter().position(|&b| b == 0)?;
+    rest = &rest[path_end + 1..];
+    let argv_start = rest.iter().position(|&b| b != 0).unwrap_or(rest.len());
+    rest = &rest[argv_start..];
+
+    let mut argv = Vec::with_capacity(argc.min(64));
+    let mut total = 0usize;
+    for _ in 0..argc {
+        let end = rest.iter().position(|&b| b == 0)?;
+        total += end;
+        if total > MAX_ARGV_BYTES_PER_PROCESS {
+            return None;
+        }
+        argv.push(rest[..end].to_vec());
+        rest = &rest[end + 1..];
+    }
+    Some(argv)
 }
 
 /// Linux: the process table is `/proc`.
@@ -497,16 +821,55 @@ mod imp {
         std::fs::read(format!("/proc/{pid}/environ")).ok()
     }
 
-    pub(super) fn is_codex_executable(pid: u32) -> Result<bool, String> {
+    /// The raw bytes of `/proc/<pid>/exe`: the same source the emitter
+    /// check has always read, exposed so the shared walk can capture the
+    /// image once per edge instead of every consumer re-reading it.
+    /// Failures (gone, foreign uid, non-dumpable) refuse the walk, as
+    /// they always refused the report.
+    pub(super) fn process_exe(pid: u32) -> Result<Vec<u8>, String> {
         use std::os::unix::ffi::OsStrExt;
-        let path = std::fs::read_link(format!("/proc/{pid}/exe"))
-            .map_err(|error| format!("reading process {pid} executable: {error}"))?;
-        let name = path
-            .file_name()
-            .map(|name| name.as_bytes())
-            .unwrap_or_default();
+        std::fs::read_link(format!("/proc/{pid}/exe"))
+            .map(|path| path.as_os_str().as_bytes().to_vec())
+            .map_err(|error| format!("reading process {pid} executable: {error}"))
+    }
+
+    /// Whether raw `exe` bytes name a native Codex image: the basename
+    /// check the emitter has always applied, over bytes the caller
+    /// already captured, so the walk and the corridor cannot observe two
+    /// different images for one edge.
+    pub(super) fn is_codex_image(exe: &[u8]) -> bool {
+        // Byte-level basename, exactly as the emitter has always applied
+        // it: no UTF-8 decoding, so a non-UTF-8 image path decides on its
+        // raw bytes rather than on a lossy rendering of them.
+        let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
         // procfs marks the image this way after an atomic executable update.
-        Ok(name.strip_suffix(b" (deleted)").unwrap_or(name) == b"codex")
+        name.strip_suffix(b" (deleted)").unwrap_or(name) == b"codex"
+    }
+
+    /// The bounded `/proc/<pid>/cmdline` split: NUL-separated argv with
+    /// the trailing NUL the kernel always writes consumed, capped at
+    /// [`super::MAX_ARGV_BYTES_PER_PROCESS`]. Over-budget, truncated
+    /// (no terminating NUL), or unreadable reads are `None` — missing
+    /// evidence, not a walk failure.
+    pub(super) fn read_process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
+        use std::io::Read;
+        let mut limited = std::fs::File::open(format!("/proc/{pid}/cmdline"))
+            .ok()?
+            .take((super::MAX_ARGV_BYTES_PER_PROCESS + 1) as u64);
+        let mut buf = Vec::new();
+        limited.read_to_end(&mut buf).ok()?;
+        if buf.len() > super::MAX_ARGV_BYTES_PER_PROCESS || !buf.ends_with(b"\0") {
+            return None;
+        }
+        buf.pop();
+        if buf.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(
+            buf.split(|byte| *byte == 0)
+                .map(|arg| arg.to_vec())
+                .collect(),
+        )
     }
 
     #[cfg(test)]
@@ -1025,7 +1388,10 @@ mod imp {
         super::parse_procargs2(&buf)
     }
 
-    pub(super) fn is_codex_executable(pid: u32) -> Result<bool, String> {
+    /// The raw bytes of `proc_pidpath`: the same source the emitter
+    /// check has always read, exposed so the shared walk can capture the
+    /// image once per edge instead of every consumer re-reading it.
+    pub(super) fn process_exe(pid: u32) -> Result<Vec<u8>, String> {
         let pid = i32::try_from(pid).map_err(|_| "process PID is out of range".to_string())?;
         let mut path = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
         // SAFETY: the kernel receives the buffer's exact writable capacity.
@@ -1037,8 +1403,54 @@ mod imp {
             ));
         }
         let bytes = &path[..len as usize];
-        let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
-        Ok(bytes.rsplit(|byte| *byte == b'/').next() == Some(b"codex".as_slice()))
+        Ok(bytes.strip_suffix(&[0]).unwrap_or(bytes).to_vec())
+    }
+
+    /// Whether raw `proc_pidpath` bytes name a native Codex image: the
+    /// basename check the emitter has always applied, over bytes the
+    /// caller already captured.
+    pub(super) fn is_codex_image(exe: &[u8]) -> bool {
+        exe.rsplit(|byte| *byte == b'/').next() == Some(b"codex".as_slice())
+    }
+
+    /// The bounded argv region of a fresh `KERN_PROCARGS2` buffer: the
+    /// same sysctl fetch the environ reader performs, parsed for argv
+    /// instead of environ. Capped, truncated-safe, and `None` on every
+    /// failure exactly like the environ reader's contract.
+    pub(super) fn read_process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
+        let pid = i32::try_from(pid).ok()?;
+        let mut mib: [c_int; 3] = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as c_int];
+        // The per-process argv cap bounds this fetch, not ARG_MAX: there
+        // is no reason to copy megabytes of args to keep kilobytes of
+        // argv, and a buffer sized to the cap makes truncation
+        // observable (a full buffer with no room left for the parser's
+        // terminator) instead of silent.
+        let needed = super::MAX_ARGV_BYTES_PER_PROCESS + 1;
+        let mut buf = vec![0u8; needed];
+        let mut len = needed;
+        // SAFETY: `buf` owns `needed` bytes and `len` says exactly that,
+        // so sysctl writes only within the allocation; `len` comes back
+        // as the number of bytes actually written, and the truncate below
+        // keeps the parser away from anything the kernel did not fill in.
+        let fetched = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                3,
+                buf.as_mut_ptr().cast::<c_void>(),
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if fetched != 0 {
+            return None;
+        }
+        buf.truncate(len);
+        // A too-small buffer surfaces as ENOMEM above, never as silent
+        // truncation — so a successful fetch holds the whole argv region,
+        // and anything the parser refuses past this point is malformed
+        // data, not a short read.
+        super::parse_procargs2_argv(&buf)
     }
 }
 
@@ -1452,5 +1864,465 @@ mod tests {
             "macOS returned a platform binary's environment — the withholding this test \
              pins has been lifted; update the marker-scan residual docs accordingly"
         );
+    }
+
+    /// The argv parser's contract in one pass: exactly `argc`
+    /// NUL-terminated entries after the exec path and its padding, with
+    /// the environment region left for the environ parser.
+    ///
+    /// Why this test matters: this is the entry-point evidence the later
+    /// per-kind proofs match against. An off-by-one in the padding skip
+    /// or the argc loop would shift every entry — matching the WRONG
+    /// argv[0] to a runtime — while still returning `Some`, the failure
+    /// direction no caller could detect.
+    #[farhelm_testtrace::test]
+    fn procargs2_argv_parsing_yields_exactly_argc_entries() {
+        let buf = procargs2(
+            &["thing", "--flag", "value"],
+            &["PATH=/bin", "FARHELM_SESSION_ID=abc-123"],
+            7,
+        );
+        let argv = parse_procargs2_argv(&buf).expect("a well-formed buffer must parse");
+        let argv: Vec<&[u8]> = argv.iter().map(Vec::as_slice).collect();
+        assert_eq!(
+            argv,
+            [
+                b"thing".as_slice(),
+                b"--flag".as_slice(),
+                b"value".as_slice()
+            ]
+        );
+    }
+
+    /// Truncation and over-budget argv are refused as evidence, never
+    /// returned as a prefix.
+    ///
+    /// Why this test matters: the two failure directions have opposite
+    /// safety properties. Returning the readable prefix as the whole argv
+    /// would let a cut-short observation match an entry point the full
+    /// command line never named; `None` forces the proof to treat the
+    /// evidence as missing instead.
+    #[farhelm_testtrace::test]
+    fn procargs2_argv_parsing_refuses_truncation_and_over_budget_reads() {
+        let buf = procargs2(&["thing", "--flag"], &["PATH=/bin"], 3);
+        // Cut mid-second-entry ("--fl" with no terminator after it): the
+        // parser must not return ["thing"]. The cut point is computed
+        // from the layout — argc, exec path, padding, first entry —
+        // rather than from the buffer end, which would land in the
+        // environment region the argv parser never reads.
+        let cut = 4 + "/usr/bin/thing\0".len() + 3 + "thing\0".len() + "--fl".len();
+        assert_eq!(&buf[cut - 4..cut], b"--fl");
+        assert!(
+            parse_procargs2_argv(&buf[..cut]).is_none(),
+            "a buffer ending mid-argv is truncated evidence, not a one-entry argv"
+        );
+        // argc claiming more entries than the buffer holds: same refusal.
+        let mut greedy = 9i32.to_ne_bytes().to_vec();
+        greedy.extend_from_slice(&buf[4..]);
+        assert!(
+            parse_procargs2_argv(&greedy).is_none(),
+            "a greedy argc must not invent entries past the buffer"
+        );
+        // Structurally unusable buffers answer None, like the environ
+        // parser's rejection test pins for its region.
+        assert!(parse_procargs2_argv(b"").is_none());
+        assert!(parse_procargs2_argv(b"\x01\x00").is_none());
+        let over = procargs2(&["thing"], &[], 1);
+        // Splice an over-budget second entry into the ARGV region (argc
+        // 2): the parser must refuse the total, not return the readable
+        // prefix. Appending past the environ region would not exercise
+        // the cap at all, since the parser stops after argc entries.
+        let mut over_argv = (2i32).to_ne_bytes().to_vec();
+        over_argv.extend_from_slice(&over[4..]);
+        let insert_at = over_argv.len();
+        over_argv.extend(std::iter::repeat_n(b'x', MAX_ARGV_BYTES_PER_PROCESS));
+        over_argv.push(0);
+        assert!(insert_at > 4, "the splice must land past the header");
+        assert!(
+            parse_procargs2_argv(&over_argv).is_none(),
+            "an argv total past the per-process cap is refused, not returned"
+        );
+    }
+
+    /// The live argv reader returns this test process's own command line
+    /// with its executable first — the reader's end-to-end claim on
+    /// whichever platform it runs.
+    ///
+    /// Why this test matters: the synthetic parser tests above pin the
+    /// format, but only a live read proves the platform fetch feeds the
+    /// parser the right region (argv, not environ, not the exec path).
+    /// Reading the test process itself keeps the fixture premise inside
+    /// the test's own lifetime: no child to reap, no lifetime to race.
+    #[farhelm_testtrace::test]
+    fn a_process_argv_read_returns_the_live_command_line() {
+        let me = std::process::id();
+        let argv = read_process_argv(me).expect("a live same-uid process must expose argv");
+        assert!(
+            !argv.is_empty() && !argv[0].is_empty(),
+            "argv[0] must name the running image"
+        );
+    }
+
+    /// The shared walk attributes the live test process to itself as a
+    /// one-edge chain with image and argv evidence attached.
+    ///
+    /// Why this test matters: [`walk_to_pane`] is the mechanics every
+    /// per-kind proof builds on, and a single-edge walk exercises its
+    /// whole contract — peer token check, live-state requirement, image
+    /// capture, argv capture, pane termination — without a fixture pane
+    /// whose lifetime the test would have to defend.
+    #[farhelm_testtrace::test]
+    fn the_shared_walk_attributes_a_live_process_to_itself() {
+        let me = std::process::id();
+        let peer = ProcessIdentity::read(me).expect("this process is live");
+        let chain = walk_to_pane(peer, me).expect("a live process must walk to itself");
+        assert_eq!(chain.len(), 1, "no ancestors are climbed past the pane");
+        let link = &chain[0];
+        assert_eq!(link.pid, me);
+        assert_eq!(link.start, peer.start);
+        assert!(!link.exe.is_empty(), "the image is required evidence");
+        assert!(
+            link.argv.as_ref().is_some_and(|argv| !argv.is_empty()),
+            "a live same-uid process must expose argv evidence"
+        );
+    }
+
+    /// One synthetic chain link: pid/start are distinct per link so an
+    /// admitted emitter is identifiable as the intended process, and argv
+    /// is spelled exactly as the kernel would capture it (argv[0] is the
+    /// executable spelling, never validated).
+    fn corridor_link(pid: u32, exe: &str, argv: &[&str]) -> ChainLink {
+        ChainLink {
+            pid,
+            ppid: 0,
+            start: u64::from(pid) * 1_000,
+            exe: exe.as_bytes().to_vec(),
+            argv: Some(argv.iter().map(|arg| arg.as_bytes().to_vec()).collect()),
+        }
+    }
+
+    fn corridor_link_no_argv(pid: u32, exe: &str) -> ChainLink {
+        ChainLink {
+            pid,
+            ppid: 0,
+            start: u64::from(pid) * 1_000,
+            exe: exe.as_bytes().to_vec(),
+            argv: None,
+        }
+    }
+
+    /// The installed hook command, as the kernel captures it on the
+    /// reporter: the executable spelling plus the verb sequence. Vendors
+    /// run this string through a shell, so the same spelling appears both
+    /// on direct children and inside a trampoline's `-c` command.
+    fn hook_argv() -> Vec<&'static str> {
+        vec![
+            "/opt/test/bin/farhelm",
+            "internal",
+            "hook",
+            "--vendor",
+            "codex",
+        ]
+    }
+
+    /// The direct-child shape every production hook takes: no
+    /// intermediary between the reporter and the runtime.
+    ///
+    /// This is the shape the corridor must keep admitting — the fix for
+    /// unclassified intermediaries below must not narrow it.
+    #[farhelm_testtrace::test]
+    fn a_direct_hook_child_of_the_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(11, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let emitter = codex_corridor(&chain).expect("a direct hook child must be admitted");
+        assert_eq!(emitter.pid, 10, "the emitter is the one Codex image");
+        assert_eq!(emitter.start, 10_000);
+    }
+
+    /// The vendor shape: `sh -c` directly invoking the hook command. Both
+    /// vendors run hook commands through a shell, so refusing this would
+    /// refuse production.
+    #[farhelm_testtrace::test]
+    fn a_shell_trampoline_invoking_only_the_hook_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &[
+                    "sh",
+                    "-c",
+                    "/opt/test/bin/farhelm internal hook --vendor codex",
+                ],
+            ),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let emitter = codex_corridor(&chain).expect("a hook trampoline must be admitted");
+        assert_eq!(emitter.pid, 10);
+    }
+
+    /// The pane anchor is accepted by position: a wrapper between the
+    /// runtime and the pane (here the login shell the pane reports) is
+    /// the owned foreground, not an intermediary.
+    #[farhelm_testtrace::test]
+    fn a_wrapper_above_the_runtime_is_the_pane_anchor_not_an_intermediary() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(11, "/opt/test/bin/codex", &["codex"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        codex_corridor(&chain).expect("the pane anchor must not need trampoline shape");
+    }
+
+    /// A reporter that is not the hook invocation cannot report, even with
+    /// a clean chain behind it: anything holding the socket credential
+    /// could otherwise speak the protocol directly.
+    #[farhelm_testtrace::test]
+    fn a_reporter_without_hook_shape_is_refused() {
+        for argv in [
+            vec!["/opt/test/bin/farhelm"],
+            vec!["/opt/test/bin/farhelm", "internal"],
+            vec!["/opt/test/bin/farhelm", "agent", "instructions"],
+            vec!["codex"],
+        ] {
+            let chain = vec![
+                corridor_link(11, "/opt/test/bin/farhelm", &argv),
+                corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+            ];
+            let refusal = codex_corridor(&chain).expect_err("a non-hook reporter must be refused");
+            assert!(
+                refusal.contains("supported hook invocation"),
+                "the diagnostic must name the missing hook shape: {refusal}"
+            );
+        }
+    }
+
+    /// Missing reporter argv is missing evidence, not a pass: the shape
+    /// cannot be established without it.
+    #[farhelm_testtrace::test]
+    fn a_reporter_without_readable_argv_is_refused() {
+        let chain = vec![
+            corridor_link_no_argv(11, "/opt/test/bin/farhelm"),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal = codex_corridor(&chain).expect_err("missing reporter argv must be refused");
+        assert!(refusal.contains("supported hook invocation"), "{refusal}");
+    }
+
+    /// An interactive shell between reporter and runtime is unclassified:
+    /// it may run anything, so the corridor cannot treat it as a
+    /// transparent trampoline.
+    #[farhelm_testtrace::test]
+    fn an_interactive_shell_intermediary_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(12, "/bin/bash", &["bash"]),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &["sh", "-c", "farhelm internal hook --vendor codex"],
+            ),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        // The inner trampoline is well-formed; the interactive shell above
+        // it is not, and one unclassified link refuses the whole chain.
+        let refusal = codex_corridor(&chain).expect_err("an interactive shell must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A shell running a script is not a trampoline even when the script
+    /// eventually runs the hook: the corridor sees the intermediary's own
+    /// shape (`sh script`), not what the script does later.
+    #[farhelm_testtrace::test]
+    fn a_script_running_shell_intermediary_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(11, "/bin/sh", &["sh", "/tmp/reporter.sh"]),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal = codex_corridor(&chain).expect_err("a script intermediary must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A chained `-c` command mentions the hook without being only the
+    /// hook: substring presence must not pass.
+    #[farhelm_testtrace::test]
+    fn a_chained_shell_command_mentioning_the_hook_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &[
+                    "sh",
+                    "-c",
+                    "echo ready; farhelm internal hook --vendor codex",
+                ],
+            ),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal =
+            codex_corridor(&chain).expect_err("a chained command must not pass as a trampoline");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A hook-first `-c` command with a redirection and a second command
+    /// still runs other shell syntax after the hook: the word splitter
+    /// sees the hook in the first three words and nothing wrong, but the
+    /// shell executes the redirection and the chained command too. The
+    /// trampoline must be exactly one simple command.
+    #[farhelm_testtrace::test]
+    fn a_hook_first_chained_shell_command_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &[
+                    "sh",
+                    "-c",
+                    "/opt/test/bin/farhelm internal hook --vendor codex < /tmp/child-report.json; printf done",
+                ],
+            ),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal = codex_corridor(&chain)
+            .expect_err("a hook-first chained command must not pass as a trampoline");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A redirection alone is executable shell syntax beyond the hook:
+    /// the same single command with its stdin replaced is not the
+    /// supported simple command.
+    #[farhelm_testtrace::test]
+    fn a_hook_command_with_a_redirection_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &[
+                    "sh",
+                    "-c",
+                    "/opt/test/bin/farhelm internal hook --vendor codex < /tmp/child-report.json",
+                ],
+            ),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal = codex_corridor(&chain)
+            .expect_err("a redirected hook command must not pass as a trampoline");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// A substitution inside `-c` runs a second command to build the
+    /// hook's surroundings. Word splitting hides it inside one word; the
+    /// syntax scan must still see the `$`.
+    #[farhelm_testtrace::test]
+    fn a_hook_command_with_a_substitution_is_refused() {
+        for command in [
+            "/opt/test/bin/farhelm internal hook --vendor $(printf codex)",
+            "/opt/test/bin/farhelm internal hook --vendor `printf codex`",
+            "/opt/test/bin/farhelm internal hook --vendor \"$(printf codex)\"",
+            "/opt/test/bin/farhelm internal hook --vendor codex | tee /tmp/hook.log",
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+                corridor_link(11, "/bin/sh", &["sh", "-c", command]),
+                corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+            ];
+            let refusal = codex_corridor(&chain)
+                .expect_err("a hook command with extra shell syntax must be refused: {command}");
+            assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        }
+    }
+
+    /// Metacharacters inside a quoted executable path are literal path
+    /// characters, not shell syntax: a trampoline whose quoted path
+    /// contains `;` must still be admitted, or installs under
+    /// punctuation-bearing directories would break. Both quote styles
+    /// protect; only double quotes still expand `$` and backquotes.
+    #[farhelm_testtrace::test]
+    fn a_trampoline_with_a_quoted_path_holding_metacharacters_is_admitted() {
+        for command in [
+            "\"/opt/test/bin with;weird/farhelm\" internal hook --vendor codex",
+            "'/opt/test/bin$weird/farhelm' internal hook --vendor codex",
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+                corridor_link(11, "/bin/sh", &["sh", "-c", command]),
+                corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+            ];
+            let emitter = codex_corridor(&chain)
+                .expect("a quoted-path trampoline must be admitted: {command}");
+            assert_eq!(emitter.pid, 10);
+        }
+    }
+
+    /// Another harness between reporter and runtime refuses with its own
+    /// message, so the diagnostic names the mechanism.
+    #[farhelm_testtrace::test]
+    fn another_runtime_between_reporter_and_foreground_is_refused() {
+        for (exe, message) in [
+            ("/opt/test/bin/claude", "another session-hosting runtime"),
+            ("/usr/local/bin/node", "unclassified intermediary"),
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+                corridor_link(11, exe, &[exe, "--run", "harness"]),
+                corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+            ];
+            let refusal =
+                codex_corridor(&chain).expect_err("a foreign intermediary must be refused");
+            assert!(refusal.contains(message), "{refusal}");
+        }
+    }
+
+    /// The pre-existing nested rule, preserved: two Codex images refuse no
+    /// matter how clean the rest of the chain is.
+    #[farhelm_testtrace::test]
+    fn a_second_codex_image_still_refuses() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(12, "/opt/test/bin/codex", &["codex"]),
+            corridor_link(11, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal = codex_corridor(&chain).expect_err("nested Codex must be refused");
+        assert!(refusal.contains("nested Codex"), "{refusal}");
+    }
+
+    /// No Codex image at all still refuses: the corridor never admits on
+    /// ancestry shape alone.
+    #[farhelm_testtrace::test]
+    fn a_chain_without_any_codex_image_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &["sh", "-c", "farhelm internal hook --vendor codex"],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = codex_corridor(&chain).expect_err("a chain without Codex must be refused");
+        assert!(
+            refusal.contains("no attributable Codex executable"),
+            "{refusal}"
+        );
+    }
+
+    /// Missing intermediary argv cannot match the trampoline shape, so it
+    /// refuses rather than passing on image alone.
+    #[farhelm_testtrace::test]
+    fn an_intermediary_without_readable_argv_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
+            corridor_link_no_argv(11, "/bin/sh"),
+            corridor_link(10, "/opt/test/bin/codex", &["codex"]),
+        ];
+        let refusal =
+            codex_corridor(&chain).expect_err("an unreadable intermediary must be refused");
+        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
     }
 }
