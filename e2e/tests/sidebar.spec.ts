@@ -3155,6 +3155,15 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
       lineContentWidth,
       title: (await target.locator(".session-title").boundingBox())!,
       identity: (await target.locator(".session-identity-copy").boundingBox())!,
+      // The group that OWNS the qualifier words outside compact mode. They
+      // used to sit in the identity group and moved here in #648 (`row.rs`'s
+      // own comment at the identity span). This is `.session-detail-copy`
+      // rather than the `.session-row-detail` line around it on purpose:
+      // the copy group is one grid track, the same shape of bound the
+      // identity group gave, while the line spans the row's full width and
+      // would make the horizontal half of the check below say almost
+      // nothing.
+      detailCopy: (await target.locator(".session-detail-copy").boundingBox())!,
       host: (await target.locator(".session-host").boundingBox())!,
       stale: (await target.locator(".stale-badge").boundingBox())!,
       archived: (await target.locator(".archived-badge").boundingBox())!,
@@ -3180,10 +3189,21 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
     dominant.host.width,
     "the host must still respect its 40% cap",
   ).toBeLessThanOrEqual(dominant.lineContentWidth * 0.4 + TOL);
+  // Containment is measured against the group that owns these words, which
+  // since #648 is the detail copy rather than the identity group. Measuring
+  // them against the identity group is what this did before, and the
+  // vertical check then failed by the height of one line — the qualifiers
+  // were exactly where they belonged, one row below where the test looked.
+  // The claim is the same one, against the same shape of box: hostile title
+  // and host text must not push a state word out of the group that owns it.
   for (const qualifier of [dominant.stale, dominant.archived]) {
-    expect(qualifier.x).toBeGreaterThanOrEqual(dominant.identity.x - TOL);
-    expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(dominant.identity.x + dominant.identity.width + TOL);
-    expect(qualifier.y + qualifier.height).toBeLessThanOrEqual(dominant.identity.y + dominant.identity.height + TOL);
+    expect(qualifier.x).toBeGreaterThanOrEqual(dominant.detailCopy.x - TOL);
+    expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(
+      dominant.detailCopy.x + dominant.detailCopy.width + TOL,
+    );
+    expect(qualifier.y + qualifier.height).toBeLessThanOrEqual(
+      dominant.detailCopy.y + dominant.detailCopy.height + TOL,
+    );
   }
 
   // ===== Host-dominant: BOTH title and host are individually long (unlike
@@ -3240,9 +3260,10 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   }
 
   // Qualifiers and activity retain stable geometry when only peer-controlled
-  // title and host lengths change. This also catches a qualifier escaping its
-  // identity group into an automatic grid row. Wrapping inside that group
-  // is deliberate when several state words cannot fit on one line.
+  // title and host lengths change. A state word that changed width under
+  // identity pressure would mean the line it sits on is being squeezed by
+  // text it should be independent of; wrapping within that line is
+  // deliberate when several state words cannot fit on one.
   for (const [name, a, b] of [
     ["stale badge", dominant.stale, underdog.stale],
     ["archived badge", dominant.archived, underdog.archived],
