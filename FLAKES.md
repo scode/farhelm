@@ -1020,9 +1020,19 @@ commits) with pending doc-only sweep edits; recorder run `4c1de15e-9977-482f-a9c
 the failing repeat copied beside it). Selection: `--project=webkit-terminal-tabs` with `-g` on the test title,
 `--repeat-each=20`; concurrency `one browser worker; retries 0`. Pinned tmux 3.7c, executable SHA256
 `b3f11c4f45d7672243ad0a1e0e5a60ba7e335c4a56c2e3ddf48582aa28de6de6` (this checkout's own `.ci-tmux` build),
-`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` in the test process). Disposition: open
-(TODO.md's watch entry updated with this evidence in the same PR).
+`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed (only `FARHELM_TEST_TRACE_DIR` in the test process).
 
-Class: ambiguous-observable
+Disposition: closed on 2026-09-20 by making the pause mark lowerable from the fixture, after instrumenting the failure
+answered what three sightings could not. The shape is a race between two bounds, not an ambiguous observable. A stalled
+tab asks the supervisor to pause only after four megabytes of undrained output; the supervisor cuts a viewer that stops
+consuming loose with a visible stall reason, and on a loaded machine that arrives first. Three reproductions in twenty
+loaded WebKit executions all carried the same fingerprint: the socket closed at 4.0-5.4 s with code 1006 and the banner
+"Detached: terminal stopped consuming output (stalled)", with only 1.4-2.2 MB undrained — so the crossing `pauseCount`
+records was unreachable rather than late. The same receipts cleared the fixture, which no earlier sighting could: 7757
+held write callbacks, every one matched to the stalled island, and no remount. With the mark lowered to 64 KiB the
+crossing takes milliseconds and lands far inside the supervisor's window; 20 of 20 passed under the load that had failed
+3 of 20 twice.
 
-Cause: unknown
+Class: budget
+
+Cause: established

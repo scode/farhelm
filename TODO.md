@@ -46,32 +46,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
-- Watch the stall-test shape in `e2e/tests/terminal-tabs.spec.ts`:
-  `stalling one tab's writes pauses only that tab;
-  the agent and a sibling stay live` never established a HIGH_WATER
-  pause within its observation window (reproduced once in browser run `7fd44a19-ce3f-42fb-a3df-410da327634a`, then 24
-  consecutive passes; not re-hunted). The island-cap sibling from the same run —
-  `a tab list past the island cap is listed in full but only partly attached`, whose first-mount handshake stalled, was
-  bannered and closed at 5s, and never retried — was fixed by the maintainer's 2026-09-17 decision to retry
-  never-connected first mounts on the ladder (`crates/farhelm-ui/assets/terminal.js`; evidence trail:
-  `lore/2026-09-16-island-cap-never-connected-first-mount.md`). The fix is visible in post-fix failures: the agent
-  socket now OPENS where the recorded shape had it closed at readiness. A residual starvation surfaced on 2026-09-17 on
-  a loaded machine (another agent's build running): 2 of about 6 WebKit executions failed with
-  `open=true, revealed=false` for the full 20s readiness budget — the handshake completes but the attach/replay behind
-  it starves across ladder attempts, each hidden mount cycling the 5s watchdog until the budget expires; the retained
-  trace was then wiped by later runs, so only the readiness observation is recorded. That is a deeper layer of the same
-  burst pathology a retry cannot fix by design (a stall persisting across attempts), not a regression from the retry
-  change; the fork to settle on recurrence: instrument the supervisor's attach path under the churn burst, extend the
-  readiness budget against the retry cycle, or accept the residual. The stall test's own shape — a socket that closed
-  1.2s after the flood started, before any HIGH_WATER crossing — is still not explained by any of this, and if it recurs
-  it re-enters with its own evidence (detach-reason and queue receipts alongside gate send, received bytes, pending
-  writes, pauses, replay state, and FLOOD-DONE). Keep all of these distinct from the existing single-client stall entry,
-  and do not weaken liveness assertions based on a later passing run. It did recur on 2026-09-19: repeat 3 of 20 loaded
-  WebKit executions (9 busy-loop children, about half of 18 cores) failed with `pauseCount` still 0 at the end of the 60
-  s HIGH_WATER poll, 19 of 20 passing in the same batch (recorder run `4c1de15e-9977-482f-a9c7-e02bfd79df0f`; trace and
-  error context retained beside it; FLAKES.md entry of the same date). No product receipts exist to compare against the
-  recorded early-socket-close shape, so the instrumentation named above remains the next step and nothing here narrows
-  the cause.
+- Watch the island-cap readiness residual in `e2e/tests/terminal-tabs.spec.ts`:
+  `a tab list past the island cap is listed in full but only partly attached`. Its original first-mount shape — a
+  handshake that stalled, was bannered and closed at 5s, and never retried — was fixed by the maintainer's 2026-09-17
+  decision to retry never-connected first mounts on the ladder (`crates/farhelm-ui/assets/terminal.js`; evidence trail:
+  `lore/2026-09-16-island-cap-never-connected-first-mount.md`), and that fix is visible in post-fix failures: the agent
+  socket now OPENS where the recorded shape had it closed at readiness. What remains surfaced on 2026-09-17 on a loaded
+  machine (another agent's build running): 2 of about 6 WebKit executions failed with `open=true, revealed=false` for
+  the full 20s readiness budget — the handshake completes but the attach/replay behind it starves across ladder
+  attempts, each hidden mount cycling the 5s watchdog until the budget expires; the retained trace was then wiped by
+  later runs, so only the readiness observation is recorded. That is a deeper layer of the same burst pathology a retry
+  cannot fix by design (a stall persisting across attempts), not a regression from the retry change; the fork to settle
+  on recurrence: instrument the supervisor's attach path under the churn burst, extend the readiness budget against the
+  retry cycle, or accept the residual. Keep this distinct from the existing single-client stall entry, and do not weaken
+  liveness assertions based on a later passing run.
 
 ### Difficult deflake
 

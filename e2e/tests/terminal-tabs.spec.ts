@@ -658,6 +658,24 @@ test("stalling one tab's writes pauses only that tab; the agent and a sibling st
   const title = `tab-isolation-${Date.now()}`;
   let id: string | undefined;
   try {
+    // Lower the pause mark before anything mounts, because the default one
+    // is not reachable here and the test used to lose a race it could not
+    // see. A stalled tab pauses after four megabytes of undrained output;
+    // the supervisor cuts a viewer that stops consuming loose with a
+    // visible stall reason well before that, and on a loaded machine it
+    // wins. Instrumenting the failure showed exactly that: three of twenty
+    // loaded WebKit executions closed the socket at about four seconds with
+    // "terminal stopped consuming output (stalled)" while only 1.4-2.2 MB
+    // sat undrained, so `pauseCount` could not have moved. With the mark at
+    // 64 KiB the crossing happens in milliseconds and the isolation claim
+    // below is observed rather than raced.
+    //
+    // It is lowered for the whole page rather than one island, which makes
+    // the sibling assertions STRONGER: the agent and the sibling now have a
+    // mark that is easy to trip, and they still must not trip it.
+    await page.addInitScript(() => {
+      (window as any).__farhelmTestFlowControl = { highWater: 64 * 1024 };
+    });
     const session = await openSessionWithTabs(page, request, title, 2);
     id = session.id;
     const [stalled, sibling] = session.tabs;
