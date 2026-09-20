@@ -799,19 +799,13 @@ impl Supervisor {
             let tmux_name = match entry.terminal.as_ref() {
                 Some(terminal) => Some(terminal.tmux_name.clone()),
                 None => match self.store.tmux_name(session_id).await {
-                    Ok(Some(tmux_name)) => match self.tmux.has_session(&tmux_name).await {
+                    Ok(Some(tmux_name)) => match self
+                        .tmux
+                        .has_session_for_terminal_less_delete(&tmux_name)
+                        .await
+                    {
                         Ok(true) => Some(tmux_name),
                         Ok(false) => None,
-                        // tmux spells "there is no server" two ways depending
-                        // on version: `no server running on <path>` and
-                        // `error connecting to <path> (No such file or
-                        // directory)`. Both mean nothing to kill.
-                        Err(error)
-                            if error.to_string().contains("no server running")
-                                || error.to_string().contains("error connecting to") =>
-                        {
-                            None
-                        }
                         Err(error) => {
                             return Err(format!(
                                 "checking whether the durable tmux session still exists before \
