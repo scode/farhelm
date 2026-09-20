@@ -89,6 +89,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the mounts weakens the oversized-at-once fixture), or keep digging browser-internally. Keep these failures distinct
   from the existing single-client stall entry, and do not weaken liveness assertions based on a later passing run.
 
+  The maintainer chose the first fork on 2026-09-19 and it was attempted and backed out the same day, because the
+  two-line version of it is not the whole change. What the attempt established, so the next pass starts from measurement
+  rather than from the choice: dropping `openedOnce` from `recoverable()` and widening `armIdleTimer`'s produced-nothing
+  branch from `reconnecting(spec.el)` to `recoverable()` does put a never-connected first mount on the ladder, and then
+  focus lands in that dead pane's `xterm-helper-textarea` — measured, not predicted — which is the silent
+  input-swallowing SPEC.md forbids and which the old path suppressed on purpose with `focusOnReveal = false`.
+  `reveal()`'s own evidence-free guard (`!attachProved && reconnecting(spec.el)`) needs the same widening or the reveal
+  goes through. The branch also needs narrowing to the STILL-CONNECTING case: taken as written it also captures an
+  open-but-silent first mount, which is SPEC's graceful degradation ("flush, reveal, go live", input works because the
+  socket is there) and must keep revealing rather than become a failed attempt. And `replay-unconnected` in
+  `e2e/tests/terminal-replay-rename.spec.ts` pins the old outcome by name, so the fork rewrites that test's expected
+  report from the "Not connected" banner to the reconnect surface; SPEC.md does not mandate the banner and its recovery
+  bullet asks for exactly what the surface gives (phase visible in the terminal, a way to retry now), so that part looks
+  sound, but it is a user-visible policy change and not a test correction. Roughly a day's careful work with browser
+  validation, not a two-line patch.
+
 ### Difficult deflake
 
 The 2026-09-08 browser gate added these follow-ups, with retained evidence in FLAKES.md:
