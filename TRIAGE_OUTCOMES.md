@@ -147,7 +147,9 @@
   predicate in both attach admission and diagnostic selection. Leave tombstone retention unchanged.
 - Completion criteria: attach accepts a finished-upload channel but rejects live uploads, live input routes, channel
   zero and oversized leases. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/765/changes. jj change:
+  `quoqtpvlslmpyonmrrrrvnzrxqozkpyq`; bookmark: `fix-attach-finished-upload-channel`. The real upload-to-terminal replay
+  regression failed before the fix; it and two related upload-admission checks pass after the fix.
 
 ## clearing-local-alias-restores-colliding-name.md
 

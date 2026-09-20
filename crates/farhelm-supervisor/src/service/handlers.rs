@@ -1594,11 +1594,12 @@ async fn handle_archive_session(
 /// malformed attach must cost the session's current client
 /// nothing. See [`MAX_LEASE_BYTES`] for why an unbounded lease
 /// is a memory question rather than a parsing one.
-/// A channel carrying an upload counts as in use too: the two
+/// A channel carrying a live upload counts as in use too: the two
 /// route maps are separate, but the channel-id space they name
-/// is one and the same, and a data frame that could mean
-/// either terminal input or upload bytes is a frame nothing
-/// can route correctly.
+/// is one and the same, and a data frame that could mean either
+/// terminal input or upload bytes is a frame nothing can route
+/// correctly. A finished upload route is only a tombstone for
+/// late upload diagnostics, so it does not reserve the channel.
 #[allow(clippy::too_many_arguments)]
 async fn handle_attach(
     sup: &Arc<Supervisor>,
@@ -1616,12 +1617,18 @@ async fn handle_attach(
 ) {
     if channel == 0
         || input_routes.contains_key(&channel)
-        || upload_routes.contains_key(&channel)
+        || upload_routes
+            .get(&channel)
+            .is_some_and(UploadRoute::is_live)
         || lease.len() > MAX_LEASE_BYTES
     {
         let message = if channel == 0 {
             "attachment channel 0 is reserved".to_string()
-        } else if input_routes.contains_key(&channel) || upload_routes.contains_key(&channel) {
+        } else if input_routes.contains_key(&channel)
+            || upload_routes
+                .get(&channel)
+                .is_some_and(UploadRoute::is_live)
+        {
             format!("attachment channel {channel} is already in use")
         } else {
             format!(
