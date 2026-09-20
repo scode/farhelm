@@ -1596,15 +1596,22 @@ async fn reverify_capture(
     }
     match crate::agent_kind::read_record(record, integration).await {
         Ok(Some((correlators, stamp))) if correlators.conversation == conversation => {
-            entry
-                .capture
-                .lock()
-                .expect("capture mutex poisoned")
-                .advance(CaptureState::Captured {
-                    conversation: conversation.to_string(),
-                    record: record.to_path_buf(),
-                    stamp,
-                });
+            let mut capture = entry.capture.lock().expect("capture mutex poisoned");
+            // The read happened outside the mutex, so another capture pass or
+            // a report may have changed the claim while it was in flight.
+            // A re-verification may renew only the exact captured locator it
+            // verified; it must never turn a matching old read into a state
+            // replacement or overwrite a newer conversation.
+            if let CaptureState::Captured {
+                conversation: captured,
+                record: captured_record,
+                stamp: captured_stamp,
+            } = &mut *capture
+                && captured == conversation
+                && captured_record == record
+            {
+                *captured_stamp = stamp;
+            }
         }
         Ok(Some((correlators, _))) => warn!(
             session = %entry.info.id, claimed = %conversation,
@@ -1723,6 +1730,65 @@ mod tests {
             format!("{line}\n"),
         )
         .expect("plant the record");
+    }
+
+    /// A matching append must renew its verification stamp without reopening
+    /// identity selection. Otherwise every later poll reads the same record
+    /// again, despite the stamp's role as the cheap re-read gate.
+    #[farhelm_testtrace::test]
+    async fn matching_reverification_refreshes_a_captured_records_stamp() {
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = std::fs::canonicalize(work.path())
+            .expect("canonicalize")
+            .to_string_lossy()
+            .to_string();
+        let conversation = "captured-conversation";
+        plant_claude_record(
+            home.path(),
+            &cwd,
+            conversation,
+            crate::agent_kind::now_unix(),
+        );
+        let record = home
+            .path()
+            .join(".claude")
+            .join("projects")
+            .join(crate::agent_kind::munge_cwd(&cwd))
+            .join(format!("{conversation}.jsonl"));
+        let stale = RecordStamp {
+            len: 0,
+            mtime_unix: None,
+        };
+        let entry = claude_entry(
+            "captured-session",
+            &cwd,
+            None,
+            CaptureState::Captured {
+                conversation: conversation.to_string(),
+                record: record.clone(),
+                stamp: stale,
+            },
+        );
+        let integration = entry
+            .snapshot
+            .integration()
+            .expect("Claude has a capture integration");
+        let expected = crate::agent_kind::stamp_of(&record)
+            .await
+            .expect("stat record")
+            .expect("record exists");
+
+        reverify_capture(&entry, integration, conversation, &record, stale).await;
+
+        assert!(matches!(
+            &*entry.capture.lock().expect("capture mutex poisoned"),
+            CaptureState::Captured {
+                conversation: captured,
+                record: captured_record,
+                stamp,
+            } if captured == conversation && captured_record == &record && *stamp == expected
+        ));
     }
 
     /// A supervisor pointed at `home` for agent records, with the fast
