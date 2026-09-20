@@ -167,12 +167,19 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
 
     // --- Primary #4: the rename dialog's own submit, plus the "cancel
     // buttons" ghost sample living right beside it in the same form.
+    // The form is reached through the ROW's rename action but does not live
+    // in the row: #651 moved it into a page-level dialog so that a session
+    // list update cannot unmount a rename the user is still typing into.
+    // Scoping these locators to the row therefore finds nothing at all,
+    // which is how this test failed on both engines rather than catching a
+    // style regression.
     await target.locator(".session-row-rename").click();
-    await expect(target.locator(".rename-form")).toBeVisible();
+    const renameForm = page.locator(".rename-dialog .rename-form");
+    await expect(renameForm).toBeVisible();
     await expectPrimary(".rename-submit");
     await expectGhost(".rename-cancel");
-    await target.locator(".rename-cancel").click();
-    await expect(target.locator(".rename-form")).toHaveCount(0);
+    await page.locator(".rename-dialog .rename-cancel").click();
+    await expect(renameForm).toHaveCount(0);
 
     // --- Ghost sample #2 (a tab). The agent tab starts selected (and
     // `.tab.selected` is its own deliberate exception to the ghost
