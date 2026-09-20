@@ -55,6 +55,7 @@ import {
   patchPreferences,
   pinAutoSelect,
   readPreferences,
+  renameSession,
   SESSION_LISTING,
   stubFeed,
 } from "./helpers/fleet";
@@ -1961,6 +1962,52 @@ test("a menu dismissed by a layout change returns focus to its toggle", async ({
   } finally {
     if (original) await page.setViewportSize(original);
     await cleanupSession(request, session.id);
+  }
+});
+
+/** Reordering closes pointer-opened actions without leaving their tint on the
+ * focused toggle's row. Focus return remains available for keyboard reopening. */
+test("reordering a pointer-opened menu clears its tint without losing focus", async ({ page, request }) => {
+  const sessions: string[] = [];
+  try {
+    const selected = await createSession(request, { title: "reorder-selected", cwd: "/tmp" });
+    sessions.push(selected.id);
+    const moved = await createSession(request, { title: "aaa-reorder-target", cwd: "/tmp" });
+    sessions.push(moved.id);
+    await pinAutoSelect(page, selected.id);
+    await page.goto("/");
+    await waitForHostsListSettled(page);
+    await waitForSessionRevealed(page, selected.id);
+    await page.getByRole("combobox", { name: "sort", exact: true }).selectOption({ label: "title A–Z" });
+    await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", moved.id);
+    const target = row(page, moved.id);
+    const toggle = target.locator(".session-row-menu");
+    await expect(target).not.toHaveClass(/selected/);
+    await page.mouse.move(0, 0);
+    const restingBackground = await target.evaluate((node) => getComputedStyle(node).backgroundColor);
+    const before = await target.evaluate((node) => [...document.querySelectorAll(".session-row")].indexOf(node));
+    await openRowMenu(target);
+    await expect(target.locator(".session-row-rename")).toBeFocused();
+    await expect(target).not.toHaveCSS("background-color", restingBackground);
+    await page.mouse.move(0, 0);
+    await renameSession(request, moved.id, "zzz-reorder-target");
+    await expect.poll(() => target.evaluate((node) => [...document.querySelectorAll(".session-row")].indexOf(node)))
+      .toBeGreaterThan(before);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    expect(await target.evaluate((node) => node.matches(":hover"))).toBe(false);
+    await expect(target).toHaveCSS("background-color", restingBackground);
+    await toggle.press("ArrowDown");
+    const rename = target.locator(".session-row-rename");
+    await expect(rename).toBeFocused();
+    expect(await rename.evaluate((node) => node.matches(":focus-visible"))).toBe(true);
+    await expect(rename).not.toHaveCSS("outline-style", "none");
+    await rename.press("Escape");
+    await expect(toggle).toBeFocused();
+    await expect(target).toHaveCSS("background-color", restingBackground);
+  } finally {
+    for (const id of sessions.reverse()) await cleanupSession(request, id);
   }
 });
 

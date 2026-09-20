@@ -1137,13 +1137,6 @@ samp {
      needs to BE an anchor for anything. */
 }
 
-/* A row holding focus is momentarily promoted to the floating level —
-   the same tint hovering gives it below, so the two ways of pointing at
-   a row look like one state and not two. */
-.session-row:focus-within {
-  background: var(--bg-2);
-}
-
 /* The row whose actions menu is open, for as long as it is open (the
    `menu-open` class comes from `row_class` in list/row.rs, and from
    `hosts::host_row_class` for the host row's own menu). The panel hangs
@@ -1156,10 +1149,12 @@ samp {
    fix — the host row inherits the same answer once its own "⋯" existed to
    ask it of.
 
-   The same tint hover and focus use, deliberately: this is one more way
-   of saying "the pointer's attention is here", not a fourth row state
-   with a look of its own. It holds while the pointer is elsewhere, which
-   is the whole point — a menu stays up after the mouse has moved off. */
+   This tint belongs to menu ownership, not to focus alone. A menu can close
+   while its toggle remains focused — especially when a row reorder removes
+   the panel — so using `:focus-within` for the same fill would leave a
+   pointer-open row looking as though its menu were still present. Keyboard
+   focus remains visible on the focused control through the sheet-wide
+   `:focus-visible` ring and the row-open override below. */
 .session-row.menu-open,
 .host-row.menu-open {
   background: var(--bg-2);
