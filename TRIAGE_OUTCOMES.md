@@ -245,7 +245,10 @@
 - Completion criteria: oversized IDs never enter the identity-less list; valid boundary-sized IDs remain accepted.
   Rejecting a seed must not turn a successful remote mutation into a reported failure. Remove this feedback file and its
   index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/771/changes. jj change:
+  `uxkrpzpvvnwsytykkvvpnzrvovzuowop`; bookmark: `fix-identityless-seed-id-bound`. The regression accepted an oversized
+  ID before the fix and now refuses it while retaining the boundary-sized ID. The existing best-effort mutation caller
+  remains unchanged.
 
 ## local-identity-conflict-returns-500.md
 
