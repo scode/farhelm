@@ -2035,31 +2035,30 @@ impl ConnectionManager {
         }
         // Same changed-only rule as a seed: forgetting a row that was not
         // there is a successful delete that changed nothing observable.
-        let mut changed = false;
-        match &claim.identity {
+        let mut changed = match &claim.identity {
             Some(identity) => {
-                changed = self
-                    .store
+                self.store
                     .forget_session(claim.host, identity, session_id)
-                    .await?;
+                    .await?
             }
-            None => {
-                status.send_modify(|status| {
-                    if status.incarnation != claim.incarnation || status.client.is_none() {
-                        return;
-                    }
-                    if let Some(live) = status.live_sessions.as_ref() {
-                        let mut entries = live.as_ref().clone();
-                        entries.retain(|existing| existing.id != session_id);
-                        changed = entries.len() != live.len();
-                        status.live_sessions = Some(Arc::new(entries));
-                    }
-                });
-            }
-        }
+            None => false,
+        };
         // A deleted session cannot be contested by anyone: whatever the
         // collision was about is gone from this host.
         status.send_modify(|status| {
+            // A durable write awaited above may outlive its connection. Keep
+            // both in-memory updates under one current-incarnation check.
+            if status.incarnation != claim.incarnation || status.client.is_none() {
+                return;
+            }
+            if claim.identity.is_none()
+                && let Some(live) = status.live_sessions.as_ref()
+            {
+                let mut entries = live.as_ref().clone();
+                entries.retain(|existing| existing.id != session_id);
+                changed = entries.len() != live.len();
+                status.live_sessions = Some(Arc::new(entries));
+            }
             if status.contested.iter().any(|id| id == session_id) {
                 let remaining: Vec<String> = status
                     .contested
@@ -5545,6 +5544,123 @@ mod tests {
             ids,
             vec!["live".to_string()],
             "the dead install's cached sessions must be gone, not merged with the new one's"
+        );
+    }
+
+    /// A delete that already entered its durable write must not clear collision
+    /// evidence published under a newer connection incarnation while it awaited.
+    #[farhelm_testtrace::test]
+    async fn a_stale_delete_completion_preserves_newer_collision_evidence() {
+        let fixture = fixture(
+            Cadence {
+                refresh: Duration::from_secs(3600),
+                ..Cadence::default()
+            },
+            |store, transport| async move {
+                let host = store
+                    .add_ssh_host("delete-claim.example", None, None)
+                    .await
+                    .unwrap();
+                transport.set_script(
+                    host,
+                    Script {
+                        identity: Some("delete-peer".to_string()),
+                        sessions: vec![session("deleted-session", 100)],
+                        ..Script::default()
+                    },
+                );
+            },
+        )
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        tokio::time::timeout(Duration::from_secs(10), fixture.manager.wait_for_state(host, |state| {
+            matches!(state, HostState::Connected {
+                identity: Some(identity), last_refresh: RefreshHealth::Ok { sessions: 1 }, ..
+            } if identity == "delete-peer")
+        })).await.unwrap_or_else(|error| panic!(
+            "initial durable refresh did not complete: {error}; state={:?}; incarnation/client={:?}; contested={:?}",
+            fixture.manager.state(host),
+            fixture.manager.status(host).map(|status| (status.incarnation, status.client.is_some())),
+            fixture.manager.contested_claimants("deleted-session"),
+        )).expect("registered host");
+        assert!(
+            fixture
+                .store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| entry.id == "deleted-session")
+        );
+        let current = fixture.manager.status(host).expect("connected host");
+        assert!(current.client.is_some());
+        let claim = SessionClaim {
+            host,
+            incarnation: current.incarnation,
+            identity: Some("delete-peer".to_string()),
+        };
+        let (status, cache_lock) = {
+            let map = fixture
+                .manager
+                .actors
+                .lock()
+                .expect("actor map mutex poisoned");
+            let handle = &map.actors[&host];
+            (Arc::clone(&handle.status), Arc::clone(&handle.cache_lock))
+        };
+        // No task can interleave between this check and the single manual poll.
+        assert!(
+            cache_lock.try_lock().is_ok(),
+            "the initial refresh released cache admission"
+        );
+        let connection = fixture.store.connection_for_test();
+        let mut forgetting =
+            std::pin::pin!(fixture.manager.forget_session(&claim, "deleted-session"));
+        {
+            let _commit_gate = connection.lock().expect("store mutex");
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(
+                forgetting.as_mut().poll(&mut cx).is_pending(),
+                "the delete must await its gated durable write"
+            );
+            assert!(
+                cache_lock.try_lock().is_err(),
+                "the pending delete must have passed claim validation and taken cache admission"
+            );
+            let replacement = fixture
+                .manager
+                .incarnations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            assert_ne!(replacement, claim.incarnation);
+            status.send_modify(|status| {
+                status.incarnation = replacement;
+                status.contested = Arc::new(vec!["deleted-session".to_string()]);
+            });
+            assert_eq!(
+                fixture.manager.contested_claimants("deleted-session"),
+                vec![host]
+            );
+        }
+        tokio::time::timeout(Duration::from_secs(10), forgetting).await
+            .unwrap_or_else(|error| panic!(
+                "released durable delete did not finish: {error}; state={:?}; incarnation/client={:?}; contested={:?}",
+                fixture.manager.state(host),
+                fixture.manager.status(host).map(|status| (status.incarnation, status.client.is_some())),
+                fixture.manager.contested_claimants("deleted-session"),
+            )).expect("durable deletion");
+        assert!(
+            fixture
+                .store
+                .cached_sessions(host)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the old deletion really committed before its final publication was checked"
+        );
+        assert_eq!(
+            fixture.manager.contested_claimants("deleted-session"),
+            vec![host],
+            "the old completion must preserve the newer incarnation's collision evidence"
         );
     }
 
