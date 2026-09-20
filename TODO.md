@@ -20,6 +20,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Definite simplification
 
 ## Near term
+- Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently connected displays and falling back safely when the display layout changes so the window never reopens off-screen or unusably large.
 
 - Assess what is needed to prevent native and shelled-out subagents from replacing or withdrawing the foreground
   conversation's restart target across harnesses. #801 adds Codex-specific ownership checks; Claude, Goose, Pi, and OMP
