@@ -75,14 +75,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Difficult deflake
 
-- Deflake `only layout changes after a profiles opening invalidate its geometry` in `e2e/tests/profiles.spec.ts`. Twenty
-  isolated Chromium baseline repetitions passed. The historical sighting was a full-suite Chromium failure on a 4-vCPU
-  worker on 2026-09-03, with no extra load. The saved-profile case formerly grouped here was a separate editor focus
-  race, fixed in #385 and validated twenty times per engine. For this remaining geometry case, retain the pre-open
-  scroll epoch, opening epoch, measured rectangle epoch, focus settlement, and post-open scroll event on recurrence. The
-  test already waits for popup focus before the second scroll. No failing trace yet establishes that its timing or
-  geometry contract should change. Assessed 2026-09-17 and left parked: no failing trace exists and the twenty isolated
-  repetitions have stood; a recurrence carrying the named epochs is the only lead.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output was un-ignored on 2026-09-19; it and the stalled
   viewer RSS, degenerate-size READY, and malformed-sentinel cases still block restoring the entire `farhelm` integration
