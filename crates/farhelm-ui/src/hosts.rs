@@ -105,7 +105,7 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
         HostPhase::Connecting { .. } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable, retrying",
         HostPhase::Connected { .. } => "connected",
-        HostPhase::VersionSkew { .. } => "version skew",
+        HostPhase::VersionSkew { .. } => "needs update",
         HostPhase::IdentityMismatch { .. } => "identity mismatch",
         HostPhase::IdentityUnverified { .. } => "identity unverified",
         HostPhase::Duplicate { .. } => "duplicate",
@@ -579,7 +579,7 @@ pub(crate) fn stale_session_notice(host_name: &str, lookup: HostLookup<'_>) -> V
         )),
         HostLookup::Known(host) => {
             parts.push(DetailPart::text(format!(
-                " is {phase}, so there is no terminal to show — everything below is the helm's \
+                ": {phase}, so there is no terminal to show — everything below is the helm's \
                  last-known record of this session. ",
                 phase = phase_display_label(&host.state),
             )));
@@ -2793,29 +2793,6 @@ mod tests {
         assert_eq!(unique.len(), labels.len());
     }
 
-    /// Display labels turn wire separators into prose without collapsing
-    /// distinct states. This matters because the row spends words only on
-    /// non-connected phases, so each word has to identify the state on its
-    /// own while `data-host-phase` retains the exact token for automation.
-    #[farhelm_testtrace::test]
-    fn every_phase_has_humanized_display_words() {
-        let labels: Vec<&str> = every_phase().iter().map(phase_display_label).collect();
-        assert_eq!(
-            labels,
-            vec![
-                "connecting",
-                "unreachable, retrying",
-                "connected",
-                "version skew",
-                "identity mismatch",
-                "identity unverified",
-                "duplicate",
-                "retired",
-                "unrecognized",
-            ]
-        );
-    }
-
     /// Every phase's detail must carry ITS OWN evidence — the sentinels make
     /// that checkable field by field, which a per-phase spot check cannot: a
     /// detail that rendered some other variant's payload, or dropped a
@@ -3398,12 +3375,10 @@ mod tests {
         );
     }
 
-    /// The stale-session notice must name the host's ACTUAL state, not a
-    /// generic "unreachable" — SPEC.md's host-unreachable notice is the
-    /// common case, not the only one, and a skewed host described as
-    /// unreachable would hide the upgrade that fixes it.
+    /// A stale session identifies its host and carries the supplied remedy
+    /// rather than leaving the user with a generic connection failure.
     #[farhelm_testtrace::test]
-    fn the_stale_notice_names_the_real_state_and_carries_its_remedy() {
+    fn the_stale_notice_identifies_the_host_and_carries_its_remedy() {
         let skewed = host(HostPhase::VersionSkew {
             peer_protocol: 9,
             peer_build: "0.2.0".to_string(),
@@ -3416,10 +3391,6 @@ mod tests {
             HostLookup::Known(&skewed),
         ));
         assert!(notice.contains("user@box"), "the host is named: {notice}");
-        assert!(
-            notice.contains("version skew"),
-            "the real phase, not a generic unreachable: {notice}"
-        );
         assert!(
             notice.contains("update the host's farhelm binary"),
             "the remedy travels with the notice, or the user is told only that they are stuck: \

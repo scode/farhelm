@@ -21,7 +21,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Replace the user-facing `version skew` label with `needs update`; `version skew` is internal jargon.
 - Add the major OpenAI models to the model choices for every supported provider-independent harness (all supported
   harnesses except Claude and OpenAI).
 - Fix the Codex restart/resume bug where Farhelm can capture the wrong session ID and then resume a nonexistent
