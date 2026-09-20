@@ -245,7 +245,7 @@ async fn report(
 /// same reason [`wait_for`] tolerates it: the last output and the
 /// pane-death notice race, so the needles are re-checked after the stream
 /// ends and only then reported missing.
-async fn wait_for_after_from(
+pub(crate) async fn wait_for_after_from(
     rx: &mut TermStream,
     seen: &mut Vec<u8>,
     from: usize,
@@ -1311,8 +1311,8 @@ async fn generic_sessions_get_no_hook_flags() {
 /// The per-kind opt-out is honoured at the point of injection.
 ///
 /// Codex's hook needs `--dangerously-bypass-hook-trust`, which makes its
-/// TUI print a warning line on every launch; a user who would rather have
-/// the scan back needs a way to say so per kind, and that switch has to be
+/// TUI print a warning line on every launch; a user who would rather run
+/// without that hook needs a way to say so per kind, and that switch has to be
 /// consulted where the flags are appended rather than anywhere they might
 /// later be filtered.
 ///

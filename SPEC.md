@@ -834,16 +834,27 @@ the command line for one launch is allowed because it writes nothing the vendor 
 conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
 absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
 Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
-example — hooks written into the agent's configuration — still stands. Scanning stays the fallback whenever no report
-has been accepted, which covers more than unhooked launches: a hook that is skipped, fails, times out, or is refused
-leaves the scan in charge exactly as before. Goose, Pi, and OMP are report-only integrations: Farhelm never scans or
-guesses from their vendor state. Goose persists a credential-free named MCP reporter with the conversation and reuses it
-on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
-session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
-file without following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh
-and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that request.
+example — hooks written into the agent's configuration — still stands. Claude retains scanning as its fallback when no
+report has been accepted. Codex, Goose, Pi, and OMP are report-only integrations: Farhelm never selects their
+conversation by scanning vendor state. A reporting credential alone does not establish which Codex conversation is in
+the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi
+loads a private static extension from Farhelm's state directory on every launch. A Pi report without a session file
+withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without
+following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh and rejects
+the stale Resume request so the user can refresh; it never silently launches fresh under that request.
 
-OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is a third report-only integration beside Pi. A launch
+Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
+process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
+process ancestry alone cannot distinguish threads sharing a process. The durable locator keeps runtime session identity
+separate from persistent thread identity, and resume uses the latter. Custom Codex homes work through the exact reported
+path; Farhelm does not search another home or choose a newer file. A legitimate reported `/clear` switches the current
+identity even when its transcript is not yet persisted: the old conversation stops being offered, and only the new
+conversation's exact file may make it resumable. An unrelated rejected report leaves the foreground identity untouched.
+Compaction preserves the conversation, and a verified new conversation replaces it. Unverifiable historical bare IDs
+remain stored but are not offered as exact resume targets. Missing or changed transcript evidence refuses Resume rather
+than silently launching fresh or selecting a different historical conversation.
+
+OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
 subcommands, print/mode/export/alias/help/version/license/list-models occurrences, the reserved-word rejecting forms,
 internal worker selectors, `--trusted-extension` launches (which OMP refuses to combine with an injected `-e`), and a
@@ -870,12 +881,13 @@ When an integrated session has no explicit resume invocation, its resume invocat
 argv retained for that session: Claude appends `--resume <conversation-id>`, and Codex appends
 `resume <conversation-id>`, Goose uses `session --resume --session-id <conversation-id>`, Pi uses
 `--session <verified-absolute-file>`, and OMP uses `--resume <verified-absolute-file>`. For Pi and OMP, `{conversation}`
-in a resume template means that verified file path, not Farhelm's internal durable locator. The original argv is reused
-as-is, including permission and configuration arguments, and is preserved as argv elements rather than rejoined shell
-text — except that OMP's own session selectors are stripped from the retained argv first, so an old resume or fork
-target cannot survive between the user and the verified one. This immediate rule assumes every original argument is
-reusable and that the launch has no initial prompt or launch-only option; separating those concerns into common, launch,
-and resume arguments is deferred.
+in a resume template means that verified file path, not Farhelm's internal durable locator; for Codex it means the
+verified persistent thread ID, not the runtime session ID or encoded locator. The original argv is reused as-is,
+including permission and configuration arguments, and is preserved as argv elements rather than rejoined shell text —
+except that OMP's own session selectors are stripped from the retained argv first, so an old resume or fork target
+cannot survive between the user and the verified one. This immediate rule assumes every original argument is reusable
+and that the launch has no initial prompt or launch-only option; separating those concerns into common, launch, and
+resume arguments is deferred.
 
 Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
 no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job

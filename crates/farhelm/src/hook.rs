@@ -307,9 +307,17 @@ fn run_inner(
             return Outcome::detail("bad-payload", format!("no-reader: {err}"));
         }
     };
-    let (conversation, source) = match parse_payload(&bytes) {
+    let request = match parse_payload(&bytes) {
         Ok(parsed) => parsed,
         Err(reason) => return Outcome::detail("bad-payload", reason),
+    };
+    let ControlMsg::ReportConversation {
+        conversation,
+        source,
+        ..
+    } = &request
+    else {
+        unreachable!("the payload parser constructs only conversation reports");
     };
 
     // Every failure from here on has an id to name, so the outcome carries
@@ -322,12 +330,12 @@ fn run_inner(
         Ok(runtime) => runtime,
         Err(err) => {
             return Outcome::detail("connect-failed", format!("runtime: {err}"))
-                .about(&conversation, &source);
+                .about(conversation, source);
         }
     };
     runtime
-        .block_on(report(credential, &conversation, &source, deadline))
-        .about(&conversation, &source)
+        .block_on(report(credential, &request, deadline))
+        .about(conversation, source)
 }
 
 /// Why a payload never arrived intact.
@@ -381,19 +389,13 @@ fn read_payload(
     }
 }
 
-/// Extract `(session_id, source)` from a vendor `SessionStart` payload.
+/// Build a bounded report without interpreting vendor-specific evidence.
 ///
-/// Parsed as a free-form [`serde_json::Value`] rather than a struct on
-/// purpose: both vendors already send fields this side has no use for
-/// (`transcript_path`, `cwd`, `model`, `permission_mode`, …) and both are
-/// free to add more. A payload gaining a field must never turn into a
-/// failed report, so unknown fields are ignored and only `session_id` is
-/// required. `source` is optional and defaults to empty, because it is
-/// diagnostic-only — nothing keys behavior on it.
-///
-/// The returned id is untrusted and merely length-bounded here; the
-/// supervisor decides whether it is plausible.
-fn parse_payload(bytes: &[u8]) -> Result<(String, String), &'static str> {
+/// Only the supervisor knows the session's durable agent kind. Preserve the
+/// exact transcript and event fields for its Codex checks; malformed evidence
+/// must not disappear into a missing value or change another vendor's parser.
+/// Unknown vendor fields remain ignored.
+fn parse_payload(bytes: &[u8]) -> Result<ControlMsg, &'static str> {
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
     let session_id = match value.get("session_id") {
         None | Some(serde_json::Value::Null) => return Err("missing-session-id"),
@@ -435,12 +437,24 @@ fn parse_payload(bytes: &[u8]) -> Result<(String, String), &'static str> {
             };
             let encoded = farhelm_supervisor::agent_kind::encode_locator(*expected, locator)
                 .map_err(|_| "invalid-locator")?;
-            return Ok((encoded, source));
+            return Ok(ControlMsg::ReportConversation {
+                req_id: REQUEST_ID,
+                conversation: encoded,
+                source,
+                transcript_path: None,
+                hook_event_name: None,
+            });
         }
         Some(_) => return Err("vendor-not-a-string"),
         None => {}
     }
-    Ok((session_id.clone(), source))
+    Ok(ControlMsg::ReportConversation {
+        req_id: REQUEST_ID,
+        conversation: session_id.clone(),
+        source,
+        transcript_path: value.get("transcript_path").cloned(),
+        hook_event_name: value.get("hook_event_name").cloned(),
+    })
 }
 
 /// One authenticated round trip: connect, handshake, report, read the reply.
@@ -457,12 +471,7 @@ fn parse_payload(bytes: &[u8]) -> Result<(String, String), &'static str> {
 /// will make, so the id and token can be moved into the handshake rather
 /// than cloned out of a borrow, and the bearer token then exists in
 /// exactly one place on its way to the socket.
-async fn report(
-    credential: HookCredential,
-    conversation: &str,
-    source: &str,
-    deadline: Instant,
-) -> Outcome {
+async fn report(credential: HookCredential, request: &ControlMsg, deadline: Instant) -> Outcome {
     let connect = tokio::net::UnixStream::connect(&credential.socket);
     let stream = match tokio::time::timeout(remaining(deadline), connect).await {
         Err(_) => return Outcome::detail("timeout", "connect"),
@@ -484,12 +493,7 @@ async fn report(
         Ok(Ok(_peer_hello)) => {}
     }
 
-    let request = ControlMsg::ReportConversation {
-        req_id: REQUEST_ID,
-        conversation: conversation.to_string(),
-        source: source.to_string(),
-    };
-    match tokio::time::timeout(remaining(deadline), writer.write_control(&request)).await {
+    match tokio::time::timeout(remaining(deadline), writer.write_control(request)).await {
         Err(_) => return Outcome::detail("timeout", "send"),
         Ok(Err(err)) => return Outcome::io("send", &err),
         Ok(Ok(())) => {}
@@ -931,6 +935,7 @@ mod tests {
                                         req_id,
                                         conversation,
                                         source,
+                                        ..
                                     } => {
                                         let _ = seen_tx.send((conversation, source, auth));
                                         tokio::time::timeout(
@@ -995,7 +1000,14 @@ mod tests {
     /// conversation, and the failure is silent by design.
     #[farhelm_testtrace::test]
     fn parses_the_verbatim_claude_payload() {
-        let (id, source) = parse_payload(CLAUDE_PAYLOAD.as_bytes()).expect("claude payload parses");
+        let ControlMsg::ReportConversation {
+            conversation: id,
+            source,
+            ..
+        } = parse_payload(CLAUDE_PAYLOAD.as_bytes()).expect("claude payload parses")
+        else {
+            panic!("expected a conversation report");
+        };
         assert_eq!(id, "6af192d4-0000-4000-8000-000000000000");
         assert_eq!(source, "startup");
     }
@@ -1006,7 +1018,14 @@ mod tests {
     /// ignored rather than being a second shape to maintain.
     #[farhelm_testtrace::test]
     fn parses_the_verbatim_codex_payload() {
-        let (id, source) = parse_payload(CODEX_PAYLOAD.as_bytes()).expect("codex payload parses");
+        let ControlMsg::ReportConversation {
+            conversation: id,
+            source,
+            ..
+        } = parse_payload(CODEX_PAYLOAD.as_bytes()).expect("codex payload parses")
+        else {
+            panic!("expected a conversation report");
+        };
         assert_eq!(id, "0198d3ac-0000-7000-8000-000000000000");
         assert_eq!(source, "startup");
     }
@@ -1019,7 +1038,14 @@ mod tests {
     #[farhelm_testtrace::test]
     fn ignores_unknown_payload_fields() {
         let payload = r#"{"session_id":"abc","source":"resume","future_field":{"nested":[1,2]},"another":null}"#;
-        let (id, source) = parse_payload(payload.as_bytes()).expect("unknown fields are ignored");
+        let ControlMsg::ReportConversation {
+            conversation: id,
+            source,
+            ..
+        } = parse_payload(payload.as_bytes()).expect("unknown fields are ignored")
+        else {
+            panic!("expected a conversation report");
+        };
         assert_eq!(id, "abc");
         assert_eq!(source, "resume");
     }
@@ -1029,7 +1055,14 @@ mod tests {
     /// Claude sends `clear`; nothing may key on the field's presence.
     #[farhelm_testtrace::test]
     fn missing_source_defaults_to_empty() {
-        let (id, source) = parse_payload(br#"{"session_id":"abc"}"#).expect("id alone is enough");
+        let ControlMsg::ReportConversation {
+            conversation: id,
+            source,
+            ..
+        } = parse_payload(br#"{"session_id":"abc"}"#).expect("id alone is enough")
+        else {
+            panic!("expected a conversation report");
+        };
         assert_eq!(id, "abc");
         assert_eq!(source, "");
     }
@@ -1069,7 +1102,12 @@ mod tests {
     #[farhelm_testtrace::test]
     fn accepts_a_session_id_at_the_cap() {
         let payload = format!(r#"{{"session_id":"{}"}}"#, "x".repeat(MAX_SESSION_ID_BYTES));
-        let (id, _) = parse_payload(payload.as_bytes()).expect("an id at the cap is fine");
+        let ControlMsg::ReportConversation {
+            conversation: id, ..
+        } = parse_payload(payload.as_bytes()).expect("an id at the cap is fine")
+        else {
+            panic!("expected a conversation report");
+        };
         assert_eq!(id.len(), MAX_SESSION_ID_BYTES);
     }
 
@@ -1089,7 +1127,12 @@ mod tests {
         let at_cap = "😀".repeat(MAX_SESSION_ID_BYTES / 4);
         assert_eq!(at_cap.len(), MAX_SESSION_ID_BYTES, "fixture sanity");
         let payload = format!(r#"{{"session_id":"{at_cap}"}}"#);
-        let (id, _) = parse_payload(payload.as_bytes()).expect("128 bytes is at the cap");
+        let ControlMsg::ReportConversation {
+            conversation: id, ..
+        } = parse_payload(payload.as_bytes()).expect("128 bytes is at the cap")
+        else {
+            panic!("expected a conversation report");
+        };
         assert_eq!(id.len(), MAX_SESSION_ID_BYTES);
 
         // One character more is four bytes more, and therefore over.
@@ -1109,19 +1152,30 @@ mod tests {
     /// path or from cross-reporting through the other vendor's prefix.
     #[farhelm_testtrace::test]
     fn vendor_payloads_encode_locators_per_vendor_and_stay_closed() {
-        let (id, source) = parse_payload(
+        let ControlMsg::ReportConversation {
+            conversation: id,
+            source,
+            ..
+        } = parse_payload(
             br#"{"vendor":"omp","session_id":"omp-id-1",
-                "session_file":"/tmp/s/conv.jsonl","source":"session_start"}"#,
+            "session_file":"/tmp/s/conv.jsonl","source":"session_start"}"#,
         )
-        .expect("omp payload parses");
+        .expect("omp payload parses")
+        else {
+            panic!("expected a conversation report");
+        };
         assert!(
             id.starts_with("omp:"),
             "OMP reports under its own prefix: {id}"
         );
         assert_eq!(source, "session_start");
 
-        let (id, _) =
-            parse_payload(br#"{"vendor":"pi","session_id":"pi-1"}"#).expect("pi payload parses");
+        let ControlMsg::ReportConversation {
+            conversation: id, ..
+        } = parse_payload(br#"{"vendor":"pi","session_id":"pi-1"}"#).expect("pi payload parses")
+        else {
+            panic!("expected a conversation report");
+        };
         assert!(id.starts_with("pi:"), "Pi's spelling is unchanged: {id}");
 
         assert_eq!(

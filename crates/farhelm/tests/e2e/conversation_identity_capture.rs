@@ -442,81 +442,6 @@ async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversatio
     }
 }
 
-/// SPEC.md requires BOTH integrations in v1, so Codex gets the same
-/// shared-directory proof rather than being assumed to follow from
-/// Claude's. It is not a formality: Codex's records live in a date-nested
-/// tree that is NOT partitioned by working directory at all, so the
-/// recorded-cwd filter carries all the weight here, and the scan cache is
-/// keyed on a root every Codex session on the host shares.
-/// The resume preview must keep the fixture's original launch arguments
-/// before appending Codex's subcommand and this session's captured ID.
-#[farhelm_testtrace::test]
-async fn two_codex_sessions_in_one_directory_each_capture_their_own_conversation() {
-    let (h, fixtures) = capture_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-
-    let first = record_session(&h, &fixtures, work.path(), "codex").await;
-    let (_chan_a, _rx_a, _seen_a, id_a) = provoke_record(&h, &first).await;
-    let at_a = wait_for_first_input(&h, &first.id, 20).await;
-
-    wait_until_window_disjoint_from(at_a).await;
-
-    let second = record_session(&h, &fixtures, work.path(), "codex").await;
-    let (_chan_b, _rx_b, _seen_b, id_b) = provoke_record(&h, &second).await;
-    let at_b = wait_for_first_input(&h, &second.id, 20).await;
-    assert_ne!(id_a, id_b);
-    assert_windows_disjoint(at_a, at_b);
-
-    assert_eq!(wait_for_capture(&h, &first.id, 30).await, id_a);
-    assert_eq!(wait_for_capture(&h, &second.id, 30).await, id_b);
-
-    let snapshot = snapshot_of(&h, &first.id).await;
-    assert_eq!(
-        snapshot.resume_argv.as_deref().unwrap(),
-        // Built from fixture inputs, not the stored template: dropping the
-        // original arguments must fail even if template and preview agree.
-        [
-            fixtures
-                .bin
-                .path()
-                .join("codex")
-                .to_string_lossy()
-                .into_owned(),
-            "internal".to_string(),
-            "fake-agent".to_string(),
-            "--script".to_string(),
-            "codex-record".to_string(),
-            "--record-home".to_string(),
-            fixtures.home.path().to_string_lossy().into_owned(),
-            "resume".to_string(),
-            id_a.clone(),
-        ]
-    );
-}
-
-/// Two sessions of DIFFERENT kinds in one working directory must not
-/// poison each other, even with overlapping windows: a Claude record can
-/// only ever be a Claude session's, so the ambiguity rule is scoped to the
-/// kind as well as the directory. Without that scoping the natural
-/// implementation (group by directory) would make a mixed pair — which is
-/// an ordinary thing for a user to do — permanently uncapturable.
-#[farhelm_testtrace::test]
-async fn a_claude_and_a_codex_session_in_one_directory_do_not_poison_each_other() {
-    let (h, fixtures) = capture_harness().await;
-    let work = farhelm_teststate::tempdir().expect("workdir");
-
-    let claude = record_session(&h, &fixtures, work.path(), "claude").await;
-    let codex = record_session(&h, &fixtures, work.path(), "codex").await;
-    let (_c1, _r1, _s1, id_claude) = provoke_record(&h, &claude).await;
-    let (_c2, _r2, _s2, id_codex) = provoke_record(&h, &codex).await;
-    let at_claude = wait_for_first_input(&h, &claude.id, 20).await;
-    let at_codex = wait_for_first_input(&h, &codex.id, 20).await;
-    assert_windows_overlap(at_claude, at_codex);
-
-    assert_eq!(wait_for_capture(&h, &claude.id, 30).await, id_claude);
-    assert_eq!(wait_for_capture(&h, &codex.id, 30).await, id_codex);
-}
-
 /// The audited constraint that shapes the entire correlator: the record
 /// appears at first PROMPT submission, not at launch, and the gap between
 /// them is unbounded. So a session left sitting well past every window
@@ -643,25 +568,6 @@ async fn a_symlinked_or_dotted_working_directory_still_correlates() {
         "the resolved spelling is what correlation must use"
     );
 
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
-    assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
-}
-
-/// Codex gets the same canonical-cwd proof as Claude, because the two
-/// consume it differently: Claude uses it to build the project DIRECTORY
-/// name, while Codex has no per-directory tree at all and uses it only for
-/// the recorded-field comparison. A fix that resolved the path for one
-/// path and not the other would pass a Claude-only test.
-#[farhelm_testtrace::test]
-async fn a_symlinked_working_directory_still_correlates_for_codex() {
-    let (h, fixtures) = capture_harness().await;
-    let parent = farhelm_teststate::tempdir().expect("workdir");
-    let real = parent.path().join("real");
-    std::fs::create_dir(&real).expect("mkdir");
-    let link = parent.path().join("link");
-    std::os::unix::fs::symlink(&real, &link).expect("symlink");
-
-    let session = record_session(&h, &fixtures, &link, "codex").await;
     let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
     assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
 }
@@ -1376,8 +1282,8 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
             80,
             24,
             farhelm_helm::CreateExtras {
-                agent_kind: Some(farhelm_proto::AgentKind::Codex),
-                resume_template: Some(vec!["codex".to_string(), "resume".to_string()]),
+                agent_kind: Some(farhelm_proto::AgentKind::Claude),
+                resume_template: Some(vec!["claude".to_string(), "--resume".to_string()]),
                 ..farhelm_helm::CreateExtras::default()
             },
         )

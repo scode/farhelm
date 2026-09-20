@@ -599,53 +599,23 @@ fn fixture_resume_template(
     ]
 }
 
-/// Where [`interrupted_session_resumes_its_conversation`]'s final assertion
-/// finds the record the resumed run appended to, once it knows `kind` and
-/// the conversation id.
-///
-/// Claude's tree is partitioned by working directory, so a listing of the
-/// one project directory the fixture writes into is enough. Codex's is not
-/// — it nests by CALENDAR DATE instead (see `record_path` in
-/// `fake_agent.rs`) — so this walks the whole `.codex/sessions` tree rather
-/// than duplicating that date math: a test-side reimplementation of the
-/// fixture's own path formula would only prove the two agree with each
-/// other, not that either matches what a real resumed Codex session does.
+/// Find the Claude record the resumed fixture appended to. This is an actual
+/// conversation effect, rather than an assertion about the stored capture
+/// value, so a broken resume can neither pass on a substituted argv alone nor
+/// hide behind the removed Codex directory-scan fixture.
 fn resumed_record_file(
     home: &std::path::Path,
-    kind: &str,
     work: &std::path::Path,
     conversation: &str,
 ) -> std::path::PathBuf {
-    match kind {
-        "claude" => {
-            let canonical = std::fs::canonicalize(work).expect("canonicalize the workdir");
-            std::fs::read_dir(home.join(".claude").join("projects").join(
-                farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
-            ))
-            .expect("project dir")
-            .map(|entry| entry.expect("dir entry").path())
-            .find(|path| path.to_string_lossy().contains(conversation))
-            .expect("the captured record still exists")
-        }
-        "codex" => {
-            fn walk(dir: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
-                for entry in std::fs::read_dir(dir).expect("read the sessions tree") {
-                    let path = entry.expect("dir entry").path();
-                    if path.is_dir() {
-                        if let Some(found) = walk(&path, id) {
-                            return Some(found);
-                        }
-                    } else if path.to_string_lossy().contains(id) {
-                        return Some(path);
-                    }
-                }
-                None
-            }
-            walk(&home.join(".codex").join("sessions"), conversation)
-                .expect("the captured record still exists")
-        }
-        other => panic!("resumed_record_file: unknown kind {other}"),
-    }
+    let canonical = std::fs::canonicalize(work).expect("canonicalize the workdir");
+    std::fs::read_dir(home.join(".claude").join("projects").join(
+        farhelm_supervisor::agent_kind::munge_cwd(&canonical.to_string_lossy()),
+    ))
+    .expect("project dir")
+    .map(|entry| entry.expect("dir entry").path())
+    .find(|path| path.to_string_lossy().contains(conversation))
+    .expect("the captured record still exists")
 }
 
 /// Archive preserves both a captured conversation identity and committed
@@ -744,12 +714,11 @@ async fn an_archived_capture_backed_session_resumes_exactly_and_reads_its_attach
 /// the test must not claim the wrapper-supplied record behavior it does not
 /// exercise.
 ///
-/// Shared by both agent kinds ([`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`]
-/// and [`an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal`]):
-/// the resume path is kind-agnostic once `fixture_resume_template` has
-/// filled in the placeholder, and the only kind-specific step left is
-/// finding where the record landed on disk ([`resumed_record_file`]).
-async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bool) {
+/// This fixture keeps its scope to Claude's record-writing path. Codex needs a
+/// foreground-attributed locator rather than the bare scan result this helper
+/// deliberately obtains, and that behavior belongs to the dedicated fixture.
+async fn interrupted_session_resumes_its_conversation(structured: bool) {
+    let kind = "claude";
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
     std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
@@ -772,29 +741,13 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
     let resume_template =
         (!structured).then(|| fixture_resume_template(&bin.path().join(kind), kind, home.path()));
     let selection = structured.then(|| farhelm_proto::LaunchSelection {
-        harness: if kind == "codex" {
-            farhelm_proto::LaunchHarness::Codex
-        } else {
-            farhelm_proto::LaunchHarness::Claude
-        },
-        model: Some(
-            if kind == "codex" {
-                "gpt-6-astra"
-            } else {
-                "claude-fable-5"
-            }
-            .to_string(),
-        ),
+        harness: farhelm_proto::LaunchHarness::Claude,
+        model: Some("claude-fable-5".to_string()),
         effort: Some(farhelm_proto::LaunchEffort::High),
         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
     });
-    let structured_options = structured.then(|| {
-        if kind == "codex" {
-            "-m gpt-6-astra -c model_reasoning_effort=high --yolo".to_string()
-        } else {
-            "--model claude-fable-5 --effort high --dangerously-skip-permissions".to_string()
-        }
-    });
+    let structured_options = structured
+        .then(|| "--model claude-fable-5 --effort high --dangerously-skip-permissions".to_string());
     let conversation = {
         let sup = Supervisor::new_with_seams(
             state.path(),
@@ -821,13 +774,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
                 80,
                 24,
                 farhelm_helm::CreateExtras {
-                    agent_kind: structured.then(|| {
-                        if kind == "codex" {
-                            farhelm_proto::AgentKind::Codex
-                        } else {
-                            farhelm_proto::AgentKind::Claude
-                        }
-                    }),
+                    agent_kind: structured.then_some(farhelm_proto::AgentKind::Claude),
                     launch: selection.clone(),
                     resume_template: resume_template.clone(),
                     ..farhelm_helm::CreateExtras::default()
@@ -877,15 +824,10 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
                 .resume_template
                 .as_ref()
                 .expect("structured restart stores its integration default");
-            let expected_flag = if kind == "codex" {
-                "resume"
-            } else {
-                "--resume"
-            };
             assert!(
-                template.iter().any(|word| word == expected_flag)
+                template.iter().any(|word| word == "--resume")
                     && template.iter().any(|word| word == "{conversation}"),
-                "structured restart stores the {kind} integration default, not a catalog-derived template: {template:?}"
+                "structured restart stores the Claude integration default, not a catalog-derived template: {template:?}"
             );
             let stored = SessionStore::open(&state.path().join("supervisor.db"), false)
                 .await
@@ -951,14 +893,10 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
     if structured {
         wait_for(&mut rx, &mut seen, "FAKE-AGENT ARGV:", 30).await;
         let argv = crate::harness::argv_marker(&seen);
-        let expected = if kind == "codex" {
-            format!("resume {conversation}")
-        } else {
-            format!("--resume {conversation}")
-        };
+        let expected = format!("--resume {conversation}");
         assert!(
             argv.contains(&expected),
-            "the reconstructed {kind} successor must use its own default resume form: {argv}"
+            "the reconstructed Claude successor must use its default resume form: {argv}"
         );
         let words = shell_words::split(&argv).expect("structured successor argv");
         let options =
@@ -966,7 +904,7 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
                 .expect("structured successor options");
         assert!(
             words.windows(options.len()).any(|window| window == options),
-            "reconstructed {kind} argv lost selected options {options:?}: {argv}"
+            "reconstructed Claude argv lost selected options {options:?}: {argv}"
         );
         wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 30).await;
         crate::structured_launches::assert_live_exchange(
@@ -1021,13 +959,8 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
     )
     .await;
     let record = String::from_utf8(
-        std::fs::read(resumed_record_file(
-            home.path(),
-            kind,
-            work.path(),
-            &conversation,
-        ))
-        .expect("read the record"),
+        std::fs::read(resumed_record_file(home.path(), work.path(), &conversation))
+            .expect("read the record"),
     )
     .expect("the fixture writes UTF-8");
     assert!(
@@ -1043,31 +976,14 @@ async fn interrupted_session_resumes_its_conversation(kind: &str, structured: bo
 /// test binary's output.
 #[farhelm_testtrace::test]
 async fn an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal() {
-    interrupted_session_resumes_its_conversation("claude", false).await;
-}
-
-/// The Codex half of PLAN_M3.md acceptance 8: until this test existed, the
-/// "both fixture pairs restart-resume their own conversation" claim was
-/// only pinned for Codex up to offer-and-argv (`snapshot.resume_offer`,
-/// `resume_argv`) — nothing actually EXECUTED a resume relaunch and
-/// confirmed the SAME conversation record grew on disk afterward, the way
-/// [`an_interrupted_session_resumes_its_conversation_in_a_fresh_terminal`]
-/// already does for Claude. The resume machinery itself is kind-agnostic
-/// (see `fixture_resume_template`'s docs), but only running it end to end
-/// against Codex's differently-shaped, date-nested record tree
-/// (`resumed_record_file`) rules out a Claude-only bug hiding behind a
-/// kind-agnostic-looking code path.
-#[farhelm_testtrace::test]
-async fn an_interrupted_codex_session_resumes_its_conversation_in_a_fresh_terminal() {
-    interrupted_session_resumes_its_conversation("codex", false).await;
+    interrupted_session_resumes_its_conversation(false).await;
 }
 
 /// Structured selections survive boot-A/boot-B reconstruction without asking
 /// today's catalog how an already accepted session should resume.
 #[farhelm_testtrace::test]
-async fn structured_codex_and_claude_resume_after_supervisor_reconstruction() {
-    interrupted_session_resumes_its_conversation("codex", true).await;
-    interrupted_session_resumes_its_conversation("claude", true).await;
+async fn structured_claude_resume_survives_supervisor_reconstruction() {
+    interrupted_session_resumes_its_conversation(true).await;
 }
 
 /// The same interrupted-then-resumed journey as

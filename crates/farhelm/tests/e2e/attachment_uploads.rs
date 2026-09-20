@@ -231,7 +231,7 @@ impl RawPeer {
         let (client_side, server_side) = tokio::io::duplex(bytes);
         let sup = Arc::clone(sup);
         tokio::spawn(async move {
-            let _ = handle_connection(sup, server_side).await;
+            let _ = handle_connection(sup, server_side, None).await;
         });
         let (read_half, write_half) = tokio::io::split(client_side);
         let mut peer = RawPeer {

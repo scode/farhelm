@@ -831,7 +831,7 @@ pub(crate) async fn connect_client(sup: &Arc<Supervisor>) -> Arc<SupervisorClien
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (r, w) = tokio::io::split(client_side);
     SupervisorClient::start(r, w).await.expect("handshake")

@@ -15,6 +15,8 @@
 use anyhow::Context;
 use std::io::{BufRead, Read, Write};
 
+mod codex_conversation;
+
 /// Which terminal behavior to act out. A closed set, so clap validates it
 /// at parse time and `--help` documents it, rather than failing at
 /// runtime on a typo in a test.
@@ -140,6 +142,12 @@ pub enum Script {
     /// Writes a Codex-shaped rollout record on first input; otherwise
     /// identical to [`Script::ClaudeRecord`].
     CodexRecord,
+    /// A narrow native-Codex-shaped conversation fixture for foreground
+    /// attribution regressions. Unlike [`Script::CodexRecord`], it fires
+    /// real hooks from root and nested native processes, so its test crosses
+    /// peer credential inheritance and process ancestry as well as record
+    /// verification. See `fake_agent/codex_conversation.rs`.
+    CodexConversation,
     /// [`Script::ClaudeRecord`] plus a `report <id>` command that fires the
     /// REAL `farhelm internal hook` binary, standing in for the vendor's
     /// own `SessionStart` hook.
@@ -340,6 +348,7 @@ pub fn run(
         ),
         Script::ClaudeRecord => record_agent(RecordShape::Claude, record_home, false),
         Script::CodexRecord => record_agent(RecordShape::Codex, record_home, false),
+        Script::CodexConversation => codex_conversation::run(record_home),
         Script::HookReport => record_agent(RecordShape::Claude, record_home, true),
         Script::AgentRelay => agent_relay(),
         Script::EnvEcho => env_echo(),

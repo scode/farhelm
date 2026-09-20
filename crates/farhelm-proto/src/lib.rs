@@ -2790,27 +2790,16 @@ pub enum ControlMsg {
     ///
     /// ## Trust boundary
     ///
-    /// Every process in the session's tree holds the session credential —
-    /// the agent itself, and anything its tools spawn — so any of them can
-    /// send this message and REPLACE the resume identity the supervisor
-    /// has recorded. That is a wider power than `CreateSession` grants a
-    /// session-authenticated peer today, but not a new hole: it is the
-    /// same boundary the conversation-record SCAN already relies on, since
-    /// the agent writes the very record files that scan reads to infer an
-    /// id in the first place. What that boundary does and does not protect
-    /// must be stated exactly. Any holder of the credential can redirect
-    /// the session's resume to ANY id it knows that passes the supervisor's
-    /// plausibility check (`agent_kind::is_plausible_conversation_id`: one
-    /// word of 1–128 ASCII graphic bytes, no leading `-`, no quotes or
-    /// backslashes — that function is the single definition, for the scan
-    /// and for reports alike), including the id of some other existing
-    /// conversation of the same user. The mitigations do not prevent that
-    /// misdirection; they prevent the id from becoming anything OTHER than
-    /// an id: the shape check, and the fact that the resume argv is always
-    /// substituted into its own argv slot and never spliced into a command
-    /// string, mean a hostile report cannot make a relaunch run anything.
-    /// Which conversation gets resumed is, and always was, the agent's
-    /// call.
+    /// The credential identifies the Farhelm session, not necessarily its
+    /// foreground vendor conversation: tools and nested invocations can inherit
+    /// it. The supervisor applies the stored kind's attribution rules before
+    /// accepting a replacement. Codex additionally requires a kernel-attributed
+    /// foreground process and matching root transcript metadata; a persistent
+    /// child record alone is insufficient.
+    ///
+    /// This is not a security boundary against the same Unix user, who owns the
+    /// processes and vendor files. Shape validation and literal argv substitution
+    /// separately prevent reported identity text from becoming a shell command.
     ///
     /// ## Ordering and replacement
     ///
@@ -2820,14 +2809,11 @@ pub enum ControlMsg {
     /// SAME process — the hook fires again, and the new id is exactly what
     /// a later resume should target. Overwriting the prior report is
     /// therefore the correct outcome, not a duplicate request to reject.
-    /// Reports are last-write-wins with no ordering field of their own,
-    /// which is sound only because of how the senders behave: both vendors
-    /// run a `SessionStart` hook to completion (or to its timeout) before
-    /// the agent continues, so one launch's reports complete in the order
-    /// its conversations came into being, never overlapping. Across
-    /// launches the supervisor fences on the session's generation, so a
-    /// report from a previous launch of the same session is refused rather
-    /// than applied.
+    /// Accepted reports replace earlier identities within the current launch.
+    /// Vendor hook ordering supplies the event order; the wire has no sequence
+    /// field. The durable generation comparison rejects a report racing a
+    /// relaunch. Lifecycle teardown removes old reporters, and Codex attribution
+    /// also requires ancestry reaching the current owned pane.
     ReportConversation {
         req_id: u64,
         /// The conversation id as the agent's own hook reported it.
@@ -2835,22 +2821,21 @@ pub enum ControlMsg {
         /// plausibility check accepts it — see this variant's own "Trust
         /// boundary" section.
         conversation: String,
-        /// The vendor's own word for why the hook fired (Claude's hook
-        /// payload names this field `source`, with values including
-        /// `"startup"`, `"resume"`, `"clear"`, and `"compact"`; Codex has
-        /// its own vocabulary). Recorded for diagnostics only — nothing in
-        /// this crate or the supervisor keys behavior on this value, so a
-        /// vendor renaming or adding a reason can never break decoding or
-        /// dispatch.
+        /// The vendor's reason for the hook. Codex uses `clear` to identify an
+        /// explicit foreground switch even before the new record is persisted.
+        /// Other integrations retain this value for bounded diagnostics.
         source: String,
+        /// Exact vendor record path, never a request to search a directory.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transcript_path: Option<serde_json::Value>,
+        /// Codex requires a root `SessionStart`, not an internal-agent event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hook_event_name: Option<serde_json::Value>,
     },
-    /// Acknowledgement of `ReportConversation`, sent only once the
-    /// supervisor has validated the id AND written it durably — receiving
-    /// this means a restart will resume that conversation. Every other
-    /// outcome (bad credential, implausible id, a supervisor that is not
-    /// recording, a launch that has since been replaced, a store failure)
-    /// arrives as a correlated `Error` instead, so a sender can tell
-    /// refusal from acceptance and transport loss from both. The hook that
+    /// Acknowledges a durable foreground identity report. A pending Codex
+    /// conversation is recorded but is not resumable until its exact file is
+    /// verified. Refusal or persistence failure arrives as a correlated `Error`,
+    /// so the sender can distinguish refusal from transport loss. The hook that
     /// sends the request cannot ACT on any of these — its own contract is
     /// to run silently and exit successfully regardless — but it does wait
     /// for the reply within its budget and records which one it got in its
@@ -6833,6 +6818,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn report_conversation_json_shapes_are_pinned() {
         let report = ControlMsg::ReportConversation {
+            transcript_path: None,
+            hook_event_name: None,
             req_id: 21,
             conversation: "abc123def456".to_string(),
             source: "startup".to_string(),
@@ -6867,6 +6854,8 @@ mod tests {
     fn report_conversation_roundtrip_through_frames() {
         for msg in [
             ControlMsg::ReportConversation {
+                transcript_path: None,
+                hook_event_name: None,
                 req_id: 1,
                 conversation: "abc123def456".to_string(),
                 source: "resume".to_string(),
@@ -6909,6 +6898,8 @@ mod tests {
 
         for msg in [
             ControlMsg::ReportConversation {
+                transcript_path: None,
+                hook_event_name: None,
                 req_id: 2,
                 conversation: "abc123def456".to_string(),
                 source: "clear".to_string(),
@@ -7864,6 +7855,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn report_conversation_pair_is_classified_as_request_and_reply() {
         let request = ControlMsg::ReportConversation {
+            transcript_path: None,
+            hook_event_name: None,
             req_id: 21,
             conversation: "abc123def456".to_string(),
             source: "startup".to_string(),

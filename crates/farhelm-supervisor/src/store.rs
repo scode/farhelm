@@ -4811,23 +4811,23 @@ impl SessionStore {
         .context("reported-conversation record task panicked")?
     }
 
-    /// Replace one exact reported locator without overwriting a newer report.
+    /// Commit a reported locator only if its complete prior capture still matches.
     ///
-    /// Pi uses this after restart-time verification proves the stored file is
-    /// no longer the session it claimed to be. Both the generation and the
-    /// complete old token participate in the comparison: a concurrent hook
-    /// report for another file must survive even when it names the same Pi
-    /// session ID.
+    /// Pi uses this to withdraw a stale file, and Codex uses it for both refresh
+    /// and reports verified against a previous binding. Generation alone cannot
+    /// fence those writers: refresh can bind a pending locator without relaunching.
+    /// `None` compares against SQL NULL, so initial reports cannot overwrite a
+    /// capture established while their evidence was being verified.
     pub async fn replace_reported_conversation_if_current(
         &self,
         id: &str,
         generation: i64,
-        expected: &str,
+        expected: Option<&str>,
         replacement: &str,
     ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
-        let expected = expected.to_string();
+        let expected = expected.map(str::to_owned);
         let replacement = replacement.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let conn = conn.lock().expect("session db mutex poisoned");
@@ -4835,7 +4835,7 @@ impl SessionStore {
                 .execute(
                     "UPDATE sessions SET captured_conversation = ?4, captured_record = NULL, \
                      conversation_source = 'hook', capture_ambiguous = 0 \
-                     WHERE id = ?1 AND generation = ?2 AND captured_conversation = ?3",
+                     WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3",
                     rusqlite::params![id, generation, expected, replacement],
                 )
                 .context("replacing a stale reported conversation locator")?;
@@ -9043,6 +9043,30 @@ mod tests {
         assert_eq!(row.conversation_source.as_deref(), Some("hook"));
     }
 
+    /// An initial report must compare against absence, not treat it as an
+    /// unconditional write. Otherwise evidence verified before the first capture
+    /// can overwrite the identity that became authoritative in the meantime.
+    #[farhelm_testtrace::test]
+    async fn an_initial_report_cannot_overwrite_a_capture_that_landed_first() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "s1").await;
+        assert!(
+            store
+                .replace_reported_conversation_if_current("s1", 0, None, "first-locator")
+                .await
+                .expect("commit the initial report")
+        );
+        assert!(
+            !store
+                .replace_reported_conversation_if_current("s1", 0, None, "stale-locator")
+                .await
+                .expect("refuse an obsolete absence snapshot")
+        );
+        let row = store.session("s1").await.expect("read").expect("present");
+        assert_eq!(row.captured_conversation.as_deref(), Some("first-locator"));
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+    }
+
     /// Pi's restart verifier may withdraw only the locator it actually read.
     /// A replacement report that lands first must survive the stale compare,
     /// even when both reports belong to the same launch generation.
@@ -9059,7 +9083,7 @@ mod tests {
                 .replace_reported_conversation_if_current(
                     "s1",
                     0,
-                    "old-locator",
+                    Some("old-locator"),
                     "fileless-locator",
                 )
                 .await
@@ -9075,7 +9099,7 @@ mod tests {
                 .replace_reported_conversation_if_current(
                     "s1",
                     0,
-                    "old-locator",
+                    Some("old-locator"),
                     "fileless-locator",
                 )
                 .await

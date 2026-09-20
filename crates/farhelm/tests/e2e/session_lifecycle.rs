@@ -1175,7 +1175,7 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(&h.sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);
@@ -1294,7 +1294,7 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(&h.sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);
@@ -1379,7 +1379,7 @@ async fn unknown_control_message_tears_down_the_connection() {
     let (client_side, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(&h.sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);
@@ -2566,7 +2566,7 @@ async fn connection_loss_detaches_terminals_and_fails_requests() {
     let (relay_b, server_side) = tokio::io::duplex(1 << 20);
     let sup = Arc::clone(&h.sup);
     tokio::spawn(async move {
-        let _ = handle_connection(sup, server_side).await;
+        let _ = handle_connection(sup, server_side, None).await;
     });
     let (mut ar, mut aw) = tokio::io::split(relay_a);
     let (mut br, mut bw) = tokio::io::split(relay_b);
@@ -2666,7 +2666,7 @@ async fn supervisor_writer_failure_ends_a_half_broken_connection() {
         fail_writes: Arc::clone(&fail_writes),
     };
     let sup = Arc::clone(&h.sup);
-    let connection = tokio::spawn(async move { handle_connection(sup, server_side).await });
+    let connection = tokio::spawn(async move { handle_connection(sup, server_side, None).await });
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);
     let mut writer = FrameWriter::new(write_half);
@@ -2741,7 +2741,7 @@ async fn writer_never_reading_peer_does_not_hang_connection_shutdown() {
     // flood to reproduce the stall.
     let (client_side, server_side) = tokio::io::duplex(4 * 1024);
     let sup = Arc::clone(&h.sup);
-    let handle = tokio::spawn(async move { handle_connection(sup, server_side).await });
+    let handle = tokio::spawn(async move { handle_connection(sup, server_side, None).await });
 
     let (read_half, write_half) = tokio::io::split(client_side);
     let mut reader = FrameReader::new(read_half);

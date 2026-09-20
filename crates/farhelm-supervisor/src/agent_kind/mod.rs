@@ -25,10 +25,10 @@
 //!    [`CWD_PLACEHOLDER`] at spawn time in `Supervisor::spawn_agent`,
 //!    which is the only place the launch's working directory is known on
 //!    every path.
-//! 2. **Conversation-identity capture** (item 8). Claude and Codex write
-//!    discoverable on-disk records that the supervisor can scan as a
-//!    fallback, and also report exact identities through a per-launch hook.
-//!    Goose, Pi, and OMP are report-only integrations: they never expose a
+//! 2. **Conversation-identity capture** (item 8). Claude can correlate
+//!    discoverable records as a fallback to its per-launch hook.
+//!    Codex requires an attributed foreground report and exact root metadata.
+//!    Codex, Goose, Pi, and OMP are report-only integrations: they never expose a
 //!    record root for Farhelm to scan, and a locator reported under one
 //!    vendor's prefix is never accepted for another's. Reporter artifacts
 //!    stay in Farhelm's state; Goose alone retains the credential-free
@@ -116,6 +116,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod capture;
+pub(crate) mod codex;
 pub(crate) use capture::read_prefix as read_bounded_regular_file;
 pub use capture::{
     CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
@@ -230,7 +231,9 @@ impl LocatorVendor {
 /// parsing as anything in particular: a malformed `pi:` or `omp:` prefix is
 /// still a claim this build must refuse, not garbage to treat as a bare id.
 pub fn is_reserved_locator_token(value: &str) -> bool {
-    value.starts_with(LocatorVendor::Pi.prefix()) || value.starts_with(LocatorVendor::Omp.prefix())
+    value.starts_with(LocatorVendor::Pi.prefix())
+        || value.starts_with(LocatorVendor::Omp.prefix())
+        || value.starts_with(codex::PREFIX)
 }
 
 /// A vendor's exact durable resume target, carried inside the existing
@@ -300,12 +303,11 @@ fn validate_locator(vendor: LocatorVendor, locator: &SessionLocator) -> anyhow::
 /// tail) lives with the session, and what remains here is pure per-KIND
 /// knowledge.
 ///
-/// Every method except [`AgentIntegration::sharpen`] is required, and that
-/// asymmetry is the contract SPEC_impl.md's two halves imply: an
-/// integration that cannot say where its records live has no business
-/// existing, while one that cannot recognize its own prompts is simply an
-/// agent whose status stays at the generic baseline. See `sharpen`'s own
-/// docs for why the default is "no sharpening" and never "no status".
+/// Every method except [`AgentIntegration::sharpen`] is required so each
+/// kind makes its capture and resume policy explicit. Returning no scan
+/// root is a real policy: report-only kinds must not infer ownership from
+/// nearby files. Sharpening is different; an unrecognized prompt retains
+/// the generic activity baseline rather than making the integration invalid.
 pub trait AgentIntegration: Send + Sync {
     /// The resume invocation this kind gets by default, preserving the
     /// complete original launch argv before Farhelm appends per-launch hook
@@ -314,10 +316,9 @@ pub trait AgentIntegration: Send + Sync {
     /// reconstruction.
     fn default_resume_template(&self, original_argv: &[String]) -> Vec<String>;
 
-    /// The directory beneath which records for `canonical_cwd` can be
-    /// found. For Claude this is the munged-cwd project directory; for
-    /// Codex it is the whole (date-nested) rollout tree, since Codex does
-    /// not partition by working directory at all.
+    /// An eligible scan root for this kind and working directory, if scanning
+    /// can establish ownership. Claude uses its munged-cwd project directory;
+    /// report-only kinds return `None` rather than guessing from nearby files.
     fn record_root(&self, home: &Path, canonical_cwd: &str) -> Option<PathBuf>;
 
     /// How many directory levels below [`AgentIntegration::record_root`]
@@ -507,8 +508,8 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
 /// directory named after the munged working directory.
 struct ClaudeIntegration;
 
-/// Codex: one JSONL rollout file per conversation, under a date-nested
-/// sessions tree that is NOT partitioned by working directory.
+/// Codex binds an attributed foreground report to its exact root rollout.
+/// Directory proximity cannot establish ownership when nested invocations exist.
 struct CodexIntegration;
 
 /// Goose reports exact identities; it has no record tree Farhelm may scan.
@@ -1210,90 +1211,22 @@ impl AgentIntegration for CodexIntegration {
         template
     }
 
-    /// Every session, regardless of working directory: Codex partitions
-    /// its rollout files by DATE, not by cwd, so there is no per-cwd
-    /// directory to narrow to and `canonical_cwd` is unused here.
-    /// Narrowing falls entirely to the recorded `cwd` field plus the mtime
-    /// lower bound — which is also why `service`'s scan cache is keyed on
-    /// the ROOT PATH: every Codex session on a host shares this one root
-    /// and must not scan it once each.
-    fn record_root(&self, home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
-        Some(home.join(".codex").join("sessions"))
+    // A lone nested conversation can be the only file in a capture window.
+    // Only an attributed foreground report can select a Codex record.
+    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        None
     }
 
-    /// `YYYY/MM/DD` beneath the sessions root.
     fn record_depth(&self) -> usize {
-        3
+        0
     }
 
-    fn is_record_file(&self, name: &str) -> bool {
-        name.ends_with(".jsonl")
+    fn is_record_file(&self, _name: &str) -> bool {
+        false
     }
 
-    /// Only a `session_meta` line is read, and its identity fields must
-    /// come from ONE schema level.
-    ///
-    /// Both restrictions are about not fabricating a record out of parts.
-    /// A rollout file carries many event types, several of which carry a
-    /// `cwd` or an `id` of their own meaning something else entirely;
-    /// accepting "any line with an id, a cwd and a timestamp" would let an
-    /// arbitrary event supply a conversation identity. And taking `id`
-    /// from the nested payload while taking `cwd` from the top level (or
-    /// the reverse) would assemble a correlator pair that no single record
-    /// ever asserted.
-    ///
-    /// The flat spelling — `id` and `cwd` directly on a `session_meta`
-    /// line — is accepted alongside the audited nested one. Honestly, that
-    /// is forward-tolerance for a vendor that promotes those fields, not a
-    /// shape observed in the wild: the audited form nests them under
-    /// `payload`. It is kept because the failure it guards against is
-    /// silent (capture would simply stop happening, with no error
-    /// anywhere), and it cannot admit a foreign record, since
-    /// `type == "session_meta"` is still required.
-    ///
-    /// A `session_meta` line lacking a usable timestamp CONTINUES to the
-    /// next line rather than failing the file: a rollout may legitimately
-    /// open with a meta line whose timestamp lives elsewhere, and aborting
-    /// there would hide the real meta line further down.
     fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
-        for line in leading_json_lines(text) {
-            let Some(object) = line.as_object() else {
-                continue;
-            };
-            if object.get("type").and_then(|v| v.as_str()) != Some("session_meta") {
-                continue;
-            }
-            // One level or the other, never a mixture: the nested payload
-            // is the audited shape and is consulted as a whole.
-            let (conversation, cwd, nested_timestamp) =
-                match object.get("payload").and_then(|v| v.as_object()) {
-                    Some(payload) => (
-                        payload.get("id").and_then(|v| v.as_str()),
-                        payload.get("cwd").and_then(|v| v.as_str()),
-                        payload.get("timestamp").and_then(|v| v.as_str()),
-                    ),
-                    None => (
-                        object.get("id").and_then(|v| v.as_str()),
-                        object.get("cwd").and_then(|v| v.as_str()),
-                        None,
-                    ),
-                };
-            let (Some(conversation), Some(cwd)) = (conversation, cwd) else {
-                continue;
-            };
-            let Some(timestamp) = object
-                .get("timestamp")
-                .and_then(|v| v.as_str())
-                .or(nested_timestamp)
-            else {
-                continue;
-            };
-            return Ok(Some(correlators_from(conversation, cwd, timestamp)?));
-        }
-        anyhow::bail!(
-            "no session_meta line in this file's first {RECORD_PREFIX_BYTES} bytes carries \
-             Codex's id/cwd/timestamp correlators"
-        )
+        Ok(codex::parse_record(text)?.map(|(record, _)| record))
     }
 
     /// Codex asks the same way Claude does — a question followed by
@@ -2462,6 +2395,16 @@ impl IntegrationSnapshot {
     /// `{conversation}` invocation unfilled, so offering it would be
     /// offering a garbled command line.
     pub fn restart_offer(&self, captured: Option<&str>) -> RestartOffer {
+        if self.kind == AgentKind::Codex {
+            return match captured.and_then(|value| codex::CodexLocator::parse(value).ok()) {
+                Some(locator)
+                    if locator.resume_id().is_some() && self.resume_template.is_some() =>
+                {
+                    RestartOffer::Resume
+                }
+                _ => RestartOffer::FreshOnly,
+            };
+        }
         let locator_vendor = match self.kind {
             AgentKind::Pi => Some(LocatorVendor::Pi),
             AgentKind::Omp => Some(LocatorVendor::Omp),
@@ -2517,6 +2460,10 @@ impl IntegrationSnapshot {
     /// conversation") rather than only the id in isolation.
     pub fn filled_resume_argv(&self, conversation: &str) -> Option<Vec<String>> {
         let replacement = match self.kind {
+            AgentKind::Codex => codex::CodexLocator::parse(conversation)
+                .ok()?
+                .resume_id()?
+                .to_string(),
             AgentKind::Pi => {
                 parse_locator(LocatorVendor::Pi, conversation)
                     .ok()?
@@ -2553,7 +2500,8 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
     match kind {
         AgentKind::Pi => parse_locator(LocatorVendor::Pi, value).is_ok(),
         AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
-        AgentKind::Claude | AgentKind::Codex | AgentKind::Goose => {
+        AgentKind::Codex => codex::CodexLocator::parse(value).is_ok(),
+        AgentKind::Claude | AgentKind::Goose => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
         }
         AgentKind::Generic => false,
@@ -4372,16 +4320,14 @@ mod tests {
         );
     }
 
-    /// Codex's rollout files carry many event types, so accepting "any
-    /// line with an id, a cwd and a timestamp" would let an arbitrary
-    /// event supply a conversation identity — and taking one field from
-    /// the nested payload and the other from the top level would fabricate
-    /// a pair no record ever asserted. Both refusals are pinned here,
-    /// along with the flat form this build accepts as forward-tolerance.
+    /// Codex's transcript contains events from internal work as well as the
+    /// root conversation. A resumable locator needs the root session metadata
+    /// payload; accepting a flat or mixed-level record would fabricate an
+    /// attribution that the transcript never made.
     #[farhelm_testtrace::test]
-    fn codex_requires_a_session_meta_line_with_same_level_correlators() {
+    fn codex_requires_root_session_metadata_in_one_payload() {
         let nested = "{\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
-                      \"payload\":{\"id\":\"roll-1\",\"cwd\":\"/work\"}}\n";
+                      \"payload\":{\"source\":\"cli\",\"id\":\"roll-1\",\"session_id\":\"runtime-1\",\"cwd\":\"/work\"}}\n";
         assert_eq!(
             CodexIntegration.parse_record(nested).unwrap().unwrap(),
             RecordCorrelators {
@@ -4391,47 +4337,26 @@ mod tests {
             }
         );
 
-        let flat = "{\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
-                    \"id\":\"roll-2\",\"cwd\":\"/work\"}\n";
-        assert_eq!(
-            CodexIntegration.parse_record(flat).unwrap().unwrap(),
-            RecordCorrelators {
-                conversation: "roll-2".to_string(),
-                cwd: "/work".to_string(),
-                created_at: parse_rfc3339("2026-07-29T12:00:05Z").unwrap(),
-            }
-        );
-
-        // An ordinary event carrying the same fields is NOT a record.
+        // An ordinary event carrying root-looking fields is not a record.
         let event = "{\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"turn_context\",\
-                     \"payload\":{\"id\":\"nope\",\"cwd\":\"/work\"}}\n";
+                     \"payload\":{\"source\":\"cli\",\"id\":\"nope\",\"session_id\":\"runtime-2\",\"cwd\":\"/work\"}}\n";
         assert!(CodexIntegration.parse_record(event).is_err());
 
-        // Mixed levels fabricate a pair: the payload exists, so the top
-        // level's `cwd` must not be borrowed to complete it.
+        // A payload without its root source is not a resumable conversation.
         let mixed = "{\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
-                     \"cwd\":\"/work\",\"payload\":{\"id\":\"roll-3\"}}\n";
+                     \"cwd\":\"/work\",\"payload\":{\"id\":\"roll-3\",\"session_id\":\"runtime-3\"}}\n";
         assert!(CodexIntegration.parse_record(mixed).is_err());
     }
 
-    /// A `session_meta` line with no usable timestamp must CONTINUE rather
-    /// than fail the file: a rollout may legitimately open with a meta
-    /// line whose timestamp lives on a later one, and aborting at the
-    /// first would hide the record entirely — a capture that silently
-    /// stops happening, with no error anywhere.
+    /// A Codex locator reads only the transcript's root header. It must not
+    /// scan forward for a later identity, because that is the directory-scan
+    /// inference removed to prevent unrelated conversations being claimed.
     #[farhelm_testtrace::test]
-    fn a_codex_meta_line_without_a_timestamp_does_not_hide_a_later_one() {
+    fn a_codex_header_without_complete_root_metadata_stays_unresumable() {
         let text = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"early\",\"cwd\":\"/work\"}}\n\
                     {\"timestamp\":\"2026-07-29T12:00:05Z\",\"type\":\"session_meta\",\
-                    \"payload\":{\"id\":\"real\",\"cwd\":\"/work\"}}\n";
-        assert_eq!(
-            CodexIntegration
-                .parse_record(text)
-                .unwrap()
-                .unwrap()
-                .conversation,
-            "real"
-        );
+                    \"payload\":{\"source\":\"cli\",\"id\":\"real\",\"session_id\":\"runtime-real\",\"cwd\":\"/work\"}}\n";
+        assert!(CodexIntegration.parse_record(text).is_err());
     }
 
     /// A conversation id crosses from an on-disk file into a durable

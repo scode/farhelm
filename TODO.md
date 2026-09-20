@@ -21,13 +21,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- Fix the Codex restart/resume bug where Farhelm can capture the wrong session ID and then resume a nonexistent
-  conversation even though the original transcript remains intact. The reported case stored
-  `01a0a9fb-e20c-7741-9450-138bd276ad9a`, while the visible conversation was `01a07eed-44dd-7a53-be64-54190d4c645e`, and
-  restart failed with `No saved session found`.
-  [Gist investigation](https://gist.github.com/scode/3d9789d37d94218e6385102710290cbe) records the evidence and
-  unresolved cause.
-
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
