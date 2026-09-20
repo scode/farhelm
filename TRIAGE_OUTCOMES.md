@@ -387,7 +387,9 @@
   the in-memory victim, preserving original vector indices and ordering.
 - Completion criteria: at capacity, an oldest/tied new row remains routable and the correct other row is evicted.
   Preserve the cap and truncated flag. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/780/changes. jj change:
+  `xmwqnwmyprkoprlxmmtwwklttrqurpqt`; bookmark: `fix-new-session-seed-eviction`. The at-capacity regression now retains
+  newly admitted old/tied rows, evicts the correct other row, and preserves the cap and truncation flag.
 
 ## ssh-destination-collides-with-local-display-name.md
 
