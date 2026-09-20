@@ -211,7 +211,10 @@
 - Completion criteria: obsolete claims from withdrawn connections no longer block routing. Failed refreshes on
   still-live connections retain their existing evidence policy. No collision-policy redesign. Remove this feedback file
   and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/769/changes. jj change:
+  `mmvyvnxlntmnqyopouutywwkwzpsuwkk`; bookmark: `fix-withdrawn-host-collision-claims`. The retarget regression
+  reproduced stale claims before the fix. Seven focused retarget, failed-refresh and actor-retirement checks pass after
+  the fix.
 
 ## forget-splits-guarded-update-drops-fresh-contested.md
 

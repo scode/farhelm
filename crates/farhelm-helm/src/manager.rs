@@ -1503,6 +1503,10 @@ impl ConnectionManager {
                             // sessions belonged to the address the user
                             // just stopped pointing at.
                             status.live_sessions = None;
+                            // A contest is evidence from this client, so it
+                            // leaves with the client rather than blocking
+                            // routing for whatever reconnects next.
+                            status.contested = Arc::new(Vec::new());
                             // A retarget invalidates every outstanding
                             // claim by definition: the client is gone and
                             // what answers next may be a different machine
@@ -1669,6 +1673,7 @@ impl ConnectionManager {
                 };
                 withdrawn = status.client.take();
                 status.live_sessions = None;
+                status.contested = Arc::new(Vec::new());
                 status.incarnation =
                     incarnations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             });
@@ -5868,6 +5873,79 @@ mod tests {
             fixture.transport.dialed_destinations(host),
             vec!["before.example", "after.example"],
             "the edit must be dialed exactly once, not merely recorded"
+        );
+    }
+
+    /// Retargeting withdraws the collision evidence reported by the old
+    /// connection with the client and live list.
+    ///
+    /// A contested id blocks routing even when no cached row is ambiguous.
+    /// Once the reporting connection is gone, retaining that id would make
+    /// an obsolete host keep a session unroutable after the replacement is
+    /// already serving the row.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn retargeting_withdraws_the_old_connections_contested_claims() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("claims-before.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(host, Script::default());
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let initial_refresh = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Ok { sessions: 0 },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await;
+        assert!(
+            matches!(initial_refresh, Ok(Some(_))),
+            "the fixture must finish its initial refresh before injecting a claim; state={:?}",
+            fixture.manager.state(host)
+        );
+        {
+            let map = fixture
+                .manager
+                .actors
+                .lock()
+                .expect("actor map mutex poisoned");
+            map.actors[&host].status.send_modify(|status| {
+                status.contested = Arc::new(vec!["stale-claim".to_string()]);
+            });
+        }
+        assert_eq!(
+            fixture.manager.contested_claimants("stale-claim"),
+            vec![host],
+            "the fixture must establish the routing block the retarget releases"
+        );
+
+        fixture
+            .store
+            .update_ssh_destination(host, "claims-after.example")
+            .await
+            .expect("retarget the host");
+        assert_eq!(
+            fixture.manager.contested_claimants("stale-claim"),
+            vec![host],
+            "the claim must survive the store await so reconciliation, not refresh, withdraws it"
+        );
+        fixture.manager.sync_registry().await.unwrap();
+
+        assert!(
+            fixture
+                .manager
+                .contested_claimants("stale-claim")
+                .is_empty(),
+            "a withdrawn connection must not keep an obsolete collision claim routable"
         );
     }
 
