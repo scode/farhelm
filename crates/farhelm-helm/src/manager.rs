@@ -1814,6 +1814,11 @@ impl ConnectionManager {
     /// actor, or its published generation has moved on. The alternative is
     /// worse than a missed write, which merely costs one refresh interval.
     ///
+    /// Refuses an id past [`MAX_SESSION_ID_BYTES`] before either cache path
+    /// can publish it. The mutation caller records this best-effort failure
+    /// separately, so refusing a local seed does not revise the remote
+    /// mutation's successful result.
+    ///
     /// Takes this host's cache lock and bumps its seed epoch, which is how
     /// a refresh whose drain predates this write learns not to overwrite it
     /// (see [`ActorHandle::seed_epoch`]).
@@ -1822,6 +1827,12 @@ impl ConnectionManager {
         claim: &SessionClaim,
         session: &SessionInfo,
     ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            session.id.len() <= MAX_SESSION_ID_BYTES,
+            "session id of {} bytes exceeds the {} this helm can build resumable cursors over",
+            session.id.len(),
+            MAX_SESSION_ID_BYTES
+        );
         let (status, cache_lock, seed_epoch) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&claim.host) else {
@@ -4979,6 +4990,92 @@ mod tests {
                 .expect("record the reply");
             assert_eq!(cached_stamps(&fixture), expected, "{label}");
         }
+    }
+
+    /// Identity-less mutation seeds enforce the same session-id boundary as
+    /// refresh drains and the durable cache.
+    ///
+    /// This is the only seed path that bypasses `HelmStore`: accepting an
+    /// overlong id here would publish a session no later request can name.
+    /// The boundary-sized id proves the local check does not narrow the
+    /// protocol contract by one byte.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn an_in_memory_seed_refuses_an_unaddressable_session_id() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("memory-id-bound.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    identity: None,
+                    sessions: vec![session("listed", 100)],
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let initial_refresh = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.manager.wait_for_state(host, |state| {
+                matches!(
+                    state,
+                    HostState::Connected {
+                        identity: None,
+                        last_refresh: RefreshHealth::Ok { sessions: 1 },
+                        ..
+                    }
+                )
+            }),
+        )
+        .await;
+        assert!(
+            matches!(initial_refresh, Ok(Some(_))),
+            "the fixture must finish its identity-less refresh before seeding; status={:?}",
+            fixture.manager.state(host)
+        );
+        assert!(
+            fixture
+                .manager
+                .status(host)
+                .and_then(|status| status.live_sessions)
+                .is_some_and(|sessions| sessions.iter().any(|entry| entry.id == "listed")),
+            "the completed refresh must publish the listed identity-less session"
+        );
+        let claim = SessionClaim {
+            host,
+            incarnation: fixture.manager.status(host).expect("connected").incarnation,
+            identity: None,
+        };
+        let boundary_id = "b".repeat(MAX_SESSION_ID_BYTES);
+        fixture
+            .manager
+            .remember_session(&claim, &session(&boundary_id, 200))
+            .await
+            .expect("the protocol-sized id remains addressable");
+
+        let overlong_id = "x".repeat(MAX_SESSION_ID_BYTES + 1);
+        fixture
+            .manager
+            .remember_session(&claim, &session(&overlong_id, 300))
+            .await
+            .expect_err("an id no request can carry must not enter the in-memory list");
+        let live = fixture
+            .manager
+            .status(host)
+            .expect("connected")
+            .live_sessions
+            .expect("the identity-less host serves its list from memory");
+        assert!(
+            live.iter().any(|entry| entry.id == boundary_id),
+            "the accepted boundary-sized seed remains routable"
+        );
+        assert!(
+            !live.iter().any(|entry| entry.id == overlong_id),
+            "the refused id must never be published as a route"
+        );
     }
 
     /// The in-memory twin of the store's seed eviction: an identity-less
