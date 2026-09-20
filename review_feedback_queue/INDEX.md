@@ -77,7 +77,6 @@ One line per open item. This file must always match the feedback files in this d
   reusing the channel.
 - `stale-stall-verdict-kills-replacement-attach.md` — stale stall verdict destroys a replacement attachment reusing the
   channel.
-- `stop-actor-skips-client-retirement.md` — removed host's connection lingers instead of tearing down.
 - `stop-outcomes-lost-when-degraded.md` — stops silently lose intent and outcome while the supervisor is degraded.
 - `stripped-agent-marker-forges-killable-tab.md` — stripped agent marker lets a forged tab kill the live agent.
 - `superseded-reap-watchers-never-exit.md` — superseded output-reap watchers never exit, leaking a task per churn cycle.

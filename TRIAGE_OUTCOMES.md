@@ -417,7 +417,10 @@
   the client through the existing status mutation and call retire_withdrawn outside it, alongside actor cancellation.
 - Completion criteria: removal retires transport despite retained clones and pending requests, without stopping remote
   sessions. No new graceful-shutdown protocol. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/782/changes. jj change:
+  `vxssnyppuzlvkwnqqyptzklsowznzqrn`; bookmark: `fix-stopped-actor-client-retirement`. Both removal paths now close the
+  observed peer transport despite retained client clones. The existing in-flight request-retirement regression also
+  passes.
 
 ## sweep-deletes-live-staged-sentinel.md
 
