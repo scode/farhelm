@@ -1371,6 +1371,48 @@ mod tests {
         assert!(!recovered.probe_id.is_empty());
     }
 
+    /// A supported-transport failure that needs manual installation must
+    /// remain actionable at the UPDATE endpoint.
+    ///
+    /// This is not a backend failure: the planner reached the host and
+    /// learned that automatic installation is unavailable. Returning a
+    /// conflict keeps the response distinct from a successful plan without
+    /// manufacturing authority to run one.
+    #[farhelm_testtrace::test]
+    async fn manual_update_requirement_is_an_http_conflict_without_a_plan() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let host = harness
+            .store
+            .add_ssh_host("manual-update.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let backend = FakeBackend::manual(root.path().to_path_buf(), "manual installation");
+        let service = service(&harness, backend, root.path());
+        let state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        ));
+        harness.state = Arc::clone(&state);
+        let response = harness
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/hosts/{host}/update"))
+                    .header("host", "127.0.0.1:7433")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(service.memory.lock().await.plans.is_empty());
+    }
+
     /// UPDATE is not an identity-resolution mechanism: both frozen mismatch
     /// and duplicate rows are refused before host inspection begins.
     #[farhelm_testtrace::test]
