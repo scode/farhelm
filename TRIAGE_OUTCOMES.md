@@ -292,7 +292,9 @@
   `local-update-refusal-returns-500.md`; execute after that dependency. Preserve the original reason.
 - Completion criteria: manual-needs update planning returns 409, backend failures remain errors and successful
   update-plan responses keep their schema. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/774/changes. jj change:
+  `rpvntromzvvyxlkmuuqkoznvppkktnyu`; bookmark: `fix-manual-update-refusal-status`. The endpoint regression changed from
+  HTTP 500 to 409 without retaining a plan. The combined run also preserved unclassified errors as HTTP 500.
 
 ## oversized-profile-relayed-before-size-check.md
 

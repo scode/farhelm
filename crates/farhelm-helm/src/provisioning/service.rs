@@ -718,7 +718,11 @@ impl ProvisioningService {
             .map_err(anyhow::Error::new)?
         {
             ReachOutcome::Supported(reach) => reach,
-            ReachOutcome::Manual(reason) => bail!(reason),
+            ReachOutcome::Manual(reason) => {
+                return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
+                    reason,
+                )));
+            }
         };
         let probe_id = uuid::Uuid::new_v4().to_string();
         let plan = self.layout.plan_for_row(

@@ -39,7 +39,6 @@ One line per open item. This file must always match the feedback files in this d
 - `helm-upload-fast-path-spin.md` — the helm's upload fast path can spin without a deadline.
 - `host-views-transiently-pairs-new-identity-with-stale-mismatch.md` — host list briefly pairs a new identity with its
   resolved mismatch.
-- `manual-update-refusal-returns-500.md` — UPDATE planning for a manual-needs host returns 500 instead of a 4xx refusal.
 - `normal-teardown-waits-unboundedly-on-detach.md` — ordinary teardown awaits detach with no timeout, parking ~60s on a
   wedged connection.
 - `orphaned-install-temps-on-managed-hosts.md` — interrupted installs orphan payload-sized hidden files on managed
