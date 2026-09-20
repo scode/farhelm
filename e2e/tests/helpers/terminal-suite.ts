@@ -153,7 +153,19 @@ export async function resetStack(request: APIRequestContext) {
   // resets the SCROLLBACK: stop/relaunch would keep the tmux history.
   for (const s of listing.sessions) {
     const deleted = await request.delete(`/api/sessions/${s.id}`);
-    expect(deleted.ok(), `deleting leftover session ${s.title}`).toBe(true);
+    // A failed delete says what the helm actually replied. This assertion is
+    // where a setup failure lands for every spec in the family, and naming
+    // only the session left the one fact worth having — the helm's own answer
+    // — discarded at the moment it existed, so a retained trace could not say
+    // afterwards whether the delete was refused, timed out, or raced a session
+    // that was already going away. The terminal-flood backspace investigation
+    // asked exactly that question of evidence that could not carry it. Read
+    // only on the failing path: the body is a one-shot stream, and consuming
+    // it for every successful delete would buy nothing.
+    const detail = deleted.ok() ? "" : ` — helm replied ${deleted.status()}: ${
+      (await deleted.text().catch((error) => `<unreadable body: ${error}>`)).slice(0, 500)
+    }`;
+    expect(deleted.ok(), `deleting leftover session ${s.title} (${s.id})${detail}`).toBe(true);
   }
   const created = await request.post("/api/sessions", {
     data: {
