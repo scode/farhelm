@@ -1843,13 +1843,25 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await page.locator(".rename-dialog .rename-cancel").click();
 
     // And so does Space, on a different command, so that neither key is
-    // proven only through the other. Focus is re-established from the
-    // TOGGLE rather than assumed: cancelling the rename above unmounted
-    // the button that held it, and the panel never closed, so there was
-    // no fresh open to place focus anywhere. Same retry as above and for
-    // the same reason — the reconnect ladder is still running this whole
-    // test, not just at its start.
-    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
+    // proven only through the other.
+    //
+    // The menu is REOPENED if the rename took it down, rather than assumed
+    // to have survived. It used to be assumed, and that is what failed on
+    // both engines in the full browser suite: the panel is a fixed-position
+    // surface the list closes whenever the layout above it could have
+    // moved, so a modal opening over the sidebar is exactly the kind of
+    // moment that takes it away. Instrumenting the DOM showed the panel
+    // being removed in the same mutation batch that added the rename
+    // dialog. It does not always happen — an isolated run of this file
+    // often keeps the panel — and the point here is that neither outcome is
+    // this test's subject. What follows needs an open menu and a focused
+    // toggle; how it got them is not what is being proven.
+    await expect(async () => {
+      if ((await target.locator(".session-row-menu-panel").count()) === 0) {
+        await openRowMenu(target);
+      }
+      await expect(target.locator(".session-row-menu-panel")).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 10_000 });
     await expect(async () => {
       await toggle.focus();
       await expect(toggle).toBeFocused();

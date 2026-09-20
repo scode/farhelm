@@ -1022,12 +1022,20 @@ and the failure survived it — with the failure snapshot showing "title A–Z" 
 alphabetical order, so the pin is verified applied rather than assumed. What is left, from the same file, is the
 consolidated effect that closes any open row menu when `layout_epoch`, `show_create`, or `hosts_list_shape` changes; the
 hosts list is the one of those three that changes on its own against this fixture, which has a local host and an ssh
-host. Nothing here establishes which of them fired. Disposition: open, appended to the existing sidebar entry in TODO.md
-rather than filed as a second one, with the next step being a receipt that names the dismissal's trigger.
+host. Nothing here establishes which of them fired.
+
+Disposition: fixed the next day, and the receipt that settled it was taken in the DOM rather than in Rust. A
+`MutationObserver` installed just before the rename is activated recorded the panel's removal in the same mutation batch
+that added the rename dialog — every time, across ten executions, with no host-list mutation, no sidebar or shell
+scroll, and no window resize in the log beside it. So a modal opening over the sidebar is itself one of the moments that
+takes a fixed-position row panel down, which is what the consolidated effect exists to do; which of its three inputs
+carries that is still unidentified and no longer blocks anything. The test now reopens the menu when the rename closed
+it instead of assuming it survived, because neither outcome is what that test is about. Ten executions of the corrected
+test passed where the previous shape had failed eight of eight.
 
 Class: fixture-premise
 
-Cause: unknown
+Cause: established
 
 ## 2026-09-19 — rotation recovery: reads no longer wait out the writes' deadline (e2e/tests/auth.spec.ts)
 
