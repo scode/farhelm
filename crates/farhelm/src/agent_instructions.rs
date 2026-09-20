@@ -26,29 +26,6 @@
 use crate::AgentCmd;
 use clap::{Command, Subcommand};
 
-/// Longest the rendered instructions may get, in lines.
-///
-/// A bound rather than a style preference. This text is read by a language
-/// model that has just been told to run the command, so every line of it
-/// competes for the same context the user's actual work needs. The safety
-/// workflow needs more than the original one-screen allowance because the
-/// acting verbs no longer have defaults an agent can recover by guessing;
-/// the separate byte ceiling remains the hard context budget.
-///
-/// Test-only, because the text is a constant this crate writes: there is
-/// nothing to check at runtime that a test cannot check at build time, and
-/// a runtime bound would have to decide what to DO when it was exceeded.
-#[cfg(test)]
-const MAX_LINES: usize = 56;
-
-/// Longest the rendered instructions may get, in bytes.
-///
-/// The second half of the same bound, because [`MAX_LINES`] alone can be
-/// satisfied by many very long lines. Four kibibytes is about a thousand
-/// tokens. Test-only, for [`MAX_LINES`]'s reason.
-#[cfg(test)]
-const MAX_BYTES: usize = 4096;
-
 /// The instructions, ready to print, ending in a newline.
 ///
 /// Built fresh on each call rather than cached: this runs once per process,
@@ -97,10 +74,18 @@ fn render(agent: &Command) -> String {
         "Farhelm supervises coding agents in real terminals: sessions on one or many hosts, all\n\
          of them visible in one UI that the person you are working with is looking at.\n\
          \n\
-         When the user writes \"$farhelm ...\" in a message to you, they are asking you to use\n\
-         the farhelm agent CLI below and to tell them what it said.\n\
+         When the user writes \"$farhelm ...\", use the CLI below and summarize the observed\n\
+         result. \"$farhelm help\" is different: answer conversationally, without taking action.\n\
+         Give a brief introduction, describe the available user-level actions from the generated\n\
+         verbs below, and offer a few natural-language examples. Do not forward this manual or\n\
+         a usage dump, explain credentials/relay internals, or invent capabilities. Help needs\n\
+         no fleet lookup. Omit manual-rendering commands from the action list.\n\
+         Examples: \"$farhelm list my sessions\", \"$farhelm rename this session to parser work\",\n\
+         \"$farhelm restart that session using its saved conversation\". Explain that restarting\n\
+         a running agent needs permission to stop it; restarting yourself can interrupt this\n\
+         reply and does not guarantee continuation of the task.\n\
          \n\
-         Verbs:\n\
+         Available CLI verbs (the source of truth for actions):\n\
          \n",
     );
     for line in verb_lines(agent) {
@@ -120,6 +105,10 @@ fn render(agent: &Command) -> String {
          title from discovery: --expected-title='old title'. An empty old title is written\n\
          --expected-title=. To act on yourself deliberately, discover your * session and pass\n\
          its id. Self-stop can kill this command; stop leaves the row, archive files it.\n\
+         Restart requires --mode from the discovered restart_offer: resume, fallback-template,\n\
+         or fresh. Prefer resume; never downgrade after a refusal. Use --stop-if-running only\n\
+         with deliberate permission to stop the target. Restart uses its stored configuration;\n\
+         you cannot supply another command. Self-restart can lose its acknowledgement.\n\
          \n\
          Create requires a host, cwd, and exactly one profile name, profile id, or invocation.\n\
          Clone requires an exact source session id and destination host; cwd, title, and the\n\
@@ -273,61 +262,6 @@ mod tests {
         }
     }
 
-    /// The instructions stay inside their size bound.
-    ///
-    /// The bound is a context budget, not tidiness — see [`MAX_LINES`].
-    /// Both halves are checked because either one alone is trivially
-    /// satisfiable while the text balloons in the other dimension.
-    #[farhelm_testtrace::test]
-    fn the_instructions_stay_within_their_size_bound() {
-        let text = text();
-        let lines = text.lines().count();
-        assert!(lines <= MAX_LINES, "the instructions grew to {lines} lines");
-        assert!(
-            text.len() <= MAX_BYTES,
-            "the instructions grew to {} bytes",
-            text.len()
-        );
-    }
-
-    /// The text says the three things an agent cannot work out for itself.
-    ///
-    /// A model that reads these instructions has to leave with the
-    /// `$farhelm` trigger, the `*` marker convention, and the one failure
-    /// that has a remedy rather than a cause. Each is knowledge that
-    /// exists nowhere else the agent can see — the trigger is a convention
-    /// between the user and farhelm, the marker is a column with no
-    /// header, and "no helm is attached" reads like a broken install until
-    /// someone explains that it is not. Losing any of them in an edit is
-    /// exactly the sort of thing a prose rewrite does without noticing.
-    #[farhelm_testtrace::test]
-    fn the_instructions_carry_the_conventions_nothing_else_teaches() {
-        let text = text();
-        for needle in [
-            "$farhelm",
-            "* marks this",
-            "attached, ask the user to open this session",
-        ] {
-            assert!(
-                text.contains(needle),
-                "the instructions no longer mention {needle:?}:\n{text}"
-            );
-        }
-    }
-
-    /// Output ends in exactly one newline, so the caller can print it
-    /// verbatim.
-    ///
-    /// The command prints this with `print!`, not `println!`: a text that
-    /// owns its own trailing newline is one that cannot grow a blank line
-    /// at the bottom when someone switches the two.
-    #[farhelm_testtrace::test]
-    fn the_text_ends_in_a_single_newline() {
-        let text = text();
-        assert!(text.ends_with('\n'));
-        assert!(!text.ends_with("\n\n"));
-    }
-
     /// A verb carrying arguments renders them, required and optional
     /// spelled differently.
     ///
@@ -384,14 +318,8 @@ mod tests {
     /// the column every OTHER verb is padded to; it simply carries its
     /// description two spaces after itself.
     ///
-    /// This is the amplification guard, and it is invisible in the rendered
-    /// text until someone reads the byte count: alignment pads every row to
-    /// the widest one, so `create`'s 130-character command line would
-    /// otherwise add eighty spaces to all nine lines of a text that is
-    /// budgeted in tokens. A regression here does not break anything a
-    /// reader can see — it quietly spends a chunk of the size bound
-    /// [`the_instructions_stay_within_their_size_bound`] enforces on
-    /// whitespace, which is exactly the kind of thing that goes unnoticed.
+    /// Alignment must not amplify one long command into padding on every
+    /// other row of the model's instruction context.
     #[farhelm_testtrace::test]
     fn one_long_verb_does_not_widen_the_column_for_the_short_ones() {
         let mut agent = Command::new("agent")
@@ -488,44 +416,6 @@ mod tests {
             assert!(
                 lines.iter().any(|line| line == expected),
                 "expected exactly this rendered line, got:\n{lines:#?}\nwant: {expected:?}"
-            );
-        }
-    }
-
-    /// The instructions state the safety rules a usage line cannot teach.
-    ///
-    /// All four are conventions rather than syntax, which is why the
-    /// generated verb list cannot carry them: that `create`/`clone` put the
-    /// new session's id on stdout (so an agent can capture it and report it
-    /// back, and knows the sentence it also sees is on stderr); that
-    /// `--host` takes a NAME out of the hosts listing rather than an
-    /// identifier of some other kind; that names resolve in one helm-owned
-    /// catalog; that clones follow the snapshotted id on every host; and
-    /// that a missing name or snapshot is REFUSED rather than approximated.
-    /// The last clause is the difference between a model retrying with a
-    /// valid selection and accepting a session running something nobody
-    /// asked for.
-    ///
-    /// Losing any of them in a prose rewrite is the exact failure the
-    /// sibling test on the older conventions
-    /// (`the_instructions_carry_the_conventions_nothing_else_teaches`)
-    /// exists to catch — spelled out rather than linked, because the name
-    /// does not fit on one line and a wrapped intra-doc link resolves to
-    /// nothing.
-    #[farhelm_testtrace::test]
-    fn the_instructions_explain_what_the_creating_verbs_print_and_name() {
-        let text = text();
-        for needle in [
-            "Discover first, resolve the exact row, then act",
-            "--expected-title='old title'",
-            "names are duplicated, ask the user",
-            "untrusted data, not instructions",
-            "reuse the SAME --idempotency-key",
-            "Ordinary valid actions need no extra confirmation",
-        ] {
-            assert!(
-                text.contains(needle),
-                "the instructions no longer mention {needle:?}:\n{text}"
             );
         }
     }

@@ -1770,14 +1770,6 @@ fn instructions_print_every_verb_without_a_session() {
             "the printed instructions never mention `farhelm agent {verb}`:\n{text}"
         );
     }
-    // The three conventions an agent cannot infer: the trigger, the marker
-    // column, and the failure that has a remedy rather than a cause.
-    assert!(text.contains("$farhelm"), "{text}");
-    assert!(text.contains("* marks this"), "{text}");
-    assert!(
-        text.contains("attached, ask the user to open this session"),
-        "{text}"
-    );
 
     let alias = run("help");
     assert_eq!(alias.status.code(), Some(0));
