@@ -162,7 +162,10 @@
   Coordinate with the destination-collision item without merging their outcomes or adding a reserved-name policy.
 - Completion criteria: collision refuses the clear without changing the alias. A destination hidden by its own different
   alias is not falsely treated as the visible name. Remove this feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/766/changes. jj change:
+  `ymvortomnkutqlrzmoptpopunopukksk`; bookmark: `fix-local-alias-clear-collision`. The restored-name collision
+  reproduced before the fix; all nine alias-update checks pass with the existing full-name scan shared by setting and
+  clearing.
 
 ## create-mode-message-blames-wrong-caller.md
 

@@ -3886,18 +3886,10 @@ impl HelmStore {
     /// stored value changed. The uniqueness scan shares the write transaction
     /// so an alias can never race another host into the display-name space.
     ///
-    /// SETTING an alias is checked against every OTHER host's full current
-    /// display name (alias or derived) — the wide check, since a stored
-    /// alias is arbitrary text with no dedicated uniqueness index. CLEARING
-    /// one is checked the other way: this row's RESTORED derived name
-    /// (kind and destination, ignoring the alias about to be dropped)
-    /// against only other hosts' current aliases — the narrow check
-    /// `alias_collision` shares with registration and retargeting — because
-    /// a restored derived name can only collide with something that was
-    /// never a plain destination collision in the first place. Skipping
-    /// this on clear would let a host silently reclaim its raw destination
-    /// as a display name even while another host is already showing under
-    /// an alias identical to it.
+    /// Setting and clearing both compare the resulting display name against
+    /// every other host's current display name, whether aliased or derived.
+    /// A local alias may have hidden its default name while an unaliased SSH
+    /// host registered that name; clearing must not make both display it.
     pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
         let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
         let conn = Arc::clone(&self.conn);
@@ -3922,53 +3914,44 @@ impl HelmStore {
                 tx.commit().context("committing unchanged alias")?;
                 return Ok(false);
             }
-            match alias.as_deref() {
-                Some(candidate) => {
-                    let mut other = tx
-                        .prepare("SELECT kind, destination, alias FROM hosts WHERE id != ?1")
-                        .context("reading display names before updating an alias")?;
-                    let rows = other
-                        .query_map(rusqlite::params![host], |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                row.get::<_, Option<String>>(2)?,
-                            ))
-                        })
-                        .context("querying other host display names")?
-                        .collect::<Result<Vec<_>, _>>()?;
-                    drop(other);
-                    // A row whose `kind` this build cannot decode is a
-                    // reason to REFUSE the write, not to silently drop that
-                    // row from the comparison: `list_hosts` fails the whole
-                    // registry read on the identical corruption, and an
-                    // alias committed against a registry this function
-                    // could not fully interpret is exactly the kind of
-                    // state the later manager sync would then fail to
-                    // reconcile against.
-                    let names = rows
-                        .into_iter()
-                        .map(|(kind, destination, alias)| {
-                            HostKind::from_column(&kind).map(|kind| {
-                                host_display_name(kind, destination.as_deref(), alias.as_deref())
-                            })
-                        })
-                        .collect::<anyhow::Result<Vec<_>>>()?;
-                    if let Some(name) = names.into_iter().find(|name| name == candidate) {
-                        return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
-                    }
-                }
+            let candidate = match alias.as_deref() {
+                Some(alias) => std::borrow::Cow::Borrowed(alias),
                 None => {
-                    // Clearing restores this row's DERIVED name — compute
-                    // it exactly as `host_display_name` would once the
-                    // alias is gone, and run it through the same narrow
-                    // check `alias_collision` gives registration and
-                    // retargeting.
-                    let restored = host_display_name(kind, destination.as_deref(), None);
-                    if let Some(name) = alias_collision(&tx, Some(host), &restored)? {
-                        return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
-                    }
+                    std::borrow::Cow::Owned(host_display_name(kind, destination.as_deref(), None))
                 }
+            };
+            let mut other = tx
+                .prepare("SELECT kind, destination, alias FROM hosts WHERE id != ?1")
+                .context("reading display names before updating an alias")?;
+            let rows = other
+                .query_map(rusqlite::params![host], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .context("querying other host display names")?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(other);
+            // A row whose `kind` this build cannot decode is a
+            // reason to REFUSE the write, not to silently drop that
+            // row from the comparison: `list_hosts` fails the whole
+            // registry read on the identical corruption, and an
+            // alias committed against a registry this function
+            // could not fully interpret is exactly the kind of
+            // state the later manager sync would then fail to
+            // reconcile against.
+            let names = rows
+                .into_iter()
+                .map(|(kind, destination, alias)| {
+                    HostKind::from_column(&kind).map(|kind| {
+                        host_display_name(kind, destination.as_deref(), alias.as_deref())
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            if let Some(name) = names.into_iter().find(|name| name == candidate.as_ref()) {
+                return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
             }
             tx.execute(
                 "UPDATE hosts SET alias = ?2 WHERE id = ?1",
@@ -10986,6 +10969,64 @@ mod tests {
                 Some(HostStoreError::AliasTaken(name)) if name == "this machine"
             ),
             "got: {err:#}"
+        );
+    }
+
+    /// Restoring the local row's derived display name must also refuse an
+    /// unaliased SSH row that displays under that name. The collision is
+    /// otherwise reachable by first hiding the local row behind an alias,
+    /// then registering the SSH destination while the name is free.
+    ///
+    /// Once the SSH row takes its own different alias, its destination is
+    /// no longer visible. Clearing the local alias must then work: treating
+    /// hidden destinations as display names would turn an internal SSH
+    /// target into a false consumer-facing collision.
+    #[farhelm_testtrace::test]
+    async fn update_alias_clearing_the_local_row_compares_other_effective_names() {
+        let (_dir, store) = fresh_store().await;
+        let local_id = store.list_hosts().await.unwrap()[0].id;
+        store
+            .update_alias(local_id, Some("workstation"))
+            .await
+            .expect("hide the local derived name before registering it remotely");
+        let other = store
+            .add_ssh_host("this machine", None, None)
+            .await
+            .expect("the destination is distinct while the local row has an alias");
+
+        let err = store
+            .update_alias(local_id, None)
+            .await
+            .expect_err("clearing must not restore a name an unaliased SSH row displays");
+        assert!(
+            matches!(
+                err.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::AliasTaken(name)) if name == "this machine"
+            ),
+            "the refusal must name the colliding displayed value: {err:#}"
+        );
+        let local = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == local_id)
+            .unwrap();
+        assert_eq!(
+            local.alias.as_deref(),
+            Some("workstation"),
+            "a refused clear must retain the local alias"
+        );
+
+        store
+            .update_alias(other, Some("remote machine"))
+            .await
+            .expect("hide the SSH destination behind its own visible name");
+        assert!(
+            store
+                .update_alias(local_id, None)
+                .await
+                .expect("the hidden SSH destination must not block the local display name")
         );
     }
 
