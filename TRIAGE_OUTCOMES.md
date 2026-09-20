@@ -466,4 +466,6 @@
 - Completion criteria: mixed routes retain the newest MAX_UPLOAD_TOMBSTONES receipts, evict exactly the finished excess
   and preserve live transfers. No retention-policy change. Remove this feedback file and its index entry in its
   execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/785/changes. jj change:
+  `qynrmolprrxqxxvxvqoqmuwvuvuvzrzx`; bookmark: `fix-upload-tombstone-count`. The mixed-route regression now retains the
+  newest 32 finished receipts and all eight live transfers, evicting only the oldest finished excess.

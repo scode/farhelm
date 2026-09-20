@@ -1342,11 +1342,11 @@ pub(crate) fn prune_finished_uploads(routes: &mut HashMap<u32, UploadRoute>) {
     if tombstones.len() <= MAX_UPLOAD_TOMBSTONES {
         return;
     }
+    // Live routes hold active transfers, not retained receipts. They must not
+    // make an otherwise in-bounds tombstone set evict extra client diagnostics.
+    let excess = tombstones.len() - MAX_UPLOAD_TOMBSTONES;
     tombstones.sort_unstable();
-    for (_, channel) in tombstones
-        .into_iter()
-        .take(routes.len().saturating_sub(MAX_UPLOAD_TOMBSTONES))
-    {
+    for (_, channel) in tombstones.into_iter().take(excess) {
         routes.remove(&channel);
     }
 }
@@ -1432,22 +1432,25 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn finished_upload_routes_are_bounded_and_live_ones_are_never_evicted() {
         let mut routes = HashMap::new();
-        for channel in 1..=(MAX_UPLOAD_TOMBSTONES as u32 + 10) {
+        for channel in 1..=(MAX_UPLOAD_TOMBSTONES as u32 + 1) {
             routes.insert(channel, test_route(channel, Some(false)));
         }
-        let live = MAX_UPLOAD_TOMBSTONES as u32 + 11;
-        routes.insert(live, test_route(live, None));
+        let live: Vec<u32> =
+            ((MAX_UPLOAD_TOMBSTONES as u32 + 2)..=(MAX_UPLOAD_TOMBSTONES as u32 + 9)).collect();
+        for channel in &live {
+            routes.insert(*channel, test_route(*channel, None));
+        }
 
         prune_finished_uploads(&mut routes);
 
         assert!(
-            routes.contains_key(&live),
-            "a live transfer's route must never be evicted"
+            live.iter().all(|channel| routes.contains_key(channel)),
+            "live transfers must never affect tombstone eviction"
         );
-        assert!(
-            routes.len() <= MAX_UPLOAD_TOMBSTONES + 1,
-            "tombstones must stay bounded, got {} entries",
-            routes.len()
+        assert_eq!(
+            routes.values().filter(|route| !route.is_live()).count(),
+            MAX_UPLOAD_TOMBSTONES,
+            "the finished-route bound is independent of live transfers"
         );
         // Oldest first: the survivors are the most recent tombstones,
         // which are the ones a client is plausibly about to ask about.
@@ -1456,7 +1459,7 @@ mod tests {
             "the oldest tombstone must be the first evicted"
         );
         assert!(
-            routes.contains_key(&(MAX_UPLOAD_TOMBSTONES as u32 + 10)),
+            routes.contains_key(&(MAX_UPLOAD_TOMBSTONES as u32 + 1)),
             "the newest tombstone must survive"
         );
     }
