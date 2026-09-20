@@ -13,7 +13,6 @@ One line per open item. This file must always match the feedback files in this d
 - `cached-session-skips-created-at-check.md` — cached session detail shows a row the list hides as poison.
 - `cancelled-request-leaks-pending-entry.md` — cancelled request without a reply leaks its pending entry for the
   connection's lifetime.
-- `clearing-local-alias-restores-colliding-name.md` — clearing the local alias can restore a colliding display name.
 - `clone-audit-log-skips-escape-for-log.md` — clone audit log prints agent-chosen ids raw, letting one id render as
   another.
 - `commit-window-reads-unpublished-outcome.md` — a commit in the close-to-publish window gets the generic error.
