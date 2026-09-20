@@ -21,6 +21,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- Assess what is needed to prevent native and shelled-out subagents from replacing or withdrawing the foreground
+  conversation's restart target across harnesses. #801 adds Codex-specific ownership checks; Claude, Goose, Pi, and OMP
+  still lack equivalent report-admission checks. Establish actual child reporter inheritance and triggering, including
+  mixed-harness delegation, and propose the required ownership checks while preserving legitimate foreground
+  clear/new/switch/fork/resume transitions. This is an assessment task, not a claim that every vendor path has been
+  reproduced. [Historical assessment](lore/2026-09-20-harness-conversation-ownership.md).
+
 ## Tricky bugs
 
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
