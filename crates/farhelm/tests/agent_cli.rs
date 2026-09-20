@@ -517,7 +517,8 @@ fn profiles_prints_the_id_name_and_builtin_table() {
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
-/// marked table, with archive and staleness visible in the STATUS column.
+/// marked table, with archive and staleness visible in the STATUS column and
+/// the non-secret restart capability in OFFER.
 ///
 /// The column ORDER is the contract being pinned. `farhelm agent` is a
 /// public, scriptable CLI whose output is read by humans and models with no
@@ -558,6 +559,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                             status: "running".to_string(),
                             current: true,
                             archived: false,
+                            restart_offer: Default::default(),
                             stale: false,
                         },
                         AgentSession {
@@ -570,6 +572,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                             status: "idle".to_string(),
                             current: false,
                             archived: false,
+                            restart_offer: Default::default(),
                             stale: true,
                         },
                         AgentSession {
@@ -582,6 +585,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                             status: "exited".to_string(),
                             current: false,
                             archived: true,
+                            restart_offer: Default::default(),
                             stale: false,
                         },
                     ],
@@ -598,10 +602,10 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         [
-            "  ID        HOST         TITLE CWD     AGENT  STATUS",
-            "* session-1 this machine auth  /w/auth claude running",
-            "  session-2 builder      docs  /w      codex  idle (stale)",
-            "  session-3 builder      old   /w      codex  archived",
+            "  ID        HOST         TITLE CWD     AGENT  STATUS       OFFER",
+            "* session-1 this machine auth  /w/auth claude running      fresh",
+            "  session-2 builder      docs  /w      codex  idle (stale) fresh",
+            "  session-3 builder      old   /w      codex  archived     fresh",
             "",
         ]
         .join("\n")
@@ -643,6 +647,7 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
                         status: "running".to_string(),
                         current: true,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     }],
                     truncated: true,
@@ -1268,6 +1273,7 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
                         status: "running".to_string(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -1362,6 +1368,7 @@ fn archive_sends_the_named_target_and_prints_its_id() {
                         status: "exited".to_string(),
                         current: false,
                         archived: true,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -1430,6 +1437,7 @@ fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
                         status: "running".to_string(),
                         current: true,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -1550,6 +1558,7 @@ fn an_archive_confirmation_escapes_control_characters_in_the_id() {
                         status: "exited".to_string(),
                         current: true,
                         archived: true,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -1659,6 +1668,7 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
                         status: "running".to_string(),
                         current: true,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -1866,6 +1876,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
                         status: String::new(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -1984,6 +1995,7 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
                         status: String::new(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -2156,6 +2168,7 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
                         status: String::new(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -2226,6 +2239,7 @@ fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
                         status: String::new(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },
@@ -2292,6 +2306,7 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
                         status: "running".to_string(),
                         current: false,
                         archived: false,
+                        restart_offer: Default::default(),
                         stale: false,
                     },
                 },

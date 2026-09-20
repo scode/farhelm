@@ -2601,30 +2601,36 @@ pub(crate) async fn restart_session(
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RestartReq>,
 ) -> impl IntoResponse {
-    let (claim, client) = match route_session(&state, &id).await {
-        Ok(routed) => routed,
-        Err(e) => return http_error(e),
-    };
-    // Load before restart: once the supervisor relaunches the agent, no
-    // catalog failure may turn that completed mutation into an error reply.
-    let profile_names = match load_profile_name_index(&state.store).await {
-        Ok(profiles) => profiles,
-        Err(error) => return http_error(error),
-    };
-    match client
-        .restart_session(&id, req.mode, req.stop_if_running)
-        .await
-    {
-        Ok(mut session) => {
-            resolve_session_profiles(&profile_names, std::iter::once(&mut session));
-            record_session(&state, &claim, &session).await;
-            match browser_session_ready(&session) {
-                Ok(()) => axum::Json(session).into_response(),
-                Err(error) => http_error(error),
-            }
-        }
+    match do_restart_session(&state, &id, req.mode, req.stop_if_running).await {
+        Ok((_claim, session)) => match browser_session_ready(&session) {
+            Ok(()) => axum::Json(session).into_response(),
+            Err(error) => http_error(error),
+        },
         Err(e) => http_error(e),
     }
+}
+
+/// Route, relaunch, enrich, and publish one session restart.
+///
+/// This is shared by the REST surface and the attached-session relay so a
+/// restart has one owner-routing and post-mutation publication contract.
+/// `mode` and `stop_if_running` deliberately reach the supervisor unchanged:
+/// it alone can revalidate the current offer and liveness immediately before
+/// destructive work. The profile index is read before that work, because a
+/// catalog read that fails afterward must not make a completed relaunch look
+/// unsuccessful to a caller that might otherwise retry it.
+pub(crate) async fn do_restart_session(
+    state: &AppState,
+    id: &str,
+    mode: farhelm_proto::RestartMode,
+    stop_if_running: bool,
+) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
+    let (claim, client) = route_session(state, id).await?;
+    let profile_names = load_profile_name_index(&state.store).await?;
+    let mut session = client.restart_session(id, mode, stop_if_running).await?;
+    resolve_session_profiles(&profile_names, std::iter::once(&mut session));
+    record_session(state, &claim, &session).await;
+    Ok((claim, session))
 }
 
 /// The body of `POST /api/sessions/{id}/rename`: the verb-POST convention

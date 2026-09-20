@@ -19,7 +19,7 @@
 //! Every verb here is served from the exact code path its REST counterpart
 //! uses — `hosts::host_views` for hosts, `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
-//! `do_archive_session` for the three lifecycle verbs, and
+//! `do_archive_session`/`do_restart_session` for the four lifecycle verbs, and
 //! `sessions::do_create_session` for `create` and `clone`. Not for economy:
 //! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
@@ -49,7 +49,7 @@
 //!
 //! # Lifecycle verbs act on ANY session, not only the asker's own
 //!
-//! `Rename`, `Stop` and `Archive` each carry `session_id: Option<String>` so
+//! `Rename`, `Stop`, `Archive`, and `Restart` each carry `session_id: Option<String>` so
 //! an old wire shape can still be decoded and refused. The relay and this
 //! authoritative boundary both require `Some(id)`, including for a deliberate
 //! self-action. The id may name any session the helm knows, on any host.
@@ -168,7 +168,7 @@ pub trait AgentRequestHandler: Send + Sync {
     /// marker would name a host that is no longer the asking session's.
     ///
     /// A COMPLETED MUTATION SKIPS THIS CHECK. Every verb
-    /// [`AgentVerb::is_mutating`] answers `true` for — the lifecycle three
+    /// [`AgentVerb::is_mutating`] answers `true` for — the lifecycle four
     /// and the two creating verbs — is re-checked on the way IN by `handle`
     /// and not on the way out, because by then the change has already
     /// happened at its target and there is nothing to withdraw: converting
@@ -361,6 +361,18 @@ impl AgentRequestHandler for HelmAgentRequests {
                         agent_session_reply(&state, &claim, info, origin.host, session_id)
                     })
             }
+            AgentVerb::Restart {
+                session_id: target,
+                mode,
+                stop_if_running,
+            } => {
+                let target = resolve_target(target.expect("validated"), session_id, "restart");
+                crate::sessions::do_restart_session(&state, &target, mode, stop_if_running)
+                    .await
+                    .map(|(claim, info)| {
+                        agent_restarted_reply(&state, &claim, info, origin.host, session_id)
+                    })
+            }
             AgentVerb::Create {
                 host,
                 cwd,
@@ -452,7 +464,7 @@ impl AgentRequestHandler for HelmAgentRequests {
 /// The helm sits in the middle of two hops, and this is the far one: the
 /// asking session's supervisor forwarded the verb up to the helm, and the
 /// helm routed it down to the supervisor that owns the target session. A
-/// MUTATION — `Rename`/`Stop`/`Archive`, or a `Create`/`Clone` — that
+/// MUTATION — `Rename`/`Stop`/`Archive`/`Restart`, or a `Create`/`Clone` — that
 /// reached THAT supervisor and lost only its reply is the same
 /// delivered-outcome-unknown ending the near hop already speaks about
 /// (`service::agent_relay::connection_lost_after_queueing`) — and it used to
@@ -612,9 +624,9 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
-        AgentVerb::Stop { session_id } | AgentVerb::Archive { session_id } => {
-            required(session_id.as_deref(), "--session")
-        }
+        AgentVerb::Stop { session_id }
+        | AgentVerb::Archive { session_id }
+        | AgentVerb::Restart { session_id, .. } => required(session_id.as_deref(), "--session"),
         AgentVerb::Create {
             host,
             cwd,
@@ -1349,6 +1361,24 @@ fn agent_session_reply(
     }
 }
 
+/// [`agent_session_reply`]'s restart twin, kept under a distinct reply tag.
+///
+/// A successful restart is an observed relaunch, not merely a session row
+/// that happened to change. Keeping that fact in the response prevents a
+/// malformed relay from making the CLI acknowledge a different lifecycle
+/// operation as a restart.
+fn agent_restarted_reply(
+    state: &AppState,
+    claim: &crate::manager::SessionClaim,
+    info: farhelm_proto::SessionInfo,
+    asking_host: HostId,
+    asking_session: &str,
+) -> AgentReply {
+    AgentReply::Restarted {
+        session: agent_row_of_mutation(state, claim, info, asking_host, asking_session),
+    }
+}
+
 /// [`agent_session_reply`]'s twin for the two CREATING verbs: the same row,
 /// under [`AgentReply::Created`]'s tag.
 ///
@@ -1536,6 +1566,7 @@ fn agent_session(
         status: status_word(&row.info.status).to_string(),
         current: row.host == asking_host && row.info.id == asking_session,
         archived: row.info.archived,
+        restart_offer: row.info.restart_offer,
         stale: row.stale,
     }
 }
@@ -2831,7 +2862,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // The lifecycle verbs — Rename, Stop, Archive — against the same
+    // The lifecycle verbs — Rename, Stop, Archive, Restart — against the same
     // production handler and the same real fleet machinery as the read-only
     // verbs above. Each drives `do_rename_session`/`do_stop_session`/
     // `do_archive_session` (`sessions.rs`) through a REAL routed call to a
@@ -2979,6 +3010,71 @@ mod tests {
                  answer, so the handler resolved without forwarding one. It answered: {outcome:?}"
             ),
         }
+    }
+
+    /// A correlated wrong reply does not establish whether restart ran.
+    /// Keep its payload private and require inspection before another mutation.
+    #[farhelm_testtrace::test]
+    async fn a_wrong_restart_reply_preserves_uncertainty_without_leaking_launch() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let (release, held) = tokio::sync::oneshot::channel();
+        let responder = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let frame = reader.read_frame().await.unwrap().expect("restart request");
+            let ControlMsg::RestartSession { req_id, .. } =
+                parse_control(&frame).expect("decode restart")
+            else {
+                panic!("expected RestartSession");
+            };
+            let mut wrong = session("target", 2);
+            wrong.invocation = "private-launch-sentinel".to_string();
+            writer
+                .write_control(&ControlMsg::SessionRenamed {
+                    req_id,
+                    session: wrong,
+                })
+                .await
+                .expect("send correlated wrong reply");
+            // Keep the peer connected so connection loss cannot satisfy the assertion.
+            held.await.expect("release after the relay answers");
+        });
+        let (h, local) =
+            spliced_local_fleet(client_side, vec![session("target", 2), session("asker", 1)]).await;
+        let outcome = tokio::time::timeout(
+            RESPONDER_JOIN_BUDGET,
+            HelmAgentRequests::for_state(&h.state).handle(
+                origin_of(&h, local),
+                "asker",
+                AgentVerb::Restart {
+                    session_id: Some("target".to_string()),
+                    mode: farhelm_proto::RestartMode::Fresh,
+                    stop_if_running: true,
+                },
+            ),
+        )
+        .await
+        .expect("relay must resolve the wrong reply");
+        release.send(()).expect("peer remains connected");
+        join_responder(responder, &outcome).await;
+        let AgentOutcome::Err { kind, message } = outcome else {
+            panic!("a wrong reply cannot acknowledge restart");
+        };
+        assert_eq!(kind, ErrorKind::Timeout, "{message}");
+        assert!(message.contains("RestartSession"), "{message}");
+        assert!(message.contains("SessionRenamed"), "{message}");
+        assert!(
+            message.contains(farhelm_proto::AGENT_MUTATION_UNKNOWN_REMEDY),
+            "{message}"
+        );
+        assert!(!message.contains("private-launch-sentinel"), "{message}");
     }
 
     /// Spec: `Rename` can target ANY session the helm knows, not only the
@@ -3180,7 +3276,7 @@ mod tests {
     }
 
     /// Spec: an ALREADY-ARCHIVED session is a legal lifecycle target —
-    /// `AgentSession::archived`'s own docs promise rename/stop/archive may
+    /// `AgentSession::archived`'s own docs promise rename/stop/archive/restart may
     /// all name one — and the helm forwards such a request rather than
     /// short-circuiting it.
     ///

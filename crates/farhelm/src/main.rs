@@ -9,7 +9,7 @@
 //! diagnostic on stderr: `farhelm spawn`'s only successful output is the
 //! child id, and `farhelm agent`'s is the listing it was asked for
 //! (`hosts`/`sessions`), the one-line confirmation of a lifecycle action
-//! (`rename`/`stop`/`archive`), or — for the two creating verbs
+//! (`rename`/`stop`/`archive`/`restart`), or — for the two creating verbs
 //! (`create`/`clone`) — the NEW SESSION'S ID and nothing else, with the
 //! human-readable confirmation on stderr beside it. That last shape is
 //! `spawn`'s contract deliberately: the created id is the one agent output
@@ -36,7 +36,7 @@
 //! it must work in a session whose relay is broken — see
 //! [`agent_instructions`].
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use farhelm_proto::AgentReply;
 use std::io::Write;
 use std::path::PathBuf;
@@ -92,7 +92,7 @@ enum Cmd {
     },
     /// Ask the helm about the fleet, or act on it, from inside a Farhelm
     /// session — `hosts`/`sessions` are read-only questions,
-    /// `rename`/`stop`/`archive` are fleet-wide lifecycle actions, and
+    /// `rename`/`stop`/`archive`/`restart` are fleet-wide lifecycle actions, and
     /// `create`/`clone` put a new session on any host in the fleet.
     ///
     /// `disable_help_subcommand` because [`AgentCmd::Help`] is farhelm's
@@ -125,12 +125,8 @@ enum Cmd {
 
 /// The verbs `farhelm agent` currently carries.
 ///
-/// Nine in total: the two read-only listings (`Hosts`, `Sessions`), the
-/// three lifecycle verbs SPEC.md's "A session can also ASK" paragraph
-/// promises (`Rename`, `Stop`, `Archive`), the two CREATING verbs
-/// (`Create`, `Clone`), and the two that print the manual itself
-/// (`Instructions`, `Help`) — see [`AgentCmd::verb`] for why the last two
-/// are answered LOCALLY while the other seven are relayed to the helm.
+/// `Instructions` and `Help` render locally; the other verbs use the
+/// attached helm's relay. See [`AgentCmd::verb`] for that boundary.
 ///
 /// The creating verbs print DIFFERENTLY from every other verb here, and
 /// the difference is a contract rather than a style: their stdout is the
@@ -213,6 +209,19 @@ enum AgentCmd {
         /// Exact session id from `farhelm agent sessions`.
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
+    },
+    /// Restart an explicitly named session using its advertised mode.
+    Restart {
+        /// Exact session id from `farhelm agent sessions`.
+        #[arg(long = "session", allow_hyphen_values = true)]
+        session: String,
+        /// Restart behavior selected from the session's OFFER column.
+        #[arg(long, value_enum)]
+        mode: AgentRestartMode,
+        /// Permit stopping the target only if it is still running when the
+        /// owning supervisor handles this request.
+        #[arg(long)]
+        stop_if_running: bool,
     },
     /// Create a session on any host; prints its id.
     Create {
@@ -309,6 +318,15 @@ impl AgentCmd {
             AgentCmd::Archive { session } => Some(farhelm_proto::AgentVerb::Archive {
                 session_id: Some(session.clone()),
             }),
+            AgentCmd::Restart {
+                session,
+                mode,
+                stop_if_running,
+            } => Some(farhelm_proto::AgentVerb::Restart {
+                session_id: Some(session.clone()),
+                mode: (*mode).into(),
+                stop_if_running: *stop_if_running,
+            }),
             AgentCmd::Create {
                 cwd,
                 host,
@@ -344,6 +362,29 @@ impl AgentCmd {
                 intent_key: idempotency_key.clone(),
             }),
             AgentCmd::Instructions | AgentCmd::Help => None,
+        }
+    }
+}
+
+/// The agent CLI's spelling of the supervisor-owned restart modes.
+///
+/// This is deliberately a CLI enum rather than a second restart policy:
+/// conversion preserves the protocol vocabulary, while clap gives the
+/// human-facing `fallback-template` spelling and refuses invented modes
+/// before any authenticated request is sent.
+#[derive(Clone, Copy, ValueEnum)]
+enum AgentRestartMode {
+    Resume,
+    Fresh,
+    FallbackTemplate,
+}
+
+impl From<AgentRestartMode> for farhelm_proto::RestartMode {
+    fn from(value: AgentRestartMode) -> Self {
+        match value {
+            AgentRestartMode::Resume => Self::Resume,
+            AgentRestartMode::Fresh => Self::Fresh,
+            AgentRestartMode::FallbackTemplate => Self::FallbackTemplate,
         }
     }
 }
@@ -649,10 +690,10 @@ fn main() -> anyhow::Result<()> {
                 print!("{}", agent_instructions::text());
                 return Ok(());
             };
-            // The two listings hand off entirely to `print_agent_listing`,
+            // The three listings hand off entirely to `print_agent_listing`,
             // which makes its own `agent_request` call and returns — there
             // is nothing left for this arm to do with their reply, unlike
-            // the three lifecycle verbs below.
+            // the four lifecycle verbs below.
             if let AgentCmd::Hosts { json }
             | AgentCmd::Sessions { json }
             | AgentCmd::Profiles { json } = &command
@@ -664,16 +705,31 @@ fn main() -> anyhow::Result<()> {
             // listings do. The authenticated caller returned alongside the
             // reply is retained for attribution even though every
             // consequential target is now explicit.
+            // A self restart tears down this process's own agent tree. The
+            // session id is already an injected authentication input, so it
+            // is available without a discovery round trip and lets the CLI
+            // warn before it sends the destructive request. There is no
+            // completion claim here: the request may cut this process off
+            // before its acknowledgement returns.
+            if let AgentCmd::Restart { session, .. } = &command {
+                let (asking, _, _) = spawn_environment("farhelm agent restart")?;
+                if session == &asking {
+                    eprintln!(
+                        "warning: restarting this session can interrupt the invoking CLI; \
+                         acknowledgement can be lost, and resumed task continuation is not guaranteed"
+                    );
+                }
+            }
             let (_asking, reply) = runtime()?.block_on(agent_request(verb))?;
             match command {
-                // The three lifecycle verbs print one confirmation line
+                // The four lifecycle verbs print one confirmation line
                 // rather than a table — there is exactly one row to
                 // report, and a script capturing stdout wants the plain
                 // sentence SPEC.md's CLI contract promises, not a one-row
-                // table with headers. A deliberate self-stop or self-archive
-                // can still terminate this CLI before it prints, because the
-                // explicit target ID names the same process tree carrying
-                // the credential.
+                // table with headers. A deliberate self-stop, self-archive,
+                // or self-restart can still terminate this CLI before it
+                // prints, because the explicit target ID names the same
+                // process tree carrying the credential.
                 AgentCmd::Rename { .. } => {
                     let AgentReply::Session { session } = reply else {
                         // `agent_request` already checked the reply's tag
@@ -714,6 +770,14 @@ fn main() -> anyhow::Result<()> {
                         );
                     };
                     println!("archived {}", safe_cell(&session.id));
+                }
+                AgentCmd::Restart { .. } => {
+                    let AgentReply::Restarted { session } = reply else {
+                        anyhow::bail!(
+                            "the helm answered restart with something other than a restarted session"
+                        );
+                    };
+                    println!("restarted {}", safe_cell(&session.id));
                 }
                 // The two creating verbs invert the stream convention the
                 // three above follow, and deliberately: stdout carries the
@@ -1552,7 +1616,7 @@ async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<(Str
 /// applied it on another host; the answer was lost), and what differs is
 /// what the reader should do next. A listing has nothing to double-apply
 /// and gets the plain transport wording, which already reads as "ask
-/// again". A MUTATION — a rename/stop/archive, or a create/clone that may
+/// again". A MUTATION — a rename/stop/archive/restart, or a create/clone that may
 /// by now have a session running on some host — may ALREADY have taken
 /// effect, so it gets
 /// the same "look before you retry" remedy the relay's own delivered-but-
@@ -1589,6 +1653,7 @@ enum ReplyKind {
     Sessions,
     Profiles,
     Session,
+    Restarted,
     Stopped,
     Created,
     ResolvedProfile,
@@ -1604,6 +1669,7 @@ impl ReplyKind {
                 ReplyKind::Session
             }
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
+            farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
             // `Created`, not `Session`: the two payloads are identical and
             // the tag is the only thing separating "a row that did not
             // exist" from "the row you changed". Checking it here is what
@@ -1626,6 +1692,7 @@ impl ReplyKind {
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
             AgentReply::Profiles { .. } => ReplyKind::Profiles,
             AgentReply::Session { .. } => ReplyKind::Session,
+            AgentReply::Restarted { .. } => ReplyKind::Restarted,
             AgentReply::Stopped {} => ReplyKind::Stopped,
             AgentReply::Created { .. } => ReplyKind::Created,
             AgentReply::ResolvedProfile { .. } => ReplyKind::ResolvedProfile,
@@ -1644,6 +1711,7 @@ impl ReplyKind {
             ReplyKind::Sessions => "sessions listing",
             ReplyKind::Profiles => "profiles listing",
             ReplyKind::Session => "session row",
+            ReplyKind::Restarted => "restarted session row",
             ReplyKind::Stopped => "stop confirmation",
             // "created", not "new": the whole point of this noun is to
             // read differently from `Session`'s in a message that names
@@ -1686,9 +1754,9 @@ fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// piece of information that has no other spelling — which row is the
 /// asking session, and which host it is on.
 ///
-/// Only ever called with the reply to `Hosts` or `Sessions` — the three
-/// lifecycle verbs print their own one-line confirmation instead (see
-/// `main`'s `Rename`/`Stop`/`Archive` arms) and the two creating verbs
+/// Only ever called with the reply to `Hosts`, `Sessions`, or `Profiles` —
+/// the four lifecycle verbs print their own one-line confirmation instead
+/// (see `main`'s `Rename`/`Stop`/`Archive`/`Restart` arms) and the two creating verbs
 /// print an id on stdout with their confirmation on stderr — which is why
 /// the lifecycle and `Created` tags are an ERROR here rather than tables of
 /// their own.
@@ -1746,6 +1814,7 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                 "CWD".to_string(),
                 "AGENT".to_string(),
                 "STATUS".to_string(),
+                "OFFER".to_string(),
             ]];
             rows.extend(sessions.iter().map(|session| {
                 vec![
@@ -1756,6 +1825,7 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
                     session.cwd.clone(),
                     session.agent.clone(),
                     session_status_cell(session),
+                    restart_offer_cell(session.restart_offer).to_string(),
                 ]
             }));
             Ok(aligned(&rows, &[]))
@@ -1781,11 +1851,24 @@ fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
         // function's docs for why that is stated as an error and not
         // asserted.
         AgentReply::Session { .. }
+        | AgentReply::Restarted { .. }
         | AgentReply::Stopped {}
         | AgentReply::Created { .. }
         | AgentReply::ResolvedProfile { .. } => {
             anyhow::bail!("only discovery listings are rendered as a table")
         }
+    }
+}
+
+/// The mode spelling a session row offers to `farhelm agent restart`.
+///
+/// It is deliberately only the non-secret enum: the command, template, and
+/// captured locator that implement an offer stay on the target supervisor.
+fn restart_offer_cell(offer: farhelm_proto::RestartOffer) -> &'static str {
+    match offer {
+        farhelm_proto::RestartOffer::FreshOnly => "fresh",
+        farhelm_proto::RestartOffer::Resume => "resume",
+        farhelm_proto::RestartOffer::FallbackTemplate => "fallback-template",
     }
 }
 
@@ -2031,7 +2114,7 @@ const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
 /// [`safe_cell`] — used to reach `anyhow::bail!` (and from there, this
 /// process's own unescaped `Result` printer) with neither protection. That
 /// was a latent gap even for the helm's own fixed refusal strings, and the
-/// lifecycle verbs made it a real one: a rename/stop/archive refusal can
+/// lifecycle verbs made it a real one: a rename/stop/archive/restart refusal can
 /// now carry a TARGET supervisor's own free-text prose (a rejected title,
 /// say), which this process never validated on the way out.
 fn safe_error_message(message: &str) -> String {
@@ -2549,6 +2632,7 @@ mod tests {
             status: "running".to_string(),
             current: false,
             archived: false,
+            restart_offer: Default::default(),
             stale: false,
         }
     }
@@ -2583,6 +2667,15 @@ mod tests {
         assert_eq!(resolve.noun(), "resolved profile");
     }
 
+    /// The CLI must never manufacture a target, a restart mode, or consent
+    /// from the caller's discovery cache. This parser-level boundary catches
+    /// the unsafe failure before any authenticated relay request exists.
+    #[farhelm_testtrace::test]
+    fn agent_restart_requires_its_explicit_target_and_mode() {
+        assert!(Cli::try_parse_from(["farhelm", "agent", "restart", "--mode", "resume"]).is_err());
+        assert!(Cli::try_parse_from(["farhelm", "agent", "restart", "--session", "s1"]).is_err());
+    }
+
     /// Spec: column widths are counted in characters, so a multibyte but
     /// single-width character does not shift the columns after it.
     ///
@@ -2609,9 +2702,9 @@ mod tests {
         assert_eq!(
             rendered,
             [
-                " ID HOST TITLE CWD AGENT  STATUS",
-                " s1 h    café  /w  claude running",
-                " s2 h    tea   /w  claude running",
+                " ID HOST TITLE CWD AGENT  STATUS  OFFER",
+                " s1 h    café  /w  claude running fresh",
+                " s2 h    tea   /w  claude running fresh",
                 "",
             ]
             .join("\n")
@@ -2652,17 +2745,17 @@ mod tests {
         assert!(!rendered.contains('\u{202e}'), "{rendered:?}");
     }
 
-    /// Spec: a non-final column is cut to [`MAX_CELL_WIDTH`] with a `…`,
-    /// while the final column is left whole.
+    /// Spec: a non-final column is cut to [`MAX_CELL_WIDTH`] with a `…`.
     ///
     /// This is a resource bound, not a cosmetic one. Alignment pads every
     /// cell of a column to the widest one in it, and session titles, paths
     /// and invocations are user text bounded only by the supervisor's
     /// create-time cap — so one long value in a middle column multiplies by
     /// the row count into an output far larger than the reply that produced
-    /// it. The final column is exempt because nothing is padded to it.
+    /// it. The final restart-offer vocabulary needs no arbitrary-text
+    /// width exception.
     #[farhelm_testtrace::test]
-    fn non_final_columns_are_clamped_and_the_last_is_not() {
+    fn non_final_columns_are_clamped() {
         let long = "x".repeat(MAX_CELL_WIDTH * 3);
         let mut row = agent_session("s1", &long);
         row.status = long.clone();
@@ -2677,10 +2770,7 @@ mod tests {
             .expect("the TITLE cell");
         assert_eq!(title.chars().count(), MAX_CELL_WIDTH);
         assert!(title.ends_with('…'), "the cut must be marked: {title}");
-        assert!(
-            rendered.contains(&long),
-            "the final column carries its value whole"
-        );
+        assert!(!rendered.contains(&long), "a non-final cell is bounded");
     }
 
     /// Spec: STATUS says `archived` for an archived session and appends
@@ -2703,9 +2793,9 @@ mod tests {
         assert_eq!(
             rendered,
             [
-                " ID HOST TITLE CWD AGENT  STATUS",
-                " s1 h    t     /w  claude archived",
-                " s2 h    t     /w  claude running (stale)",
+                " ID HOST TITLE CWD AGENT  STATUS          OFFER",
+                " s1 h    t     /w  claude archived        fresh",
+                " s2 h    t     /w  claude running (stale) fresh",
                 "",
             ]
             .join("\n")

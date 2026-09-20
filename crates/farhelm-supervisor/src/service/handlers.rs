@@ -1392,7 +1392,7 @@ async fn handle_delete_session(
         // is load-bearing (see `Supervisor::agent_request_locks`). An asking
         // session's own credential is validated once, at the top of the
         // `AgentRequest` handler, and this delete may be racing a mutation
-        // that credential already authorized — a rename, stop, or archive
+        // that credential already authorized — a rename, stop, archive, or restart
         // still in flight up to the helm and back. Waiting here for that fence
         // to clear means such a mutation always finishes against a session
         // this delete has not yet torn down, rather than the delete
@@ -3653,7 +3653,7 @@ pub(crate) async fn handle_restricted_control(
             // and one reply shape means the asking CLI decodes exactly one
             // thing (see `ControlMsg::AgentRequest`'s docs).
             // The two CREATING verbs are fenced for exactly the reason the
-            // lifecycle three are, and the stakes are higher: a create that
+            // lifecycle four are, and the stakes are higher: a create that
             // completes while this credential is being invalidated leaves a
             // real session running on some host with the asking process
             // told nothing about it. Which verbs count is not decided here
@@ -3860,9 +3860,9 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
-        AgentVerb::Stop { session_id } | AgentVerb::Archive { session_id } => {
-            validate_target(session_id)
-        }
+        AgentVerb::Stop { session_id }
+        | AgentVerb::Archive { session_id }
+        | AgentVerb::Restart { session_id, .. } => validate_target(session_id),
         AgentVerb::Create {
             host,
             cwd,
@@ -6261,6 +6261,16 @@ mod tests {
                 .unwrap_err()
                 .contains("required"),
             "the old implicit-self shape must be refused"
+        );
+        assert!(
+            validate_agent_verb(&AgentVerb::Restart {
+                session_id: None,
+                mode: RestartMode::Fresh,
+                stop_if_running: false,
+            })
+            .unwrap_err()
+            .contains("required"),
+            "restart must not recover an implicit self target"
         );
         assert!(
             validate_agent_verb(&AgentVerb::Stop {
