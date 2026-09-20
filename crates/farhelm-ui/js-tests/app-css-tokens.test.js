@@ -45,6 +45,21 @@ const COLOR_FUNCTION_RE = /\b(?:rgb|rgba|hsl|hsla)\(/i;
 // that's why this check only ever runs on the "outside :root" slice of the
 // file, never on the whole thing).
 const FONT_LIST_LITERAL_RE = /,\s*(?:monospace|sans-serif|serif|cursive|fantasy|system-ui)\b/i;
+// A `border-radius` (or per-corner `border-*-radius`) declaration, value
+// captured. Whether the value holds a literal is a second question, asked
+// of the capture by RADIUS_LENGTH_LITERAL_RE.
+const RADIUS_DECL_RE = /border(?:-[a-z]+)*-radius\s*:\s*([^;{}]+)/g;
+// A non-zero LENGTH. A bare `0` stays legal: app.css's header carves it out
+// as structural (a corner squared off because it joins a neighbor names no
+// design value). A percentage stays legal for the same kind of reason: `50%`
+// says "make this box a circle", which is a shape, not a point on the corner
+// scale, and the status dot is the one place it appears.
+//
+// Any number with a length unit counts unless every digit in it is zero
+// (`0px`, `0.0em`), which is what the lookahead rules out. Case-insensitive
+// because CSS units are.
+const RADIUS_LENGTH_LITERAL_RE =
+  /(?<![\w.-])(?![0.]+[a-z])\d*\.?\d+(?:px|r?em|ch|ex|pt|pc|cm|mm|in|q|v[wh]|vmin|vmax)\b/i;
 const VAR_REF_RE = /var\(\s*(--[a-zA-Z0-9-]+)/g;
 const VAR_DECL_RE = /(--[a-zA-Z0-9-]+)\s*:/g;
 
@@ -127,6 +142,11 @@ function blankBlocks(css, blocks) {
  *   (a) outside `:root` and `@font-face`, no hex color, no
  *       rgb()/rgba()/hsl()/hsla() call, and no literal font-family list —
  *       every such value must instead be a `var(--token)` reference.
+ *       Non-zero corner radii are held to the same rule: a `border-radius`
+ *       length outside `:root` is a literal on the corner scale. The launch
+ *       composer carried sixteen of them (6px, 8px, 12px) for as long as
+ *       this checker only looked at colors and fonts, which is how a dialog
+ *       ended up with rounder corners than the window it opens over.
  *   (b) every `var(--x)` referenced anywhere in the source names a token
  *       declared in some `:root` block, or is in `RUNTIME_ALLOWLISTED_VARS`.
  */
@@ -149,6 +169,13 @@ function checkAppCss(css) {
   const fontListMatch = exemptFromLiteralCheck.match(FONT_LIST_LITERAL_RE);
   if (fontListMatch) {
     errors.push(`font-family list literal found outside :root/@font-face (matched "${fontListMatch[0]}")`);
+  }
+
+  for (const match of exemptFromLiteralCheck.matchAll(RADIUS_DECL_RE)) {
+    const literal = match[1].match(RADIUS_LENGTH_LITERAL_RE);
+    if (literal) {
+      errors.push(`corner radius literal "${literal[0]}" found outside :root (in "${match[0].trim()}")`);
+    }
   }
 
   const declared = declaredRootTokens(stripped);
@@ -197,6 +224,35 @@ test("rejects a literal font-family list outside :root", () => {
   const result = checkAppCss(css);
   assert.equal(result.ok, false);
   assert.ok(result.errors.some((e) => e.includes("font-family list literal")), result.errors.join("\n"));
+});
+
+test("rejects a literal corner radius outside :root, in the shorthand and per corner", () => {
+  // Both spellings, because the per-corner longhand is how a literal would
+  // most plausibly slip past a check that only knew `border-radius`.
+  const literals = [
+    "border-radius: 6px",
+    "border-top-left-radius: 0.5em",
+    "border-radius: var(--radius-sm) 12px",
+    "border-radius: 1.0PX",
+    "border-radius: 2ch",
+  ];
+  for (const declaration of literals) {
+    const css = `:root { --radius-sm: 3px; }\n.thing { ${declaration}; }`;
+    const result = checkAppCss(css);
+    assert.equal(result.ok, false, declaration);
+    assert.ok(result.errors.some((e) => e.includes("corner radius literal")), result.errors.join("\n"));
+  }
+});
+
+test("accepts a token radius, the structural 0 app.css's header carves out, and a percentage", () => {
+  // The joined tab corners are the real `0` case and the status dot is the
+  // real `50%` case; a checker that flagged either would push someone to
+  // mint a token that names no design value.
+  const css = `:root { --radius-sm: 3px; }\n` +
+    `.tab { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }\n` +
+    `.square { border-radius: 0; }\n.also-square { border-radius: 0px 0.0em; }\n.dot { border-radius: 50%; }`;
+  const result = checkAppCss(css);
+  assert.deepEqual(result.errors, []);
 });
 
 test("rejects a var() reference to an undeclared, non-allowlisted token", () => {

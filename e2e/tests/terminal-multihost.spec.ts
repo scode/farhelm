@@ -923,9 +923,9 @@ test.describe("multi-host", () => {
       throw new Error("the host header elements must all have measurable boxes");
     }
     // Same line means the three boxes share a horizontal band, not that
-    // their centers coincide: `.host-row-main` aligns them by BASELINE, so a
-    // taller toggle and a shorter status word sit on one line with different
-    // centers. A wrapped toggle would have no vertical overlap with the name.
+    // their boxes coincide: `.host-row-main` centers them, and a taller
+    // toggle and a shorter status word still have different tops and
+    // bottoms. A wrapped toggle would have no vertical overlap with the name.
     const boxes = [nameBox, statusBox, toggleBox];
     const bandTop = Math.max(...boxes.map((box) => box.y));
     const bandBottom = Math.min(...boxes.map((box) => box.y + box.height));

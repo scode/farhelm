@@ -3890,9 +3890,21 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   expect(dotBox.width).toBeGreaterThan(0);
   expect(dotBox.height).toBeGreaterThan(0);
   expect(Math.abs(dotBox.width - dotBox.height)).toBeLessThanOrEqual(1);
-  expect(
-    await dot.evaluate((element) => getComputedStyle(element).borderRadius),
-  ).toBe("50%");
+  // The mark is painted by the dot's `::before`, not by the span itself:
+  // each status has a shape of its own, some cut with `clip-path`, and a
+  // clip on the span would shrink the click target of a dot that doubles
+  // as the mark-read toggle (see `.status-dot` in app.css). So "round" and
+  // "painted" are both read off the pseudo-element. Running is the status
+  // whose shape is the plain circle, which is what this badge is.
+  const mark = await dot.evaluate((element) => {
+    const style = getComputedStyle(element, "::before");
+    return { radius: style.borderRadius, clip: style.clipPath, fill: style.backgroundColor };
+  });
+  expect(mark.radius).toBe("50%");
+  expect(mark.clip, "a running dot is a circle, not one of the cut shapes").toBe("none");
+  expect(mark.fill, "the mark must paint the badge's own status color").toBe(
+    await badge.evaluate((element) => getComputedStyle(element).color),
+  );
 
   // The word is the invisible half: still in the DOM and still named above,
   // but clipped to a box nobody can read it in.

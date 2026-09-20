@@ -21,8 +21,8 @@
  *
  * Three surface levels and one accent carry the whole layout, and both
  * are design constraints rather than accidents of what the sheet grew.
- * The page ground is black, and the terminal paints its own surface
- * (`--terminal-bg`) on top of it; chrome (sidebar, main
+ * The page ground is a cool near-black, and the terminal paints its own
+ * surface (`--terminal-bg`) on top of it; chrome (sidebar, main
  * header, tab strip) sits one step above the ground; panels that float over
  * chrome — menus, dialogs, forms, bands that interrupt a pane — sit one
  * step above that. The accent is a single blue, and what it may be
@@ -30,6 +30,17 @@
  * primary control a surface is allowed, and the pressed state of a row's
  * actions-menu toggle. The `:root` comments below carry the element-by-
  * element map.
+ *
+ * Two more rules hold the look together across surfaces, and a dialog is
+ * not exempt from either. Selection is ONE construct wherever it appears
+ * (session row, tab, the launch composer's chosen controls): the quiet
+ * `--accent-fill`, an accent bar on one edge, and `--fg-bright` text. And
+ * the status colors are the loudest thing in the sidebar, each paired with
+ * a shape of its own (`.status-dot`), so the session that needs a person
+ * is louder than the one already open. There is one corner
+ * scale and one typeface for the same reason the accent is single: the
+ * launch composer once had a palette, radii, and a selection color of
+ * its own, and read as a different application.
  *
  * The dark palette is the only one today. A light theme is a decision
  * already made, and it arrives as a SECOND `:root` block redefining the
@@ -126,27 +137,41 @@
      tokens after them are fills for a control's hover state and a small
      chip, not a fourth and fifth level — named for that role
      (`--control-hover-bg`, `--chip-bg`) rather than `--bg-3`/`--bg-4`
-     specifically so nothing reads them as a rung on this ladder.
+     specifically so nothing reads them as a rung on this ladder. `--well`
+     is a third fill of that kind, for the inside of an input.
 
-     The ground stays pure black for the page chrome and recessed input
-     wells. The terminal has its own surface token, matching the xterm theme,
-     so its 4px gutter and viewport do not frame the pane in black. */
-  --bg-0: #000; /* GROUND: the page and recessed well of inputs, selects, and
-                   code boxes */
+     All three levels lean slightly cool, and by the same amount, so the
+     chrome reads as one material at three depths and the blue accent reads
+     as that material turned up. The ground is a near-black and not
+     `#000` for the same reason: pure black would be the one untinted
+     surface in the set. It costs almost no contrast (`--fg-2`, the token
+     the ground binds, was retuned for it). The terminal has its own surface
+     token, matching the xterm theme, so its 4px gutter and viewport do not
+     frame the pane in the ground color. */
+  --bg-0: #05070a; /* GROUND: the page behind everything */
+  --well: #0c1015; /* RECESSED: the inside of a control that holds a value
+                      or a choice: inputs, selects, code boxes, and in the
+                      launch composer the harness chips, segments, and the
+                      recent-setups list. Darker than any surface a control
+                      can sit on (chrome or floating), so it reads as cut
+                      INTO its panel, and lighter than the ground, so a
+                      field on a dialog does not read as a hole through to
+                      the page. Not a rung on the ladder: it is the inside
+                      of a control, never a surface other things sit on */
   --terminal-bg: #282c34; /* the terminal's surface: the xterm.js theme's
                              background (assets/terminal-theme.js), mirrored
                              here so the pane's gutter and viewport match; a
                              js-test pins the two to the same value */
-  --bg-1: #1a1d23; /* RAISED CHROME: the sidebar column and everything in it,
+  --bg-1: #141920; /* RAISED CHROME: the sidebar column and everything in it,
                       the main pane's titlebar, the tab strip, and the quiet
                       bands (stale notice, stale metadata) */
-  --bg-2: #252a35; /* FLOATING: surfaces that sit above chrome — the row
+  --bg-2: #1b222c; /* FLOATING: surfaces that sit above chrome — the row
                        actions menu, the header's confirmation popover, the
                        auth card, the create form, the bands that interrupt a
                        pane (tab confirm, count banner, attach status) — and
                        the tint a session row takes while hovered or holding
                        focus */
-  --control-hover-bg: #2c313d; /* the hover fill of a bordered control, which
+  --control-hover-bg: #232b37; /* the hover fill of a bordered control, which
                                    has to read on --bg-2 as well as on --bg-1.
                                    Also a binding constraint like --fg-1
                                    below rather than a free pick: this is
@@ -163,13 +188,14 @@
      every surface it actually lands on, and for the two quiet ones that
      is a binding constraint rather than an observation: --fg-1 is set by
      the brightest surface it has to survive (--accent-fill-hover, the
-     hovered selected row, where it is 4.6:1) and --fg-2 by the ground
+     hovered selected row, where it is 4.8:1) and --fg-2 by the ground
      (4.6:1). Darkening either, or lightening the surfaces under them,
-     takes metadata below AA. */
+     takes metadata below AA. --fg-2 was lifted a few units when the
+     ground stopped being pure black, to hold that same 4.6:1. */
   --fg-0: #d8dee9; /* primary text */
   --fg-dim: #b8c0cc; /* explanatory prose on a notice or placeholder surface */
   --fg-1: #9199a7; /* secondary/muted: labels, metadata lines, quiet status words */
-  --fg-2: #6e7684; /* faint: empty-state text nobody needs to read twice */
+  --fg-2: #717988; /* faint: empty-state text nobody needs to read twice */
   --fg-bright: #fff; /* high-contrast cue on a filled surface (selected row/tab, red banner); not part of the loudness scale above */
 
   /* The one accent, and the only chromatic thing in the chrome. Blue
@@ -196,24 +222,33 @@
   --accent: #5896e8; /* the accent at full strength: the selected row's inset
                         bar, every focus ring, and the glyph of an actions-menu
                         toggle whose menu is open */
-  --accent-fill: #16294a; /* accent-tinted SURFACE: the selected row, the selected
-                             tab, and the fill a primary button would take */
-  --accent-fill-hover: #1b3054; /* hover/focus inside an already-selected row */
-  --accent-edge: #3d6ba8; /* the accent at border weight: the selected tab's outline,
-                             and the outline a filled primary would take */
+  --accent-fill: #15263d; /* accent-tinted SURFACE: every selected thing (session
+                             row, tab, and the launch composer's chosen
+                             harness, segment, folder, and list option), and
+                             the fill a primary button takes. Deliberately
+                             quiet: the accent BAR on the selected thing's
+                             edge is what announces the selection, and the
+                             fill only has to stay recognizably blue beside
+                             the neutral hover tint (see
+                             `.session-row.selected`), so that status colors
+                             stay the loudest pixels in the sidebar */
+  --accent-fill-hover: #1a2d47; /* hover/focus inside an already-selected row */
+  --accent-edge: #3d6ba8; /* the accent at border weight: the outline a filled
+                             primary or a pressed titlebar trigger takes, and
+                             the fill of the launch composer's own submit */
 
   /* Rules and control outlines. */
-  --border: #434a55; /* the standard control outline: buttons, inputs, menu panel, auth card */
-  --border-dim: #2d3138; /* the quiet rule: the box around an embedded detail */
-  --border-sidebar-edge: #434a55; /* the sidebar's own edge against the main pane; same value as
+  --border: #36404f; /* the standard control outline: buttons, inputs, menu panel, auth card */
+  --border-dim: #232a35; /* the quiet rule: the box around an embedded detail */
+  --border-sidebar-edge: #36404f; /* the sidebar's own edge against the main pane; same value as
                                      --border today but its own role, so a theme can move one
                                      without the other */
-  --border-row: #2d3138; /* hairline between stacked items: the session row's bottom separator
+  --border-row: #232a35; /* hairline between stacked items: the session row's bottom separator
                              and the hosts panel's own bottom rule, the same role wearing two
                              class names. A rule token, not a surface one: the row and the
                              sidebar under it are both --bg-1 now, so a separator borrowing a
                              surface value would be invisible against what it separates */
-  --border-nested: #434a55; /* the rule marking an indented sub-section subordinate to the row
+  --border-nested: #36404f; /* the rule marking an indented sub-section subordinate to the row
                                 above it — host provisioning (.provisioning-panel). A surface
                                 value used to do this job and stopped working the moment the
                                 surfaces moved */
@@ -241,7 +276,7 @@
                                 badge and an error row's own text can sit on
                                 — --bg-1, --bg-2, --accent-fill, and
                                 --accent-fill-hover, the tightest of the four
-                                at ~4.59:1 — so an error stays legible while
+                                at ~4.85:1 — so an error stays legible while
                                 its row is plain, hovered, focused, or
                                 selected. */
   --danger-soft: #e0b0b0; /* pale red, for an outline that has to read against a red fill */
@@ -263,9 +298,11 @@
   --scrim: rgba(0, 0, 0, 0.82); /* dims a stale terminal while it reconnects */
 
   /* Elevation. The surface ladder above says which LEVEL a thing sits on;
-     this says that one of them is genuinely in front. Spent only on the
-     row actions menu, and the reason is specific to WHAT it covers: it
-     floats over other SESSION ROWS, elements that look exactly like the
+     this says that one of them is genuinely in front. Spent on the panels
+     that open over content which looks like them: the row actions menu,
+     the profiles popover, and the launch composer's search results. The
+     row menu is the case that set the rule, and the reason is specific to
+     WHAT it covers: it floats over other SESSION ROWS, elements that look exactly like the
      row it belongs to and carry the same kinds of control, so a flat
      panel would read as part of the list rather than in front of it.
      `.header-confirm` also floats without reflowing or dimming and
@@ -276,27 +313,37 @@
      reads as a drawn frame instead of as depth. */
   --shadow-menu: 0 6px 18px rgba(0, 0, 0, 0.45);
 
-  /* Launch composer. This dialog is an embedded product surface, with a
-     slightly bluer floating panel and controls so its many related choices
-     read as one bounded task. These are roles rather than additions to the
-     general surface ladder: they must move together if the composer ever
-     gets a theme of its own. */
-  --composer-scrim: rgb(13 17 25 / 78%);
-  --composer-bg: #171e2b;
-  --composer-border: #334157;
-  --composer-control-bg: #202a3a;
-  --composer-search-hover-bg: #29364c;
-  --composer-control-fg: #a5b4ca;
-  --composer-selected-border: #9eafff;
-  --composer-selected-bg: #354477;
-  --composer-selected-fg: #edf2fa;
-  --composer-launch-context-fg: #cfe0f7; /* the launch button's destination text: legible on the accent fill, quieter than the verb */
-  --composer-shadow: 0 18px 56px rgb(0 0 0 / 45%);
-  --composer-menu-shadow: 0 12px 28px rgb(0 0 0 / 38%);
+  /* Modal dialogs. A dialog sits on the ordinary floating level (`--bg-2`)
+     and its controls use the ordinary tokens. What it adds is only what
+     being modal needs: a veil over the app behind it, an edge one step
+     brighter than a control outline so the panel reads as set into the
+     frame, and a shadow.
 
-  /* Corner radii. */
+     The launch composer used to carry a palette of its own here (a navy
+     panel, bluer controls, a periwinkle selection, a 56px shadow). It was
+     removed because it made the composer read as a different application
+     from the window it opens over, and because its periwinkle was a second
+     accent, which the closed list above rules out. If a dialog ever needs
+     a value the shared tokens lack, it gets a role-named token here, not a
+     `--composer-` one. */
+  --scrim-dialog: rgb(3 5 8 / 62%); /* the veil behind a modal dialog. Not
+                                       `--scrim`: that one has to hide a stale
+                                       terminal, this one only has to push
+                                       the app back while leaving it readable */
+  --border-dialog: #4a5668; /* a modal panel's own edge */
+  --shadow-dialog: 0 10px 24px rgb(0 0 0 / 50%); /* tighter and darker than the
+                                                    glow it replaced: a panel
+                                                    in front, not a card
+                                                    hovering over a page */
+  --on-accent-dim: #e2ecfb; /* secondary text on a filled accent control (the
+                               launch button's destination): legible on the
+                               fill, quieter than the verb beside it */
+
+  /* Corner radii. One scale for every surface, dialogs included: the
+     terminal beside the chrome is a grid of square cells, and large radii
+     next to it read as a different product. */
   --radius-sm: 3px; /* controls and inputs */
-  --radius-md: 4px; /* panels and cards */
+  --radius-md: 4px; /* panels, cards, and dialogs */
   --radius-lg: 8px; /* pill-ish badges */
 
   /* The session row's two fixed leading tracks (status dot, locality glyph)
@@ -670,6 +717,35 @@ samp {
   padding: 0;
 }
 
+/* The section label: small, uppercase, tracked, in the muted foreground.
+   ONE type treatment for every place the chrome names a section, which is
+   the launch composer's field groups and the sidebar's two list headings.
+   It started in the composer and was the part of that dialog most worth
+   keeping, so the sidebar's counts ("3 hosts", "12 sessions") now wear it
+   too and both surfaces label their sections the same way.
+
+   Only the PLAIN count. The same element also carries whole sentences when
+   a filter is in force ("2 matching of 12 sessions", and the longer notice
+   that a helm ignored the filter), marked `.filtered`. Those are prose, and
+   a sentence in tracked capitals in a 340px column is hard to read, so they
+   keep the banner's ordinary type. The `.banner` in the selector is there
+   for specificity: `.banner.session-count` further down sets its own
+   `font-size` and would otherwise win by coming later.
+
+   Type only. What differs stays with each owner: the composer's label is a
+   block with a hairline after it (`.launch-composer-section-label`), the
+   sidebar's count is an inline member of a heading row. `text-transform`
+   does the uppercasing, so the DOM text, and with it the accessible name
+   and everything the browser suite matches on, stays as written. */
+.launch-composer-section-label,
+.session-heading .banner.session-count:not(.filtered),
+.hosts-heading .host-count {
+  color: var(--fg-1);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .compact-toggle,
 .host-details-control {
   display: inline-flex;
@@ -691,7 +767,7 @@ samp {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   background: var(--bg-1);
 }
 
@@ -699,7 +775,7 @@ samp {
    "sort" label would repeat it. The accessible label remains in the markup. */
 .list-header-controls .sort-select {
   margin-left: auto;
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -724,7 +800,7 @@ samp {
    without replacing the platform behavior that makes it accessible. */
 .list-header-controls .filter-host,
 .list-header-controls .sort-select {
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -823,7 +899,7 @@ samp {
    dot-only rule in the status-badge section below is later in the sheet at
    equal specificity, so it still wins for the three that draw as a dot.
 
-   `flex-shrink: 0`: the badge is a 7px dot or a string already capped at
+   `flex-shrink: 0`: the badge is an 8px dot or a string already capped at
    32ch by `.status-badge` itself, so shrinking it further would not free
    meaningful space while making the one thing it exists to state
    unreadable — unlike `.meta` and `.title`, which have somewhere useful to
@@ -1216,15 +1292,24 @@ samp {
    stating a fact, not a row marking a selection, so it competes with
    nothing here), so it cannot be mistaken for the neutral `--bg-2` tint a
    hovered row takes even though the two sit at nearly the same lightness
-   (measured: ΔE76 ≈ 15 between them, against ΔE76 ≈ 20 from the fill to
+   (measured: ΔE76 ≈ 9 between them, against ΔE76 ≈ 13 from the fill to
    the plain row). Before the palette had a real accent this rule had to
    buy that separation with a lightness step alone, which is exactly why
    selection was hard to see.
 
-   The fill deliberately stops short of where lightness would help more:
+   The fill is quieter than it used to be (ΔE76 ≈ 15 and ≈ 20), on
+   purpose. A saturated selected row outshouted the status marks beside
+   it, and the row a person most needs to notice is usually a WAITING one,
+   not the one already open. So the bar and the white title carry the
+   selection, and the fill keeps only as much hue as it takes to stay
+   apart from the hover tint. A neutral fill was tried on paper and
+   rejected for exactly that: at ΔE76 ≈ 2 from `--bg-2`, a selected row
+   reads as a hovered one.
+
+   The fill also stops short of where lightness would help more:
    `--fg-1` metadata has to clear AA (4.5:1) on every row surface this
    fill and its hover step produce. The resting fill has real headroom
-   (~5.05:1); the hover fill sits close to the floor (~4.58:1) — the
+   (~5.3:1); the hover fill sits closer to the floor (~4.85:1) — the
    hover pair is the actual binding constraint on how much brighter
    either step could go, not the resting one.
 
@@ -1929,7 +2014,7 @@ samp {
 .rename-input {
   flex: 1 1 0;
   min-width: 0;
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -1982,7 +2067,7 @@ samp {
   place-items: center;
   padding: 20px;
   overflow: auto;
-  background: var(--composer-scrim);
+  background: var(--scrim-dialog);
 }
 
 .rename-dialog {
@@ -1994,10 +2079,10 @@ samp {
   max-height: calc(100vh - 40px);
   padding: 20px;
   overflow: auto;
-  background: var(--composer-bg);
-  border: 1px solid var(--composer-border);
-  border-radius: 12px;
-  box-shadow: var(--composer-shadow);
+  background: var(--bg-2);
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
 }
 
 /* The row-panel form opted out of column-axis flexing above. The dialog is a
@@ -2376,7 +2461,7 @@ samp {
 }
 
 /* A LIVE badge is its dot and nothing else, so it carries no padding: the
-   dot is 7px wide and 16px of padding around it would read as a gap rather
+   dot is 8px wide and 16px of padding around it would read as a gap rather
    than as a mark. The line's own `gap` is the whole spacing story there.
    Enumerated rather than derived from a modifier class because it is the
    same three statuses the color rules below already enumerate — and it is a
@@ -2400,13 +2485,68 @@ samp {
    read it as "new statuses are free".
 
    Sized in px rather than em because it is a MARK, not text — it has to
-   stay the same size beside a 14px row title and a 13px header title. */
+   stay the same size beside a 14px row title and a 13px header title.
+
+   The mark is painted by `::before`, not by the span's own background,
+   because of the shapes below. Several of them are cut with `clip-path`,
+   and `clip-path` clips hit-testing along with the paint: on the span
+   itself it would shrink the click target of a dot that doubles as the
+   mark-read toggle (see `.status-dot-toggle`) down to the triangle or
+   diamond. Clipping the pseudo-element leaves the span's full box
+   clickable. */
 .status-dot {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
+}
+
+.status-dot::before {
+  content: "";
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
   background: currentColor;
+}
+
+/* Each dot-only status has its own SHAPE as well as its own color, so the
+   sidebar can be read without telling hues apart: by someone who cannot, or
+   in peripheral vision, where shape survives and hue does not. The shapes
+   follow the urgency the colors already encode. Running is the plain filled
+   circle (and the only one that pulses). Waiting, the status that asks for a
+   person, is the one pointed shape. Idle with output nobody has looked at is
+   a diamond, filled because there is something there. Plain idle is a
+   hollow ring: present, and nothing in it.
+
+   The accessible status is untouched by any of this. The dot stays
+   `aria-hidden`, and the visually hidden status word beside it is still
+   the whole of the accessible name.
+
+   `.idle.unseen` has to restore the fill and drop the ring because an
+   unseen badge also carries `.idle`. It outranks that rule on
+   specificity, so the order of the two does not matter. Statuses that
+   print their word (exited, interrupted, error) draw no dot and need no
+   shape.
+
+   The box grew from 7px to 8px with the shapes: a 7px triangle or ring is
+   too small to be told from a circle. It still fits the row's 12px
+   `--row-slot`. */
+.status-badge.waiting .status-dot::before {
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.status-badge.idle .status-dot::before {
+  border: 1.5px solid currentColor;
+  background: none;
+}
+
+.status-badge.idle.unseen .status-dot::before {
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 
 /* The row's own dot doubles as a mark-read/mark-unread MOUSE shortcut
@@ -2683,7 +2823,11 @@ samp {
 
 .host-row-main {
   display: flex;
-  align-items: baseline;
+  /* Centered, not baseline-aligned. The "⋯" toggle is a padded button,
+     taller than the name beside it, and on a shared baseline the row's
+     extra height all fell UNDER the text: the name looked pinned to the top
+     of its row. Centering splits the slack evenly. */
+  align-items: center;
   gap: 6px;
   min-height: 32px;
   padding: 4px 0 4px 12px;
@@ -2845,7 +2989,7 @@ samp {
 }
 
 .host-destination-input {
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -2895,7 +3039,7 @@ samp {
 }
 
 .add-host-form input {
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -2947,7 +3091,7 @@ samp {
    Preserve its line boundaries and whitespace; wrapping long paths is the
    only layout intervention, and does not change the text copied or read. */
 .provisioning-plan {
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -3044,7 +3188,7 @@ samp {
   padding: 10px;
   background: var(--bg-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-menu);
 }
 
@@ -3185,7 +3329,7 @@ samp {
 
 .profile-form input,
 .profile-kind-select {
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -3299,7 +3443,7 @@ samp {
 .create-session-form input,
 .create-session-host,
 .create-session-profile {
-  background: var(--bg-0);
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-0);
@@ -3366,7 +3510,7 @@ samp {
   place-items: center;
   padding: 20px;
   overflow: auto;
-  background: var(--composer-scrim);
+  background: var(--scrim-dialog);
 }
 
 /* Content-sized rather than a fixed box: Launch and Cancel lead the composer,
@@ -3386,10 +3530,10 @@ samp {
   margin: 0;
   padding: 24px;
   overflow: auto;
-  background: var(--composer-bg);
-  border: 1px solid var(--composer-border);
-  border-radius: 12px;
-  box-shadow: var(--composer-shadow);
+  background: var(--bg-2);
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
 }
 
 /* The eyebrow names this transient launcher without competing with its
@@ -3399,13 +3543,33 @@ samp {
   margin-bottom: 8px;
 }
 
+/* The label's type comes from the shared section-label rule beside
+   `.session-heading`. What is the composer's own is the layout: each label
+   heads a group of controls, and a hairline runs from the label to the
+   group's right edge so the groups read as ruled sections of one panel
+   without a box around each. The rule is a pseudo-element because it is
+   decoration: it adds nothing to the label's text or accessible name. */
 .launch-composer-section-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 6px;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--composer-control-fg);
+}
+
+.launch-composer-section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-row);
+}
+
+/* Effort and permissions are content-sized (see
+   `.launch-composer-choice-pair`), so a rule after their labels would stop
+   wherever the segments happen to end, a different length for each
+   harness. A stub like that reads as a rendering fault, so these two
+   labels go without. */
+.launch-composer-choice-pair .launch-composer-section-label::after {
+  content: none;
 }
 
 /* Reset shares the action row but sits at its far end: it clears the launch
@@ -3414,7 +3578,7 @@ samp {
 .launch-composer-reset {
   border: 0;
   background: transparent;
-  color: var(--composer-selected-fg);
+  color: var(--fg-0);
   font: inherit;
   text-decoration: underline;
   margin-left: auto;
@@ -3472,10 +3636,10 @@ samp {
 .launch-composer-destination-row > button {
   min-height: 36px;
   padding: 0 14px;
-  border: 1.5px solid var(--composer-border);
-  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--composer-control-fg);
+  color: var(--fg-0);
   font-size: 13px;
 }
 
@@ -3484,10 +3648,10 @@ samp {
 .launch-composer-backdrop .create-session-form input[type="text"],
 .launch-composer-backdrop .create-session-form .create-session-host,
 .launch-composer-backdrop .create-session-form .launch-composer-search input {
-  background: var(--composer-control-bg);
-  border: 1.5px solid var(--composer-border);
-  border-radius: 6px;
-  color: var(--composer-selected-fg);
+  background: var(--well);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-0);
   min-height: 36px;
   padding: 0 12px;
 }
@@ -3496,25 +3660,24 @@ samp {
   display: flex;
   flex-wrap: wrap;
   gap: 0 10px;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   font-size: 12px;
 }
 
 .launch-composer-folder-links > button {
   padding: 2px 4px;
   border: 1.5px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   cursor: pointer;
   font: inherit;
   text-decoration: underline dotted;
 }
 
+/* Fill, bar, and text color come from the shared selection rule beside
+   `.launch-composer-segmented`. */
 .launch-composer-folder-links > button.selected {
-  border-color: var(--composer-selected-border);
-  background: var(--composer-selected-bg);
-  color: var(--composer-selected-fg);
   text-decoration: underline solid;
 }
 
@@ -3526,7 +3689,7 @@ samp {
 }
 
 .launch-composer-summary {
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -3547,10 +3710,10 @@ samp {
 .launch-composer-recent-slots {
   display: grid;
   gap: 0;
-  border: 1px solid var(--composer-border);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--composer-control-bg);
+  background: var(--well);
 }
 
 .launch-composer-choice {
@@ -3595,18 +3758,12 @@ samp {
   min-height: 38px;
   padding: 0 14px;
   box-sizing: border-box;
-  border: 1.5px solid var(--composer-border);
-  border-radius: 6px;
-  background: var(--composer-control-bg);
-  color: var(--composer-control-fg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--fg-0);
   font-size: 14px;
   font-weight: 600;
-}
-
-.launch-composer-options > button.selected {
-  border-color: var(--composer-selected-border);
-  background: var(--composer-selected-bg);
-  color: var(--composer-selected-fg);
 }
 
 /* A current catalog can reject an exact snapshot recorded by an earlier
@@ -3635,14 +3792,14 @@ samp {
   width: min(100%, 440px);
   min-height: 36px;
   box-sizing: border-box;
-  border: 1.5px solid var(--composer-border);
-  border-radius: 6px;
-  background: var(--composer-control-bg);
-  color: var(--composer-control-fg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--fg-0);
 }
 
 .launch-composer-model-hint {
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -3660,10 +3817,10 @@ samp {
   max-height: 260px;
   padding: 6px;
   overflow: auto;
-  background: var(--composer-bg);
-  border: 1px solid var(--composer-selected-border);
-  border-radius: 8px;
-  box-shadow: var(--composer-menu-shadow);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
 }
 
 .launch-composer-search {
@@ -3682,31 +3839,25 @@ samp {
 .launch-composer-listbox > button {
   min-height: 32px;
   border: 1.5px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--composer-selected-fg);
+  color: var(--fg-0);
   text-align: left;
-}
-
-.launch-composer-listbox > button.selected {
-  border-color: var(--composer-selected-border);
-  background: var(--composer-selected-bg);
-  color: var(--composer-selected-fg);
 }
 
 /* Pointer feedback without borrowing the navigated row's fill, the same
    split the search results keep: `.selected` names what Enter will apply,
    hover only says where the pointer is. */
 .launch-composer-listbox > button:hover:not(.selected) {
-  background: var(--composer-search-hover-bg);
-  box-shadow: inset 0 0 0 1px var(--composer-border);
+  background: var(--control-hover-bg);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .launch-composer-listbox > button:last-child {
   margin-top: 4px;
   padding-top: 6px;
-  border-top: 1px solid var(--composer-border);
-  color: var(--composer-control-fg);
+  border-top: 1px solid var(--border-row);
+  color: var(--fg-1);
 }
 
 /* Fixed, mutually exclusive choices read as one decision when their buttons
@@ -3733,9 +3884,9 @@ samp {
   flex-wrap: wrap;
   gap: 1px;
   overflow: hidden;
-  border: 1.5px solid var(--composer-border);
-  border-radius: 6px;
-  background: var(--composer-border);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--border);
 }
 
 .launch-composer-segmented > button {
@@ -3744,15 +3895,44 @@ samp {
   padding: 0 14px;
   border: 0;
   border-radius: 0;
-  background: var(--composer-control-bg);
-  color: var(--composer-control-fg);
+  background: var(--well);
+  color: var(--fg-0);
   font-size: 13px;
 }
 
+/* Selection in the composer, stated ONCE for every control that can hold
+   one. It is the same construct the sidebar's selected row and the tab strip
+   use: the quiet `--accent-fill`, an accent bar on one edge, and
+   `--fg-bright` text. The composer used to mark a chosen thing with a
+   periwinkle outline and fill of its own, which made it a third selection
+   language next to the row's and the tab's.
+
+   Which edge the bar takes follows the control's shape, the way it does
+   outside the composer. A thing chosen from a HORIZONTAL set (a harness
+   chip, a segment, a folder link) carries it underneath, like a tab. A thing
+   chosen from a VERTICAL list (a model option, a search result) carries it
+   on the leading edge, like a session row. The bar is an inset shadow for
+   the reason `.session-row.selected` gives: it needs no element and moves
+   no content.
+
+   These rules must stay ABOVE `.launch-composer-segment-danger`, which ties
+   with them on specificity and has to win the text color. */
+.launch-composer-options > button.selected,
+.launch-composer-segmented > button.selected,
+.launch-composer-folder-links > button.selected {
+  background: var(--accent-fill);
+  color: var(--fg-bright);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.launch-composer-listbox > button.selected,
+.launch-composer-search-group > button.selected {
+  background: var(--accent-fill);
+  color: var(--fg-bright);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .launch-composer-segmented > button.selected {
-  box-shadow: inset 0 0 0 1.5px var(--composer-selected-border);
-  background: var(--composer-selected-bg);
-  color: var(--composer-selected-fg);
   font-weight: 600;
 }
 
@@ -3780,7 +3960,7 @@ samp {
 
 .launch-composer-search-group-heading {
   padding: 4px 6px 1px;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   font-size: 12px;
   font-weight: 600;
 }
@@ -3788,16 +3968,10 @@ samp {
 .launch-composer-search-group > button {
   min-height: 32px;
   border: 1.5px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--composer-selected-fg);
+  color: var(--fg-0);
   text-align: left;
-}
-
-.launch-composer-search-group > button.selected {
-  border-color: var(--composer-selected-border);
-  background: var(--composer-selected-bg);
-  color: var(--composer-selected-fg);
 }
 
 /* The combobox owns keyboard focus, so `.selected` names the one result
@@ -3805,8 +3979,8 @@ samp {
    that active-result fill and make two different actions look equivalent. */
 .launch-composer-search-group > button:hover:not(.selected),
 .launch-composer-search-group > button:focus-visible:not(.selected) {
-  background: var(--composer-search-hover-bg);
-  box-shadow: inset 0 0 0 1px var(--composer-border);
+  background: var(--control-hover-bg);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .launch-composer-search-recent-destination,
@@ -3824,7 +3998,7 @@ samp {
 
 .launch-composer-search-recent-selection {
   margin-top: 2px;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   font-size: 12px;
   font-weight: 400;
 }
@@ -3832,10 +4006,10 @@ samp {
 .launch-composer-browser > button,
 .create-session-form label:has(select) select {
   min-height: 38px;
-  border: 1.5px solid var(--composer-border);
-  border-radius: 6px;
-  background: var(--composer-control-bg);
-  color: var(--composer-control-fg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--fg-0);
   font-size: 14px;
   font-weight: 600;
 }
@@ -3847,7 +4021,7 @@ samp {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   overflow: hidden;
   text-align: left;
   white-space: nowrap;
@@ -3866,7 +4040,7 @@ samp {
    farther down the dialog. */
 .launch-composer-recent-harness {
   flex: none;
-  color: var(--composer-selected-fg);
+  color: var(--fg-0);
   font-weight: 700;
 }
 
@@ -3877,7 +4051,7 @@ samp {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
 }
 
 .launch-composer-recent-selection {
@@ -3890,22 +4064,25 @@ samp {
   display: none;
   flex: none;
   margin-left: auto;
-  color: var(--composer-control-fg);
+  color: var(--fg-1);
   font-size: 12px;
 }
 
 .launch-composer-recent-slots > button + button {
-  border-top: 1px solid var(--composer-border);
+  border-top: 1px solid var(--border-row);
 }
 
 .launch-composer-recent-slots > button:hover:not(:disabled),
 .launch-composer-recent-slots > button:focus-visible {
-  background: var(--composer-selected-bg);
-  color: var(--composer-selected-fg);
+  background: var(--control-hover-bg);
+  color: var(--fg-0);
 }
 
+/* A recent row is an action, not a selection, so keyboard focus gets the
+   accent as a RING (`:focus-visible` is on the accent's closed list) and
+   never the selection fill. */
 .launch-composer-recent-slots > button:focus-visible {
-  box-shadow: inset 0 0 0 1.5px var(--composer-selected-border);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 .launch-composer-recent-slots > button:focus-visible .launch-composer-recent-hint {
@@ -3957,9 +4134,9 @@ samp {
   min-height: 44px;
   padding: 0 18px;
   border: 1.5px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--accent-edge);
-  color: var(--composer-selected-fg);
+  color: var(--fg-bright);
   font-size: 15px;
   font-weight: 700;
 }
@@ -3980,7 +4157,7 @@ samp {
   min-width: 0;
   max-width: 34ch;
   overflow: hidden;
-  color: var(--composer-launch-context-fg);
+  color: var(--on-accent-dim);
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3989,10 +4166,10 @@ samp {
 .launch-composer-cancel {
   min-height: 44px;
   padding: 0 18px;
-  border: 1.5px solid var(--composer-border);
-  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--composer-control-fg);
+  color: var(--fg-0);
   font-size: 14px;
 }
 
@@ -4367,18 +4544,6 @@ samp {
   border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 }
 
-/* `.tab.selected` (below) colors all four of its inherited border sides,
-   right edge included — fine for a lone tab, but here the right edge sits
-   flush against `.tab-close`'s own transparent left edge, and an opaque
-   accent line on one side of that join with nothing answering it on the
-   other reintroduces exactly the seam the shared transparent border above
-   exists to avoid. Restated at higher specificity (`.tab-slot .tab` beats
-   `.tab.selected` alone) to keep that one edge transparent regardless of
-   selection. */
-.tab-slot .tab.selected {
-  border-right-color: transparent;
-}
-
 /* The close button deliberately does NOT carry `.btn`: its hover color is
    the destructive red rather than the shared neutral fill, which a bare
    `.btn` would give it. Ghost like `.tab` beside it, for the same
@@ -4420,21 +4585,24 @@ samp {
   cursor: default;
 }
 
-/* The selected tab is the one whose terminal is visible. Marked by a
-   filled background rather than only a border tint: with several tabs the
+/* The selected tab is the one whose terminal is visible. It wears the same
+   selection construct as the sidebar's selected row and the composer's
+   chosen controls: the quiet `--accent-fill`, an accent bar, and
+   `--fg-bright` text. A tab is one of a horizontal set, so the bar runs
+   underneath it. A fill AND a bar, not a bar alone: with several tabs the
    selection has to be readable at a glance from across the strip.
-   `border-color` only, not a full `border` shorthand: `.tab` (via `.btn`)
-   already reserves the same 1px solid width and style, so restating them
-   here would say nothing new while inviting the two declarations to drift
-   apart on a future edit to either. `--accent-edge` is exactly the token
-   the layering PR names for this ("the outline a filled primary would
-   take"), so the selected tab reads as this strip's own filled-primary
-   moment — `.tab-slot .tab.selected` above keeps the abutting right edge
-   transparent regardless. */
+
+   The bar is an inset shadow, so it moves no content and leaves alone the
+   transparent 1px border `.tab` reserves (via `.btn`). That border used to
+   be colored `--accent-edge` here, an outline around the whole tab. It
+   went for two reasons. An outline plus a fill was a second way of
+   drawing "selected", different from the row's. And it needed a special
+   case to keep its right edge from showing as a seam against `.tab-close`;
+   a bar along the bottom never meets that join. */
 .tab.selected {
   background: var(--accent-fill);
   color: var(--fg-bright);
-  border-color: var(--accent-edge);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 /* Every tab carries `.btn` too (see `TabStripItem` in tabs.rs), and its
@@ -4517,7 +4685,7 @@ samp {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-0);
+  background: var(--well);
   color: var(--fg-0);
   font: 14px var(--font-ui);
 }
