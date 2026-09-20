@@ -1254,10 +1254,20 @@ failure can leave private evidence, but cannot authorize another directory move.
 
   **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
   start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
-  reach the session's owned live pane and contain exactly one native executable whose basename is `codex`. This accepts
-  package-manager wrappers while refusing a nested native Codex. Unavailable process evidence refuses the report without
-  changing the current identity. This is attribution under inherited credentials, not a security boundary against the
-  same Unix user. Renamed native executables are not recognized.
+  reach the session's owned live pane and contain exactly one native executable whose basename is `codex`. The pane
+  anchor itself is exempt from intermediary classification; additional surviving launch wrappers above Codex are not.
+  This deliberately rejects some multi-layer package-manager launchers that older builds accepted. The supported process
+  chains are documented in [the Codex integration](docs/harnesses/codex.md). The reporter must spell the installed hook
+  invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor still accepts older hooks),
+  and every other non-Codex link except the pane anchor must be a narrow shell trampoline directly invoking it
+  (`sh -c '<farhelm> internal
+  hook …'` — the shape vendor hook runners produce) as exactly one simple command: any
+  unquoted control operator, redirection, substitution, or other executable shell syntax refuses even when the hook
+  comes first, while metacharacters inside quoted paths stay literal; another session-hosting runtime or any
+  unclassified intermediary (interactive shell, script, chained command, unreadable argv) refuses. Argv classifies
+  honest trampolines only: a descendant forging the exact hook shape is outside the attribution model. Unavailable
+  process evidence refuses the report without changing the current identity. This is attribution under inherited
+  credentials, not a security boundary against the same Unix user. Renamed native executables are not recognized.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -1276,31 +1286,80 @@ failure can leave private evidence, but cannot authorize another directory move.
   capture. Reports received before in-memory publication use the durable launching row and discover its owned pane from
   tmux. Historical bare Codex IDs are retained but fail closed rather than being guessed into a new locator.
 
+  **Shared attribution framework and the five-step admission.** The ancestry walk above is shared mechanics, not Codex
+  code: at most 64 live `Running` edges from the socket peer to the owned pane, the peer's start token verified first,
+  loops and a missing pane refused, and every edge plus every image observation re-read before the walk returns (an exec
+  between the walk and the re-read refuses, since the observed process is no longer the one the walk saw). Each edge
+  captures its image (required — an unreadable image refuses, as it always did) and its argv (optional evidence: `/proc`
+  exe plus bounded NUL cmdline on Linux, a new bounded `KERN_PROCARGS2` argv reader on macOS, 64 KiB per process and 1
+  MiB per walk, with over-budget or truncated argv recorded as missing rather than prefix-matched). The per-kind step
+  applies its own restrictive corridor to the returned chain — only the reporter plus a narrow trampoline between
+  runtime and reporter; any other session-hosting runtime or unclassified intermediary refuses. Codex's instance is
+  exactly-one native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only. Admission runs five steps:
+  cheap envelope/kind/generation gating with no vendor I/O (the doorway's discriminator check re-applied against the
+  fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the bounded capture
+  claim (one shared session-keyed `capture_locks` registry for report admission and Codex readiness refresh, never the
+  lifecycle claim, at most a second of waiting on the report path) and a reload comparing kind, generation, and the
+  complete prior binding; the mutation-free runtime and vendor-root proofs with repeat attribution around the evidence;
+  the atomic generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness, and the
+  ambiguity reset together; and the mirror of only the committed result into the matching current-generation entry under
+  the same claim. Rejection at any pre-write step changes nothing durable, in memory, ambiguous, pending, or offered.
+  Refresh and report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's
+  version beside the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup
+  — and a rejected report never triggers a readiness withdrawal through them. Scan writes, restart verification and
+  lifecycle resets retain their durable generation/binding fences; they do not all acquire this capture claim. The
+  timeout bounds lock acquisition, not the entire admission operation.
+
+  **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
+  (`INTEGER NOT NULL
+  DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established
+  under the ownership contract — every historical capture — and only the authoritative admission transaction ever writes
+  1, for the kind whose proof ran. Exact Resume requires version 1 for such kinds on every surface (reload, list and
+  replay views, direct restart requests, pre-spawn verification), with the stored row's version beside the identity at
+  each one; unknown versions preserve their data but refuse Resume and promotion. The deliberate Codex exception keeps
+  valid `codex:` v1 tokens admitted before the column existed resumable at 0 through the existing exact-record verifier
+  — bare IDs stay excluded, nothing is backfilled, and file existence or a valid header can never upgrade a version.
+  Relaunch clears provenance to 0 exactly when it clears the capture (Fresh/fallback) and preserves both together on
+  Resume; the restart claim compares the version alongside the identity, so a provenance change under an unchanged
+  conversation still invalidates a stale claim. Protocol 28 carries the required closed-enum report discriminator that
+  the doorway gates on; senders predating it fail closed at decode and at the missing CLI flag alike.
+
+  **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
+  Attribution proofs currently apply only to Codex. OMP, Goose, Claude, and Pi retain their existing acceptance behind
+  the discriminator gate, and new framework entry points default to deny rather than allow. The offer gate has its final
+  shape but flips per kind: only Codex requires version 1 today, while the other kinds keep today's offer behavior until
+  their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is no report epoch,
+  and no vendor event ordering beyond what the Codex proof establishes. Old processes and assets fail closed after the
+  upgrade; nothing is grandfathered.
+
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
   they replaced, so a scan-derived identity keeps resuming the conversation the user just threw away. Both vendors fire
   a `SessionStart` hook whose payload carries that id, and both accept a hook supplied on the command line for a single
-  launch, so farhelm appends itself as that hook (`farhelm internal hook`, reporting over the supervisor's one shared
-  `supervisor.sock` and authenticating with the per-session credential the launch already carries) and lets the agent
-  state its own identity. Claude takes it as `--settings <json>`; Codex takes
-  `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`. Per-launch is the whole point:
-  nothing is written to `~/.claude` or to Codex's active configuration home (`$CODEX_HOME` when set, `~/.codex`
-  otherwise), no trust state is left behind, and flags cannot outlive the process they were passed to — which is what
-  keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The costs are accepted deliberately, and
-  both are scoped to the launches that actually carry the injected flags rather than to Codex launches in general: on
-  those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the user has in
-  that same configuration home but has not trusted runs too. Codex fires `SessionStart` at the first prompt rather than
-  at process start, so a Codex session's identity arrives only once the user has typed something, where Claude's arrives
-  at startup. And three invocation shapes disqualify a launch, which is skipped with a logged reason rather than made to
-  work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would silently
-  drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a rejected
-  command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), and — for either vendor —
-  an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the supervisor's
-  environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read once at
-  supervisor start and carried as a seam value. Claude's scan remains the fallback when no report has been accepted;
-  Codex requires attributed reporting and does not infer ownership from nearby rollout files. An accepted report
-  dominates scan-derived state, including ambiguity. `docs/agent-hook-injection.md` is the user-facing account of the
-  same mechanism.
+  launch, so farhelm appends itself as that hook (`farhelm internal hook --vendor <adapter>`, reporting over the
+  supervisor's one shared `supervisor.sock` and authenticating with the per-session credential the launch already
+  carries) and lets the agent state its own identity. The `--vendor` flag is the report envelope's discriminator,
+  sourced from the installed entry point rather than inferred from the payload; the Goose helper supplies its own value
+  internally so the persisted declaration keeps invoking the same command, while the Pi/OMP assets pass theirs on the
+  spawned command line and keep their JSON `vendor` field purely as a consistency check. Claude takes it as
+  `--settings <json>`; Codex takes `--dangerously-bypass-hook-trust -c features.hooks=true -c hooks.SessionStart=…`.
+  Per-launch is the whole point: nothing is written to `~/.claude` or to Codex's active configuration home
+  (`$CODEX_HOME` when set, `~/.codex` otherwise), no trust state is left behind, and flags cannot outlive the process
+  they were passed to — which is what keeps SPEC.md's no-agent-configuration rule intact rather than merely bent. The
+  costs are accepted deliberately, and both are scoped to the launches that actually carry the injected flags rather
+  than to Codex launches in general: on those, Codex prints a hook-trust warning line above its composer, and with trust
+  bypassed any hook the user has in that same configuration home but has not trusted runs too. Codex fires
+  `SessionStart` at the first prompt rather than at process start, so a Codex session's identity arrives only once the
+  user has typed something, where Claude's arrives at startup. And three invocation shapes disqualify a launch, which is
+  skipped with a logged reason rather than made to work: an argv that already carries `--settings` (Claude honors only
+  the last one, so injecting ours would silently drop the user's), an argv already steering Codex's own hook
+  configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the
+  user's once they touch them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt
+  text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
+  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Claude's scan remains
+  the fallback when no report has been accepted; Codex requires attributed reporting and does not infer ownership from
+  nearby rollout files. An accepted report dominates scan-derived state, including ambiguity.
+  `docs/agent-hook-injection.md` is the user-facing account of the same mechanism.
 
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second

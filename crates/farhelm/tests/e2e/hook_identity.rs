@@ -1488,7 +1488,10 @@ impl Drop for ChildGuard {
 /// above for why that distinction is load-bearing here specifically.
 fn hook_command(socket: &std::path::Path, session_id: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new(farhelm_bin());
-    cmd.args(["internal", "hook"])
+    // The silence tests exercise the Claude entry point; the flag is
+    // required since the envelope migration, and an invocation without it
+    // fails closed at CLI parse rather than reporting untagged.
+    cmd.args(["internal", "hook", "--vendor", "claude"])
         .env(farhelm_supervisor::launch::SESSION_ID_ENV_VAR, session_id)
         .env(
             farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR,
@@ -1788,7 +1791,11 @@ fn a_hook_whose_stdin_is_never_closed_still_finishes_in_budget() {
 #[farhelm_testtrace::test]
 fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
     let mut cmd = std::process::Command::new(farhelm_bin());
-    cmd.args(["internal", "hook"])
+    // A fully-formed vendor invocation: the flag has been required since
+    // the envelope migration, and the silence contract below is about a
+    // sessionless launch, not a vendorless one (which fails closed at
+    // parse — see the next test).
+    cmd.args(["internal", "hook", "--vendor", "claude"])
         // Removed on the COMMAND, because the test process may itself be
         // running inside a farhelm session and would otherwise pass a live
         // credential down to the child.
@@ -1802,6 +1809,60 @@ fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
         cmd,
         br#"{"session_id":"conv-x","hook_event_name":"SessionStart"}"#,
         false,
+    );
+}
+
+/// A hook invocation without `--vendor` never runs: clap refuses the argv
+/// before anything reads stdin or dials, so no untagged report can reach
+/// a supervisor. The exit code and stderr wording are deliberately clap's
+/// rather than farhelm's — only a hand-typed argv can produce this shape,
+/// since every vendor hook command embeds its flag — which is why this
+/// test pins refusal and the flag's naming, not an exact status or text.
+#[farhelm_testtrace::test]
+fn a_hook_without_a_vendor_flag_fails_closed_at_parse() {
+    use std::io::Read;
+    let mut child = ChildGuard(
+        std::process::Command::new(farhelm_bin())
+            .args(["internal", "hook"])
+            .env_remove(farhelm_supervisor::launch::SESSION_ID_ENV_VAR)
+            .env_remove(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR)
+            .env_remove(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn the hook binary"),
+    );
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.0.try_wait().expect("poll the hook child") {
+            Some(status) => break status,
+            None => {
+                assert!(
+                    started.elapsed() < SILENCE_DEADLINE,
+                    "a parse refusal must not hang; a run this long is one the vendor times out"
+                );
+                // sleep-ok: poll child exit while a parse refusal settles.
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    };
+    assert!(
+        !status.success(),
+        "a vendorless hook argv must be refused, not run untagged"
+    );
+    let mut err = Vec::new();
+    child
+        .0
+        .stderr
+        .take()
+        .expect("piped stderr")
+        .read_to_end(&mut err)
+        .expect("read stderr");
+    let err = String::from_utf8_lossy(&err);
+    assert!(
+        err.contains("--vendor"),
+        "the refusal must name the missing flag; got {err:?}"
     );
 }
 

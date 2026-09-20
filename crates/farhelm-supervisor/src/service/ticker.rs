@@ -1637,6 +1637,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -3226,6 +3227,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4270,6 +4272,7 @@ mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),

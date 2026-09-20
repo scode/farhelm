@@ -482,8 +482,29 @@ pub struct ActivityScreen {
 /// nobody chose. Shell-quoted because both vendors run a hook's `command`
 /// through a shell rather than exec'ing it, so an unquoted path containing
 /// a space would be split into arguments neither can find (verified).
-fn hook_command(hook_exe: &str, instructions: AgentInstructions) -> String {
-    let mut command = format!("{} internal hook", shell_words::quote(hook_exe));
+fn hook_command(
+    hook_exe: &str,
+    instructions: AgentInstructions,
+    vendor: farhelm_proto::ReportVendor,
+) -> String {
+    let vendor = match vendor {
+        farhelm_proto::ReportVendor::Claude => "claude",
+        farhelm_proto::ReportVendor::Codex => "codex",
+        farhelm_proto::ReportVendor::Goose => "goose",
+        farhelm_proto::ReportVendor::Pi => "pi",
+        farhelm_proto::ReportVendor::Omp => "omp",
+    };
+    // The `--vendor` flag is the report envelope's discriminator, sourced
+    // from the vendor-specific entry point rather than inferred from the
+    // payload: the hook process proves nothing by carrying it (a child can
+    // copy argv), but without it the supervisor cannot tell a Claude
+    // report from a Codex one before spending vendor I/O. It rides the
+    // injected command line so every private entry point declares its
+    // adapter; the Goose helper supplies its value internally instead.
+    let mut command = format!(
+        "{} internal hook --vendor {vendor}",
+        shell_words::quote(hook_exe)
+    );
     if instructions.announces() {
         command.push_str(" --announce");
     }
@@ -1185,7 +1206,7 @@ impl AgentIntegration for ClaudeIntegration {
     /// internally (`hook.rs`, a later step), so this is scheduling margin,
     /// not an expectation that the hook will ever need it.
     fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
-        let command = hook_command(hook_exe, instructions);
+        let command = hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Claude);
         let settings = serde_json::json!({
             "hooks": {
                 "SessionStart": [{
@@ -1281,7 +1302,11 @@ impl AgentIntegration for CodexIntegration {
     /// Claude does — so [`hook_command`]'s shell quoting comes first and
     /// the RESULT of that quoting is what gets TOML-escaped.
     fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
-        let command = toml_basic_string(&hook_command(hook_exe, instructions));
+        let command = toml_basic_string(&hook_command(
+            hook_exe,
+            instructions,
+            farhelm_proto::ReportVendor::Codex,
+        ));
         vec![
             "--dangerously-bypass-hook-trust".to_string(),
             "-c".to_string(),
@@ -2394,7 +2419,25 @@ impl IntegrationSnapshot {
     /// is `FreshOnly`, never `FallbackTemplate`: SPEC.md forbids running a
     /// `{conversation}` invocation unfilled, so offering it would be
     /// offering a garbled command line.
-    pub fn restart_offer(&self, captured: Option<&str>) -> RestartOffer {
+    pub fn restart_offer(&self, captured: Option<&str>, ownership_version: i64) -> RestartOffer {
+        // Provenance gate: kinds with an implemented ownership proof offer
+        // exact Resume only for bindings admitted under this contract
+        // (version 1). The deliberate Codex exception keeps existing valid
+        // `codex:` v1 tokens — produced under the two-proof contract long
+        // before the version column existed — resumable at version 0;
+        // bare IDs stay excluded exactly as before, and no row is ever
+        // backfilled. Unknown or future versions preserve their data but
+        // refuse exact Resume and readiness promotion, and a later
+        // attributed report may replace them under the usual CAS. Kinds
+        // without an implemented proof keep today's offer behavior until
+        // their PR flips the predicate above; the gate shape does not
+        // change when they do.
+        if ownership_proof_implemented(self.kind)
+            && ownership_version != 1
+            && !(self.kind == AgentKind::Codex && ownership_version == 0)
+        {
+            return RestartOffer::FreshOnly;
+        }
         if self.kind == AgentKind::Codex {
             return match captured.and_then(|value| codex::CodexLocator::parse(value).ok()) {
                 Some(locator)
@@ -2492,6 +2535,37 @@ impl IntegrationSnapshot {
         let mut filled = self.resume_template.clone()?;
         fill_slots(&mut filled, CONVERSATION_PLACEHOLDER, &replacement);
         Some(filled)
+    }
+}
+
+/// Whether this kind's foreground-runtime and root-conversation proofs are
+/// implemented, so its admissions write versioned ownership provenance and
+/// its exact-resume offers require it.
+///
+/// THE flip each later PR makes: OMP, Goose, Claude, and Pi change their
+/// arm here from `false` to `true` when their proof lands — admission,
+/// the durable writers, the refresh mirror, and every offer surface
+/// consult this one predicate, so no per-site kind match has to change
+/// with it. New framework entry points default to deny; legacy paths are
+/// preserved, not re-blessed, until their kind flips.
+pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
+    match kind {
+        AgentKind::Codex => true,
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Omp => false,
+        AgentKind::Generic => false,
+    }
+}
+
+/// The durable kind a report discriminator must name. The destination
+/// row's kind stays authoritative; this is the comparison the doorway
+/// applies before any vendor I/O.
+pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
+    match vendor {
+        farhelm_proto::ReportVendor::Claude => AgentKind::Claude,
+        farhelm_proto::ReportVendor::Codex => AgentKind::Codex,
+        farhelm_proto::ReportVendor::Goose => AgentKind::Goose,
+        farhelm_proto::ReportVendor::Pi => AgentKind::Pi,
+        farhelm_proto::ReportVendor::Omp => AgentKind::Omp,
     }
 }
 
@@ -3535,7 +3609,7 @@ mod tests {
             "an option-shaped id must never be substituted into an argv"
         );
         assert_eq!(
-            snapshot.restart_offer(Some("--dangerously-bypass-approvals-and-sandbox")),
+            snapshot.restart_offer(Some("--dangerously-bypass-approvals-and-sandbox"), 0),
             RestartOffer::FreshOnly,
             "and must not be advertised as resumable either, or the offer would promise a \
              command the substitution then refuses to build"
@@ -3543,7 +3617,7 @@ mod tests {
         // The honest case still works, or this test would pass for the
         // wrong reason.
         let good = "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31";
-        assert_eq!(snapshot.restart_offer(Some(good)), RestartOffer::Resume);
+        assert_eq!(snapshot.restart_offer(Some(good), 0), RestartOffer::Resume);
         assert_eq!(
             snapshot
                 .filled_resume_argv(good)
@@ -3844,7 +3918,10 @@ mod tests {
 
             let snapshot =
                 IntegrationSnapshot::resolve(&[argv0.to_string()], None, None).expect("integrated");
-            assert_eq!(snapshot.restart_offer(Some(&encoded)), RestartOffer::Resume);
+            assert_eq!(
+                snapshot.restart_offer(Some(&encoded), 0),
+                RestartOffer::Resume
+            );
             let fileless = encode_locator(
                 vendor,
                 SessionLocator {
@@ -3854,7 +3931,7 @@ mod tests {
             )
             .expect("encode fileless locator");
             assert_eq!(
-                snapshot.restart_offer(Some(&fileless)),
+                snapshot.restart_offer(Some(&fileless), 0),
                 RestartOffer::FreshOnly
             );
             assert!(
@@ -3900,7 +3977,7 @@ mod tests {
                 IntegrationSnapshot::resolve(&[other_argv0.to_string()], None, None)
                     .expect("integrated");
             assert_eq!(
-                other_snapshot.restart_offer(Some(&encoded)),
+                other_snapshot.restart_offer(Some(&encoded), 0),
                 RestartOffer::FreshOnly,
                 "a {vendor:?} locator cannot make a {other:?} session offer a resume"
             );
@@ -3916,7 +3993,7 @@ mod tests {
                 "omp:nonsense".to_string(),
             ] {
                 assert_eq!(
-                    snapshot.restart_offer(Some(&malformed)),
+                    snapshot.restart_offer(Some(&malformed), 0),
                     RestartOffer::FreshOnly,
                     "{malformed:?} cannot make a {vendor:?} session offer a resume"
                 );
@@ -4246,8 +4323,11 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_restart_offer_reflects_exactly_what_could_honestly_be_run() {
         let claude = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
-        assert_eq!(claude.restart_offer(None), RestartOffer::FreshOnly);
-        assert_eq!(claude.restart_offer(Some("conv-1")), RestartOffer::Resume);
+        assert_eq!(claude.restart_offer(None, 0), RestartOffer::FreshOnly);
+        assert_eq!(
+            claude.restart_offer(Some("conv-1"), 0),
+            RestartOffer::Resume
+        );
 
         let fallback = IntegrationSnapshot::resolve(
             &["some-agent".into()],
@@ -4256,13 +4336,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            fallback.restart_offer(None),
+            fallback.restart_offer(None, 0),
             RestartOffer::FallbackTemplate,
             "a placeholder-free template is the one thing that can be run verbatim"
         );
 
         let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
-        assert_eq!(generic.restart_offer(None), RestartOffer::FreshOnly);
+        assert_eq!(generic.restart_offer(None, 0), RestartOffer::FreshOnly);
 
         // A generic session whose template DOES mention the placeholder can
         // never have an identity to fill it with, so it must not advertise
@@ -4276,7 +4356,7 @@ mod tests {
             ]),
         )
         .unwrap();
-        assert_eq!(unfillable.restart_offer(None), RestartOffer::FreshOnly);
+        assert_eq!(unfillable.restart_offer(None, 0), RestartOffer::FreshOnly);
     }
 
     /// The munging is the audited reason correlation cannot use directory
@@ -5079,8 +5159,9 @@ mod tests {
 
     /// The one property that actually matters about `hook_argv`: a path
     /// hostile to EITHER quoting layer survives being embedded through
-    /// BOTH of them and comes back out as the exact three argv elements
-    /// `farhelm internal hook` was launched with.
+    /// BOTH of them and comes back out as the exact six argv elements
+    /// `farhelm internal hook` was launched with (the `--vendor`
+    /// discriminator included).
     ///
     /// `hostile_path` is chosen to hit every character each layer is
     /// responsible for: a space (breaks an unquoted shell word), a single
@@ -5096,12 +5177,20 @@ mod tests {
         let hostile_path = r#"/tmp/a b's "q" \dir/farhelm"#;
         // The default (announcing) shape, which is what ships. The `off`
         // shape is checked at the end, against the same path.
-        let expected_words = vec![
-            hostile_path.to_string(),
-            "internal".to_string(),
-            "hook".to_string(),
-            "--announce".to_string(),
-        ];
+        // Each vendor's command names its own adapter after `hook`: the
+        // envelope discriminator rides the installed entry point, so the
+        // supervisor can gate on it before any vendor I/O.
+        let expected_words_for = |vendor: &str| {
+            vec![
+                hostile_path.to_string(),
+                "internal".to_string(),
+                "hook".to_string(),
+                "--vendor".to_string(),
+                vendor.to_string(),
+                "--announce".to_string(),
+            ]
+        };
+        let expected_words = expected_words_for("claude");
 
         // --- Claude: `["--settings", <json>]` ---
         let claude_argv = ClaudeIntegration.hook_argv(hostile_path, AgentInstructions::On);
@@ -5158,7 +5247,7 @@ mod tests {
         );
         let codex_words = shell_words::split(codex_command)
             .expect("Codex's rendered command must be one valid shell command line");
-        assert_eq!(codex_words, expected_words);
+        assert_eq!(codex_words, expected_words_for("codex"));
 
         // --- The same path with the pointer turned off. ---
         //
@@ -5169,11 +5258,6 @@ mod tests {
         // into it — a mistake that would produce a path argument nobody
         // can exec, and only for users with a space in their install
         // directory.
-        let silent_words: Vec<String> = expected_words
-            .iter()
-            .filter(|word| *word != "--announce")
-            .cloned()
-            .collect();
         for (kind, argv) in [
             (
                 "claude",
@@ -5206,6 +5290,11 @@ mod tests {
                         .to_string()
                 }
             };
+            let silent_words: Vec<String> = expected_words_for(kind)
+                .iter()
+                .filter(|word| *word != "--announce")
+                .cloned()
+                .collect();
             assert_eq!(
                 shell_words::split(&command).expect("one valid shell command line"),
                 silent_words,

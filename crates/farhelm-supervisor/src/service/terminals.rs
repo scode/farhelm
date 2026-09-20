@@ -469,12 +469,10 @@ async fn resolve_terminal_inner(
         // The same derivation the restart path uses for the offer it
         // reports on the wire, so the refusal never promises a resume the
         // restart would not perform.
+        let capture = entry.capture.lock().expect("capture mutex poisoned");
         let offer = entry.snapshot.restart_offer(
-            entry
-                .capture
-                .lock()
-                .expect("capture mutex poisoned")
-                .committed_conversation(),
+            capture.committed_conversation(),
+            capture.committed_ownership_version().unwrap_or(0),
         );
         RequestError::new(
             ErrorKind::NotFound,

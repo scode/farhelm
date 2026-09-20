@@ -3336,10 +3336,12 @@ pub(crate) async fn handle_restricted_control(
         }
         ControlMsg::ReportConversation {
             req_id,
+            vendor,
             conversation,
             source,
             transcript_path,
             hook_event_name,
+            agent_id,
         } => {
             // NO lifecycle claim, deliberately, and the contrast with the
             // `CreateSession` arm directly above is the point rather than
@@ -3410,6 +3412,103 @@ pub(crate) async fn handle_restricted_control(
                 .await;
                 return;
             }
+            // The discriminator gate sits HERE, at the doorway, before any
+            // vendor I/O: the destination row's durable kind is
+            // authoritative, and a report naming another kind's adapter is
+            // refused without reading a single vendor file. Kind is
+            // immutable for a session, so this read cannot race a
+            // relaunch; `report_conversation` re-checks against the
+            // generation-fenced resolution anyway, and that second check
+            // is the authoritative one.
+            let expected_kind = crate::agent_kind::agent_kind_of_vendor(vendor);
+            let doorway_kind = match sup.sessions.lock().await.get(&auth.session_id) {
+                Some(entry) => Some(entry.snapshot.kind),
+                None => sup
+                    .store
+                    .session(&auth.session_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|row| row.agent_kind),
+            };
+            if doorway_kind.is_some_and(|kind| kind != expected_kind) {
+                warn!(
+                    session = %auth.session_id,
+                    expected = ?expected_kind,
+                    "refused a conversation report whose vendor does not match this \
+                     session's durable agent kind"
+                );
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "the reported conversation identity does not match this \
+                                  session's agent kind"
+                            .to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
+            // Raw semantic evidence is type-checked BEFORE diagnostic
+            // sanitation, so an invalid value can never be normalized
+            // into an allowed word. A present subagent identity is a
+            // rejection signal on every kind; a value of an unexpected
+            // type is distinct from an absent one and is rejected rather
+            // than coerced to absent.
+            if let Some(identity) = agent_id.as_ref().and_then(|value| match value {
+                serde_json::Value::Null => None,
+                other => Some(other),
+            }) {
+                let subagent = match identity {
+                    serde_json::Value::String(marker) => !marker.is_empty(),
+                    _ => {
+                        send_reply(
+                            tx,
+                            &ControlMsg::Error {
+                                req_id,
+                                message: "the reported agent identity has an unexpected shape"
+                                    .to_string(),
+                                kind: ErrorKind::InvalidRequest,
+                            },
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                if subagent {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: "a delegated agent may not report its session's conversation"
+                                .to_string(),
+                            kind: ErrorKind::InvalidRequest,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
+            // Codex's transition vocabulary is checked against the RAW
+            // source for the same reason: sanitation exists for log
+            // safety, and a vocabulary decision must not depend on what
+            // it rewrites.
+            if vendor == farhelm_proto::ReportVendor::Codex
+                && !crate::agent_kind::codex::is_foreground_source(&source)
+            {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "Codex reported an unsupported foreground transition".to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
             // Bounded and stripped of control characters HERE, at the
             // doorway, so nothing downstream has to remember that this
             // field is attacker-chosen: `report_conversation` puts it in
@@ -3420,11 +3519,14 @@ pub(crate) async fn handle_restricted_control(
             let reply = match sup
                 .report_conversation(
                     &auth.session_id,
-                    conversation,
-                    source,
-                    transcript_path,
-                    hook_event_name,
-                    peer,
+                    super::core::ReportedConversation {
+                        vendor,
+                        conversation,
+                        source,
+                        transcript_path,
+                        hook_event_name,
+                        peer,
+                    },
                 )
                 .await
             {
@@ -3884,7 +3986,7 @@ mod tests {
     use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
-    use farhelm_proto::{RestartOffer, SessionStatus};
+    use farhelm_proto::{ReportVendor, RestartOffer, SessionStatus};
     use std::sync::atomic::AtomicBool;
 
     /// Records cancellation of a synthetic browse future. The timeout test
@@ -3959,6 +4061,7 @@ mod tests {
             .insert_session(
                 crate::store::StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4022,6 +4125,7 @@ mod tests {
             .insert_session(
                 crate::store::StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4820,6 +4924,7 @@ mod tests {
             .insert_session(
                 crate::store::StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: session_id.to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -6834,6 +6939,7 @@ mod tests {
             .insert_session(
                 crate::store::StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -6887,14 +6993,29 @@ mod tests {
 
     /// Send one `ReportConversation` down a restricted connection and
     /// decode the single reply it produces, with the ordinary `startup`
-    /// source every test that is not about the source field wants.
+    /// source every test that is not about the source field wants. The
+    /// discriminator is the caller's: tests targeting the kind's own
+    /// adapter pass it, and the mismatch tests pass another kind's.
     async fn send_report(
         sup: &Arc<Supervisor>,
         auth: &farhelm_proto::SessionAuth,
         req_id: u64,
         conversation: &str,
     ) -> ControlMsg {
-        send_report_with_source(sup, auth, req_id, conversation, "startup").await
+        send_report_with_vendor(sup, auth, req_id, conversation, ReportVendor::Claude).await
+    }
+
+    /// [`send_report`] with the discriminator chosen by the caller, for
+    /// the tests that exercise the doorway's kind match rather than the
+    /// happy path through it.
+    async fn send_report_with_vendor(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        conversation: &str,
+        vendor: ReportVendor,
+    ) -> ControlMsg {
+        send_report_with_vendor_and_source(sup, auth, req_id, conversation, vendor, "startup").await
     }
 
     /// [`send_report`] with the vendor's `source` string chosen by the
@@ -6907,12 +7028,68 @@ mod tests {
         conversation: &str,
         source: &str,
     ) -> ControlMsg {
+        send_report_with_vendor_and_source(
+            sup,
+            auth,
+            req_id,
+            conversation,
+            ReportVendor::Claude,
+            source,
+        )
+        .await
+    }
+
+    /// [`send_report_with_vendor_and_source`] with the raw agent identity
+    /// chosen by the caller, for the tests that pin the doorway's
+    /// subagent rejection before sanitation.
+    async fn send_report_with_agent_identity(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        conversation: &str,
+        vendor: ReportVendor,
+        agent_id: Option<serde_json::Value>,
+    ) -> ControlMsg {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         handle_restricted_control(
             sup,
             ControlMsg::ReportConversation {
+                vendor,
                 transcript_path: None,
                 hook_event_name: None,
+                agent_id,
+                req_id,
+                conversation: conversation.to_string(),
+                source: "startup".to_string(),
+            },
+            &tx,
+            auth,
+            None,
+        )
+        .await;
+        serde_json::from_slice(&rx.recv().await.expect("a report is always answered").body)
+            .expect("decode the report reply")
+    }
+
+    /// The full-shape helper the three shorthands above funnel into: the
+    /// discriminator, the identity, and the raw source each chosen by the
+    /// caller, with no agent identity attached.
+    async fn send_report_with_vendor_and_source(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        conversation: &str,
+        vendor: ReportVendor,
+        source: &str,
+    ) -> ControlMsg {
+        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        handle_restricted_control(
+            sup,
+            ControlMsg::ReportConversation {
+                vendor,
+                transcript_path: None,
+                hook_event_name: None,
+                agent_id: None,
                 req_id,
                 conversation: conversation.to_string(),
                 source: source.to_string(),
@@ -6948,8 +7125,10 @@ mod tests {
         let (_tasks, mut rx) = dispatch_for_test(
             &sup,
             ControlMsg::ReportConversation {
+                vendor: ReportVendor::Claude,
                 transcript_path: None,
                 hook_event_name: None,
+                agent_id: None,
                 req_id: 61,
                 conversation: "conv-helm".to_string(),
                 source: "startup".to_string(),
@@ -7096,6 +7275,187 @@ mod tests {
         );
     }
 
+    /// A report whose discriminator names another kind's adapter is refused
+    /// before any vendor I/O, and changes nothing durable or in memory.
+    ///
+    /// Why this test matters: this is the envelope half of the child
+    /// confusion fix. A credential-holding child (a shell launch with
+    /// forwarded settings, a sibling pane's teammate) can copy argv as
+    /// easily as environment, so the discriminator alone proves nothing —
+    /// but without it a Codex-shaped id addressed to a Claude session (or
+    /// any cross-kind pairing) was accepted on shape alone, skipping the
+    /// destination kind's proofs entirely. Converted from the pre-fix
+    /// reproduction that showed an untagged report landing in the column.
+    #[farhelm_testtrace::test]
+    async fn a_report_whose_vendor_disagrees_with_the_session_kind_is_rejected() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+        assert!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .is_some(),
+            "the fixture session must exist before the reports it must refuse"
+        );
+
+        for (req_id, vendor) in [
+            (71u64, ReportVendor::Codex),
+            (72, ReportVendor::Goose),
+            (73, ReportVendor::Pi),
+            (74, ReportVendor::Omp),
+        ] {
+            let reply = send_report_with_vendor(&sup, &auth, req_id, "conv-foreign", vendor).await;
+            let ControlMsg::Error {
+                req_id: answered,
+                kind,
+                ..
+            } = reply
+            else {
+                panic!("a {vendor:?} report to a Claude session must be refused: {reply:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert_eq!(
+                answered, req_id,
+                "the refusal must answer the request that caused it"
+            );
+        }
+        let snapshot = sup
+            .session_snapshot(&auth.session_id)
+            .await
+            .unwrap()
+            .expect("the session still exists");
+        assert_eq!(
+            snapshot.captured_conversation, None,
+            "no refused report may reach the column"
+        );
+        assert_eq!(
+            snapshot.restart_offer,
+            RestartOffer::FreshOnly,
+            "no refused report may conjure an offer"
+        );
+    }
+
+    /// A report naming the session's own kind behind a matching
+    /// discriminator is still accepted: the gate rejects confusion, not
+    /// the foreground's own adapter.
+    ///
+    /// Why this test matters alongside the mismatch test above: the two
+    /// together pin that the discriminator is a routing check rather than
+    /// a second credential. A test that only refused could pass by
+    /// refusing everything.
+    #[farhelm_testtrace::test]
+    async fn a_report_naming_the_session_kind_is_accepted() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        let reply = send_report(&sup, &auth, 75, "conv-own").await;
+        let ControlMsg::ConversationReported { req_id } = reply else {
+            panic!("the session's own adapter must be accepted: {reply:?}");
+        };
+        assert_eq!(req_id, 75);
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-own"),
+            "the matching report must still land"
+        );
+    }
+
+    /// A report carrying a present subagent identity is rejected on every
+    /// kind, while a wrong-typed identity is rejected as malformed rather
+    /// than coerced to absent.
+    ///
+    /// Why this test matters: `agent_id` separates a foreground
+    /// `SessionStart` from a delegated subagent event, and the doorway
+    /// must see the raw value — checking after diagnostic sanitation
+    /// could normalize an invalid marker into an allowed word. Absence
+    /// (and an explicit null, which the hook forwards untouched) stays
+    /// accepted: only a NAMED subagent, or a value of a shape no vendor
+    /// sends, refuses.
+    #[farhelm_testtrace::test]
+    async fn a_report_naming_a_subagent_is_rejected_before_sanitation() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        for (req_id, agent_id, what) in [
+            (
+                76u64,
+                Some(serde_json::Value::String("subagent-1".to_string())),
+                "a named subagent",
+            ),
+            (
+                77,
+                Some(serde_json::json!({"id": "subagent-1"})),
+                "a structured identity",
+            ),
+            (
+                78,
+                Some(serde_json::Value::from(7)),
+                "a wrong-typed identity",
+            ),
+        ] {
+            let reply = send_report_with_agent_identity(
+                &sup,
+                &auth,
+                req_id,
+                "conv-subagent",
+                ReportVendor::Claude,
+                agent_id,
+            )
+            .await;
+            let ControlMsg::Error {
+                req_id: answered,
+                kind,
+                ..
+            } = reply
+            else {
+                panic!("{what} must be refused: {reply:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert_eq!(
+                answered, req_id,
+                "the refusal must answer the request that caused it"
+            );
+        }
+        // An explicit null carries no identity and stays accepted.
+        let reply = send_report_with_agent_identity(
+            &sup,
+            &auth,
+            79,
+            "conv-null-agent",
+            ReportVendor::Claude,
+            Some(serde_json::Value::Null),
+        )
+        .await;
+        assert!(
+            matches!(reply, ControlMsg::ConversationReported { req_id: 79 }),
+            "a null agent identity must stay accepted: {reply:?}"
+        );
+        assert_eq!(
+            sup.session_snapshot(&auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation
+                .as_deref(),
+            Some("conv-null-agent"),
+            "only the accepted report may land"
+        );
+    }
+
     /// An accepted report becomes the session's resume identity, and a
     /// SECOND report replaces the first.
     ///
@@ -7164,7 +7524,7 @@ mod tests {
         assert!(
             matches!(
                 &state,
-                CaptureState::Reported { conversation } if conversation == "conv-second"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-second"
             ),
             "and the in-memory mirror must follow the durable write: {state:?}"
         );
@@ -7452,7 +7812,7 @@ mod tests {
         assert!(
             matches!(
                 &capture,
-                CaptureState::Reported { conversation } if conversation == "conv-hostile-source"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-hostile-source"
             ),
             "the in-memory mirror must follow the accepted report too: {capture:?}"
         );
@@ -7544,6 +7904,7 @@ mod tests {
                 crate::store::OfferBasis {
                     captured_conversation: None,
                     capture_ambiguous: false,
+                    capture_ownership_version: 0,
                 },
                 true,
                 false,

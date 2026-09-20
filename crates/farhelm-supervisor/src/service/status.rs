@@ -355,9 +355,10 @@ fn waiting_or_baseline(baseline: SessionStatus, sharpened: SessionStatus) -> Ses
 /// the offer from promising a resume that no stored value could fill.
 fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
     let capture = entry.capture.lock().expect("capture mutex poisoned");
-    entry
-        .snapshot
-        .restart_offer(capture.committed_conversation())
+    entry.snapshot.restart_offer(
+        capture.committed_conversation(),
+        capture.committed_ownership_version().unwrap_or(0),
+    )
 }
 
 /// One entry as a reply must describe it: the stored metadata plus the

@@ -221,7 +221,19 @@ pub(crate) enum CaptureState {
     /// process (another `/clear`, a resume, a compaction) fires a fresh
     /// hook and produces a fresh report. What is lost is this one report.
     /// Only kinds with a supported scan fallback can recover without a report.
-    Reported { conversation: String },
+    ///
+    /// `ownership_version` is the durable `capture_ownership_version` the
+    /// admitting write committed alongside this identity (1 for a binding
+    /// admitted under the ownership contract, 0 for legacy kinds whose
+    /// proof is not yet implemented). It travels with the mirror so every
+    /// offer surface — list views, reload, restart checks — applies the
+    /// same provenance gate to the in-memory promise as the row-derived
+    /// paths apply to the stored one, without a second lookup. A refresh
+    /// that reloads the row carries the row's version, never a cached one.
+    Reported {
+        conversation: String,
+        ownership_version: i64,
+    },
 }
 
 impl CaptureState {
@@ -240,7 +252,25 @@ impl CaptureState {
     pub(crate) fn committed_conversation(&self) -> Option<&str> {
         match self {
             CaptureState::Captured { conversation, .. }
-            | CaptureState::Reported { conversation } => Some(conversation.as_str()),
+            | CaptureState::Reported { conversation, .. } => Some(conversation.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The ownership provenance of the committed identity, if any.
+    ///
+    /// Paired with [`committed_conversation`](Self::committed_conversation):
+    /// offer surfaces pass both to the kind's resume builder so the
+    /// in-memory promise cannot offer what the durable gate would refuse.
+    /// `None` exactly when there is no committed identity — and with no
+    /// identity the offer never depends on the version, so callers fall
+    /// back to 0 without changing any outcome.
+    pub(crate) fn committed_ownership_version(&self) -> Option<i64> {
+        match self {
+            CaptureState::Reported {
+                ownership_version, ..
+            } => Some(*ownership_version),
+            CaptureState::Captured { .. } => Some(0),
             _ => None,
         }
     }
@@ -695,7 +725,7 @@ fn reported_ids<'a>(
         else {
             continue;
         };
-        if let CaptureState::Reported { conversation } =
+        if let CaptureState::Reported { conversation, .. } =
             &*entry.capture.lock().expect("capture mutex poisoned")
         {
             ids.entry((crate::store::agent_kind_column(entry.snapshot.kind), cwd))
@@ -738,17 +768,31 @@ fn is_spoken_for(
 /// have replaced the initial row while this pass waited for the claim.
 /// A different mirrored identity wins over this observation. A change away and
 /// back can still leave a stale offer until the next pass; restart reads the row.
+///
+/// The claim comes FIRST and the row is reloaded under it: publishing a
+/// pre-claim snapshot is the documented away-and-back stale-offer window,
+/// where a report that landed while this pass waited would be overwritten
+/// by the older binding this pass read first. The mirror carries the
+/// row's ownership version beside the identity, so offers derived from
+/// memory apply the same provenance gate as row-derived ones. Rejected
+/// reports never reach this path as withdrawals: only the row's own
+/// claim-guarded state is mirrored, and a rejection wrote nothing.
 async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
     for entry in entries {
         if !matches!(
             entry.snapshot.kind,
-            farhelm_proto::AgentKind::Goose
+            farhelm_proto::AgentKind::Claude
+                | farhelm_proto::AgentKind::Goose
                 | farhelm_proto::AgentKind::Codex
                 | farhelm_proto::AgentKind::Pi
                 | farhelm_proto::AgentKind::Omp
         ) {
             continue;
         }
+        // The shared capture claim, unbounded here: this is a background
+        // pass with no reporter waiting on it, so patience is correct and
+        // a timeout would only trade convergence for a retry next pass.
+        let _claim = sup.capture_locks.claim(&entry.info.id).await;
         let before = entry
             .capture
             .lock()
@@ -769,7 +813,11 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         {
             continue;
         }
-        match sup.refresh_codex_capture(&mut row).await {
+        // The `_claimed` variant: this loop already holds this session's
+        // capture claim (above), and the per-key mutex is not reentrant —
+        // calling the claiming wrapper here parked the pass against itself
+        // and no capture pass over a hook-reported Codex row ever completed.
+        match sup.refresh_codex_capture_claimed(&mut row).await {
             Ok(true) => {}
             Ok(false) => continue,
             Err(error) => {
@@ -783,9 +831,13 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         if !crate::agent_kind::accepts_reported_conversation(row.agent_kind, &conversation) {
             continue;
         }
+        let ownership_version = row.capture_ownership_version;
         let mut state = entry.capture.lock().expect("capture mutex poisoned");
         if state.committed_conversation() == before.as_deref() {
-            state.advance(CaptureState::Reported { conversation });
+            state.advance(CaptureState::Reported {
+                conversation,
+                ownership_version,
+            });
         }
     }
 }
@@ -1823,6 +1875,9 @@ mod tests {
     fn reported(conversation: &str) -> CaptureState {
         CaptureState::Reported {
             conversation: conversation.to_string(),
+            // The ladder tests below assert rank and replaceability, not
+            // provenance: a legacy 0 keeps them on the pre-contract path.
+            ownership_version: 0,
         }
     }
 
@@ -1883,7 +1938,7 @@ mod tests {
             );
             assert!(matches!(
                 &state,
-                CaptureState::Reported { conversation } if conversation == "conv-hook"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-hook"
             ));
         }
     }
@@ -1911,7 +1966,7 @@ mod tests {
         );
         assert!(matches!(
             &state,
-            CaptureState::Reported { conversation } if conversation == "conv-second"
+            CaptureState::Reported { conversation, .. } if conversation == "conv-second"
         ));
 
         for scanned in scan_derived_states() {
@@ -1923,7 +1978,7 @@ mod tests {
             assert!(
                 matches!(
                     &state,
-                    CaptureState::Reported { conversation } if conversation == "conv-second"
+                    CaptureState::Reported { conversation, .. } if conversation == "conv-second"
                 ),
                 "and the refusal must leave the reported identity untouched"
             );
@@ -2006,7 +2061,7 @@ mod tests {
         assert!(
             matches!(
                 &*entry.capture.lock().expect("capture mutex poisoned"),
-                CaptureState::Reported { conversation } if conversation == "conv-hook"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-hook"
             ),
             "and the reported identity must survive the attempt"
         );
@@ -2098,7 +2153,7 @@ mod tests {
         assert!(
             matches!(
                 &*b.capture.lock().expect("capture mutex poisoned"),
-                CaptureState::Reported { conversation } if conversation == "conv-hook-b"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-hook-b"
             ),
             "and the pass must leave the reported identity exactly as the report left it"
         );
@@ -2176,7 +2231,7 @@ mod tests {
         assert!(
             matches!(
                 &*a.capture.lock().expect("capture mutex poisoned"),
-                CaptureState::Reported { conversation } if conversation == "conv-a"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-a"
             ),
             "and nothing in the pass may disturb A's reported identity"
         );

@@ -938,7 +938,7 @@ fn record_agent(
             // fixtures' contract with their tests must not shift because a
             // sibling script grew a command.
             (line, _) if hook_reports && line.starts_with(REPORT_COMMAND) => {
-                hook_report(line[REPORT_COMMAND.len()..].trim(), &mut out)?;
+                hook_report(shape, line[REPORT_COMMAND.len()..].trim(), &mut out)?;
             }
             _ => {
                 if current.is_none() {
@@ -1063,7 +1063,7 @@ fn wait_bounded(
 /// child's output to this fixture's own pty, where it would be
 /// indistinguishable from the fixture's markers and would silently satisfy
 /// a naive transcript scan.
-fn hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("locating this fixture's own executable")?;
     let payload = serde_json::json!({
         "session_id": conversation,
@@ -1071,9 +1071,15 @@ fn hook_report(conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
         "source": "startup",
     })
     .to_string();
+    // The discriminator comes from the shape under test — the entry point
+    // a real injection would have installed — never from the payload.
+    let vendor = match shape {
+        RecordShape::Claude => "claude",
+        RecordShape::Codex => "codex",
+    };
 
     let mut child = std::process::Command::new(&exe)
-        .args(["internal", "hook"])
+        .args(["internal", "hook", "--vendor", vendor])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
