@@ -119,8 +119,8 @@ const FLOOD_RECORDS = 800_000;
  * `__farhelmTest.paused` on arrival — which may already be `false` again
  * by then, since the FIRST release already sent a resume. Such a callback
  * would sit in `held` forever, never invoked, quietly inflating
- * terminal.js's own `pendingWrite` by however much it represents (up to
- * LOW_WATER's worth) for the rest of the attachment's life. `released`
+ * terminal.js's own `pendingWrite` by however much it represents (up to the
+ * resume mark's worth) for the rest of the attachment's life. `released`
  * makes every write dispatched through this wrapper, no matter when its
  * completion actually arrives, pass straight through once the real
  * release has happened.
@@ -793,7 +793,7 @@ test("a client that stops draining is detached with the stall reason after the f
     // instance afterward would race the flood's first bytes, which can
     // land (and drain normally) before a post-mount patch runs. With no
     // callback ever firing, terminal.js's `pendingWrite` never drains
-    // below LOW_WATER, so the pause this test provokes is never answered
+    // below the resume mark, so the pause this test provokes is never answered
     // by a resume: exactly the "viewer stopped consuming" wedge
     // `STALL_DETACH_TIMEOUT` exists for.
     await page.evaluate(() => {

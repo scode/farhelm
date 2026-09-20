@@ -661,16 +661,47 @@
   // 3) — a shared counter here would have quietly undone it.
   const HIGH_WATER = 4 * 1024 * 1024;
 
+  /**
+   * This island's pause mark, with the browser suite allowed to LOWER it.
+   *
+   * The same argument `replayControls` makes for the replay bounds, for the
+   * same reason: no fixture can push four megabytes of real output through a
+   * real socket on demand, and one that tries is racing something else. The
+   * something else here is the supervisor's own stall detach — a viewer that
+   * stops consuming is cut loose with a visible reason, and on a loaded
+   * machine that lands at about four seconds, before a stalled tab has
+   * accumulated anything like four megabytes. Measured: three failures in
+   * twenty loaded WebKit executions sat at 1.4-2.2 MB undrained when the
+   * socket closed with "terminal stopped consuming output (stalled)", so the
+   * crossing this mark exists to make was unreachable, not merely late.
+   * Lowering the mark makes it reachable in milliseconds, which is what lets
+   * a test observe the pause rather than a race between two bounds.
+   *
+   * LOWER only. A test that could raise it would be able to disable the
+   * pause entirely and call the resulting silence a pass — the same
+   * one-way rule `commit_focus_destination`'s browser budget follows.
+   *
+   * Read per mount, like the replay limits: nothing here is shared between
+   * islands, and a production page never defines the global.
+   */
+  function pauseMark() {
+    const override = window.__farhelmTestFlowControl?.highWater;
+    return typeof override === "number" && override > 0 && override < HIGH_WATER
+      ? override
+      : HIGH_WATER;
+  }
+
   // A quarter of HIGH_WATER, not just "some smaller number": the gap
   // between the two marks is what stops a producer hovering right at the
   // boundary from flapping pause/resume/pause on every few bytes drained.
   // A resume this close behind the pause still recovers in well under a
   // second even at xterm.js's slowest realistic parse rate (PLAN_M2_5.md:
   // 5-35 MB/s), so nothing is given up by not waiting for a fuller drain.
-  // Derived from HIGH_WATER, not a second duplicated literal — a future
+  // Derived from the pause mark, not a second duplicated literal — a future
   // edit to one mark must not silently un-derive the ratio this comment
-  // describes.
-  const LOW_WATER = HIGH_WATER / 4;
+  // describes. Both are resolved per mount (see `pauseMark`), so a test that
+  // lowers the pause mark carries this ratio down with it rather than
+  // leaving the resume mark stranded above the new pause point.
 
   // How many buffered replay bytes this file will hold before giving up on
   // the no-intermediate-paint presentation and going live (PLAN_M5.md item
@@ -3149,6 +3180,10 @@
         // no way for one tab's backlog to pause another's stream.
         let pendingWrite = 0;
         let paused = false;
+        // Both marks resolved once, here, so the documented 4:1 ratio
+        // survives a test lowering the pause mark — see `pauseMark`.
+        const highWater = pauseMark();
+        const lowWater = highWater / 4;
 
         // Test-only observability (e2e/tests/terminal-flood.spec.ts): the
         // watermark state machine lives entirely inside this closure, so
@@ -3665,9 +3700,10 @@
             // Resume only out of an ACTUAL prior pause: this is the other
             // half of exactly-once semantics (see the pause check below)
             // — without the `paused` guard, a producer whose backlog
-            // merely dips below LOW_WATER before ever crossing HIGH_WATER
-            // would send a resume the supervisor never asked to answer.
-            if (paused && pendingWrite <= LOW_WATER) {
+            // merely dips below the resume mark before ever crossing the
+            // pause mark would send a resume the supervisor never asked to
+            // answer.
+            if (paused && pendingWrite <= lowWater) {
               paused = false;
               testHook.paused = false;
               testHook.resumeCount++;
@@ -3683,7 +3719,7 @@
           // Exactly once per crossing: `paused` blocks every repeat check
           // while the backlog stays above HIGH_WATER, so one crossing
           // sends one pause, not a flood of them.
-          if (!paused && pendingWrite > HIGH_WATER) {
+          if (!paused && pendingWrite > highWater) {
             paused = true;
             testHook.paused = true;
             testHook.pauseCount++;
