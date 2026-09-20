@@ -279,11 +279,11 @@ pub(crate) async fn remove_launch_artifacts_for_session(
 ///
 /// Staging prefixes the final launch name with a dot and appends `.tmp-<uuid>`;
 /// a failed post-publication unlink can therefore leave a second,
-/// credential-bearing copy beside the published file. The broad
-/// [`crate::files::is_staged_temp_name`] predicate is enough for the startup
-/// sweep, but teardown must identify the owner before deleting anything so a
-/// concurrent launch for another session is not disturbed. Invalid stems are
-/// deliberately rejected rather than treated as abandoned launch files.
+/// credential-bearing copy beside the published file. Both startup sweeping
+/// and teardown identify the owner before deleting anything so a concurrent
+/// launch for a surviving session is not disturbed. Invalid stems are
+/// deliberately rejected as owners, leaving them eligible for the startup
+/// sweep's existing orphan cleanup.
 fn staged_name_belongs_to(name: &str, session_id: &str) -> bool {
     if !crate::files::is_staged_temp_name(name) || !name.starts_with('.') {
         return false;
@@ -390,7 +390,12 @@ pub(crate) async fn sweep_launch_dir(
         let name = name.to_string_lossy();
 
         let should_remove = if crate::files::is_staged_temp_name(&name) {
-            true
+            // A restart leaves the old shim alive. Its unpublished staged
+            // sentinel is still launch-failure evidence, so only staging
+            // whose parsed owner is absent is orphaned at startup.
+            !sessions
+                .iter()
+                .any(|session_id| staged_name_belongs_to(&name, session_id))
         } else if let Some((id, _generation)) = crate::launch::parse_launch_file_name(&name) {
             // Names are `<id>.<generation>.json|status` now that launch
             // files are per-LAUNCH rather than per-session
@@ -426,10 +431,11 @@ mod tests {
     /// durable exec-failure sentinel must survive this sweep no matter
     /// what, even for a session no longer tracked (there is no session in
     /// this test at all) — only PR5's future classifier, or an explicit
-    /// delete, may ever remove one. A staged temp file and an ORPHANED
-    /// spec (its session id absent from `sessions`) are seeded alongside
-    /// it and must both go, proving the sweep does not simply skip the
-    /// whole directory.
+    /// delete, may ever remove one. An orphaned staged file and spec (their
+    /// session ids absent from `sessions`) are seeded alongside it and must
+    /// both go, while a surviving session's unpublished staged sentinel
+    /// remains for its still-running shim to publish. That proves the sweep
+    /// classifies staging by ownership rather than skipping the directory.
     #[farhelm_testtrace::test]
     async fn sweep_launch_dir_never_removes_a_sentinel() {
         let tmp = tempfile::tempdir().unwrap();
@@ -448,6 +454,11 @@ mod tests {
         // predecessor).
         std::fs::write(launch_dir.join("live.3.json"), b"{}").unwrap();
         std::fs::write(launch_dir.join(".orphan.0.json.tmp-deadbeef"), b"partial").unwrap();
+        std::fs::write(
+            launch_dir.join(".live.3.status.tmp-deadbeef"),
+            b"unpublished exec failure",
+        )
+        .unwrap();
         // Unrecognized names are never this sweep's to remove.
         std::fs::write(launch_dir.join("not-ours"), b"?").unwrap();
 
@@ -468,7 +479,11 @@ mod tests {
         );
         assert!(
             !launch_dir.join(".orphan.0.json.tmp-deadbeef").exists(),
-            "a staged temp file must always be removed"
+            "an orphaned staged temp file must be removed"
+        );
+        assert!(
+            launch_dir.join(".live.3.status.tmp-deadbeef").exists(),
+            "a surviving session's unpublished sentinel must remain for its shim to publish"
         );
         assert!(
             launch_dir.join("not-ours").exists(),
