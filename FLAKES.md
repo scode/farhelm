@@ -995,3 +995,36 @@ left the working copy, so none remains to remove.
 Class: peer-lifecycle
 
 Cause: established
+
+## 2026-09-19 — sidebar row menu is gone after the rename dialog cancels (e2e/tests/sidebar.spec.ts)
+
+`opening the actions menu enters it, and Tab leaves it` failed at the assertion that the row's menu panel is still
+visible after the rename dialog is cancelled: `element(s) not found` after 5 s. Both engines failed it within the same
+attempt, three separate times across three repetition batches on a four-CPU Ubuntu 24.04 workstation shared with other
+agents. Selection `exact actions-menu test, both engines` (Playwright `tests/sidebar.spec.ts` with `-g` on the test
+title); concurrency `one browser worker; retries 0; one execution per engine per attempt`. Pinned tmux 3.7c executable
+SHA256 `62c79831e9ffb46570aaee6381c36e045d8c131eff03a34f2bdd7ddc35b01ce4` (this checkout's own `.ci-tmux` build),
+`LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed by the recorder. Tested commit `4fa11039fdcf` with an uncommitted
+correction to the same test's ArrowDown step, EXCEPT for the batch that establishes pre-existence, which ran that commit
+with a clean version of this test.
+
+The batches: `4b69e1ad-d2bb-4cb9-a4c5-efd944cf7efc` on the unmodified test, attempts 5 and 6 of 6, four of twelve
+executions — which is what makes this pre-existing rather than a consequence of the ArrowDown correction;
+`51cb0fd8-e000-4ba5-a0ee-c4db1cb0bcc5` with that correction, attempt 6 of 6, two of twelve; and
+`69ebe0fe-3926-4f94-8fe6-4f076d703ffd`, twelve attempts with the session order pinned to title, attempt 12, two of
+twenty-four. The retained Chromium trace of the first failure ends with `Enter` on the rename item, the dialog opening,
+a click on `.rename-dialog .rename-cancel`, and then only repeated polls for a panel that never comes back.
+
+One candidate mechanism is RULED OUT rather than suspected. `ListView` closes an open row menu whenever a listing
+refresh moves that row (`rows::menu_row_reordered`, answered by `menu_open.set(None)`), and with two rows under the
+default "recently active" order either row's activity could swap them. Pinning the order to title removes that entirely,
+and the failure survived it — with the failure snapshot showing "title A–Z" selected and the two rows in stable
+alphabetical order, so the pin is verified applied rather than assumed. What is left, from the same file, is the
+consolidated effect that closes any open row menu when `layout_epoch`, `show_create`, or `hosts_list_shape` changes; the
+hosts list is the one of those three that changes on its own against this fixture, which has a local host and an ssh
+host. Nothing here establishes which of them fired. Disposition: open, appended to the existing sidebar entry in TODO.md
+rather than filed as a second one, with the next step being a receipt that names the dismissal's trigger.
+
+Class: fixture-premise
+
+Cause: unknown

@@ -164,6 +164,22 @@ is a clean gate.
   is no direct baseline reproduction. First check whether awaiting `__farhelmTest.replay.revealed` before focusing the
   toggle settles initial reveal, then retain focus and reveal receipts in repetitions of both engines. Keep this
   initial-attach race distinct from reconnect behavior, and retain the keyboard-entry and Tab-exit assertions.
+
+  Hunts 2026-09-19 (four-CPU Ubuntu 24.04 workstation shared with other agents, pinned tmux 3.7c, one worker, zero
+  retries, both engines per attempt) settled the ArrowDown miss and found something else. The miss itself is corrected:
+  the keystroke moved inside the retried focus block, because a focus assertion a later poll can recover from is not the
+  same thing as a key already delivered to the terminal. The reveal step the entry above asks for was already in place
+  (`waitForSessionRevealed` observes `replayRevealed`). What the validation turned up instead is a SECOND failure in
+  this same test, at the assertion that the row's menu panel is still visible after the rename dialog is cancelled:
+  `element(s) not found` after 5 s, both engines within one attempt, and reproducing on unmodified source — batch
+  `4b69e1ad-d2bb-4cb9-a4c5-efd944cf7efc`, attempts 5 and 6 of 6, four of twelve executions. It is therefore pre-existing
+  and, unlike the ArrowDown miss, cheap to reproduce. The reorder dismissal is ruled OUT as its cause: pinning the order
+  to title so the open row's index cannot move still failed (batch `69ebe0fe-3926-4f94-8fe6-4f076d703ffd`, attempt 12 of
+  12, two of twenty-four executions), with the failure snapshot confirming "title A–Z" selected and the order stable.
+  What remains from `list/view.rs` is the consolidated dismissal effect that closes any open row menu when
+  `layout_epoch`, `show_create`, or `hosts_list_shape` changes; the hosts list is the one of those three that churns on
+  its own against this fixture. Next step is a receipt naming which of them fires, not another repetition. Batch for the
+  corrected test: `51cb0fd8-e000-4ba5-a0ee-c4db1cb0bcc5`, attempt 6 of 6, two of twelve executions.
 - Deflake `a client that stops draining is detached with the stall reason after the full stall interval` in
   `e2e/tests/terminal-flood.spec.ts`, WebKit. The loaded 2026-09-03 failure saw zero pauses after thirty seconds, before
   the sixty-second stall interval could start. Thirty prior loaded repetitions passed; ten gate-to-first-pause

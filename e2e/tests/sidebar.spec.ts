@@ -1770,12 +1770,25 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     // what lets a losing attempt recover: the next iteration re-focuses
     // after whatever reconnect just fired, instead of polling a focus that
     // is never coming back on its own.
+    //
+    // The KEYSTROKE is inside that retry for the same reason, which an
+    // earlier version of this test had wrong. Ending the retried block at
+    // the focus assertion left the gap between that assertion and the
+    // ArrowDown open, and a reveal landing in it sends the key to the
+    // terminal instead of the menu — a key, unlike a focus assertion, is
+    // not something a later poll can recover, because it has already been
+    // delivered somewhere else. Observed exactly once, on WebKit in a full
+    // run: the toggle focus assertion passed, the keyboard-action snapshot
+    // 23 ms later showed the terminal focused, and the menu handler never
+    // saw the key. So an attempt is judged by whether the panel opened,
+    // and a lost key just costs one more iteration. The `sleep 300` pane
+    // swallowing a stray ArrowDown is why that is cheap.
     await expect(async () => {
       await toggle.focus();
       await expect(toggle).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(target.locator(".session-row-menu-panel")).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 10_000 });
-    await page.keyboard.press("ArrowDown");
-    await expect(target.locator(".session-row-menu-panel")).toBeVisible();
     await expect(rename).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(toggle).toBeFocused();
