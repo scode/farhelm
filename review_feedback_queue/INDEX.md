@@ -2,8 +2,6 @@
 
 One line per open item. This file must always match the feedback files in this directory.
 
-- `agent-fence-claimed-before-validation.md` — fence claimed before pure validation, parking the read loop on malformed
-  requests.
 - `agent-label-empty-cell-on-trailing-slash.md` — trailing-slash invocation renders a blank agent name in the session
   list.
 - `agentrequest-refusals-hold-fence-across-reply.md` — AgentRequest refusals hold the per-session fence across the reply
