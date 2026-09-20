@@ -1387,6 +1387,10 @@ impl ConnectionManager {
     ///
     /// Serialized against itself end to end (see [`Self::reconcile`]), so
     /// no two callers can reconcile from different reads of the registry.
+    ///
+    /// Removed rows retire their published transport even if a caller still
+    /// holds a client clone. This withdraws access; it does not stop the
+    /// remote supervisor or its sessions.
     pub async fn sync_registry(&self) -> anyhow::Result<()> {
         let _reconcile = self.reconcile.lock().await;
         let rows = self.store.list_hosts().await?;
@@ -1407,6 +1411,7 @@ impl ConnectionManager {
         // the ones that failed) wakes no client at all.
         let mut shape_changed = false;
         let live: std::collections::HashSet<HostId> = rows.iter().map(|row| row.id).collect();
+        let mut withdrawn = Vec::new();
         map.actors.retain(|id, handle| {
             if live.contains(id) {
                 return true;
@@ -1420,6 +1425,13 @@ impl ConnectionManager {
                 host = *id,
                 "stopping the connection actor for a removed host"
             );
+            // A task abort does not close client clones retained by a caller.
+            // Withdraw first, then retire after releasing the map lock.
+            handle.status.send_modify(|status| {
+                if let Some(client) = status.client.take() {
+                    withdrawn.push(client);
+                }
+            });
             handle.task.abort();
             false
         });
@@ -1544,6 +1556,9 @@ impl ConnectionManager {
         // (the registry write is already committed, and snapshots come off
         // the map this pass has finished editing), and whatever the fresh
         // actors go on to discover arrives as their own transitions.
+        for client in withdrawn {
+            retire_withdrawn(Some(client));
+        }
         if shape_changed {
             self.events.bump();
         }
@@ -2594,20 +2609,28 @@ impl ConnectionManager {
     /// that installs an actor holds the same mutex, so after this returns
     /// no in-flight one can still land.
     ///
+    /// The withdrawn client is retired before return, including when callers
+    /// retain clones; task cancellation alone cannot close their transport.
+    ///
     /// Returns whether an actor was actually stopped, so a caller can tell
     /// "removed" from "there was nothing there".
     pub async fn stop_actor(&self, host: HostId) -> bool {
-        let stopped = {
+        let (stopped, withdrawn) = {
             let _reconcile = self.reconcile.lock().await;
             let mut map = self.actors.lock().expect("actor map mutex poisoned");
             match map.actors.remove(&host) {
                 Some(handle) => {
+                    let mut withdrawn = None;
+                    handle.status.send_modify(|status| {
+                        withdrawn = status.client.take();
+                    });
                     handle.task.abort();
-                    true
+                    (true, withdrawn)
                 }
-                None => false,
+                None => (false, None),
             }
         };
+        retire_withdrawn(withdrawn);
         // A removed host disappears from the hosts list and takes its
         // sessions with it — a registry shape change, and the one that
         // arrives by this path rather than through `sync_registry`'s
@@ -7678,6 +7701,91 @@ mod tests {
             fixture.transport.attempts(added).len(),
             dials_while_registered,
             "a removed host's actor must stop attempting, not merely stop being listed"
+        );
+    }
+
+    /// Removing an actor retires its transport even when a caller retained
+    /// the client it had published.
+    ///
+    /// The registry-reconcile and direct-removal paths both discard an actor.
+    /// A retained clone used to keep the peer transport serving after either
+    /// path, so the peer's observed closure is the consumer boundary this
+    /// test protects rather than a check that an internal map entry vanished.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn removing_an_actor_retires_a_retained_published_client() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            for destination in ["reconcile-remove.example", "direct-remove.example"] {
+                let host = store.add_ssh_host(destination, None, None).await.unwrap();
+                // These are independent peers, not duplicate routes to one
+                // supervisor; both must publish a client before removal.
+                transport.set_script(
+                    host,
+                    Script {
+                        identity: Some(destination.to_string()),
+                        ..Script::default()
+                    },
+                );
+            }
+        })
+        .await;
+        let rows = fixture.store.list_hosts().await.unwrap();
+        let (reconciled, direct) = (rows[1].id, rows[2].id);
+        for host in [reconciled, direct] {
+            let refreshed = tokio::time::timeout(
+                Duration::from_secs(10),
+                fixture.manager.wait_for_state(host, |state| {
+                    matches!(
+                        state,
+                        HostState::Connected {
+                            last_refresh: RefreshHealth::Ok { sessions: 0 },
+                            ..
+                        }
+                    )
+                }),
+            )
+            .await;
+            assert!(
+                matches!(refreshed, Ok(Some(_))),
+                "the removal fixture must finish its initial refresh; host={host}, status={:?}",
+                fixture.manager.state(host)
+            );
+        }
+        let retained_reconciled = status_client(&fixture.manager, reconciled)
+            .expect("the reconciled actor published a client");
+        let retained_direct =
+            status_client(&fixture.manager, direct).expect("the direct actor published a client");
+
+        fixture.store.remove_ssh_host(reconciled).await.unwrap();
+        fixture.manager.sync_registry().await.unwrap();
+        // Keep this clone alive through the peer observation: closure must
+        // come from explicit retirement, not from its final `Arc` drop.
+        let _ = &retained_reconciled;
+        let reconciled_close = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.transport.wait_for_closures(reconciled, 1),
+        )
+        .await;
+        assert!(
+            reconciled_close.is_ok(),
+            "the removed peer must close while its client is retained; status={:?}, closures={:?}, retained_refs={}",
+            fixture.manager.state(reconciled),
+            fixture.transport.closures.borrow().clone(),
+            Arc::strong_count(&retained_reconciled)
+        );
+
+        assert!(fixture.manager.stop_actor(direct).await);
+        let _ = &retained_direct;
+        let direct_close = tokio::time::timeout(
+            Duration::from_secs(10),
+            fixture.transport.wait_for_closures(direct, 1),
+        )
+        .await;
+        assert!(
+            direct_close.is_ok(),
+            "the directly stopped peer must close while its client is retained; status={:?}, closures={:?}, retained_refs={}",
+            fixture.manager.state(direct),
+            fixture.transport.closures.borrow().clone(),
+            Arc::strong_count(&retained_direct)
         );
     }
 
