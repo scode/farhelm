@@ -434,7 +434,9 @@
 - Completion criteria: a surviving session's staged sentinel is not startup-swept; orphaned staging remains eligible. No
   generation reconciliation, age policy or background sweep. Remove this feedback file and its index entry in its
   execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/783/changes. jj change:
+  `nxvtytyoykynplrkylzrmptputpmklvp`; bookmark: `fix-live-staged-launcher-sweep`. The startup-sweep regression now
+  preserves surviving-session staging and published sentinels while removing orphaned staging.
 
 ## terminal-less-delete-no-server-guards-never-match.md
 
