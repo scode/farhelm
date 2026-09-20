@@ -217,28 +217,13 @@ is a clean gate.
   `transition_many` commits; removal is best-effort and logs non-NotFound errors. It is not an unawaited deletion race.
   On recurrence capture unlink path/errno, planted versus derived generation paths, and the committed session ID. If the
   paths match and no removal warning exists, inspect the actual directory entry before changing cleanup semantics.
-- Fix the forced-pause helper's client-list parsing in `crates/farhelm/tests/e2e/terminal_backpressure.rs`. The combined
-  `aa333815` run failed four cases with "no output control client found among tmux clients":
-  `replay_marker::a_tmux_pause_catch_up_replays_without_a_marker`,
-  `terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment`,
-  `terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane`, and
-  `terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state`. The listing visibly contained the output
-  client's `pause-after=5` flag, but an underscore separated its name from the flags where the helper expects a tab. The
-  exact replay-marker case also failed on untouched `d71a87fb` with one test thread in 0.47 seconds, on a second worker
-  with the same reported 3.7c pin and no extra load. Both the helper and these test bodies are unchanged across the
-  comparison, but the worker's executable identity is unverified. CI run 34006471792 at `2069e0c8` passed all four cases
-  on its built pin with four threads. The 2026-09-06 FLAKES.md caveat records that counterevidence; the observed
-  delimiter failure remains open, without a claim of deterministic failure on the exact pin. Retain a recorder run,
-  check the formatter's delimiter bytes, and use an unambiguous supported separator if the mismatch is reproduced while
-  keeping the positive `pause-after` discriminator. Then validate all four callers against the pinned substrate.
 - Restore the release integration gate and remove the remaining ignored binary-output test when the named Rust flakes
   above are fixed. #382 restored the helm-death test. Binary output still blocks its own un-ignore; it and the stalled
-  viewer RSS, degenerate-size READY, replacement claim, malformed-sentinel, and forced-pause helper cases still block
-  restoring the entire `farhelm` integration target in `.github/dist-build-setup.yml`. Browser flakes are separate
-  coverage and do not themselves gate that Rust target. The integration suite remains available for explicit local or
-  worker validation; ordinary CI and the release gate do not run it while this exclusion stands. A single clean combined
-  run cannot establish that these latent failures are fixed; retain the release exclusion until the evidence supports
-  reversing it.
+  viewer RSS, degenerate-size READY, replacement claim, and malformed-sentinel cases still block restoring the entire
+  `farhelm` integration target in `.github/dist-build-setup.yml`. Browser flakes are separate coverage and do not
+  themselves gate that Rust target. The integration suite remains available for explicit local or worker validation;
+  ordinary CI and the release gate do not run it while this exclusion stands. A single clean combined run cannot
+  establish that these latent failures are fixed; retain the release exclusion until the evidence supports reversing it.
 
 - Deflake `profile CRUD round-trips from the app-bar popup to the helm` in `e2e/tests/profiles.spec.ts` (profile CRUD
   edit timeout). The deflake sweep's browser battery failed it once on Chromium: the 60 s test timeout fired in the

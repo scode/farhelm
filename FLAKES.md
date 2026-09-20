@@ -367,8 +367,11 @@ find an output control client even though the printed listing contained `pause-a
 underscore, while the parser splits at a tab. The exact replay-marker case reproduced on untouched `d71a87fb` on a
 second worker with the same pin, one test thread, and no extra load. The helper and test bodies are unchanged across
 that comparison. This establishes a pre-existing test/substrate compatibility failure before the catch-up assertions,
-not a new product regression. Disposition: open under Difficult deflake in TODO.md; inspect delimiter bytes and correct
-the helper without weakening its positive output-client discriminator.
+not a new product regression. Disposition: retired without a diagnosis. The helper now asks tmux for the names of
+clients whose flags match, with `list-clients -f`, so there is no separator for a parser to disagree about and the
+positive `pause-after` discriminator runs inside tmux. What mangled the separator was never established: a verified
+pinned tmux 3.7c prints the tab, and the four callers pass against it. The underscore observation stays recorded here
+rather than in a live TODO entry, because there is no remaining parser for it to break.
 
 ## 2026-09-05 — large terminal paste reaches the reply deadline
 
@@ -432,9 +435,9 @@ named cases passing at `2069e0c83e8a7775daf68798fff08a85528d5e4a` with four libt
 tmux builder on PATH. The available worker record does not retain resolved executable hashes; the CI log supplies the
 pin/build assertion rather than an executable digest or a dirty-tree fingerprint. Locale and ambient FARHELM variable
 names were not retained in these receipts either. Those inputs cannot be reconstructed from a reported version alone.
-Disposition: the delimiter failure remains open in TODO.md, but the worker substrate and underlying cause are
-unverified; obtain a retained command, raw delimiter bytes, and executable identity before treating the worker failure
-as a same-substrate baseline. This bookkeeping correction does not claim a new reproduction or a fix.
+Disposition: the delimiter failure was later retired without being explained — see the 2026-09-05 entry above — so the
+worker substrate and underlying cause remain unverified and no longer have anything to be verified against. This
+bookkeeping correction does not claim a new reproduction or a fix.
 
 Class: substrate
 

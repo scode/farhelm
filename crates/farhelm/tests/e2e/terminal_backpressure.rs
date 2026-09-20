@@ -525,11 +525,35 @@ const FLOOD_RECORDS: u64 = 800_000;
 /// it is the client that must never be paused (see `tmux::SessionSink`) —
 /// which is what makes the same flag both the sink's defining absence and
 /// this helper's positive match.
+///
+/// tmux does that matching, not this function, and that is deliberate.
+/// The helper used to list `#{client_name}\t#{client_flags}` and split each
+/// line on the tab. On 2026-09-05 all four of its callers failed together
+/// with "no output control client found" against a listing that plainly
+/// contained `pause-after=5`, because an underscore stood where the helper
+/// expected its tab. That has never been reproduced since — not on a
+/// verified pinned tmux locally, and CI run 34006471792 passed all four on
+/// its own built pin — so what mangled the separator is still unknown, and
+/// waiting to find out means leaving four tests resting on a guess about
+/// how a listing is punctuated. Asking tmux for the names of clients whose
+/// flags match, with `list-clients -f`, has no separator to disagree about.
+/// The discriminator is still `pause-after` and still a positive match, but
+/// it is now tmux's own glob across the whole flag list rather than a prefix
+/// test on a comma-split field — a looser predicate that picks the same
+/// client here, because no tmux client flag carries that text except the
+/// flag itself. The unfiltered listing is still fetched for the panic
+/// message, where a mangled separator costs nothing.
 pub(crate) async fn force_tmux_pause(h: &Harness, pane: &str) {
     let sock = h.state.path().join("tmux.sock");
     let listed = tmux_query(
         &sock,
-        &["list-clients", "-F", "#{client_name}\t#{client_flags}"],
+        &[
+            "list-clients",
+            "-f",
+            "#{m:*pause-after=*,#{client_flags}}",
+            "-F",
+            "#{client_name}",
+        ],
     )
     .await;
     assert!(
@@ -538,16 +562,20 @@ pub(crate) async fn force_tmux_pause(h: &Harness, pane: &str) {
         String::from_utf8_lossy(&listed.stderr)
     );
     let listed = String::from_utf8_lossy(&listed.stdout).into_owned();
-    let target = listed
-        .lines()
-        .filter_map(|line| line.split_once('\t'))
-        .find(|(_, flags)| {
-            flags
-                .split(',')
-                .any(|flag| flag.starts_with("pause-after="))
-        })
-        .map(|(name, _)| name)
-        .unwrap_or_else(|| panic!("no output control client found among tmux clients:\n{listed}"));
+    let target = match listed.lines().find(|name| !name.is_empty()) {
+        Some(name) => name,
+        None => {
+            let all = tmux_query(
+                &sock,
+                &["list-clients", "-F", "#{client_name} #{client_flags}"],
+            )
+            .await;
+            panic!(
+                "no output control client found among tmux clients:\n{}",
+                String::from_utf8_lossy(&all.stdout)
+            );
+        }
+    };
     let paused = tmux_query(
         &sock,
         &[

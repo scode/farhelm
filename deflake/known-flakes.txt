@@ -25,8 +25,4 @@ nextest farhelm::e2e session_lifecycle::non_utf8_terminal_output_survives_live_s
 nextest farhelm::e2e terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled  # backpressure-rss-attribution
 nextest farhelm::e2e session_rename::a_renamed_title_survives_a_supervisor_restart  # rename-supervisor-ownership-race
 nextest farhelm::e2e launch_sentinel_error_status::a_planted_malformed_spec_sentinel_classifies_error_with_its_detail  # sentinel-unlink-surviving-file
-nextest farhelm::e2e replay_marker::a_tmux_pause_catch_up_replays_without_a_marker  # forced-pause-client-parsing
-nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_is_recovered_through_the_real_attachment  # forced-pause-client-parsing
-nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_recovers_an_alternate_screen_pane  # forced-pause-client-parsing
-nextest farhelm::e2e terminal_backpressure::a_forced_tmux_pause_restores_modes_and_cursor_state  # forced-pause-client-parsing
 playwright profiles.spec.ts profile CRUD round-trips from the app-bar popup to the helm  # profile-crud-edit-timeout
