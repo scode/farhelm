@@ -1950,9 +1950,14 @@ impl ConnectionManager {
                     // longer holds everything known — the same statement a
                     // capped drain makes.
                     if entries.len() > farhelm_proto::LIST_SESSIONS_CAP {
+                        // The just-recorded row is admitted by this branch;
+                        // only a previously cached row may make room for it.
+                        // Filtering preserves the original vector indices
+                        // for removal below.
                         if let Some(oldest) = entries
                             .iter()
                             .enumerate()
+                            .filter(|(_, entry)| entry.id != session.id)
                             .max_by(|(_, a), (_, b)| {
                                 (std::cmp::Reverse(a.created_at), a.id.as_str())
                                     .cmp(&(std::cmp::Reverse(b.created_at), b.id.as_str()))
@@ -5095,6 +5100,10 @@ mod tests {
     /// a refusal here (the old behavior) would leave a session the caller
     /// was just told exists unroutable until the next refresh, on exactly
     /// the host whose list vanishes with its connection.
+    ///
+    /// The seed ties the oldest existing row but sorts after it by id. That
+    /// is the case where selecting from the whole post-insert list evicts
+    /// the new row instead of the eligible old one.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn an_in_memory_seed_past_the_cap_evicts_the_oldest_row_and_flags_the_cut() {
         let full: Vec<SessionInfo> = (0..farhelm_proto::LIST_SESSIONS_CAP)
@@ -5147,7 +5156,7 @@ mod tests {
 
         fixture
             .manager
-            .remember_session(&claim, &session("fresh", 10_000))
+            .remember_session(&claim, &session("z-fresh", 1_000))
             .await
             .expect("the seed must land, not be refused at the cap");
 
@@ -5157,8 +5166,8 @@ mod tests {
             .expect("an identity-less host serves its list from memory");
         assert_eq!(live.len(), farhelm_proto::LIST_SESSIONS_CAP);
         assert!(
-            live.iter().any(|s| s.id == "fresh"),
-            "the new session must be listed and routable"
+            live.iter().any(|s| s.id == "z-fresh"),
+            "the tied new session must be listed and routable"
         );
         assert!(
             !live.iter().any(|s| s.id == "s-0000"),

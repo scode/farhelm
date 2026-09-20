@@ -65,7 +65,6 @@ One line per open item. This file must always match the feedback files in this d
   session ownership.
 - `same-version-cache-generations-never-pruned.md` — same-version payload cache generations from other base URLs are
   never pruned.
-- `seed-eviction-evicts-just-recorded-row.md` — at-capacity eviction can evict the session just recorded.
 - `seed-write-validates-handle-outside-publish.md` — session seed validates the handle outside the publish, briefly
   404ing new sessions.
 - `send-upload-ignores-cancellation.md` — the transfer's queue send ignores cancellation, stalling deletes.
