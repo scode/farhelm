@@ -39,7 +39,6 @@ One line per open item. This file must always match the feedback files in this d
 - `helm-upload-fast-path-spin.md` — the helm's upload fast path can spin without a deadline.
 - `host-views-transiently-pairs-new-identity-with-stale-mismatch.md` — host list briefly pairs a new identity with its
   resolved mismatch.
-- `local-identity-conflict-returns-500.md` — local identity conflict during discovery returns 500 instead of 409.
 - `local-update-refusal-returns-500.md` — refusing UPDATE on the local row returns 500 instead of a 4xx refusal.
 - `manual-update-refusal-returns-500.md` — UPDATE planning for a manual-needs host returns 500 instead of a 4xx refusal.
 - `normal-teardown-waits-unboundedly-on-detach.md` — ordinary teardown awaits detach with no timeout, parking ~60s on a

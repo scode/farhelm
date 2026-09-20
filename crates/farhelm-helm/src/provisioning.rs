@@ -2958,6 +2958,69 @@ mod tests {
         }
     }
 
+    /// A local supervisor reporting a different identity must leave the
+    /// stored identity alone and tell the panel that it needs resolution.
+    ///
+    /// Discovery is still allowed to observe a local supervisor after setup.
+    /// What it must not do is turn an adopt-or-fix conflict into an internal
+    /// failure, because the panel then loses the state it needs to recover.
+    #[farhelm_testtrace::test]
+    async fn local_probe_identity_conflict_is_reported_without_replacing_the_identity() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let local = local_row(&harness).await;
+        let row = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == local)
+            .expect("the local row remains in the registry");
+        let recorded = harness
+            .store
+            .record_first_contact(local, &DialedAs::of(&row), "recorded-identity")
+            .await
+            .expect("the conflict fixture must establish the recorded identity");
+        assert_eq!(
+            recorded,
+            crate::store::FirstContactOutcome::Recorded,
+            "the fixture must store its original identity before discovery"
+        );
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        let service = service(&harness, backend, root.path());
+        let state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            service,
+        ));
+        harness.state = Arc::clone(&state);
+        let response = harness
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/hosts/probe")
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"target":{"kind":"local"}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let after = harness
+            .store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == local)
+            .expect("the refused discovery must retain the local row");
+        assert_eq!(after.host_identity.as_deref(), Some("recorded-identity"));
+    }
+
     /// UPDATE on the local row is refused for EVERY local row, with no
     /// unit file present and before any transport work — the alternate
     /// route to the install the ADD path stopped offering.
