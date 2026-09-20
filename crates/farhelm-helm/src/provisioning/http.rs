@@ -15,6 +15,10 @@ use std::sync::Arc;
 pub(super) enum ProvisioningRequestError {
     #[error("{0}")]
     InvalidProbe(String),
+    /// A valid request cannot proceed until the operator follows the
+    /// supplied handoff or manual-install instruction.
+    #[error("{0}")]
+    Refused(String),
     #[error("the provisioning plan is unknown or has already been used; probe again")]
     UnknownPlan,
     #[error("host {0} already has a provisioning operation in flight")]
@@ -220,9 +224,9 @@ fn provisioning_error(error: anyhow::Error) -> Response {
     if let Some(request) = error.downcast_ref::<ProvisioningRequestError>() {
         let status = match request {
             ProvisioningRequestError::InvalidProbe(_) => StatusCode::BAD_REQUEST,
-            ProvisioningRequestError::UnknownPlan | ProvisioningRequestError::Busy(_) => {
-                StatusCode::CONFLICT
-            }
+            ProvisioningRequestError::Refused(_)
+            | ProvisioningRequestError::UnknownPlan
+            | ProvisioningRequestError::Busy(_) => StatusCode::CONFLICT,
         };
         return (status, format!("{error:#}")).into_response();
     }

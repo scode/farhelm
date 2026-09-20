@@ -277,7 +277,10 @@
 - Completion criteria: local update planning returns 409 with the existing handoff reason. Failure to obtain that reason
   remains a real failure; no local update plan becomes possible and no success-response schema changes. Remove this
   feedback file and its index entry in its execution PR.
-- Execution: `pending`.
+- Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/773/changes. jj change:
+  `mmwpzyrrlwwmytyrnzurmzlyzuymomkt`; bookmark: `fix-local-update-refusal-status`. The endpoint regression reproduced
+  HTTP 500 before the fix and now returns 409 without retaining a plan. The ordinary unclassified-error mapping still
+  returns 500.
 
 ## manual-update-refusal-returns-500.md
 
