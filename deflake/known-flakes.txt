@@ -16,7 +16,6 @@ playwright terminal-multihost.spec.ts a failed removal stays visible with detail
 playwright terminal-tabs.spec.ts stalling one tab's writes pauses only that tab; the agent and a sibling stay live  # tab-stall-pause-not-observed
 playwright terminal-tabs.spec.ts a tab list past the island cap is listed in full but only partly attached  # tab-cap-closed-socket
 playwright terminal-flood.spec.ts real backspace erases; real ctrl-c kills the fake agent  # backspace-ctrlc-session-deletion
-playwright profiles.spec.ts an outside click overrides a delayed opening focus commit  # profiles-outside-click-deadline
 playwright profiles.spec.ts stale focus-out classifiers cannot clear newer obligations  # profiles-stubfeed-socket-missing
 playwright sidebar.spec.ts opening the actions menu enters it, and Tab leaves it  # sidebar-menu-arrowdown-miss
 playwright terminal-flood.spec.ts a client that stops draining is detached with the stall reason after the full stall interval; reattaching afterward replays  # flood-stall-zero-pauses

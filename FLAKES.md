@@ -1051,3 +1051,31 @@ ambiguous about whether the far side did the work.
 Class: product
 
 Cause: hypothesis
+
+## 2026-09-19 — the held-commit fixture's own window, not the boundary it asserts (e2e/tests/profiles.spec.ts)
+
+`an outside click overrides a delayed opening focus commit` failed twice in twenty WebKit executions of batch
+`03879a41-df56-4699-9e4c-46a96f4adc1a` (attempts 5 and 7 of ten, one Playwright worker, zero retries, both engines per
+attempt, selection `seven profiles cases by title`). Both failures were the same receipt: `trusted` true, `pending`
+true, `focused` false — every field the behavior is about exactly as expected — and `inBudget` false. Substrate: a
+four-CPU Ubuntu 24.04 workstation shared with other agents, pinned tmux 3.7c executable SHA256
+`62c79831e9ffb46570aaee6381c36e045d8c131eff03a34f2bdd7ddc35b01ce4`, `LANG=C.UTF-8`, ambient `FARHELM_*` scrubbed, tested
+commit `386e79dc` clean for this spec. This is the same shape the 2026-09-10 entry above recorded ("the trusted click
+reached a held commit after its deadline").
+
+The cause is the fixture's window rather than anything in the product, and it is structural. The hold pauses inside
+`commit_focus_destination`'s browser script while that request's own deadline keeps running, and the product refuses to
+let a test widen it — `focusBrowserBudgetMs` may only shrink the budget. So the trusted click has to cross the driver
+boundary and land within `FOCUS_SETTLE_MS` of the popup opening, and the three round trips before it (the inert point,
+the pending poll, the click) do not always fit on a loaded WebKit. `inBudget` exists in that receipt precisely to tell
+this apart from a late focus, which is what made the diagnosis a read rather than a hunt.
+
+Fixed by retrying the arm-open-click sequence until the click lands in budget, with every assertion unchanged and each
+attempt starting from a dismissed popup and a fresh receipt object. Batch `8b6eaece-d317-4c90-9a20-2d346e6f89ee`, the
+exact test, fourteen attempts, twenty-eight executions, all passed. Two failures in twenty and then none in twenty-eight
+is not a large sample, and it is not what the confidence rests on: the premise the test was leaving to chance is now
+retried, so driver latency can cost an iteration and nothing else.
+
+Class: fixture-premise
+
+Cause: established

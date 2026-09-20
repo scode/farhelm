@@ -97,10 +97,16 @@ The 2026-09-08 browser gate added these follow-ups, with retained evidence in FL
   session-deletion setup after the large-paste case, before the input assertions: `deleted.ok()` was false. Both passed
   in narrow candidate and baseline sequences. Inspect the deletion response and session lifecycle evidence to
   distinguish paste contamination from an independent failure; do not infer a cause from a retry.
-- Stabilize the intended boundaries of `an outside click overrides a delayed opening focus commit` and
-  `a profile edited in another browser reaches this one over the real feed` in `e2e/tests/profiles.spec.ts`. WebKit
-  missed the held commit's deadline or popup focus readiness before the behavior under test. A baseline pass does not
-  establish that the new layout is uninvolved. Preserve trusted-pointer, unexpired-release, and focus assertions.
+- Stabilize the popup focus readiness of `a profile edited in another browser reaches this one over the real feed` in
+  `e2e/tests/profiles.spec.ts`. WebKit missed it before the behavior under test. A baseline pass does not establish that
+  the new layout is uninvolved. Preserve trusted-pointer, unexpired-release, and focus assertions.
+
+  The other test this entry used to name, `an outside click overrides a delayed opening focus commit`, is done: its
+  failures were the fixture's own window being missed, not the boundary it asserts, and it now retries the
+  arm-open-click sequence until the click lands in budget. Hunt 2026-09-19 reproduced the missed window twice in twenty
+  WebKit executions (batch `03879a41-df56-4699-9e4c-46a96f4adc1a`) and then passed fourteen attempts with the retry
+  (batch `8b6eaece-d317-4c90-9a20-2d346e6f89ee`). The feed case above ran in that same first batch and passed all twenty
+  of its executions, so it keeps its entry on the strength of the earlier sightings rather than a new one.
 
 The earlier entries below remain unresolved after targeted investigation; clean repetitions are non-reproduction
 evidence, not fixes. Their 2026-09-05 baseline was `d71a87fb`, on Ubuntu 24.04 workers with four CPUs and 8 GiB RAM.

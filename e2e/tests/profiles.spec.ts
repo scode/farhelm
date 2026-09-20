@@ -1087,6 +1087,57 @@ test.describe("agent profiles", () => {
    */
   test("an outside click overrides a delayed opening focus commit", async ({ page }) => {
     await listWithStubbedFeed(page);
+    // The whole arm-open-click sequence is one retried attempt, because its
+    // PREMISE is a race this side cannot win reliably and the product will not
+    // let it cheat. The hold pauses inside the product's commit script while
+    // the browser deadline (`FOCUS_SETTLE_MS`) keeps running, and
+    // `commit_focus_destination`'s own doc says a test may shrink that budget
+    // and never widen it. So the trusted click has to cross the driver
+    // boundary and land inside a couple of hundred milliseconds of the popup
+    // opening, and on a loaded WebKit the round trips for the inert point, the
+    // pending poll, and the click itself do not always fit: `inBudget` comes
+    // back false and the test fails having never reached the behavior it is
+    // about. Observed twice in twenty WebKit executions on 2026-09-19 (batch
+    // `03879a41-df56-4699-9e4c-46a96f4adc1a`, attempts 5 and 7), each time
+    // with `trusted`, `pending` and `focused` exactly as expected and only
+    // `inBudget` wrong — which is the shape the receipt's `inBudget` field was
+    // added to make legible in the first place.
+    //
+    // A missed window is therefore a re-arm, not a verdict. Every assertion
+    // below is unchanged and still has to hold on the attempt that lands in
+    // budget; what the retry removes is the fixture's dependence on driver
+    // latency. Each attempt starts from a dismissed popup and a fresh receipt
+    // object, because a missed attempt leaves `focusCommitExpired` set and its
+    // one-shot observer already consumed.
+    await expect(async () => {
+      if (await section(page).count() > 0) {
+        await page.keyboard.press("Escape");
+        await expect(section(page)).toHaveCount(0);
+      }
+      await armAndClickOutsideAHeldOpeningCommit(page);
+    }).toPass({ timeout: 60_000 });
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitHold.releasedInBudget)
+    ).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(true);
+    await expect(section(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitExpired))
+      .not.toBe(true);
+    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusedAt))
+      .toBeUndefined();
+  });
+
+  /**
+   * One attempt at the held-commit race: arm the receipts, open the popup,
+   * click an inert spot outside it, and require that the click reached a held,
+   * unexpired commit.
+   *
+   * Split out so its caller can retry it. Throwing on a missed fixture window
+   * is what makes the retry work, so the in-budget check lives here rather
+   * than beside the caller's other assertions.
+   */
+  async function armAndClickOutsideAHeldOpeningCommit(page: Page): Promise<void> {
     await page.evaluate(() => {
       (window as any).__farhelmTestProfiles = {
         focusCommitHold: {},
@@ -1125,17 +1176,7 @@ test.describe("agent profiles", () => {
     expect(receipt, "the trusted click must reach a held, unexpired opening commit").toEqual({
       trusted: true, pending: true, inBudget: true, focused: false,
     });
-    await expect.poll(() =>
-      page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitHold.releasedInBudget)
-    ).toBe(true);
-    await expect.poll(() => page.evaluate(() => document.activeElement === document.body))
-      .toBe(true);
-    await expect(section(page)).toHaveCount(0);
-    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusCommitExpired))
-      .not.toBe(true);
-    expect(await page.evaluate(() => (window as any).__farhelmTestProfiles.focusedAt))
-      .toBeUndefined();
-  });
+  }
 
   /**
    * Every state change inside the popup names the next keyboard position.
