@@ -2,7 +2,6 @@
 
 One line per open item. This file must always match the feedback files in this directory.
 
-- `adopt-request-silently-ignores-unknown-fields.md` — typo'd extra fields in an adopt request are silently dropped.
 - `agent-fence-claimed-before-validation.md` — fence claimed before pure validation, parking the read loop on malformed
   requests.
 - `agent-label-empty-cell-on-trailing-slash.md` — trailing-slash invocation renders a blank agent name in the session
