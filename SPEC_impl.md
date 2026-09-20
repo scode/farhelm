@@ -234,7 +234,11 @@ chrome-only pages that never open a terminal (the auth screen, an empty session 
 text reads as the same typeface as whatever the agent prints instead of pairing a generic UI font against a distinctive
 monospace one. That extra load is a WOFF2 fetch rather than the vendored TTF's — a lossless re-encoding at roughly 40%
 of the TTF's size — and once either surface has fetched it, the browser serves the other from cache rather than fetching
-it a second time.
+it a second time. Form controls get the face by default rather than by opting in: user-agent stylesheets give `button`,
+`input`, `select`, and `textarea` a platform face instead of letting them inherit, so one zero-specificity rule in
+app.css makes them inherit `font-family`, and a control added later cannot fall back to the platform sans-serif the way
+most of the launch composer's buttons once did. The rule leaves font size alone, and it excludes xterm.js's own helper
+textarea, which belongs to the vendored widget.
 
 The open session's chrome is ONE header row — title, `{cwd} — {invocation}`, status badge, archive and restart — sized
 at about 40px, with the tab strip beneath it and nothing else in the steady state. It used to be four stacked bands

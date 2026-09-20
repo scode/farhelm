@@ -4454,9 +4454,9 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if let Some(reason) = model_draft_error() { div { class: "launch-composer-choice-error", "{reason}" } }
-                        // OpenCode has no effort vocabulary, so permissions remains a
-                        // full-width choice in this pair rather than gaining a blank
-                        // sibling that suggests an unavailable setting exists.
+                        // OpenCode has no effort vocabulary, so permissions stands
+                        // alone in this pair rather than gaining a blank sibling
+                        // that suggests an unavailable setting exists.
                         div { class: "launch-composer-choice-pair",
                         if structured_harness() != Some(LaunchHarness::OpenCode) {
                         div { class: "launch-composer-choice launch-composer-effort-choice",
