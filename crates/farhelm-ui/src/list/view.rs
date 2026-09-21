@@ -2414,7 +2414,21 @@ pub(crate) fn ListView(
                 if let Some(Ok(listing)) = &*listing.read() {
                     {
                         let banner = count_banner(listing);
-                        rsx! { div { class: "{banner.class}", "{banner.text}" } }
+                        // The plain count is this list's section heading, so
+                        // its number and label go in separate spans for the
+                        // stylesheet to reorder ("SESSIONS 12"). Number first
+                        // in the DOM, deliberately: the element's text stays
+                        // "12 sessions" (see `CountBanner::count_len`). The
+                        // sentence-shaped variants stay one run of text.
+                        match banner.heading_parts() {
+                            Some((count, label)) => rsx! {
+                                div { class: "{banner.class}",
+                                    span { class: "heading-count", "{count}" }
+                                    span { class: "heading-label", "{label}" }
+                                }
+                            },
+                            None => rsx! { div { class: "{banner.class}", "{banner.text}" } },
+                        }
                     }
                 }
                 label { class: "compact-toggle",
