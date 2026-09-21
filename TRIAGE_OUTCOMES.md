@@ -704,4 +704,9 @@
 - Completion criteria: queue backpressure and caller timeout cannot abandon the upstream detach notification while the
   connection remains usable. Verify with a focused cancellation/backpressure test, preserving explicit takeover and
   existing connection cleanup. Remove the feedback file and index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; explicit detach now awaits an independently owned send task, preserving normal enqueue ordering
+  while caller cancellation leaves upstream notification alive. Focused tests cover a full writer queue, cancellation
+  after local removal, and ordering with later traffic. The old inline send fails the cancellation regression; the
+  reviewed implementation passes both tests. Browser revocation and supervisor takeover checks are unchanged. Removed
+  the feedback and index entry. jj change: `ltqmxvpqpnqvynkxrovoszwmyyvopmpr`; bookmark:
+  `triage-preserve-upstream-detach`; draft PR: https://github.com/scode/farhelm/pull/843/changes.
