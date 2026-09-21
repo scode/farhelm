@@ -4,7 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
-- `cached-session-skips-created-at-check.md` — cached session detail shows a row the list hides as poison.
 - `cancelled-request-leaks-pending-entry.md` — cancelled request without a reply leaks its pending entry for the
   connection's lifetime.
 - `clone-audit-log-skips-escape-for-log.md` — clone audit log prints agent-chosen ids raw, letting one id render as

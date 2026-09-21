@@ -573,8 +573,10 @@
 - Completion criteria: state the general principle in SPEC_impl.md, without adding a timestamp check or removing
   existing checks. Remove this feedback file and its index entry during execution. Preserve external-input validation
   and review of concrete writer or migration defects.
-- Execution: `in progress`; the requested implementation-spec clarification is applied locally and formatting checked.
-  Queue removal and the execution PR remain pending.
+- Execution: `complete`; verified SPEC_impl.md's "Transactional database representations" principle, already committed
+  at the triage anchor. Removed the feedback and index entry without adding or removing runtime checks. jj change:
+  `ptwopqztykytvxmwnrmzktszktmuokwr`; bookmark: `triage-complete-cached-session-spec`; draft PR:
+  https://github.com/scode/farhelm/pull/836/changes.
 
 ## clone-audit-log-skips-escape-for-log.md
 
