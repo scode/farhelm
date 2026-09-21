@@ -52,6 +52,7 @@ use dioxus::prelude::*;
 /// stored command exists without pretending Farhelm knows what runs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessGlyph {
+    Cursor,
     Codex,
     Claude,
     Muse,
@@ -105,6 +106,7 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
         HarnessGlyph::Codex => "codex",
         HarnessGlyph::Claude => "claude",
         HarnessGlyph::Muse => "muse",
+        HarnessGlyph::Cursor => "cursor",
         HarnessGlyph::Goose => "goose",
         HarnessGlyph::Pi => "pi",
         HarnessGlyph::Omp => "omp",
@@ -121,6 +123,7 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
                 HarnessGlyph::Codex => rsx! { path { d: "M10 2.4A4.8 4.8 0 1 0 10 9.6L8.5 8.1A2.7 2.7 0 1 1 8.5 3.9Z", fill: "currentColor" } },
                 HarnessGlyph::Claude => rsx! { path { d: "M2 2h2v6h6v2H2z", fill: "currentColor" } },
                 HarnessGlyph::Muse => rsx! { path { d: "M1.2 10V2h1.9l2.9 4.6L8.9 2h1.9v8H9V5.2L6.8 8.7H5.2L3 5.2V10z", fill: "currentColor" } },
+                HarnessGlyph::Cursor => rsx! { path { d: "M2 1L10 6L6 7L4 11Z", fill: "currentColor" } },
                 HarnessGlyph::Goose => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "G" } },
                 HarnessGlyph::Pi => rsx! { text { x: "3", y: "9", fill: "currentColor", font_size: "9", "P" } },
                 HarnessGlyph::Omp => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "Ω" } },

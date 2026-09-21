@@ -255,6 +255,7 @@ pub(crate) fn model_options(
         LaunchHarness::Codex,
         LaunchHarness::Claude,
         LaunchHarness::Muse,
+        LaunchHarness::Cursor,
         LaunchHarness::Goose,
         LaunchHarness::Pi,
         LaunchHarness::Omp,
@@ -516,6 +517,7 @@ pub(crate) fn search_results(
             LaunchHarness::Codex,
             LaunchHarness::Claude,
             LaunchHarness::Muse,
+            LaunchHarness::Cursor,
             LaunchHarness::Goose,
             LaunchHarness::Pi,
             LaunchHarness::Omp,
@@ -2513,7 +2515,7 @@ mod tests {
         }];
 
         let harnesses = search_results(&history, &catalog, "harness:", None, None);
-        assert_eq!(harnesses.len(), 8);
+        assert_eq!(harnesses.len(), 9);
         assert!(harnesses.iter().all(|result| {
             matches!(
                 result,

@@ -89,6 +89,16 @@ const OPENCODE_EFFORTS: &[LaunchEffort] = &[];
 
 const CATALOG: &[CatalogModel] = &[
     CatalogModel {
+        id: "auto",
+        harness: LaunchHarness::Cursor,
+        efforts: &[],
+    },
+    CatalogModel {
+        id: "composer-2.5",
+        harness: LaunchHarness::Cursor,
+        efforts: &[],
+    },
+    CatalogModel {
         id: "gpt-5.6-luna",
         harness: LaunchHarness::Codex,
         efforts: CODEX_EFFORTS,
@@ -343,7 +353,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
     if let Some(model) = &selection.model {
         match selection.harness {
             LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
-            LaunchHarness::Claude | LaunchHarness::Muse => {
+            LaunchHarness::Claude | LaunchHarness::Muse | LaunchHarness::Cursor => {
                 argv.extend(["--model".to_string(), model.clone()])
             }
             LaunchHarness::OpenCode => argv.extend([
@@ -378,6 +388,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             ]),
             // `validate_selection` has already rejected this combination.
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
+            LaunchHarness::Cursor => unreachable!("Cursor has no separate effort flag"),
             LaunchHarness::Goose => {}
             LaunchHarness::Pi | LaunchHarness::Omp => {
                 argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
@@ -403,6 +414,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
             LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
             LaunchHarness::OpenCode => Some("--auto"),
+            LaunchHarness::Cursor => Some("--force"),
             // Goose encodes every mode in the environment above; Pi has no
             // approval flag at all; OMP's own approval-mode arm above already
             // wrote its flag.
@@ -419,6 +431,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::Codex => AgentKind::Codex,
             LaunchHarness::Claude => AgentKind::Claude,
             LaunchHarness::Muse => AgentKind::Generic,
+            LaunchHarness::Cursor => AgentKind::Generic,
             LaunchHarness::OpenCode => AgentKind::Generic,
             LaunchHarness::Goose => AgentKind::Goose,
             LaunchHarness::Pi => AgentKind::Pi,
@@ -434,6 +447,7 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Codex => "codex",
         LaunchHarness::Claude => "claude",
         LaunchHarness::Muse => "muse",
+        LaunchHarness::Cursor => "agent",
         LaunchHarness::OpenCode => "opencode",
         LaunchHarness::Goose => "goose",
         LaunchHarness::Pi => "pi",
@@ -448,7 +462,10 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
             LaunchHarness::Goose => Some("choose a Goose model before launching"),
             LaunchHarness::Pi => Some("choose a Pi model before launching"),
             LaunchHarness::Omp => Some("choose an OMP model before launching"),
-            LaunchHarness::Codex | LaunchHarness::Claude | LaunchHarness::Muse => None,
+            LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor => None,
         };
         if let Some(message) = message {
             return Err(message.to_string());
@@ -547,6 +564,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Codex => CODEX_EFFORTS,
         LaunchHarness::Claude => CLAUDE_EFFORTS,
         LaunchHarness::Muse => MUSE_EFFORTS,
+        LaunchHarness::Cursor => &[],
         LaunchHarness::OpenCode => OPENCODE_EFFORTS,
         LaunchHarness::Goose => GOOSE_EFFORTS,
         LaunchHarness::Pi => PI_EFFORTS,
@@ -569,6 +587,51 @@ mod tests {
             effort: None,
             permissions: None,
         }
+    }
+
+    /// Cursor remains a Generic launch even when model and permission choices
+    /// are explicit; a saved ID must not synthesize Resume.
+    #[test]
+    fn cursor_launches_preserve_intent_without_conversation_integration() {
+        for model in [None, Some("composer-2.5"), Some("custom[effort=high]")] {
+            for permissions in [None, Some(LaunchPermission::Yolo)] {
+                let input = LaunchSelection {
+                    harness: LaunchHarness::Cursor,
+                    model: model.map(str::to_owned),
+                    effort: None,
+                    permissions,
+                };
+                let launch = compile(input.clone()).unwrap();
+                let mut expected = vec!["agent".to_string()];
+                if let Some(model) = model {
+                    expected.extend(["--model".into(), model.into()]);
+                }
+                if permissions.is_some() {
+                    expected.push("--force".into());
+                }
+                assert_eq!(shell_words::split(&launch.invocation).unwrap(), expected);
+                assert_eq!(launch.selection, input);
+                assert_eq!(launch.agent_kind, AgentKind::Generic);
+                let snapshot = farhelm_supervisor::agent_kind::IntegrationSnapshot::resolve(
+                    &expected,
+                    Some(launch.agent_kind),
+                    launch.resume_template,
+                )
+                .unwrap();
+                assert!(snapshot.integration().is_none());
+                assert!(snapshot.resume_template.is_none());
+                assert_eq!(
+                    snapshot.restart_offer(Some("saved-id")),
+                    farhelm_proto::RestartOffer::FreshOnly
+                );
+            }
+        }
+        let mut input = selection(LaunchHarness::Cursor);
+        input.effort = Some(LaunchEffort::High);
+        assert!(compile(input).is_err());
+        let mut input = selection(LaunchHarness::Cursor);
+        input.permissions = Some(LaunchPermission::Approve);
+        assert!(compile(input).is_err());
     }
 
     /// Omitted choices must omit flags, because “default” is the vendor's

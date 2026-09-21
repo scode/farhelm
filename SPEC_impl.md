@@ -1553,36 +1553,39 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   remembered default, recoverable web token, hashed browser device sessions, and the one client preference (list order,
   last-selected session, compact rows) every client shares.
 - The `profiles` table is bounded on both axes — 128 stored profiles per helm, 8 KiB of caller-supplied text per profile
-  — so the unpaginated catalog reply stays predictably bounded. The helm combines those stored rows with six
-  release-owned Claude Code, Codex, and Muse built-ins in its read and resolution paths; built-ins are never seeded,
-  persisted, or mutable. The response carries an authoritative `builtin` boolean, defaulting false for stored rows and
-  old responses, so the UI need not derive source policy from an opaque ID. Existing stored starters remain ordinary
-  editable rows. A profile names its kind explicitly (`generic` means no integration), and an absent resume template
-  selects that kind's default. The helm resolves every profile-backed create into an invocation, kind, template, and
-  immutable id/name snapshot before the supervisor call. When the template is absent for Claude or Codex, the supervisor
-  derives it by retaining the parsed original invocation argv and appending that kind's resume arguments; the argv is
-  captured before per-launch Farhelm hook injection. This deliberately assumes original arguments are reusable and has
-  no parser for initial prompts or launch-only options. It also resolves every supervisor `SourceProfile` marked
-  `Unresolved` against one catalog read per reply before browser JSON or session-cache storage; missing ids become
-  `Deleted`, and ids whose current names differ from the snapshot become `Renamed`. Profile writes are last-write-wins
-  and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no resume template. They
-  use the ordinary terminal launch path and generic activity classifier, without per-agent hooks or
-  conversation-identity capture. OpenCode is a structured harness only: its release catalog holds verified Zen model
+  — so the unpaginated catalog reply stays predictably bounded. The helm combines those stored rows with eight
+  release-owned Claude Code, Codex, Muse, and Cursor built-ins in its read and resolution paths; built-ins are never
+  seeded, persisted, or mutable. The response carries an authoritative `builtin` boolean, defaulting false for stored
+  rows and old responses, so the UI need not derive source policy from an opaque ID. Existing stored starters remain
+  ordinary editable rows. A profile names its kind explicitly (`generic` means no integration), and an absent resume
+  template selects that kind's default. The helm resolves every profile-backed create into an invocation, kind,
+  template, and immutable id/name snapshot before the supervisor call. When the template is absent for Claude or Codex,
+  the supervisor derives it by retaining the parsed original invocation argv and appending that kind's resume arguments;
+  the argv is captured before per-launch Farhelm hook injection. This deliberately assumes original arguments are
+  reusable and has no parser for initial prompts or launch-only options. It also resolves every supervisor
+  `SourceProfile` marked `Unresolved` against one catalog read per reply before browser JSON or session-cache storage;
+  missing ids become `Deleted`, and ids whose current names differ from the snapshot become `Renamed`. Profile writes
+  are last-write-wins and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no
+  resume template. They use the ordinary terminal launch path and generic activity classifier, without per-agent hooks
+  or conversation-identity capture. OpenCode is a structured harness only: its release catalog holds verified Zen model
   IDs, requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag.
   Its empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
-  provider-specific effort or conversation lifecycle contract. OMP is also a structured harness only at launch time: its
-  release catalog holds the same OpenRouter model IDs as Pi's, requires a model, and compiles
-  `omp --provider openrouter --model <id>` (provider intent explicit; a literal custom id stays one argv element and is
-  stored verbatim — provider qualification is not a promise of literal upstream routing for unknown ids; OMP's own
-  resolution still runs alias, fuzzy, and `:suffix` interpretations on the id it receives, as documented in
-  `docs/harnesses/omp.md`). `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not
-  offered), and `--approval-mode yolo|always-ask` carries the YOLO/Approve choices while `default` adds no flag and
-  stays omitted in the stored selection — unlike Pi, no YOLO default is rewritten on. SmartApprove and Chat are refused
-  for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size. Resolving
-  `SourceProfile` snapshots while draining remote sessions discovers catalog state only: those observations never select
-  the helm-wide remembered default. A successful profile-backed create through the user's REST surface alone writes that
-  default; agent-relay creates and clones do not, so an agent's work cannot change the profile the user's next dialog
-  suggests.
+  provider-specific effort or conversation lifecycle contract. Cursor likewise maps its structured harness to the
+  existing Generic kind, with no resume template or capture machinery. Its two release-owned profiles invoke `agent` and
+  `agent --force`; models use `--model`, with no separate effort flag. The UI preserves its harness in launch intent
+  while explicitly disclosing the lack of tracking and Resume. Protocol 27 adds the Cursor harness variant, not a new
+  runtime integration kind. OMP is also a structured harness only at launch time: its release catalog holds the same
+  OpenRouter model IDs as Pi's, requires a model, and compiles `omp --provider openrouter --model <id>` (provider intent
+  explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise
+  of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix`
+  interpretations on the id it receives, as documented in `docs/harnesses/omp.md`). `--thinking <effort>` carries the
+  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
+  YOLO/Approve choices while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO
+  default is rewritten on. SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen
+  so it cannot read as Pi's "P" at sidebar size. Resolving `SourceProfile` snapshots while draining remote sessions
+  discovers catalog state only: those observations never select the helm-wide remembered default. A successful
+  profile-backed create through the user's REST surface alone writes that default; agent-relay creates and clones do
+  not, so an agent's work cannot change the profile the user's next dialog suggests.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
