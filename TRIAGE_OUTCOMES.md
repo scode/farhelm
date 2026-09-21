@@ -499,7 +499,14 @@
   consistent displayed and durable outcomes. Preserve genuine launch-error reporting and verified exits, including quick
   exits. Verify the boundary with a focused regression and inspect startup reconciliation. Remove the feedback file and
   its index entry only when the bounded fix is complete; retain them if the complexity caveat stops execution.
-- Execution: `pending`.
+- Execution: `blocked`; deferred under the user's simplicity caveat after current-code inspection. Ambiguous recovery
+  republishes the old terminal as `Launching`, but a verified new terminal whose database confirmation fails is also
+  published as `Launching`. Suppressing every dead `Launching` pane would lose that verified quick exit; clearing the
+  terminal would change immediate attachment, stop, and tab behavior. Preserving both contracts needs a provenance
+  distinction beyond the agreed classifier fix. Startup's empty-pane guard does not supply that distinction to live
+  observations. No runtime reproduction or code change was made; the feedback and index entry remain for discussion.
+  Deferral record: jj change `uqyyskvosywqwumslvvyppspqrzmxuts`; bookmark: `triage-defer-ambiguous-restart`; draft PR
+  [#833](https://github.com/scode/farhelm/pull/833/changes). The remaining triaged outcomes continue independently.
 
 ## archive-discards-stopped-agent-exit-code.md
 
