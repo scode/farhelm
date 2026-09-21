@@ -654,7 +654,9 @@
 - Decision: discarded under the user's authorization to discard rare diagnostic-only edge cases. This finding concerns
   missing detail after an actor panic, not the cause of the panic or a failure to retire its connection.
 - Completion criteria: remove the feedback file and its index entry during execution without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; removed the feedback file and index entry without code or spec changes. jj change:
+  `tkqzsoyyozmrstzsuwpnpwzkltmtvzpo`; bookmark: `triage-discard-actor-panic-diagnostic`; draft PR:
+  https://github.com/scode/farhelm/pull/841/changes.
 
 ## create-runs-inline-on-read-loop.md
 

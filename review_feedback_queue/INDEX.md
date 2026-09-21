@@ -65,7 +65,6 @@ One line per open item. This file must always match the feedback files in this d
 - `stop-outcomes-lost-when-degraded.md` — stops silently lose intent and outcome while the supervisor is degraded.
 - `stripped-agent-marker-forges-killable-tab.md` — stripped agent marker lets a forged tab kill the live agent.
 - `superseded-reap-watchers-never-exit.md` — superseded output-reap watchers never exit, leaking a task per churn cycle.
-- `supervisor-discards-actor-panic-cause.md` — connection actor panic loses its cause in the visible record.
 - `tmux-kill-runs-unbounded-under-global-lock.md` — teardown's tmux calls run unbounded under the global lock.
 - `untracked-mutations-leak-on-wedged-tmux.md` — untracked mutations leak permit, claim, and fence against wedged tmux.
 - `unvalidated-state-dir-on-add.md` — adding a host with a bad state-dir path permanently bricks the entry.
