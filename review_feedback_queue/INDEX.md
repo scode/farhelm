@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
-- `detach-timeout-abandons-upstream-detach.md` — detach timeout drops the send, leaving the supervisor-side attachment
-  live.
 - `directory-source-staging-leak.md` — crash-orphaned extraction staging files are never pruned.
 - `discard-quarantined-hangs-response.md` — post-delete quarantine discard hangs the response on a wedged disk.
 - `duplicate-freeze-clobbers-retarget-nudge.md` — retargeting a duplicate-frozen host loses the edit until a second

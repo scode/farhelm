@@ -731,7 +731,9 @@ async fn serve_term(
     result
 }
 
-/// Give supervisor cleanup a bounded opportunity after browser I/O is gone.
+/// Bound local detach after browser I/O is gone. Once the local attachment
+/// is removed, the client's independent task owns upstream notification;
+/// this timeout cannot cancel a send waiting for writer capacity.
 async fn detach_bounded(client: &SupervisorClient, channel: u32) {
     if tokio::time::timeout(WS_TEARDOWN_GRACE, client.detach(channel))
         .await

@@ -1894,27 +1894,27 @@ impl SupervisorClient {
         }
     }
 
-    /// Enqueue a `Detach` for `channel` upstream WITHOUT awaiting.
+    /// Start an independently owned upstream `Detach` send.
     ///
-    /// Called only from the demultiplexer, which is why it must not await:
-    /// `detach()` blocks on the bounded writer queue, and blocking there
-    /// on the shared reader loop is precisely the head-of-line failure the
-    /// per-terminal detach rule exists to avoid — one wedged tab would
-    /// stall every other terminal, every pending request, and the control
-    /// channel, via the very path meant to protect them from it. Spawning
-    /// keeps the loop free; the message is never dropped, because the task
-    /// owns a sender clone and outlives this call.
+    /// Both demultiplexer cleanup and explicit detach use this task. Waiting
+    /// for writer capacity on the reader loop would stall every terminal and
+    /// pending request; waiting in the browser's teardown future would lose
+    /// the notification when that future times out. The task owns its sender
+    /// clone, so caller cancellation cannot abandon the send. Connection
+    /// shutdown still closes the queue and ends any pending send.
+    /// Explicit detach awaits the handle to retain its enqueue barrier;
+    /// the demultiplexer drops it so reader progress never waits on capacity.
     ///
     /// The local terminal entry is always removed by the caller before
     /// this runs, so nothing routes to the channel while the `Detach` is
     /// still in flight.
-    fn release_upstream(&self, channel: u32) {
+    fn release_upstream(&self, channel: u32) -> tokio::task::JoinHandle<()> {
         let writer_tx = self.writer_tx.clone();
         tokio::spawn(async move {
             let _ = writer_tx
                 .send(Frame::control(&ControlMsg::Detach { channel }).into())
                 .await;
-        });
+        })
     }
 
     /// Enqueue an `AbortUpload` for `channel` from a task this caller does
@@ -3040,13 +3040,14 @@ impl SupervisorClient {
     ///
     /// The local sender is removed from `terminals` before the message
     /// goes out, which discards output still in flight instead of
-    /// delivering it to a caller that has stopped listening.
+    /// delivering it to a caller that has stopped listening. Once removed,
+    /// upstream notification belongs to an independent task: a caller's
+    /// timeout cannot cancel it while the writer queue is full. Normal return
+    /// preserves enqueue ordering with subsequent requests, but does not mean
+    /// the supervisor has received the notification.
     pub async fn detach(&self, channel: u32) {
         self.terminals.lock().await.remove(&channel);
-        let _ = self
-            .writer_tx
-            .send(Frame::control(&ControlMsg::Detach { channel }).into())
-            .await;
+        let _ = self.release_upstream(channel).await;
     }
 
     /// Forward terminal input, chunked below the protocol's frame cap.
@@ -3746,6 +3747,107 @@ mod tests {
             github_repo: None,
             working_copy: None,
         }
+    }
+
+    /// Dropping a browser teardown future must not strand its upstream seat.
+    ///
+    /// Reserving every writer slot establishes backpressure without timing a
+    /// slow peer. Polling detach once removes the local terminal, then dropping
+    /// that future models cancellation at the old send boundary. The live peer
+    /// must receive Detach after capacity is released, even though its original
+    /// caller is gone. Holding the peer's writer preserves the connection.
+    #[farhelm_testtrace::test]
+    async fn cancelled_detach_still_releases_upstream_after_writer_backpressure() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("peer handshake");
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w)
+            .await
+            .expect("client handshake");
+        let (mut peer_reader, _peer_writer) = peer.await.expect("live peer");
+        let _stream = register_terminal(&client, 7, TERM_EVENT_QUEUE).await;
+        let permits = client
+            .writer_tx
+            .reserve_many(SUPERVISOR_WRITER_QUEUE)
+            .await
+            .expect("writer queue is open");
+        assert_eq!(
+            client.writer_tx.capacity(),
+            0,
+            "writer must be backpressured"
+        );
+        assert!(!client.writer_tx.is_closed(), "writer must remain alive");
+
+        let mut detach = Box::pin(client.detach(7));
+        std::future::poll_fn(|cx| {
+            let _ = std::future::Future::poll(detach.as_mut(), cx);
+            Poll::Ready(())
+        })
+        .await;
+        drop(detach);
+        assert!(
+            !client.terminals.lock().await.contains_key(&7),
+            "the cancelled caller must already have revoked local delivery"
+        );
+        drop(permits);
+
+        let frame = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("live peer received no Detach after writer capacity returned")
+            .expect("peer read failed")
+            .expect("connection closed before Detach");
+        assert!(matches!(
+            parse_control(&frame).expect("control frame"),
+            ControlMsg::Detach { channel: 7 }
+        ));
+    }
+
+    /// Awaited detach must enqueue before a caller's subsequent traffic.
+    ///
+    /// Callers use later request replies as barriers for attachment cleanup.
+    /// Handing the send to a task must not let a normal return move that
+    /// barrier ahead of Detach. The next input frame stands in for any later
+    /// message on the shared FIFO writer, without adding a response exchange.
+    #[farhelm_testtrace::test]
+    async fn awaited_detach_preserves_writer_ordering() {
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("peer handshake");
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w)
+            .await
+            .expect("client handshake");
+        let (mut peer_reader, _peer_writer) = peer.await.expect("live peer");
+        let _stream = register_terminal(&client, 7, TERM_EVENT_QUEUE).await;
+        assert!(!client.writer_tx.is_closed(), "writer must remain alive");
+
+        client.detach(7).await;
+        client.send_input(8, b"after detach".to_vec()).await;
+
+        let first = timeout(Duration::from_secs(5), peer_reader.read_frame())
+            .await
+            .expect("live peer received no frame")
+            .expect("peer read failed")
+            .expect("connection closed before Detach");
+        assert!(matches!(
+            parse_control(&first).expect("Detach must precede later input"),
+            ControlMsg::Detach { channel: 7 }
+        ));
     }
 
     /// A healthy connection must close when its final external client
