@@ -26,6 +26,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - On Farhelm startup with existing sessions, render each session's last known state immediately instead of briefly marking many sessions green/active for several seconds while the live state settles; reconcile the cached state with the current live state once available.
 - Investigate suppressing the Claude and Codex startup prompts that ask whether to trust the working directory, using supported per-session mechanisms where available without weakening their trust boundaries; keep the warning when Farhelm cannot establish directory trust safely.
 - Do not require users to choose a model for OMP or any other harness unless clear evidence shows that harness requires one; leave model selection optional and use the harness default otherwise.
+- Extend the launch composer labels beyond `gh:owner/repo`: `name:foo` should set the session name without navigating to the name field, `host:foo` should select a host, and `host:local` should select the helm-local host. Rename the GUI label `this machine` to `local (this machine)` to match.
 
 - Assess what is needed to prevent native and shelled-out subagents from replacing or withdrawing the foreground
   conversation's restart target across harnesses. #801 adds Codex-specific ownership checks; Claude, Goose, Pi, and OMP
