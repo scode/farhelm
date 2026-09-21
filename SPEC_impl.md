@@ -2070,9 +2070,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   up to a 52-character usage width; past it a verb carries its description right behind itself, because alignment pads
   every row to the widest one and `create`'s full command line would otherwise spend a slice of the manual's context
   budget on whitespace. The manual distinguishes conversational `$farhelm help` from an acting request: the agent
-  summarizes the generated verbs as user-level actions, gives natural-language examples, and explains restart's
-  live-stop consent and self-interruption caveat without forwarding CLI usage or internal credential/relay details.
-  There is no separate hand-maintained action catalog, installed skill, fleet lookup, or help-specific network request.
+  summarizes the generated verbs as user-level actions and gives natural-language examples, without forwarding CLI
+  usage, restart caveats, or internal credential/relay details. There is no separate hand-maintained action catalog,
+  installed skill, fleet lookup, or help-specific network request.
 
 Internal commands live under a hidden-from-help `internal` namespace — `farhelm internal stdio` is the ssh-exec stdio
 proxy. (An underscore prefix like `_stdio` was considered; it is not a recognized convention, while an explicit

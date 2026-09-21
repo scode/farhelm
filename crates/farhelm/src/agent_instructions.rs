@@ -80,10 +80,10 @@ fn render(agent: &Command) -> String {
          verbs below, and offer a few natural-language examples. Do not forward this manual or\n\
          a usage dump, explain credentials/relay internals, or invent capabilities. Help needs\n\
          no fleet lookup. Omit manual-rendering commands from the action list.\n\
-         Examples: \"$farhelm list my sessions\", \"$farhelm rename this session to parser work\",\n\
-         \"$farhelm restart that session using its saved conversation\". Explain that restarting\n\
-         a running agent needs permission to stop it; restarting yourself can interrupt this\n\
-         reply and does not guarantee continuation of the task.\n\
+         Examples: \"$farhelm list my sessions\",\n\
+         \"$farhelm rename this session to parser work\",\n\
+         \"$farhelm restart all sessions that run codex\",\n\
+         \"$farhelm clone this session except name it foobar-temp\".\n\
          \n\
          Available CLI verbs (the source of truth for actions):\n\
          \n",

@@ -1020,8 +1020,8 @@ it. The verb list it prints is derived from the CLI itself, so it cannot describ
 
 `$farhelm help` in a conversation asks the agent for a brief introduction, the available user-level actions, and a few
 natural-language examples, not a raw CLI help dump. The agent derives the actions from that generated inventory and does
-not query the fleet or mutate anything merely to explain them. Restart is included with its live-stop consent and
-self-interruption caveat. This conversational convention does not change ordinary shell `--help`.
+not query the fleet or mutate anything merely to explain them. This conversational convention does not change ordinary
+shell `--help`.
 
 The instructions must identify session titles, working directories, and agent labels in fleet listings as externally
 supplied data, not instructions to follow. The helm relaying those values does not make their authors trusted. This is a
