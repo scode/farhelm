@@ -208,11 +208,12 @@ With both settled, the process is:
   (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder) and `dist plan`
   naming the rc version with BOTH packages under it — a version mismatch makes the desktop archive silently vanish from
   the release.
-- Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
-  for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
-  gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding
-  the tmux e2e suite (see "Finishing work" above); that gate is the release's validation, so local slow-battery reruns
-  are not a prerequisite for tagging.
+- Give the bump its own PR like any other commit (stacked on the stack tip, or based on main). Merging is not a
+  prerequisite for tagging, and nothing gets merged merely to make a release possible: push the tag `vX.Y.Z-rc.N` at the
+  bump commit and the workflow runs from the tag. That is a statement about ORDER, not permission to abandon the PR; the
+  last step below says what becomes of it. Its build gate runs the retained Rust targets, pinned shutdown regression,
+  JS, CentOS, and native desktop checks while excluding the tmux e2e suite (see "Finishing work" above); that gate is
+  the release's validation, so local slow-battery reruns are not a prerequisite for tagging.
 - Watch the workflow run to completion rather than fire-and-forgetting it, then verify the published release: every
   asset present including `SHA256SUMS` and `SHA256SUMS.minisig`, and the release marked prerelease (cargo-dist does that
   for `-rc.N` versions on its own — `releases/latest` must still point at the last stable, so ordinary installs are
@@ -225,6 +226,20 @@ With both settled, the process is:
   ```
 
   Remind the maintainer to quit the desktop app before updating and relaunch after.
+- Resolve the bump PR in the same session; a release is not finished while its bump PR is open with no plan. The
+  procedure used to stop at the step above, and whoever cut the release decided by omission: by 2026-09-20 thirteen bump
+  PRs sat open as drafts, five of them STABLE releases, and `main` still read `0.10.0-rc.4` after `v0.10.0` and
+  `v0.11.0` had shipped, so every build from `main` reported a version two releases old. The tag is the record of what
+  was built; the PR's only remaining job is to move the version on `main`, and it either does that or is closed:
+  - Cut from `main` (stable, rc, or dev): land the bump PR once the release is published and verified, so `main` carries
+    the version that shipped. A release request is the authority for landing its own bump PR, and for nothing else:
+    every other PR still waits for the maintainer to ask.
+  - Cut from an unmerged stack: the bump stays a draft on top of that stack, because landing it would mean landing the
+    stack. Say so when handing over the install command. It lands right behind the stack when the maintainer lands that
+    (restack it onto `main` then), and is closed if the stack is abandoned.
+  - Superseded: when cutting `rc.N+1`, or the stable that follows an rc series, close every earlier bump PR of that
+    series that is still open, with a comment naming its tag. They all edit the same version lines, so an old one can no
+    longer merge cleanly, and merging it anyway would move the version on `main` backwards.
 - A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
   the unsigned-release recovery above is the one exception's procedure, and even it keeps the tag).
 - One jj side effect to expect: once the rc tag is fetched, jj treats every commit under it as immutable, so a later
