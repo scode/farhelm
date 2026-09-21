@@ -554,7 +554,10 @@
 - Completion criteria: after that removal eliminates the affected archived-session state and operation, remove this
   feedback file and its index entry and record the dependency as satisfied. Do not change owned GitHub checkout
   directory archival on session deletion, which is unrelated and remains supported.
-- Execution: `pending`; depends on `archive-discards-stopped-agent-exit-code.md`.
+- Execution: `complete`; jj change: `nzvolvnmtszsplqntnunqqtxnlxqwrkl`; bookmark: `triage-close-archived-retry`; draft
+  PR: https://github.com/scode/farhelm/pull/835/changes. The preceding Archive-removal change eliminates the operation,
+  session flag and retry special cases that this finding depends on. Pending create reservations retain their ordinary
+  retry behavior; no separate retry fix is introduced. Owned-checkout directory archival is unchanged.
 
 ## cached-session-skips-created-at-check.md
 
