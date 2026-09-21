@@ -401,7 +401,10 @@ async fn real_codex_session_captures_its_conversation_identity() {
 ///
 /// Default seams apart from `agent_home`, and that is the point — hooks are
 /// on by default, so this exercises the configuration a user gets.
-async fn serving_supervisor(
+/// An in-process supervisor that also accepts real socket peers —
+/// shared with the native-vendor tests outside this module, whose
+/// reporters are real child processes rather than in-process calls.
+pub(crate) async fn serving_supervisor(
     state: &std::path::Path,
     agent_home: std::path::PathBuf,
 ) -> (Arc<Supervisor>, Arc<SupervisorClient>, ServeTask) {

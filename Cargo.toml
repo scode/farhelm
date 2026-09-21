@@ -166,7 +166,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 # libsqlite3 — required for the musl-static supervisor artifacts
 # SPEC_impl.md's cross-compilation plan ships (audited there: builds fine
 # for both target triples under cargo-zigbuild).
-rusqlite = { version = "0.40", features = ["bundled", "hooks"] }
+# `hooks` carries the authorizer and progress callbacks; `limits` carries
+# the engine caps the read-only Goose store reader enforces per attempt.
+rusqlite = { version = "0.40", features = ["bundled", "hooks", "limits"] }
 # Compares a payload-cache generation directory's version against this
 # build's before deleting it recursively (`provisioning/release_payloads.rs`).
 # A hand-rolled comparison got prereleases wrong in both directions — a

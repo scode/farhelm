@@ -120,7 +120,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 21;
+const SCHEMA_VERSION: i64 = 22;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1323,6 +1323,16 @@ pub struct StoredSession {
     /// startup cost multiplicative in captured sessions. A stale path
     /// simply fails re-verification, which retains the identity (see
     /// `service`'s `reverify_capture`).
+    ///
+    /// Goose rows admitted under the ownership proof carry a second
+    /// interpretation here: the absolute store path the accepted
+    /// report's metadata was read from. It is a verification hint,
+    /// not identity — the conversation id is what `session --resume
+    /// --session-id` consumes, and every admission re-resolves the
+    /// store from the live runtime's environment and re-validates it,
+    /// so the CAS compares the id alone. Pre-resume verification
+    /// re-opens this locator through the same read-only reader and
+    /// requires the saved id to still read as a foreground root.
     pub captured_record: Option<String>,
     /// Whether correlation for this session was found AMBIGUOUS, which bars
     /// any SCAN-DERIVED claim for the rest of this launch (PLAN_M3.md item
@@ -1477,6 +1487,21 @@ pub struct StoredSession {
     /// is `Unknown` and fails closed at the corridor. Only OMP uses
     /// this column today.
     pub omp_launch_program: Option<String>,
+    /// The launch PROGRAM this session's CURRENT launch started — the
+    /// installation descriptor the Goose corridor must find live — or
+    /// `None` when unknown (every pre-proof launch, every launch whose
+    /// provenance write never landed).
+    ///
+    /// The value is
+    /// [`GooseLaunchProgram`](crate::agent_kind::goose::GooseLaunchProgram)'s
+    /// column spelling, classified from the argv this generation
+    /// actually started and written pre-spawn by the same fenced
+    /// provenance write OMP's pair uses. Admission refuses `None`,
+    /// stale, and `"unknown"` before any process is inspected.
+    /// Decoded leniently like OMP's: anything unrecognized is
+    /// `Unknown` and fails closed at the corridor. Only Goose uses
+    /// this column today.
+    pub goose_launch_program: Option<String>,
     /// Which profile this session was CREATED from, or `None` for a
     /// raw-created session (PLAN_M6_75.md item 4).
     ///
@@ -1701,7 +1726,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  fresh_checkout_id     TEXT,
                  capture_ownership_version INTEGER NOT NULL DEFAULT 0,
                  omp_reporter_asset TEXT,
-                 omp_launch_program TEXT
+                 omp_launch_program TEXT,
+                 goose_launch_program TEXT
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1745,7 +1771,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 21;
+             PRAGMA user_version = 22;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2287,6 +2313,24 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 20 to 21")?;
         version = 21;
     }
+    if version == 21 {
+        // The launch PROGRAM for the Goose ownership proof: the
+        // classification of the argv this generation actually started,
+        // retained so admission binds the live chain to the current
+        // launch. Every pre-22 row adopts NULL — launched before any
+        // binary recorded this — so old launches fail closed. The
+        // column is nullable `TEXT`, repeated in the fresh-database
+        // DDL above so a migrated and a freshly created database have
+        // identical schemas.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN goose_launch_program TEXT;
+             PRAGMA user_version = 22;
+             COMMIT;",
+        )
+        .context("migrating schema from version 21 to 22")?;
+        version = 22;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2424,9 +2468,11 @@ fn insert_session_row(
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
           source_profile_id, source_profile_name, parent, session_token, archived, \
           last_activity_at, last_work_started_at, conversation_source, launch, \
-          capture_ownership_version, omp_reporter_asset, omp_launch_program) \
+          capture_ownership_version, omp_reporter_asset, omp_launch_program, \
+          goose_launch_program) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, \
+                 ?33, ?34)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2468,6 +2514,7 @@ fn insert_session_row(
             row.capture_ownership_version,
             row.omp_reporter_asset,
             row.omp_launch_program,
+            row.goose_launch_program,
         ],
     )
     .context("inserting session row")?;
@@ -2498,7 +2545,8 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
                                archived, last_activity_at, last_work_started_at, conversation_source, launch, \
-                               capture_ownership_version, omp_reporter_asset, omp_launch_program";
+                               capture_ownership_version, omp_reporter_asset, omp_launch_program, \
+                               goose_launch_program";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2556,6 +2604,7 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             capture_ownership_version: r.get(29)?,
             omp_reporter_asset: r.get(30)?,
             omp_launch_program: r.get(31)?,
+            goose_launch_program: r.get(32)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -3787,6 +3836,7 @@ impl SessionStore {
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
                 omp_launch_program: None,
+                goose_launch_program: None,
                 created_at: preserved_created_at,
                 // Carried for `created_at`'s reason and with the same
                 // reach: the replaced row provably never launched (an
@@ -3924,7 +3974,9 @@ impl SessionStore {
     ///   previous run's capture authority to this one. The pre-spawn
     ///   provenance write republishes the new generation's pair; if that
     ///   write fails, the columns stay unknown and admission fails closed
-    ///   instead of reading stale authority.
+    ///   instead of reading stale authority. `goose_launch_program` clears
+    ///   for the same reason: it is the Goose launch's program, republished
+    ///   pre-spawn for the new generation.
     /// - `launch_scoped` is re-decided from `scope_available`, because the
     ///   selection belongs to a launch and not to a session (PLAN_M3.md item
     ///   10): a host that lost its user manager between two launches must
@@ -4003,15 +4055,16 @@ impl SessionStore {
             // One statement rather than two near-identical ones: the capture
             // columns are cleared by an expression that is a no-op when the
             // relaunch is resuming, so the SQL cannot drift between the two
-            // cases the way two copies of it could. The OMP launch-provenance
-            // columns beside them clear unconditionally — they describe the
-            // launch, not the conversation, so even a Resume must not inherit
-            // them.
+            // cases the way two copies of it could. The OMP and Goose
+            // launch-provenance columns beside them clear unconditionally —
+            // they describe the launch, not the conversation, so even a
+            // Resume must not inherit them.
             tx.execute(
                 "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
                  archived = 0, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, \
+                 goose_launch_program = NULL, \
                  first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
@@ -5014,6 +5067,14 @@ impl SessionStore {
     /// the write instead of blessing stale evidence. `false` is that
     /// invalidation, never a malfunction, and the caller mirrors nothing
     /// on it.
+    ///
+    /// `record` is the verification hint the binding was proven against,
+    /// or `None` when the proof leaves no locator behind: Goose passes
+    /// the absolute store path its metadata was read from (a hint for
+    /// pre-resume verification, never part of the compared binding —
+    /// the store is re-resolved from live runtime env at every
+    /// admission, so comparing it would turn legitimate store moves
+    /// into stuck bindings), while Codex and OMP pass `None`.
     pub async fn admit_ownership_proven_conversation(
         &self,
         id: &str,
@@ -5021,16 +5082,18 @@ impl SessionStore {
         expected_conversation: Option<&str>,
         expected_version: i64,
         replacement: &str,
+        record: Option<&str>,
     ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
         let expected_conversation = expected_conversation.map(str::to_owned);
         let replacement = replacement.to_string();
+        let record = record.map(str::to_owned);
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let conn = conn.lock().expect("session db mutex poisoned");
             let changed = conn
                 .execute(
-                    "UPDATE sessions SET captured_conversation = ?5, captured_record = NULL, \
+                    "UPDATE sessions SET captured_conversation = ?5, captured_record = ?6, \
                      conversation_source = 'hook', capture_ambiguous = 0, \
                      capture_ownership_version = 1 \
                      WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
@@ -5040,7 +5103,8 @@ impl SessionStore {
                         generation,
                         expected_conversation,
                         expected_version,
-                        replacement
+                        replacement,
+                        record
                     ],
                 )
                 .context("admitting an ownership-proven conversation identity")?;
@@ -5094,6 +5158,89 @@ impl SessionStore {
         })
         .await
         .context("OMP provenance record task panicked")?
+    }
+
+    /// Record one Goose launch's provenance: which program its argv
+    /// started. The write is fenced on the launch generation, so a
+    /// slow spawn records against the run it actually launched rather
+    /// than one a relaunch has since replaced.
+    ///
+    /// Called pre-spawn — after the launch spec publishes, before tmux
+    /// can start anything — by the one place that decides injection,
+    /// for every Goose launch that gets that far. Publishing before the
+    /// first process can exist is what closes the startup-report race:
+    /// a report requires a live agent, which requires the tmux start
+    /// this write precedes. Only a spec-publish failure records
+    /// nothing, and that failure provably started nothing. A tmux
+    /// failure records the decided value: the argv was fixed, so an
+    /// ambiguous survivor runs exactly what the row describes. Only
+    /// Goose writes here today.
+    ///
+    /// `program` is the launch classification's column spelling, not
+    /// the enum: the store keeps plain strings at its boundary the
+    /// way it does for OMP's pair, and the caller owns the mapping.
+    pub async fn record_goose_launch_provenance(
+        &self,
+        id: &str,
+        generation: i64,
+        program: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let program = program.to_owned();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute(
+                "UPDATE sessions SET goose_launch_program = ?3 \
+                 WHERE id = ?1 AND generation = ?2",
+                rusqlite::params![id, generation, program],
+            )
+            .context("recording the launch's Goose provenance")?;
+            Ok(())
+        })
+        .await
+        .context("Goose provenance record task panicked")?
+    }
+
+    /// Withdraw a Goose resume offer whose saved proof no longer
+    /// verifies: compare-replace version 1 → 0 under CAS, keeping the
+    /// id and the generation.
+    ///
+    /// The Goose analog of Pi/OMP fileless demotion: the id is kept,
+    /// the offer is withdrawn, and a later attributed report re-proves
+    /// under the usual CAS. The fence compares the conversation the
+    /// verifier read alongside the id, generation, and version, so a
+    /// DIFFERENT-id report that landed between the read and this
+    /// write keeps its version instead of being demoted for a
+    /// staleness it never had. What it deliberately does NOT cover
+    /// is a same-ID re-proof: every compared field still matches
+    /// that newer proof, so serializing verification with admission
+    /// is the CALLER's job — `verify_goose_resume` holds the
+    /// session's capture claim from its reload through this write.
+    /// `false` is that invalidation, never a malfunction.
+    pub async fn demote_goose_resume_provenance(
+        &self,
+        id: &str,
+        generation: i64,
+        expected_conversation: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let expected_conversation = expected_conversation.map(str::to_owned);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET capture_ownership_version = 0 \
+                     WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
+                     AND capture_ownership_version = 1",
+                    rusqlite::params![id, generation, expected_conversation],
+                )
+                .context("withdrawing an unverifiable Goose resume offer")?;
+            Ok(changed > 0)
+        })
+        .await
+        .context("Goose demotion task panicked")?
     }
 
     /// Record durably that this session's correlation was AMBIGUOUS, so no
@@ -5783,6 +5930,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -6638,6 +6786,7 @@ mod tests {
                 "ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE sessions DROP COLUMN goose_launch_program;
                  PRAGMA user_version = 18;",
             )
             .expect("downgrade the fixture to the pre-provenance schema");
@@ -6686,6 +6835,86 @@ mod tests {
         );
     }
 
+    /// Migration 22 lands the Goose launch-program column as NULL for
+    /// every old row and preserves the rest of the binding
+    /// byte-for-byte: a populated pre-22 database gains no launch
+    /// authority it never recorded.
+    ///
+    /// Why this test matters: `migrated_and_fresh_schemas_agree` proves
+    /// the migrated schema matches a fresh one, but a migration that
+    /// backfilled a program spelling (or dropped a column's data)
+    /// would still pass that comparison. Starting from a populated
+    /// row is what makes the NULL adoption and the preservation both
+    /// observable.
+    #[farhelm_testtrace::test]
+    async fn migration_22_lands_goose_program_as_null_for_old_rows() {
+        let (dir, store) = fresh_store().await;
+        let db_path = dir.path().join("supervisor.db");
+        let mut row = launching_row("old-goose");
+        row.agent_kind = farhelm_proto::AgentKind::Goose;
+        row.resume_template = Some(vec![
+            "goose".to_string(),
+            "session".to_string(),
+            "--resume".to_string(),
+            "--session-id".to_string(),
+            "{conversation}".to_string(),
+        ]);
+        row.captured_conversation = Some("goose-old".to_string());
+        row.conversation_source = Some("hook".to_string());
+        row.omp_launch_program = Some("omp".to_string());
+        store
+            .insert_session(row, None)
+            .await
+            .expect("insert migration fixture");
+        drop(store);
+        {
+            let conn = Connection::open(&db_path).expect("open raw v21 fixture");
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN goose_launch_program;
+                 PRAGMA user_version = 21;",
+            )
+            .expect("downgrade the fixture to the pre-Goose-provenance schema");
+            let downgraded: i64 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("read downgraded version");
+            assert_eq!(
+                downgraded, 21,
+                "the fixture premise: a genuine pre-22 database"
+            );
+        }
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v21");
+        let row = migrated
+            .session("old-goose")
+            .await
+            .expect("read migrated row")
+            .expect("row survives");
+        assert_eq!(
+            row.goose_launch_program, None,
+            "a pre-22 launch adopts NULL, so its reports fail closed"
+        );
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("goose-old"),
+            "the identity migrates byte-preserved"
+        );
+        assert_eq!(
+            row.omp_launch_program.as_deref(),
+            Some("omp"),
+            "the neighboring provenance migrates byte-preserved"
+        );
+        let version: i64 = Connection::open(&db_path)
+            .expect("open raw")
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read user version");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "the migration replays the whole ladder to the current version"
+        );
+    }
+
     /// Only the authoritative admission writer establishes version 1,
     /// and its CAS compares the complete prior binding — generation,
     /// exact locator, AND proof version.
@@ -6705,7 +6934,7 @@ mod tests {
 
         assert!(
             store
-                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-new")
+                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-new", None)
                 .await
                 .expect("admit"),
             "the first admission against the pristine binding must commit"
@@ -6719,6 +6948,10 @@ mod tests {
             row.captured_conversation.as_deref(),
             Some("conv-new"),
             "the admitted identity commits"
+        );
+        assert_eq!(
+            row.captured_record, None,
+            "a proof with no locator behind it commits NULL, as before"
         );
         assert_eq!(
             row.capture_ownership_version, 1,
@@ -6737,7 +6970,7 @@ mod tests {
         // A stale locator no longer matches the binding verification saw.
         assert!(
             !store
-                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-stale")
+                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-stale", None)
                 .await
                 .expect("stale admission"),
             "a superseded locator must not overwrite the committed binding"
@@ -6745,7 +6978,14 @@ mod tests {
         // Neither does a stale version: the CAS sees the whole binding.
         assert!(
             !store
-                .admit_ownership_proven_conversation("proven", 0, Some("conv-new"), 0, "conv-new")
+                .admit_ownership_proven_conversation(
+                    "proven",
+                    0,
+                    Some("conv-new"),
+                    0,
+                    "conv-new",
+                    None
+                )
                 .await
                 .expect("stale version"),
             "a superseded version must not re-bless the binding"
@@ -6763,6 +7003,188 @@ mod tests {
         assert_eq!(
             row.capture_ownership_version, 1,
             "both stale attempts leave the committed version alone"
+        );
+    }
+
+    /// A Goose admission persists its verification hint — the absolute
+    /// store path the accepted report's metadata was read from — beside
+    /// the identity, atomically with it. A later Goose transition
+    /// replaces the hint with the store it was proven against, and a
+    /// locator-less proof clears it back to NULL.
+    ///
+    /// Why this test matters: pre-resume verification re-opens the
+    /// saved locator. If the hint committed separately from the
+    /// identity (or lingered across a locator-less proof), a restart
+    /// could verify one conversation's id against another launch's
+    /// store — or against a store no proof ever named.
+    #[farhelm_testtrace::test]
+    async fn admitting_a_goose_binding_persists_its_store_locator() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .insert_session(launching_row("goose-locator"), None)
+            .await
+            .expect("insert admission fixture");
+
+        assert!(
+            store
+                .admit_ownership_proven_conversation(
+                    "goose-locator",
+                    0,
+                    None,
+                    0,
+                    "goose-conv",
+                    Some("/tmp/goose-home/.local/share/goose/sessions/sessions.db"),
+                )
+                .await
+                .expect("admit"),
+            "the first admission against the pristine binding must commit"
+        );
+        let row = store
+            .session("goose-locator")
+            .await
+            .expect("read admitted row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("goose-conv"),
+            "the admitted identity commits"
+        );
+        assert_eq!(
+            row.captured_record.as_deref(),
+            Some("/tmp/goose-home/.local/share/goose/sessions/sessions.db"),
+            "the proven store locator commits beside the identity"
+        );
+        assert_eq!(
+            row.capture_ownership_version, 1,
+            "the locator rides the same version-1 commit"
+        );
+
+        // A stale hint never overwrites the committed binding: the CAS
+        // compares the conversation, and the locator follows the winner.
+        assert!(
+            !store
+                .admit_ownership_proven_conversation(
+                    "goose-locator",
+                    0,
+                    None,
+                    0,
+                    "goose-stale",
+                    Some("/tmp/other/sessions.db"),
+                )
+                .await
+                .expect("stale admission"),
+            "a superseded binding must not overwrite the committed locator"
+        );
+        let row = store
+            .session("goose-locator")
+            .await
+            .expect("reread admitted row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_record.as_deref(),
+            Some("/tmp/goose-home/.local/share/goose/sessions/sessions.db"),
+            "the stale attempt leaves the committed locator alone"
+        );
+
+        // A locator-less proof clears the hint rather than inheriting a
+        // store its evidence never named.
+        assert!(
+            store
+                .admit_ownership_proven_conversation(
+                    "goose-locator",
+                    0,
+                    Some("goose-conv"),
+                    1,
+                    "goose-conv-2",
+                    None,
+                )
+                .await
+                .expect("locator-less admission"),
+            "a legitimate transition with no locator must commit"
+        );
+        let row = store
+            .session("goose-locator")
+            .await
+            .expect("read transitioned row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("goose-conv-2"),
+            "the transition commits"
+        );
+        assert_eq!(
+            row.captured_record, None,
+            "a proof with no locator clears the hint it replaces"
+        );
+    }
+
+    /// Withdrawing a Goose resume offer compare-replaces version 1 → 0
+    /// under CAS, keeping the id: the offer is withdrawn, the history
+    /// is preserved, and a newer report that landed between the
+    /// verifier's read and this write keeps its version.
+    ///
+    /// Why this test matters: the demotion runs on the restart path,
+    /// concurrently with reports. Without the id in the fence, a
+    /// verifier acting on stale evidence could strip version 1 from a
+    /// binding a newer report just established.
+    #[farhelm_testtrace::test]
+    async fn demoting_a_goose_binding_withdraws_the_offer_under_cas() {
+        let (_dir, store) = fresh_store().await;
+        for id in ["goose-demote", "goose-demote-stale"] {
+            let mut row = launching_row(id);
+            row.captured_conversation = Some("goose-conv".to_string());
+            row.conversation_source = Some("hook".to_string());
+            row.capture_ownership_version = 1;
+            row.captured_record = Some("/tmp/goose/sessions.db".to_string());
+            store
+                .insert_session(row, None)
+                .await
+                .expect("insert proven fixture");
+        }
+
+        assert!(
+            store
+                .demote_goose_resume_provenance("goose-demote", 0, Some("goose-conv"))
+                .await
+                .expect("demote"),
+            "the demotion against the binding the verifier read must commit"
+        );
+        let row = store
+            .session("goose-demote")
+            .await
+            .expect("read demoted row")
+            .expect("row survives");
+        assert_eq!(
+            row.capture_ownership_version, 0,
+            "the version withdraws to 0"
+        );
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("goose-conv"),
+            "the id is kept — only the offer is withdrawn"
+        );
+        assert_eq!(
+            row.captured_record.as_deref(),
+            Some("/tmp/goose/sessions.db"),
+            "the locator hint survives for the next report to replace"
+        );
+
+        // A newer report's binding is not the verifier's to withdraw.
+        assert!(
+            !store
+                .demote_goose_resume_provenance("goose-demote-stale", 0, Some("goose-older"))
+                .await
+                .expect("stale demotion"),
+            "a demotion fenced on a superseded id must land nothing"
+        );
+        let row = store
+            .session("goose-demote-stale")
+            .await
+            .expect("reread fenced row")
+            .expect("row survives");
+        assert_eq!(
+            row.capture_ownership_version, 1,
+            "the newer binding keeps its version"
         );
     }
 
@@ -6962,6 +7384,109 @@ mod tests {
         }
     }
 
+    /// A relaunch opens its generation with UNKNOWN Goose launch
+    /// provenance even when it preserves the captured conversation:
+    /// the program describes the LAUNCH (which argv started), not the
+    /// conversation being resumed, so carrying it across would lend
+    /// the previous run's capture authority to this one. If the new
+    /// generation's provenance publish then fails, the column stays
+    /// unknown and admission fails closed instead of evaluating this
+    /// launch's reporters as its predecessor.
+    ///
+    /// Why this test matters: the pre-spawn provenance write is
+    /// best-effort — a transient storage failure warns and launches
+    /// anyway. Starting from a non-NULL old program is what makes the
+    /// test discriminate: without the atomic clear, the failed publish
+    /// would leave the preceding generation's program on the new
+    /// generation's row. Both relaunch arms are covered because the
+    /// clear is unconditional: the Resume arm keeps its conversation
+    /// while losing its provenance.
+    ///
+    /// What stands in for the failed write: a provenance write through
+    /// the real function against a superseded generation, which the
+    /// fence provably drops. A failed write's observable contract is
+    /// that nothing lands, and this is a write — carrying a value
+    /// distinct from both the old and the new program — that lands
+    /// nothing. Afterwards the new generation's own publish lands,
+    /// proving the clear did not wedge the column.
+    #[farhelm_testtrace::test]
+    async fn relaunch_clears_goose_provenance_when_the_publish_lands_nothing() {
+        let (_dir, store) = fresh_store().await;
+        for id in ["goose-fresh", "goose-resume"] {
+            let mut row = launching_row(id);
+            row.captured_conversation = Some("conv-old".to_string());
+            row.conversation_source = Some("hook".to_string());
+            row.goose_launch_program = Some("goose".to_string());
+            store
+                .insert_session(row, None)
+                .await
+                .expect("insert stale-provenance fixture");
+        }
+        let basis = OfferBasis {
+            captured_conversation: Some("conv-old".to_string()),
+            capture_ambiguous: false,
+            capture_ownership_version: 0,
+        };
+        for (id, reset_capture, kept_conversation) in [
+            ("goose-fresh", true, None),
+            ("goose-resume", false, Some("conv-old")),
+        ] {
+            let claim = claimed(
+                store
+                    .begin_relaunch(id, basis.clone(), reset_capture, false)
+                    .await
+                    .expect("relaunch"),
+            );
+            let row = store
+                .session(id)
+                .await
+                .expect("read reopened row")
+                .expect("row survives");
+            assert_eq!(
+                row.goose_launch_program, None,
+                "{id}: the new generation must not inherit the previous run's program"
+            );
+            assert_eq!(
+                row.captured_conversation.as_deref(),
+                kept_conversation,
+                "{id}: the clear must not disturb the capture-preservation arm it rides with"
+            );
+            // The failed publish: a write through the real function that
+            // lands nothing — the fence drops a superseded generation.
+            store
+                .record_goose_launch_provenance(id, claim.generation - 1, "shell")
+                .await
+                .expect("a fenced-out write is still a successful call");
+            let row = store
+                .session(id)
+                .await
+                .expect("read after the failed publish")
+                .expect("row survives");
+            assert_eq!(
+                row.goose_launch_program.as_deref(),
+                None,
+                "{id}: a publish that lands nothing must leave unknown provenance, not stale authority"
+            );
+            // And the new generation's own publish lands on the cleared
+            // column — here a shell-wrapped launch, whose authority
+            // differs from the direct-`goose` launch it replaces.
+            store
+                .record_goose_launch_provenance(id, claim.generation, "shell")
+                .await
+                .expect("the new generation publishes");
+            let row = store
+                .session(id)
+                .await
+                .expect("read after the new publish")
+                .expect("row survives");
+            assert_eq!(
+                row.goose_launch_program.as_deref(),
+                Some("shell"),
+                "{id}: the new generation's program must publish onto the cleared column"
+            );
+        }
+    }
+
     /// Every outcome shape must survive the on-disk round trip — the stop
     /// annotation and the exit code especially, since those are exactly
     /// what SPEC.md promises a user still sees after a supervisor restart
@@ -7038,6 +7563,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -7094,6 +7620,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
@@ -7704,6 +8231,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
                     archived: false,
@@ -7771,6 +8299,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -7837,6 +8366,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s-omp".to_string(),
                     parent: None,
                     archived: false,
@@ -7938,6 +8468,7 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE sessions DROP COLUMN goose_launch_program;
                  PRAGMA user_version = 17;",
             )
             .expect("restore pre-checkout schema");
@@ -8258,6 +8789,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -8322,6 +8854,7 @@ mod tests {
             capture_ownership_version: 0,
             omp_reporter_asset: None,
             omp_launch_program: None,
+            goose_launch_program: None,
             canonical_cwd: None,
             captured_record: None,
             capture_ambiguous: false,
@@ -9316,6 +9849,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -9338,6 +9872,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -9394,6 +9929,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     created_at: CREATED,
                     last_activity_at: CREATED,
                     last_work_started_at: 0,
@@ -9514,6 +10050,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -10129,6 +10666,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -10455,6 +10993,7 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
+             ALTER TABLE sessions DROP COLUMN goose_launch_program;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              PRAGMA user_version = 11;",
@@ -10586,6 +11125,7 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
+                 ALTER TABLE sessions DROP COLUMN goose_launch_program;
                  DROP TABLE working_copies;
                  DROP TABLE working_copy_members;
                  PRAGMA user_version = 16;",
@@ -10668,6 +11208,7 @@ mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        goose_launch_program: None,
                         created_at: *created_at,
                         last_activity_at: *created_at,
                         last_work_started_at: 0,
@@ -10695,6 +11236,7 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
+             ALTER TABLE sessions DROP COLUMN goose_launch_program;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              PRAGMA user_version = 12;",
@@ -10781,6 +11323,7 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
+             ALTER TABLE sessions DROP COLUMN goose_launch_program;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              PRAGMA user_version = 13;",
@@ -11434,6 +11977,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -11646,6 +12190,7 @@ mod tests {
             capture_ownership_version: 0,
             omp_reporter_asset: None,
             omp_launch_program: None,
+            goose_launch_program: None,
             id: "s1".to_string(),
             parent: None,
             archived: false,

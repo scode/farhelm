@@ -1001,6 +1001,239 @@ pub(crate) fn foreground_omp_emitter(
     omp_corridor(&chain, program)
 }
 
+/// Whether one argv is exactly the Goose helper invocation:
+/// `internal goose-hook` after any `argv[0]`. A Goose-specific rule
+/// beside [`is_hook_invocation_argv`], which matches only `internal
+/// hook`.
+///
+/// Exact, not a prefix: the helper takes no arguments, so a live
+/// peer with trailing words is not the helper invocation this
+/// contract describes. A future helper flag requires a corridor
+/// update in the same change.
+fn is_goose_reporter_argv(argv: &[Vec<u8>]) -> bool {
+    argv.len() == 3 && argv[1] == b"internal" && argv[2] == b"goose-hook"
+}
+
+/// Whether one link's image is a native `goose` executable. A script
+/// named `goose` never matches: scripts resolve to their
+/// interpreter's image before this comparison runs. The ` (deleted)`
+/// suffix a replaced-while-running binary carries is stripped before
+/// comparing, the way the OMP half of this module does.
+fn is_goose_runtime_link(link: &ChainLink) -> bool {
+    omp_image_basename(&link.exe) == b"goose"
+}
+
+/// The exact persisted MCP reporter declaration's post-`sh -c` words:
+/// `exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook`.
+/// A below-runtime link is the narrow MCP trampoline ONLY when it is
+/// a shell whose `-c` command shell-splits to EXACTLY these words —
+/// resolved exes, extra words, or different words are not this
+/// launch's transparency, and `$`-leading expansions are matched ONLY
+/// as these literal bytes (the split never expands).
+fn is_goose_mcp_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
+    let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    if !matches!(name, b"sh" | b"bash" | b"dash") {
+        return false;
+    }
+    let [_, flag, command] = argv else {
+        return false;
+    };
+    if flag != b"-c" {
+        return false;
+    }
+    let command = match std::str::from_utf8(command) {
+        Ok(command) => command,
+        Err(_) => return false,
+    };
+    shell_words::split(command).is_ok_and(|words| {
+        words.as_slice()
+            == [
+                "exec",
+                "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}",
+                "internal",
+                "goose-hook",
+            ]
+    })
+}
+
+/// Whether one above-runtime link is this launch's transparent shell:
+/// a shell whose `-c` command shell-splits to exactly `exec goose`
+/// plus arguments. Same rule OMP's `S` applies, no new generality —
+/// a trampoline exec'ing anything else is not this launch's
+/// transparency, and (like every shell rule here) has no business
+/// with unquoted shell syntax anywhere past the words.
+fn is_goose_shell_trampoline(link: &ChainLink) -> bool {
+    let name = omp_image_basename(&link.exe);
+    if !matches!(name, b"sh" | b"bash" | b"dash") {
+        return false;
+    }
+    let Some(argv) = link.argv.as_deref() else {
+        return false;
+    };
+    let [_, flag, command] = argv else {
+        return false;
+    };
+    if flag != b"-c" {
+        return false;
+    }
+    let command = match std::str::from_utf8(command) {
+        Ok(command) => command,
+        Err(_) => return false,
+    };
+    let words = match shell_words::split(command) {
+        Ok(words) => words,
+        Err(_) => return false,
+    };
+    let [exec, target, ..] = words.as_slice() else {
+        return false;
+    };
+    exec == "exec" && *target == "goose" && !has_unquoted_shell_syntax(command)
+}
+
+/// Whether the emitter link's live argv still describes a Goose
+/// session, read through the SAME grammar injection uses — decoded
+/// to UTF-8 here, decided there. Missing or undecodable argv is
+/// missing evidence and refuses, as does any shape the grammar does
+/// not recognize: the corridor needs "recognized" only (fresh,
+/// resume, fork, and edit launches all emit reports worth
+/// attributing), but a utility argv can never carry the runtime.
+fn goose_runtime_session_grammar(link: &ChainLink) -> Result<(), String> {
+    let argv = link.argv.as_deref().ok_or_else(|| {
+        "the Goose runtime's command line could not be read; the report is refused".to_string()
+    })?;
+    let decoded: Option<Vec<String>> = argv
+        .iter()
+        .map(|arg| std::str::from_utf8(arg).map(str::to_string).ok())
+        .collect();
+    let Some(decoded) = decoded else {
+        return Err(
+            "the Goose runtime's command line is not valid UTF-8; the report is refused"
+                .to_string(),
+        );
+    };
+    match crate::agent_kind::goose::goose_launch_shape(&decoded) {
+        Some(_) => Ok(()),
+        None => Err(
+            "the live Goose runtime no longer describes a session; the report is refused"
+                .to_string(),
+        ),
+    }
+}
+
+/// Goose's instance of the restrictive corridor, over an
+/// already-walked chain: the reporter (first link, the
+/// kernel-attributed socket peer) must be exactly the helper
+/// invocation; exactly one native `goose` image is the emitter, whose
+/// LIVE argv must still describe a session through the shared
+/// grammar; the pane anchor (last link, the owned foreground) is
+/// accepted by position; below the runtime only the narrow MCP
+/// trampoline may appear; above it only this launch's transparent
+/// shell. Any second `goose`, any other session-hosting runtime, or
+/// any unclassified intermediary refuses.
+///
+/// Pure over the chain so the shapes are unit-testable without live
+/// processes; every refusal names the shape it found.
+fn goose_corridor(
+    chain: &[ChainLink],
+    program: &crate::agent_kind::goose::GooseLaunchProgram,
+) -> Result<ProcessIdentity, String> {
+    use crate::agent_kind::goose::GooseLaunchProgram;
+    if !matches!(
+        program,
+        GooseLaunchProgram::Goose | GooseLaunchProgram::Shell
+    ) {
+        return Err(
+            "the Goose launch shape is not a supported runtime; the report is refused".to_string(),
+        );
+    }
+    let Some(reporter) = chain.first() else {
+        return Err("the process chain is empty; the report is refused".to_string());
+    };
+    let reporter_argv = reporter.argv.as_deref().ok_or_else(|| {
+        "the reporter's command line could not be read; the report is refused".to_string()
+    })?;
+    if !is_goose_reporter_argv(reporter_argv) {
+        return Err(
+            "the reporter is not the Goose helper invocation; the report is refused".to_string(),
+        );
+    }
+    let mut emitter_index = None;
+    for (index, link) in chain.iter().enumerate().skip(1) {
+        if is_goose_runtime_link(link) {
+            if emitter_index.is_some() {
+                return Err(
+                    "two live Goose runtimes claim the report; the report is refused".to_string(),
+                );
+            }
+            emitter_index = Some(index);
+        }
+    }
+    let Some(emitter_index) = emitter_index else {
+        return Err("no live Goose runtime claims the report; the report is refused".to_string());
+    };
+    for link in &chain[1..emitter_index] {
+        let argv = link.argv.as_deref().ok_or_else(|| {
+            "a process between the reporter and the Goose runtime has no command line; the report is refused"
+                .to_string()
+        })?;
+        if !is_goose_mcp_trampoline(&link.exe, argv) {
+            return Err(
+                "a process between the reporter and the Goose runtime is not the MCP trampoline; the report is refused"
+                    .to_string(),
+            );
+        }
+    }
+    // The runtime's OWN argv is re-read live and must still describe a
+    // session: the launch-time classification says how this session
+    // started, not what this process is now.
+    goose_runtime_session_grammar(&chain[emitter_index])?;
+    // Links strictly between the emitter and the pane anchor — empty
+    // when the emitter IS the anchor (an exec'd pane), which the
+    // bounds check keeps from slicing backwards.
+    let last = chain.len() - 1;
+    if emitter_index + 1 < last {
+        for link in &chain[emitter_index + 1..last] {
+            if is_goose_shell_trampoline(link) {
+                continue;
+            }
+            // A second `goose` cannot reach this loop — the emitter
+            // scan above refuses it first, with the nesting
+            // diagnostic — so only the other session-hosting
+            // runtimes are named here.
+            if is_other_session_runtime(&link.exe) {
+                return Err(
+                    "another session-hosting runtime sits above the Goose emitter; the report is refused"
+                        .to_string(),
+                );
+            }
+            return Err(
+                "an unclassified process sits above the Goose emitter; the report is refused"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(ProcessIdentity {
+        pid: chain[emitter_index].pid,
+        start: chain[emitter_index].start,
+    })
+}
+
+/// Attribute a hook connection to the one Goose runtime under the owned pane
+/// that the launch installed.
+///
+/// The walk is the shared [`walk_to_pane`] mechanics; the corridor applied
+/// below is Goose's instance of the restrictive rule. `program` is the
+/// durable launch's program classification, so the live chain must agree
+/// with how the session was launched, not merely look like some Goose shape.
+pub(crate) fn foreground_goose_emitter(
+    peer: ProcessIdentity,
+    pane_pid: u32,
+    program: &crate::agent_kind::goose::GooseLaunchProgram,
+) -> Result<ProcessIdentity, String> {
+    let chain = walk_to_pane(peer, pane_pid)?;
+    goose_corridor(&chain, program)
+}
+
 /// Extract the environment region of a macOS `KERN_PROCARGS2` buffer,
 /// re-joined as the NUL-delimited block [`read_environ`] promises.
 ///
@@ -3437,5 +3670,463 @@ mod tests {
         let refusal = omp_corridor(&chain, &crate::agent_kind::omp::OmpLaunchProgram::Omp)
             .expect_err("a non-hook reporter must be refused");
         assert!(refusal.contains("supported hook invocation"), "{refusal}");
+    }
+
+    /// The Goose helper invocation, as the kernel captures it on the
+    /// reporter: any `argv[0]` plus the exact `internal goose-hook`
+    /// words.
+    fn goose_hook_argv() -> Vec<&'static str> {
+        vec!["farhelm", "internal", "goose-hook"]
+    }
+
+    /// One native `goose` image link running a session, with `tail`
+    /// appended after the `session` word.
+    fn goose_runtime_link(pid: u32, tail: &[&str]) -> ChainLink {
+        let mut argv = vec!["goose", "session"];
+        argv.extend(tail.iter().copied());
+        corridor_link(pid, "/usr/local/bin/goose", &argv)
+    }
+
+    /// The exact MCP trampoline command: the persisted declaration's
+    /// post-`sh -c` words, byte for byte.
+    fn goose_mcp_command() -> &'static str {
+        "exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook"
+    }
+
+    /// A native `goose` runtime with a direct helper child is the
+    /// primary supported shape — the one production launches take, in
+    /// which the extension manager's `sh -c` execs the helper away and
+    /// no trampoline link survives — so the corridor must keep
+    /// admitting it while every refusal below stays closed.
+    ///
+    /// Why this test matters: it is the shape the live admission
+    /// tests exercise, pinned here without processes.
+    #[farhelm_testtrace::test]
+    fn a_native_goose_runtime_with_a_direct_helper_child_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(11, &[]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let emitter = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect("the installed shape must be admitted");
+        assert_eq!(emitter.pid, 11, "the emitter is the goose runtime");
+    }
+
+    /// The pane anchor may itself be the runtime: a pane that exec'd
+    /// into the launch has no wrapper link left, and position must not
+    /// cost it the emitter role.
+    #[farhelm_testtrace::test]
+    fn a_pane_execd_into_the_goose_runtime_is_still_the_emitter() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(11, &["--resume", "--session-id", "parent-1"]),
+        ];
+        let emitter = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect("an exec'd pane runtime must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// Resume, fork, and edit argv still attribute: the corridor needs
+    /// "recognized" only, because every session shape emits reports
+    /// worth attributing — the launch-time resume bit is not
+    /// re-decided here.
+    #[farhelm_testtrace::test]
+    fn session_shaped_argv_variants_still_attribute() {
+        for tail in [
+            vec!["--resume", "--session-id", "parent-1"],
+            vec!["--fork", "--session-id", "parent-1"],
+            vec!["--edit", "--session-id", "parent-1"],
+            vec![
+                "--with-extension",
+                "farhelm-reporter:sh -c 'exec farhelm internal goose-hook'",
+            ],
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+                goose_runtime_link(11, &tail),
+            ];
+            goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+                .unwrap_or_else(|error| panic!("{tail:?} must attribute: {error}"));
+        }
+    }
+
+    /// A shell launch program admits the exec'd-away wrapper: no link
+    /// survives a shell that already exec'd into the runtime, so the
+    /// chain looks exactly like a direct launch — and the provenance
+    /// saying `shell` must not void it. This is the manual-declaration
+    /// shape: injection skipped, reporter declared by hand.
+    #[farhelm_testtrace::test]
+    fn a_shell_launch_program_with_an_execd_away_wrapper_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(11, &[]),
+        ];
+        let emitter = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Shell)
+            .expect("an exec'd-away shell wrapper must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// A surviving shell trampoline above the runtime admits under
+    /// both programs: `sh -c` exec'ing exactly the runtime is this
+    /// launch's transparency either way.
+    #[farhelm_testtrace::test]
+    fn a_surviving_shell_trampoline_above_the_runtime_is_admitted() {
+        for program in [
+            crate::agent_kind::goose::GooseLaunchProgram::Goose,
+            crate::agent_kind::goose::GooseLaunchProgram::Shell,
+        ] {
+            let chain = vec![
+                corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+                goose_runtime_link(12, &[]),
+                corridor_link(11, "/bin/sh", &["sh", "-c", "exec goose session"]),
+                corridor_link(10, "/bin/bash", &["-bash"]),
+            ];
+            let emitter = goose_corridor(&chain, &program)
+                .expect("a surviving exec trampoline must be admitted");
+            assert_eq!(emitter.pid, 12);
+        }
+    }
+
+    /// The exact MCP trampoline below the runtime admits: a shell
+    /// whose `-c` command shell-splits to precisely the persisted
+    /// declaration's words, for shells that keep the link instead of
+    /// exec'ing it away.
+    #[farhelm_testtrace::test]
+    fn an_exact_mcp_trampoline_below_the_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            corridor_link(12, "/bin/sh", &["sh", "-c", goose_mcp_command()]),
+            goose_runtime_link(11, &[]),
+        ];
+        let emitter = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect("the exact MCP trampoline must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// The MCP trampoline matches by exact words, not by resemblance:
+    /// a resolved executable, extra words, different words, and a
+    /// non-shell image all refuse. Each deviation gets its own chain
+    /// so a failure names the deviation, not a row in a loop.
+    #[farhelm_testtrace::test]
+    fn mcp_trampoline_deviations_are_refused() {
+        let chains = [
+            (
+                "a resolved exe",
+                corridor_link(
+                    12,
+                    "/bin/sh",
+                    &["sh", "-c", "exec /opt/test/bin/farhelm internal goose-hook"],
+                ),
+            ),
+            (
+                "extra words",
+                corridor_link(
+                    12,
+                    "/bin/sh",
+                    &[
+                        ("sh"),
+                        ("-c"),
+                        ("exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook --extra"),
+                    ],
+                ),
+            ),
+            (
+                "different words",
+                corridor_link(12, "/bin/sh", &["sh", "-c", "exec farhelm internal hook"]),
+            ),
+            (
+                "a chained command",
+                corridor_link(
+                    12,
+                    "/bin/sh",
+                    &[
+                        ("sh"),
+                        ("-c"),
+                        ("exec \"${FARHELM_GOOSE_REPORTER_EXE:-farhelm}\" internal goose-hook; echo hi"),
+                    ],
+                ),
+            ),
+            (
+                "a non-shell image",
+                corridor_link(12, "/usr/bin/sleep", &["sh", "-c", goose_mcp_command()]),
+            ),
+        ];
+        for (label, trampoline) in chains {
+            let chain = vec![
+                corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+                trampoline,
+                goose_runtime_link(11, &[]),
+            ];
+            let refusal =
+                goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+                    .expect_err(&format!("{label} must be refused"));
+            assert!(
+                refusal.contains("not the MCP trampoline"),
+                "{label}: {refusal}"
+            );
+        }
+    }
+
+    /// A non-trampoline process below the runtime refuses: only the
+    /// narrow MCP shape may sit between the reporter and the runtime.
+    #[farhelm_testtrace::test]
+    fn a_non_trampoline_below_the_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            corridor_link(12, "/usr/bin/sleep", &["sleep", "25"]),
+            goose_runtime_link(11, &[]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("a non-trampoline below the runtime must be refused");
+        assert!(refusal.contains("not the MCP trampoline"), "{refusal}");
+    }
+
+    /// Two live `goose` images refuse: a nested session passes its own
+    /// checks on its own context, so only the duplicate-emitter rule
+    /// can refuse it — this is the central regression the corridor
+    /// pins.
+    #[farhelm_testtrace::test]
+    fn a_nested_goose_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(12, &[]),
+            goose_runtime_link(11, &[]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("nested goose must be refused");
+        assert!(refusal.contains("two live Goose runtimes"), "{refusal}");
+    }
+
+    /// A mixed-harness runtime above the emitter refuses with the
+    /// session-hosting diagnostic rather than a generic intermediary:
+    /// the shape is recognized, and recognized as another session.
+    #[farhelm_testtrace::test]
+    fn a_mixed_harness_above_the_runtime_is_refused() {
+        for (exe, argv) in [
+            ("/opt/test/bin/omp", vec!["omp", "--resume", "conv.jsonl"]),
+            ("/usr/local/bin/pi", vec!["pi", "--model", "x"]),
+        ] {
+            let chain = vec![
+                corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+                goose_runtime_link(12, &[]),
+                corridor_link(11, exe, &argv),
+                corridor_link(10, "/bin/bash", &["-bash"]),
+            ];
+            let refusal =
+                goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+                    .expect_err(&format!("{exe} above the emitter must be refused"));
+            assert!(
+                refusal.contains("another session-hosting runtime"),
+                "{exe}: {refusal}"
+            );
+        }
+    }
+
+    /// An unclassified process above the emitter refuses: anything
+    /// that is neither this launch's transparent shell nor a
+    /// recognized runtime voids the chain.
+    #[farhelm_testtrace::test]
+    fn an_unclassified_process_above_the_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(12, &[]),
+            corridor_link(11, "/usr/bin/sleep", &["sleep", "25"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("an unclassified intermediary must be refused");
+        assert!(refusal.contains("unclassified process"), "{refusal}");
+    }
+
+    /// An unknown launch program refuses before any link is examined:
+    /// the chain below would otherwise admit, which is what proves
+    /// the refusal is upfront rather than shape-driven.
+    #[farhelm_testtrace::test]
+    fn an_unknown_goose_launch_program_is_refused_upfront() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(11, &[]),
+        ];
+        let refusal = goose_corridor(
+            &chain,
+            &crate::agent_kind::goose::GooseLaunchProgram::Unknown,
+        )
+        .expect_err("an unknown launch program must be refused");
+        assert!(refusal.contains("not a supported runtime"), "{refusal}");
+    }
+
+    /// A non-helper reporter refuses even with a clean chain behind
+    /// it: the corridor never admits on ancestry shape alone. The
+    /// `internal hook` spelling (other harnesses' helper) is included
+    /// because sharing it would cross-wire vendors.
+    #[farhelm_testtrace::test]
+    fn a_non_helper_reporter_is_refused() {
+        for argv in [
+            vec!["farhelm", "agent", "instructions"],
+            vec!["farhelm", "internal", "hook"],
+            vec!["farhelm", "internal", "hook", "--vendor", "goose"],
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &argv),
+                goose_runtime_link(11, &[]),
+            ];
+            let refusal =
+                goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+                    .expect_err(&format!("{argv:?} must be refused"));
+            assert!(
+                refusal.contains("not the Goose helper invocation"),
+                "{argv:?}: {refusal}"
+            );
+        }
+    }
+
+    /// The reporter rule is exact: trailing words on the helper
+    /// invocation refuse, because the helper takes no arguments and a
+    /// live peer carrying them is not the invocation this contract
+    /// describes.
+    #[farhelm_testtrace::test]
+    fn a_helper_reporter_with_trailing_words_is_refused() {
+        let chain = vec![
+            corridor_link(
+                12,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "internal", "goose-hook", "--extra"],
+            ),
+            goose_runtime_link(11, &[]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("trailing words must be refused");
+        assert!(
+            refusal.contains("not the Goose helper invocation"),
+            "{refusal}"
+        );
+    }
+
+    /// Missing argv anywhere on the reporter or runtime refuses:
+    /// unreadable evidence is missing evidence, never an admission.
+    #[farhelm_testtrace::test]
+    fn missing_argv_refuses() {
+        let chain = vec![
+            corridor_link_no_argv(12, "/opt/test/bin/farhelm"),
+            goose_runtime_link(11, &[]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("a missing reporter command line must be refused");
+        assert!(refusal.contains("could not be read"), "{refusal}");
+
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            corridor_link_no_argv(11, "/usr/local/bin/goose"),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("a missing runtime command line must be refused");
+        assert!(refusal.contains("could not be read"), "{refusal}");
+    }
+
+    /// Non-UTF-8 runtime argv refuses: the grammar decides over decoded
+    /// words, and undecodable bytes are missing evidence.
+    #[farhelm_testtrace::test]
+    fn non_utf8_runtime_argv_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            ChainLink {
+                pid: 11,
+                ppid: 0,
+                start: 11_000,
+                exe: b"/usr/local/bin/goose".to_vec(),
+                argv: Some(vec![b"goose".to_vec(), b"session".to_vec(), vec![0xff]]),
+            },
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("non-UTF-8 runtime argv must be refused");
+        assert!(refusal.contains("not valid UTF-8"), "{refusal}");
+    }
+
+    /// A runtime that no longer describes a session refuses even
+    /// though its image is still `goose`: the launch-time
+    /// classification says how this session started, not what this
+    /// process is now. A `--help` tail and a `configure` verb both
+    /// leave the session grammar.
+    #[farhelm_testtrace::test]
+    fn a_runtime_that_left_the_session_grammar_is_refused() {
+        for tail in [vec!["--help"], vec!["configure"]] {
+            let mut argv = vec!["goose"];
+            if tail != ["configure"] {
+                argv.push("session");
+            }
+            argv.extend(tail.iter().copied());
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+                corridor_link(11, "/usr/local/bin/goose", &argv),
+            ];
+            let refusal =
+                goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+                    .expect_err(&format!("{argv:?} must be refused"));
+            assert!(
+                refusal.contains("no longer describes a session"),
+                "{argv:?}: {refusal}"
+            );
+        }
+    }
+
+    /// A script named `goose` is not a runtime: its image is the
+    /// interpreter's, and the descriptor matches the image — never
+    /// `argv[0]`, however session-shaped the words.
+    #[farhelm_testtrace::test]
+    fn a_script_named_goose_is_not_a_runtime() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            corridor_link(11, "/bin/sh", &["/usr/local/bin/goose", "session"]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("a script named goose must be refused");
+        assert!(refusal.contains("no live Goose runtime"), "{refusal}");
+    }
+
+    /// A `goose` image carrying the ` (deleted)` suffix still matches:
+    /// a binary replaced while running keeps its identity for the
+    /// walk's purposes.
+    #[farhelm_testtrace::test]
+    fn a_replaced_while_running_goose_image_still_matches() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            corridor_link(11, "/usr/local/bin/goose (deleted)", &["goose", "session"]),
+        ];
+        let emitter = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect("a replaced image must still match");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// A shell trampoline exec'ing another program is not this
+    /// launch's transparency: only `exec goose` names the runtime the
+    /// provenance describes.
+    #[farhelm_testtrace::test]
+    fn a_goose_shell_trampoline_execing_another_program_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "exec codex exec"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("a foreign exec target must be refused");
+        assert!(refusal.contains("unclassified process"), "{refusal}");
+    }
+
+    /// A chained trampoline mentioning the runtime refuses: the `;`
+    /// is unquoted shell syntax past the words, so the link is not a
+    /// transparent exec no matter which binary it names.
+    #[farhelm_testtrace::test]
+    fn a_chained_shell_trampoline_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &goose_hook_argv()),
+            goose_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "exec goose session; echo hi"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
+            .expect_err("a chained trampoline must be refused");
+        assert!(refusal.contains("unclassified process"), "{refusal}");
     }
 }

@@ -117,6 +117,7 @@ use std::path::{Path, PathBuf};
 
 mod capture;
 pub(crate) mod codex;
+pub(crate) mod goose;
 pub(crate) mod omp;
 pub(crate) use capture::read_prefix as read_bounded_regular_file;
 pub use capture::{
@@ -2551,8 +2552,8 @@ impl IntegrationSnapshot {
 /// preserved, not re-blessed, until their kind flips.
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
-        AgentKind::Codex | AgentKind::Omp => true,
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi => false,
+        AgentKind::Codex | AgentKind::Omp | AgentKind::Goose => true,
+        AgentKind::Claude | AgentKind::Pi => false,
         AgentKind::Generic => false,
     }
 }

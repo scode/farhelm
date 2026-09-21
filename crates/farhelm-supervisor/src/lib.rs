@@ -41,6 +41,7 @@
 pub mod agent_kind;
 pub mod attachments;
 pub mod files;
+pub(crate) mod goose_store;
 pub mod launch;
 mod pi_extension;
 pub mod repository_discovery;
