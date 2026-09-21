@@ -18,6 +18,44 @@ Motivation: single language across supervisor, helm, CLI, and UI maximizes share
 real components. tokio because the chosen web stack (axum, tungstenite) lives there; no exotic async needs exist that
 would justify anything else.
 
+## Transactional database representations
+
+A database may store multiple materialized representations of the same information, such as a session's full JSON record
+alongside columns extracted for lookup, filtering, or ordering. This is an accepted implementation choice: writers must
+derive mutually consistent values and update them together in the same transaction. Good test coverage of those writes
+and relevant migrations establishes the invariant; readers may rely on it.
+
+Sanity checks comparing representations that should agree are encouraged where they are extremely trivial and add no
+meaningful performance cost or implementation complexity. They are optional. The absence of such a check, or unequal
+coverage of these checks across read paths, is not itself a bug. Do not add repeated decoding, extra queries, recovery
+machinery, or other overhead merely to detect hypothetical corruption of correctly maintained transactional data. Review
+findings should identify a concrete writer, migration, or transaction-boundary defect that can violate the invariant,
+rather than require every reader to re-prove it. This reliance on internal transactional writes does not remove
+validation requirements at external input boundaries or excuse an established write-consistency bug.
+
+## Supervisor metadata retention and nonresponse
+
+The helm may retain a fixed amount of metadata about a supervisor indefinitely, including while that supervisor is
+unavailable. Retention duration alone is not a leak or a bug: the relevant distinction is whether state accumulates
+without bound over time, not whether an unavailable supervisor's metadata eventually expires.
+
+Separately, defending against state accumulation caused by a malicious or buggy supervisor selectively failing to answer
+requests is outside the implementation's requirements. For example, a supervisor may keep a connection alive while
+leaving some requests unanswered, retaining their reply-routing bookkeeping. The lack of special cleanup, timeouts, or
+quotas to prevent growth under that behavior is not a bug; do not spend implementation complexity on defending against
+it. This exception does not excuse unbounded accumulation during ordinary operation with a correctly behaving supervisor
+or failure to perform the specified cleanup when a connection is retired or a host is removed.
+
+## Session IDs in logs
+
+Session IDs must not inject log lines or use invisible or direction-changing characters to disguise the ID shown in
+logs. Rejecting IDs outside plain printable ASCII is an acceptable way to meet this requirement; choose that option when
+it is simpler. There is no requirement to accept or carry arbitrary Unicode session IDs through the system. Safe
+escaping by the configured logging formatter also satisfies the requirement without a separate escaping helper at each
+call site. Prefer the simplest implementation that meets this behavior; do not add duplicate escaping or new
+infrastructure where the logger already provides it. This rule concerns session IDs, not a new general validation
+framework for every externally supplied value.
+
 ## Workspace layout
 
 - `crates/farhelm` — the single multi-call binary (see CLI).

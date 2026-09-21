@@ -17,7 +17,6 @@ One line per open item. This file must always match the feedback files in this d
   another.
 - `commit-window-reads-unpublished-outcome.md` — a commit in the close-to-publish window gets the generic error.
 - `create-runs-inline-on-read-loop.md` — CreateSession runs its full validate-and-launch inline on the read loop.
-- `delete-quarantine-waits-unboundedly.md` — session-delete quarantine awaits the disk unboundedly under the claim.
 - `detach-timeout-abandons-upstream-detach.md` — detach timeout drops the send, leaving the supervisor-side attachment
   live.
 - `directory-source-staging-leak.md` — crash-orphaned extraction staging files are never pruned.

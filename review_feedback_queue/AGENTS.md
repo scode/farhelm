@@ -48,3 +48,8 @@ the user's decision in root `TRIAGE_OUTCOMES.md` without changing the feedback f
 decision and removes or narrows the item in its own draft PR. A `discard` outcome means only "not worth the human's time
 at this time", not that the feedback is wrong; its execution removes the file and index entry without a spec or code
 change. The outcome ledger lives outside this directory and is not a feedback file to add to `INDEX.md`.
+
+Exception: when triage verifies that a finding is fully covered by an accepted specification rule or an existing
+`Planned` item in TODO.md, record the basis in the ledger and remove the feedback file and index entry immediately.
+These items must not remain in the queue to be skipped repeatedly. Completing this queue cleanup does not mean the
+planned implementation is complete.

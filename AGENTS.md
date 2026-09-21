@@ -367,9 +367,9 @@ addressed) in the same commit, change, or PR as the fix.
 ## Triage step
 
 "Triage review feedback" means decide what to do with individual items, WITH the user. It does not authorize fixes or PR
-creation. Read `review_feedback_queue/AGENTS.md`, the index, and root `TRIAGE_OUTCOMES.md` if it exists. Work through
-items in index order unless the user chooses another order, skipping items with a recorded decision unless asked to
-revisit them.
+creation. Read `review_feedback_queue/AGENTS.md`, the index, root `TRIAGE_OUTCOMES.md` if it exists, and the `Planned`
+bucket in `TODO.md`. Work through items in index order unless the user chooses another order, skipping items with a
+recorded decision unless asked to revisit them.
 
 For each item, complete these steps before asking the user for an outcome:
 
@@ -382,6 +382,16 @@ For each item, complete these steps before asking the user for an outcome:
    inconclusive, say exactly what remains unverified and why; do not present it as confirmed.
 3. State the assessment to the user, with the evidence and any uncertainty: confirmed, partly correct, incorrect,
    already addressed, or unresolved. Keep correctness separate from whether the issue is worth addressing.
+
+Before presenting an item for a decision, check whether its behavior is explicitly accepted by the current SPEC.md or
+SPEC_impl.md, or its fix is already covered by an item in TODO.md's `Planned` bucket. Verify the actual trigger,
+consequence, and scope against that acceptance or planned work; sharing a subsystem or keyword is not enough. If fully
+covered, skip renewed discussion and record `other` with the exact spec section or planned item as the reason. Remove
+the feedback file and its index entry immediately, and record execution as complete for that queue cleanup; do not leave
+the item to be skipped again in later sessions. Already planned means acknowledged work, not an implemented fix. Do not
+implement it, broaden its scope, or create another TODO merely because the same issue appears in feedback. If only part
+is covered, bring the uncovered part to the user. Briefly report skipped items and their basis, then continue to the
+next undecided item. This is an exception to the per-item decision question below.
 
 Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Name the feedback
 filename and explain the affected feature or operation, the triggering scenario, expected versus actual behavior, and
@@ -415,7 +425,8 @@ as it appears in `review_feedback_queue/`, with these fields:
 Keep previous decisions and execution records; do not overwrite the file on a new triage session. If the user revises a
 decision, retain the prior decision and note what supersedes it. Do not create entries for undecided items. Triaged
 items are no longer awaiting a triage decision, but their feedback files and index entries stay until execution,
-including for `discard`. This preserves the input for the separate execution step and its per-item PR.
+including for `discard`. This preserves the input for the separate execution step and its per-item PR. The automatic
+spec-covered or already-planned cleanup above is the exception: those queue items are removed during triage itself.
 
 ## Execute triage outcomes
 

@@ -469,3 +469,206 @@
 - Execution: `complete`; draft PR: https://github.com/scode/farhelm/pull/785/changes. jj change:
   `qynrmolprrxqxxvxvqoqmuwvuvuvzrzx`; bookmark: `fix-upload-tombstone-count`. The mixed-route regression now retains the
   newest 32 finished receipts and all eight live transfers, evicting only the oldest finished excess.
+
+## agent-label-empty-cell-on-trailing-slash.md
+
+- Outcome: `discard`.
+- Assessment: partly confirmed by current-code inspection, not runtime reproduction. The agent-facing label helper
+  returns an empty basename for a raw program token ending in `/`; the browser UI already preserves that token. Empty
+  invocations are refused by current creation validation. This is a cosmetic edge case for an invalid executable path,
+  not a failure to support unfamiliar agents. The spec requires argument secrecy, not an explicitly nonempty label.
+- Decision: the user chose discard after discussing the label's purpose, arbitrary-command support, and the limited
+  impact. No remedial action.
+- Completion criteria: remove the feedback file and its index entry during execution, without code, spec, or TODO
+  changes.
+- Execution: `pending`.
+
+## ambiguous-restart-misattributes-exit.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed by current-code inspection, not runtime reproduction. Ambiguous relaunch recovery
+  republishes the previous terminal with the new generation and a Launching outcome. The status and observation paths
+  can then attribute the old dead pane's exit to that generation. Startup reconciliation has a stale-pane guard, but the
+  feedback's claim of repeated status flips is overstated: a wrongly committed terminal outcome need not be undone by a
+  supervisor restart.
+- Decision: the user chose fix code only while the change remains simple. Stop and return the item for discussion if
+  implementation requires substantial complexity; do not expand into a lifecycle redesign or new tracking machinery.
+- Completion criteria: prevent an unresolved restart from attributing the previous run's exit to the new launch, with
+  consistent displayed and durable outcomes. Preserve genuine launch-error reporting and verified exits, including quick
+  exits. Verify the boundary with a focused regression and inspect startup reconciliation. Remove the feedback file and
+  its index entry only when the bounded fix is complete; retain them if the complexity caveat stops execution.
+- Execution: `pending`.
+
+## archive-discards-stopped-agent-exit-code.md
+
+- Outcome: `fix spec+code`.
+- Assessment: partly confirmed by current-code inspection, not runtime reproduction. Session Archive can destroy the
+  terminal without collecting its available final exit code, then record an annotated exit with no code. Already
+  recorded terminal outcomes are preserved, so the finding's universal claim is overstated. A natural exit racing
+  Archive can receive a stop annotation, but collecting an exit code alone does not resolve that attribution race. The
+  GUI exposes Archive without exposing a control to include archived sessions in its list.
+- Decision: remove the concept of an archived SESSION from the product, rather than repair this feature. The user has no
+  established use case for it and prefers removing its complexity; a future feature can be designed if a clear use case
+  emerges. This is a product-wide removal, not merely hiding the GUI action: remove session Archive operations,
+  archived-session state and filtering, unarchive behavior, and associated special cases across GUI, CLI, agent tools,
+  APIs, protocol, persistence, and implementation wherever they exist. Update the authoritative specifications and
+  maintained documentation to describe the resulting product.
+- Completion criteria: no supported operation archives or unarchives a session, and no active session model or listing
+  depends on an archived-session flag. Remove obsolete feature-specific code and tests; validate remaining lifecycle
+  operations and address existing persisted archived rows explicitly. Do not silently delete those sessions, launch
+  their agents, or discard their retained metadata or attachments as a migration shortcut. Assess schema and protocol
+  compatibility during implementation, retaining only compatibility machinery actually required by repository policy.
+  This decision does NOT remove or change OWNED GITHUB CHECKOUT DIRECTORY ARCHIVAL: deleting a session with an owned
+  GitHub checkout must retain the existing behavior that moves the checkout into `farhelm-archived-working-copies`,
+  including its ownership checks, retention, journaling, recovery, and safety rules. That filesystem operation is
+  separate from session Archive and remains specified and tested. Do not use a blanket removal of symbols or prose
+  containing "archive"; classify each reference by which feature it serves. Remove this feedback file and its index
+  entry when the session-feature removal is complete. Other queued findings made obsolete by that removal must be
+  explicitly accounted for, not silently fixed or discarded during triage.
+- Execution: `pending`.
+
+## archived-retry-resurrects-session.md
+
+- Outcome: `other`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. An interrupted keyed create can retain a
+  pending reservation and an unlaunched session. Archiving that session does not settle the reservation; a later retry
+  can take it over, replace the archived row with an unarchived one, and launch the agent. The existing lifecycle claim
+  protects takeover but does not check the archived flag. Ordinary completed-create retries are outside this finding.
+- Decision: the user agreed to resolve this through the session Archive removal recorded under
+  `archive-discards-stopped-agent-exit-code.md`, without a separate bug fix.
+- Completion criteria: after that removal eliminates the affected archived-session state and operation, remove this
+  feedback file and its index entry and record the dependency as satisfied. Do not change owned GitHub checkout
+  directory archival on session deletion, which is unrelated and remains supported.
+- Execution: `pending`; depends on `archive-discards-stopped-agent-exit-code.md`.
+
+## cached-session-skips-created-at-check.md
+
+- Outcome: `fix spec`.
+- Assessment: the read-path inconsistency is confirmed by code inspection, not runtime reproduction: the list compares
+  the cached creation-time column with its JSON payload, while the individual stale-detail read does not. Both normal
+  cache writers derive those representations from the same session record and write them together in one SQL statement
+  within a transaction. No current writer defect or ordinary timing window producing disagreement was established.
+- Decision: the user accepts multiple materialized representations within a database when maintained together and
+  transactionally, relying on correct writes and good test coverage. Extremely trivial sanity checks without performance
+  or complexity costs are encouraged but optional; missing checks are not bugs. Do not add recurring corruption checks
+  and overhead as a substitute for trusting that invariant.
+- Completion criteria: state the general principle in SPEC_impl.md, without adding a timestamp check or removing
+  existing checks. Remove this feedback file and its index entry during execution. Preserve external-input validation
+  and review of concrete writer or migration defects.
+- Execution: `in progress`; the requested implementation-spec clarification is applied locally and formatting checked.
+  Queue removal and the execution PR remain pending.
+
+## clone-audit-log-skips-escape-for-log.md
+
+- Outcome: `fix spec`.
+- Assessment: the claimed log-forgery behavior is not supported by current-code inspection. Create and clone log session
+  IDs as ordinary string fields; the configured tracing formatter uses Rust debug escaping for those fields, including
+  the invisible and direction-changing characters described in the finding. Omitting the custom helper does not imply
+  missing escaping. Clone also resolves the source against a current session listing before logging it. No runtime
+  reproduction was performed.
+- Decision: specify safe session-ID presentation in logs only, not a broad rule about untrusted input. The user accepts
+  rejecting IDs outside plain normal ASCII and explicitly prefers rejection when it is simpler. There is no requirement
+  to support arbitrary Unicode IDs or thread them through new escaping machinery. Existing logging-library escaping
+  satisfies the behavior without additional call-site helpers.
+- Completion criteria: add the narrow behavior and simplicity preference to SPEC_impl.md. No code change or general
+  validation framework is requested. Remove this feedback file and its index entry during execution.
+- Execution: `in progress`; the requested implementation-spec clarification is applied locally and formatting checked.
+  Queue removal and the execution PR remain pending.
+
+## cancelled-request-leaks-pending-entry.md
+
+- Outcome: `fix spec`.
+- Assessment: cancellation after enqueue retains a reply-routing entry until a reply arrives or the connection is
+  closed. This is confirmed by code inspection, not runtime reproduction. Sustained growth requires unanswered requests
+  on a connection that stays live; ordinary replies and connection retirement clear the entries. No leak surviving
+  connection teardown or host removal was established.
+- Decision: the user accepts indefinite retention of a fixed amount of supervisor metadata, even during unavailability,
+  provided it does not accumulate without bound over time. Separately, defending against accumulation caused by a
+  malicious or buggy supervisor selectively failing to answer requests is out of scope. Missing defenses against that
+  behavior are not bugs and do not justify added complexity.
+- Completion criteria: state both principles in SPEC_impl.md without adding cancellation cleanup or removing existing
+  cleanup. Preserve ordinary-operation boundedness and specified connection-retirement and host-removal cleanup. Remove
+  this feedback file and its index entry during execution.
+- Execution: `in progress`; the requested implementation-spec clarification is applied locally and formatting checked.
+  Queue removal and the execution PR remain pending.
+
+## commit-window-reads-unpublished-outcome.md
+
+- Outcome: `discard`.
+- Assessment: confirmed ordering gap by current-code inspection, not runtime reproduction. Upload cleanup closes its
+  command channel before publishing the final ending reason. A commit arriving in between can receive the generic
+  no-upload refusal instead of the deletion-specific refusal. The request still fails visibly, and a separate abort
+  notification carries the reason. No data-loss or hung-request consequence was established.
+- Decision: the user chose discard after discussing the limited diagnostic impact and the extra state needed to separate
+  the ending reason from cleanup completion.
+- Completion criteria: remove the feedback file and its index entry during execution without changing code or specs.
+- Execution: `pending`.
+
+## host-views-transiently-pairs-new-identity-with-stale-mismatch.md
+
+- Outcome: `discard`.
+- Assessment: confirmed transient display inconsistency by current-code inspection, not runtime reproduction. Host-view
+  assembly reads the registry separately from the actor snapshot; a read during adoption can pair the new identity with
+  the old mismatch warning. Subsequent reads converge. Adoption still validates identity and routing uses manager state,
+  not the assembled host view. No wrong action or durable state loss was established.
+- Decision: discarded under the user's authorization to discard rare timing-dependent findings whose only impact is
+  slightly misleading presentation, without data loss or a serious operational consequence.
+- Completion criteria: remove the feedback file and its index entry during execution without code or spec changes.
+- Execution: `pending`.
+
+## supervisor-discards-actor-panic-cause.md
+
+- Outcome: `discard`.
+- Assessment: confirmed diagnostic limitation by current-code inspection, not runtime reproduction. The actor monitor
+  discards the panic payload when constructing its structured warning and visible retirement reason. Retirement and
+  client cleanup still run. The default panic hook retains the cause on stderr; silent hooks in separate agent-hook
+  commands do not apply to the helm. No production panic trigger was established by this finding.
+- Decision: discarded under the user's authorization to discard rare diagnostic-only edge cases. This finding concerns
+  missing detail after an actor panic, not the cause of the panic or a failure to retire its connection.
+- Completion criteria: remove the feedback file and its index entry during execution without code or spec changes.
+- Execution: `pending`.
+
+## create-runs-inline-on-read-loop.md
+
+- Outcome: `other`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Both create dispatch paths await creation
+  inline on their connection's read loop, delaying later incoming frames, including terminal input and unrelated
+  requests. Other hosts remain independent, and existing output tasks can continue. Creation has intent, directory, and
+  parent lifecycle admission but does not use the shared slow-handler task admission. A correct background-handler fix
+  requires preserving those guards and disconnect semantics; estimated medium effort.
+- Decision: the user chose to create a `Planned` bucket in TODO.md and put this fix there. Also update triage to skip
+  findings already covered by a planned item, as it skips behavior accepted by the current specifications. Planning the
+  fix does not authorize implementing it now.
+- Completion criteria: add the scoped planned item and triage rule, then remove this feedback file and its index entry
+  during execution. Keep the planned TODO until the actual code fix is implemented; removing the feedback is not
+  completion of that fix.
+- Execution: `in progress`; the planned item and triage instructions are applied locally. Queue removal and the
+  execution PR remain pending.
+
+## delete-quarantine-waits-unboundedly.md
+
+- Outcome: `other`.
+- Assessment: the deletion path awaits filesystem operations while holding its session lifecycle claim, confirmed by
+  code inspection. The finding requires that host's filesystem to hang. No cross-host or helm-wide blocking consequence
+  was established.
+- Decision: skipped under the triage rule for behavior already accepted by the specifications. SPEC.md's "Healthy local
+  filesystems" section permits the affected host and its requests to stop making progress and rejects added complexity
+  solely to bound those filesystem hangs. This is accepted behavior, not a completed fix.
+- Completion criteria: remove the feedback file and its index entry immediately under the user's clarified triage rule,
+  without code or spec changes.
+- Execution: `complete`; removed the feedback file and index entry locally during triage. The ledger retains the
+  assessment and specification basis.
+
+## detach-timeout-abandons-upstream-detach.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed cleanup gap by current-code inspection, not runtime reproduction. Credential-revocation cleanup
+  can time out while queueing Detach after removing the local attachment. The supervisor can retain the obsolete
+  attachment when the connection recovers, interfering with cautious automatic reattachment. Explicit takeover remains
+  available, and connection loss or other cleanup can release it; permanent inability to take over is overstated.
+- Decision: the user agreed to the small code fix: reuse the existing background-detach mechanism so the cleanup
+  notification survives the caller's timeout. Preserve prompt revocation of browser access.
+- Completion criteria: queue backpressure and caller timeout cannot abandon the upstream detach notification while the
+  connection remains usable. Verify with a focused cancellation/backpressure test, preserving explicit takeover and
+  existing connection cleanup. Remove the feedback file and index entry in the execution change.
+- Execution: `pending`.
