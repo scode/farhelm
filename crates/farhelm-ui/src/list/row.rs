@@ -350,6 +350,8 @@ const INVOCATION_MARKERS: &[(&str, &[(&str, &str)])] = &[
     // OpenCode calls its permission-bypass mode `--auto`; it is a YOLO
     // equivalent, unlike Codex's separately sandboxed `--full-auto`.
     ("opencode", &[("--auto", "yolo")]),
+    ("agent", &[("--force", "yolo"), ("--yolo", "yolo")]),
+    ("cursor-agent", &[("--force", "yolo"), ("--yolo", "yolo")]),
 ];
 
 /// The row's parsed view of a launch command: the program's basename to
@@ -387,6 +389,7 @@ fn known_harness(program: &str) -> HarnessGlyph {
         "codex" => HarnessGlyph::Codex,
         "claude" => HarnessGlyph::Claude,
         "muse" => HarnessGlyph::Muse,
+        "agent" | "cursor-agent" => HarnessGlyph::Cursor,
         "goose" => HarnessGlyph::Goose,
         "pi" => HarnessGlyph::Pi,
         "omp" => HarnessGlyph::Omp,
@@ -417,6 +420,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
             LaunchHarness::Codex => HarnessGlyph::Codex,
             LaunchHarness::Claude => HarnessGlyph::Claude,
             LaunchHarness::Muse => HarnessGlyph::Muse,
+            LaunchHarness::Cursor => HarnessGlyph::Cursor,
             LaunchHarness::Goose => HarnessGlyph::Goose,
             LaunchHarness::Pi => HarnessGlyph::Pi,
             LaunchHarness::Omp => HarnessGlyph::Omp,
@@ -441,6 +445,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
             HarnessGlyph::Codex => "Codex".to_string(),
             HarnessGlyph::Claude => "Claude Code".to_string(),
             HarnessGlyph::Muse => "Muse Code".to_string(),
+            HarnessGlyph::Cursor => "Cursor".to_string(),
             HarnessGlyph::Goose => "Goose".to_string(),
             HarnessGlyph::Pi => "Pi".to_string(),
             HarnessGlyph::Omp => "OMP".to_string(),
@@ -590,6 +595,7 @@ fn invocation_switches<'a>(
             "--settings",
         ],
         "muse" | "opencode" => &["--model", "-m"],
+        "agent" | "cursor-agent" => &["--model"],
         _ => &[],
     };
     let mut switches = Vec::new();
@@ -2706,6 +2712,8 @@ mod tests {
         assert_eq!(known_harness("codex"), HarnessGlyph::Codex);
         assert_eq!(known_harness("claude"), HarnessGlyph::Claude);
         assert_eq!(known_harness("muse"), HarnessGlyph::Muse);
+        assert_eq!(known_harness("agent"), HarnessGlyph::Cursor);
+        assert_eq!(known_harness("cursor-agent"), HarnessGlyph::Cursor);
         assert_eq!(known_harness("goose"), HarnessGlyph::Goose);
         assert_eq!(known_harness("pi"), HarnessGlyph::Pi);
         assert_eq!(known_harness("opencode"), HarnessGlyph::OpenCode);

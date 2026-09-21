@@ -72,6 +72,7 @@ impl FakeHarness {
                     LaunchHarness::Codex => "codex",
                     LaunchHarness::Claude => "claude",
                     LaunchHarness::Muse => "muse",
+                    LaunchHarness::Cursor => "agent",
                     LaunchHarness::Goose => "goose",
                     LaunchHarness::Pi => "pi",
                     LaunchHarness::Omp => "omp",
@@ -93,6 +94,7 @@ impl FakeHarness {
             match selection.harness {
                 LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
                 LaunchHarness::Claude
+                | LaunchHarness::Cursor
                 | LaunchHarness::Muse
                 | LaunchHarness::Goose
                 | LaunchHarness::Pi
@@ -128,6 +130,7 @@ impl FakeHarness {
                     argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
                 }
                 LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
+                LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
             }
         }
         if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -135,6 +138,7 @@ impl FakeHarness {
                 LaunchHarness::Codex | LaunchHarness::Muse => Some("--yolo"),
                 LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
                 LaunchHarness::OpenCode => Some("--auto"),
+                LaunchHarness::Cursor => Some("--force"),
                 LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => None,
             };
             if let Some(flag) = flag {
@@ -168,7 +172,7 @@ impl FakeHarness {
 pub(crate) fn fake_harness() -> FakeHarness {
     let bin = farhelm_teststate::tempdir().expect("fixture executable directory");
     let home = farhelm_teststate::tempdir().expect("structured launch agent home");
-    for name in ["codex", "claude", "muse", "opencode"] {
+    for name in ["codex", "claude", "muse", "opencode", "agent"] {
         let executable = bin.path().join(name);
         let counter = bin.path().join(format!("{name}.generation"));
         std::fs::write(
@@ -231,6 +235,7 @@ fn agent_kind(selection: &LaunchSelection) -> AgentKind {
         // Muse deliberately remains a Generic runtime integration: it has no
         // conversation-resume contract for this release.
         LaunchHarness::Muse => AgentKind::Generic,
+        LaunchHarness::Cursor => AgentKind::Generic,
         // OpenCode has the same generic lifecycle: no captured conversation
         // means a restart cannot honestly synthesize a resume command.
         LaunchHarness::OpenCode => AgentKind::Generic,
@@ -526,6 +531,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
         let model_flag = match selection.harness {
             LaunchHarness::Codex => "-m",
             LaunchHarness::Claude
+            | LaunchHarness::Cursor
             | LaunchHarness::Muse
             | LaunchHarness::Goose
             | LaunchHarness::Pi
@@ -555,6 +561,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Goose => return,
             LaunchHarness::Pi | LaunchHarness::Omp => effort.as_cli_arg().to_string(),
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
+            LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
         };
         let flag = match selection.harness {
             LaunchHarness::Codex => "-c",
@@ -563,6 +570,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Goose => return,
             LaunchHarness::Pi | LaunchHarness::Omp => "--thinking",
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
+            LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
         };
         assert!(
             words
@@ -608,6 +616,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Codex | LaunchHarness::Muse => "--yolo",
             LaunchHarness::Claude => "--dangerously-skip-permissions",
             LaunchHarness::OpenCode => "--auto",
+            LaunchHarness::Cursor => "--force",
             LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => return,
         };
         assert!(
@@ -631,6 +640,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         LaunchHarness::Codex,
         LaunchHarness::Claude,
         LaunchHarness::Muse,
+        LaunchHarness::Cursor,
     ];
 
     for harness in defaults {
@@ -646,7 +656,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         let words = shell_words::split(&argv).expect("default fake argv");
         assert!(
             !words.iter().any(|word| {
-                matches!(word.as_str(), "--model" | "--effort" | "--yolo")
+                matches!(word.as_str(), "--model" | "--effort" | "--yolo" | "--force")
                     || word.starts_with("model_reasoning_effort=")
             }),
             "default selections must omit structured flags: {words:?}"
@@ -654,6 +664,12 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
     }
 
     let explicit = [
+        LaunchSelection {
+            harness: LaunchHarness::Cursor,
+            model: Some("composer-2.5".to_string()),
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+        },
         LaunchSelection {
             harness: LaunchHarness::Codex,
             model: Some("release/candidate'42;$literal".to_string()),
@@ -708,6 +724,19 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             .expect("read durable session")
             .expect("created session remains stored");
         assert_eq!(stored.launch, Some(selection.clone()));
+
+        // Cursor retains launch choices across a fresh process generation,
+        // but Generic must never turn that into conversation Resume.
+        if selection.harness == LaunchHarness::Cursor {
+            assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
+            let restarted = h
+                .client
+                .restart_session(&created.id, RestartMode::Fresh, true)
+                .await
+                .expect("fresh-restart Cursor fixture");
+            assert_eq!(restarted.launch, Some(selection.clone()));
+            assert_forwarded(&observed_argv(&h, &created.id, 3).await, &selection);
+        }
 
         if selection.harness == LaunchHarness::Muse {
             explicit_muse_id = Some(created.id.clone());

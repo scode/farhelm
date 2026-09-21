@@ -126,7 +126,10 @@ fn missing_model_error(harness: LaunchHarness) -> Option<&'static str> {
         LaunchHarness::Goose => Some("choose a Goose model before launching"),
         LaunchHarness::Pi => Some("choose a Pi model before launching"),
         LaunchHarness::Omp => Some("choose an OMP model before launching"),
-        LaunchHarness::Codex | LaunchHarness::Claude | LaunchHarness::Muse => None,
+        LaunchHarness::Codex
+        | LaunchHarness::Claude
+        | LaunchHarness::Muse
+        | LaunchHarness::Cursor => None,
     }
 }
 
@@ -1997,6 +2000,15 @@ pub(super) fn CreateSessionForm(
     let seeded = *seeded_for.read();
     let agent = resolve_agent(chosen_profile.read().as_ref(), offered, seeded);
     let by_profile = matches!(agent.choice, Some(AgentChoice::Profile(_)));
+    // Only the active creation surface determines the notice; the other
+    // surface retains a draft that may describe a different harness.
+    let cursor_launch = match creation_surface() {
+        CreationSurface::Structured => structured_harness() == Some(LaunchHarness::Cursor),
+        CreationSurface::Legacy => matches!(
+            &agent.choice,
+            Some(AgentChoice::Profile(id)) if matches!(id.as_str(), "builtin-cursor" | "builtin-cursor-yolo")
+        ),
+    };
     // Owned, because the picker's options compare against it inside a loop
     // that also borrows the catalog guard this selection was derived from.
     // The placeholder's value stands in for "nothing is selected", which is a
@@ -4206,6 +4218,7 @@ pub(super) fn CreateSessionForm(
                                     (LaunchHarness::Codex, "Codex"),
                                     (LaunchHarness::Claude, "Claude"),
                                     (LaunchHarness::Muse, "Muse"),
+                                    (LaunchHarness::Cursor, "Cursor"),
                                     (LaunchHarness::Goose, "Goose"),
                                     (LaunchHarness::Pi, "Pi"),
                                     (LaunchHarness::Omp, "OMP"),
@@ -4499,11 +4512,11 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if let Some(reason) = model_draft_error() { div { class: "launch-composer-choice-error", "{reason}" } }
-                        // OpenCode has no effort vocabulary, so permissions stands
+                        // OpenCode and Cursor have no effort vocabulary, so permissions stands
                         // alone in this pair rather than gaining a blank sibling
                         // that suggests an unavailable setting exists.
                         div { class: "launch-composer-choice-pair",
-                        if structured_harness() != Some(LaunchHarness::OpenCode) {
+                        if !matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Cursor)) {
                         div { class: "launch-composer-choice launch-composer-effort-choice",
                             span { class: "launch-composer-section-label", "effort" }
                             div { class: "launch-composer-segmented",
@@ -4646,6 +4659,9 @@ pub(super) fn CreateSessionForm(
                         if let Some(reason) = composer_reset_reason() {
                             div { class: "launch-composer-choice-error", role: "status", "{reason}" }
                         }
+                        }
+                        if cursor_launch {
+                            p { "Cursor session tracking and Resume are not supported. Restart starts a new conversation." }
                         }
                         if *creation_surface.read() == CreationSurface::Legacy {
             // The agent, offered from the helm catalog and defaulting

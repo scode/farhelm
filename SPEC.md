@@ -137,12 +137,19 @@ systemd units for it, so a reboot of the helm's machine brings the web UI back; 
 the app.
 
 Agent profiles belong to the helm: one catalog applies to every host the helm manages, while the invocation still has to
-exist on the host that runs it. Every release supplies read-only built-in Claude Code, Codex, and Muse profiles, each in
-a plain and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, `codex-yolo`, `muse`, and
-`muse-yolo`. They appear beside the user's stored, editable definitions and are identified as Built-in; historical
-stored starter rows remain editable and deletable. Integrations are not user-authored — a profile optionally names an
-agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that kind's status heuristics and
-conversation-identity capture; profiles without a kind get generic treatment.
+exist on the host that runs it. Every release supplies read-only built-in Claude Code, Codex, Muse, and Cursor profiles,
+each in a plain and a permission-skipping ("yolo") variant: `claude`, `claude-yolo`, `codex`, `codex-yolo`, `muse`,
+`muse-yolo`, `cursor`, and `cursor-yolo`. They appear beside the user's stored, editable definitions and are identified
+as Built-in; historical stored starter rows remain editable and deletable. Integrations are not user-authored — a
+profile optionally names an agent kind from Farhelm's built-in v1 catalog (Claude Code, Codex), which selects that
+kind's status heuristics and conversation-identity capture; profiles without a kind get generic treatment.
+
+Cursor is a structured harness with `cursor` and `cursor-yolo` built-in profiles invoking `agent` and `agent --force`.
+Its model is optional, with `auto`, `composer-2.5` and literal custom IDs supported. Default permissions add no flag;
+YOLO preserves explicit Cursor denies. There is no separate effort selector. Cursor uses generic activity status and has
+no conversation tracking, automatic Resume, configuration editing, hooks or instruction injection. The launcher states
+that tracking and Resume are unsupported. Restart starts fresh; history and clone preserve launch intent. See
+[Cursor](docs/harnesses/cursor.md).
 
 Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
@@ -306,22 +313,22 @@ checkout; the agent choice is independent of that destination:
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Goose, Pi, OpenCode, and
-  OMP launches carry a harness plus model, effort, and permission choices where that harness supports them; visible
-  permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`. Absent optional choices mean the
-  selected harness's defaults and omit their flags, except an omitted Pi permission means its mandatory YOLO mode.
-  OpenCode, Goose, Pi, and OMP require a model; OpenCode offers no effort choice. The helm owns the released model
-  catalog and validates every structured choice, so the browser never turns a model identifier into an argv fragment. A
-  known model identifies its owning harness; a custom model needs an explicit harness. A shared known model retains a
-  selected owning harness, while an unselected ambiguous id asks for one. Replacing a harness clears only choices that
-  are incompatible with it. An invalid combination cannot launch. The one exception to "New preselects nothing": the
-  permissions mode remembers the last SUCCESSFUL structured launch, helm-wide across every client; "reset choices"
-  returns the segment to that remembered value rather than to the harness default, and a recent-setup row's own saved
-  choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by the
-  chosen harness, effort words offered by that harness and model, folders, and recent setups. Accepting a result applies
-  it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid selection
-  through the ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape closes the
-  result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
+- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Cursor, Goose, Pi,
+  OpenCode, and OMP launches carry a harness plus model, effort, and permission choices where that harness supports
+  them; visible permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`. Absent optional
+  choices mean the selected harness's defaults and omit their flags, except an omitted Pi permission means its mandatory
+  YOLO mode. OpenCode, Goose, Pi, and OMP require a model; OpenCode and Cursor offer no effort choice. The helm owns the
+  released model catalog and validates every structured choice, so the browser never turns a model identifier into an
+  argv fragment. A known model identifies its owning harness; a custom model needs an explicit harness. A shared known
+  model retains a selected owning harness, while an unselected ambiguous id asks for one. Replacing a harness clears
+  only choices that are incompatible with it. An invalid combination cannot launch. The one exception to "New preselects
+  nothing": the permissions mode remembers the last SUCCESSFUL structured launch, helm-wide across every client; "reset
+  choices" returns the segment to that remembered value rather than to the harness default, and a recent-setup row's own
+  saved choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by
+  the chosen harness, effort words offered by that harness and model, folders, and recent setups. Accepting a result
+  applies it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid
+  selection through the ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape
+  closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
   replaces only the model, effort, and permissions controls with the profile picker and raw invocation field. Existing
   callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not silently choose

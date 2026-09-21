@@ -258,6 +258,24 @@ const BUILTIN_PROFILE_PREFIX: &str = "builtin-";
 /// state, while stored historical starters remain ordinary editable rows.
 pub(crate) fn builtin_profiles() -> Vec<farhelm_proto::Profile> {
     vec![
+        // Cursor intentionally uses Generic: these starters do not promise
+        // conversation capture or synthesize a Resume command.
+        farhelm_proto::Profile {
+            id: "builtin-cursor".to_string(),
+            builtin: true,
+            name: "cursor".to_string(),
+            invocation: "agent".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+        },
+        farhelm_proto::Profile {
+            id: "builtin-cursor-yolo".to_string(),
+            builtin: true,
+            name: "cursor-yolo".to_string(),
+            invocation: "agent --force".to_string(),
+            agent_kind: farhelm_proto::AgentKind::Generic,
+            resume_template: None,
+        },
         farhelm_proto::Profile {
             id: "builtin-claude".to_string(),
             builtin: true,
@@ -13144,6 +13162,8 @@ mod tests {
         for (id, name, invocation) in [
             ("builtin-muse", "muse", "muse"),
             ("builtin-muse-yolo", "muse-yolo", "muse --yolo"),
+            ("builtin-cursor", "cursor", "agent"),
+            ("builtin-cursor-yolo", "cursor-yolo", "agent --force"),
         ] {
             expected_builtins.push(farhelm_proto::Profile {
                 id: id.to_string(),
@@ -13154,6 +13174,7 @@ mod tests {
                 resume_template: None,
             });
         }
+        expected_builtins.sort_by(|left, right| left.id.cmp(&right.id));
         assert_eq!(store.profiles().await.unwrap(), expected_builtins);
         {
             let conn = store.conn.lock().unwrap();

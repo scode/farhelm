@@ -13,6 +13,9 @@ Codex, Goose, Pi, and OMP do not have a scanning fallback. See the harness notes
 [Pi's saved-file requirement and permission behavior](harnesses/pi.md), and
 [OMP's report-only contract and limits](harnesses/omp.md).
 
+[Cursor has basic launch support only](harnesses/cursor.md): it uses no hook or status wrapper and has no conversation
+tracking or automatic Resume.
+
 ## Why hooks at all
 
 Farhelm's job on a restart is to bring back the conversation you were in, not just the agent. Until now it worked that

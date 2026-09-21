@@ -374,6 +374,8 @@ pub struct LaunchSelection {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchHarness {
+    /// Cursor has launch support but no conversation tracking or automatic Resume.
+    Cursor,
     Codex,
     Claude,
     Muse,

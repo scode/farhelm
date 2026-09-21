@@ -241,7 +241,10 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// shape. Exact-version negotiation keeps an older peer from presenting or
 /// accepting that removed lifecycle vocabulary.
 ///
-/// `protocol_version_is_pinned_at_26` (renamed at every bump since `_at_4`)
+/// Version 27 adds Cursor to the structured launch vocabulary. Older peers
+/// cannot decode that harness, even though it uses the existing Generic runtime.
+///
+/// `protocol_version_is_pinned_at_27` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -253,7 +256,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 26;
+pub const PROTOCOL_VERSION: u32 = 27;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -4460,8 +4463,9 @@ mod tests {
     /// the other non-additive case. The bump to 24 adds the GitHub-checkout
     /// messages and the optional `CreateSession::github_checkout` payload;
     /// version 25 adds the agent restart tag and its discovery capability;
-    /// version 26 removes session archive state and operations. Both need a
-    /// handshake refusal rather than silent tolerance. Pinning the
+    /// version 26 removes session archive state and operations. Version 27
+    /// adds the Cursor harness variant. These changes need a handshake
+    /// refusal rather than silent tolerance. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
     /// drift discovered only by two builds refusing to talk to each other.
@@ -4469,24 +4473,24 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test and the literal-24 skew check below are
+    /// an edit per bump; this test and the literal-26 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_26() {
-        assert_eq!(PROTOCOL_VERSION, 26);
+    fn protocol_version_is_pinned_at_27() {
+        assert_eq!(PROTOCOL_VERSION, 27);
     }
 
-    /// Pins the skew direction the GitHub-checkout bump exists to create, in
+    /// Pins the skew direction the Cursor harness bump exists to create, in
     /// BOTH directions, against the LITERAL previous version rather than the
     /// constant-relative ± 1 the `io.rs` skew test uses:
     ///
-    /// - A peer still speaking v24 is refused by this build's handshake with
+    /// - A peer still speaking v26 is refused by this build's handshake with
     ///   the explicit skew error and the connection torn down — never
-    ///   tolerated into silently dropping an agent restart capability.
-    /// - A v25 hello is refused by a hand-rolled v24 receiver, which sees a
+    ///   tolerated into receiving a harness variant it cannot decode.
+    /// - A v27 hello is refused by a hand-rolled v26 receiver, which sees a
     ///   version it does not know and hangs up. This test models the old
     ///   receiver with its refusal rule: accept
-    ///   exactly 24, refuse anything else. It is what keeps this test
+    ///   exactly 26, refuse anything else. It is what keeps this test
     ///   honest about the old side instead of asserting only the new side's
     ///   opinion.
     ///
@@ -4495,7 +4499,7 @@ mod tests {
     /// rename; this test is the one that fails when the constant and the
     /// version history disagree.
     #[farhelm_testtrace::test]
-    async fn v25_and_v26_peers_refuse_each_other() {
+    async fn v26_and_v27_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4504,7 +4508,7 @@ mod tests {
             auth: None,
         };
 
-        // A literal-v24 peer against THIS build's handshake.
+        // A literal-v26 peer against THIS build's handshake.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
@@ -4515,7 +4519,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(25)).await.unwrap();
+        w.write_control(&stale_hello(26)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4531,22 +4535,22 @@ mod tests {
         let err = receiver.await.unwrap().unwrap_err();
         assert!(
             err.to_string().contains("protocol version mismatch"),
-            "a literal v24 peer must be refused: {err}"
+            "a literal v26 peer must be refused: {err}"
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 25);
-        assert_eq!(skew.our_protocol, 26);
+        assert_eq!(skew.peer_protocol, 26);
+        assert_eq!(skew.our_protocol, 27);
 
-        // The reverse direction: a v24 receiver (the refusal rule itself,
-        // modeled by its exact-version check) meets a v25 hello and hangs up.
+        // The reverse direction: a v26 receiver (the refusal rule itself,
+        // modeled by its exact-version check) meets a v27 hello and hangs up.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
-        let v24_receiver = tokio::spawn(async move {
+        let v26_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(25)).await.unwrap();
+            w.write_control(&stale_hello(26)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4555,7 +4559,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 25 {
+            if protocol_version != 26 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4565,7 +4569,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-                Err("refused a v25 peer".to_string())
+                Err("refused a v27 peer".to_string())
             } else {
                 Ok(())
             }
@@ -4575,11 +4579,11 @@ mod tests {
         w.write_control(&stale_hello(PROTOCOL_VERSION))
             .await
             .unwrap();
-        // Hellos cross first; the v24 peer's hello precedes its refusal.
+        // Hellos cross first; the v26 peer's hello precedes its refusal.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
         assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
-        assert!(v24_receiver.await.unwrap().is_err());
+        assert!(v26_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump

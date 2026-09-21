@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchHarness {
+    /// Cursor launches with the Generic runtime: no conversation tracking or Resume.
+    Cursor,
     Codex,
     Claude,
     Muse,

@@ -2500,6 +2500,7 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
             farhelm_proto::LaunchHarness::Codex => farhelm_proto::AgentKind::Codex,
             farhelm_proto::LaunchHarness::Claude => farhelm_proto::AgentKind::Claude,
             farhelm_proto::LaunchHarness::Muse => farhelm_proto::AgentKind::Generic,
+            farhelm_proto::LaunchHarness::Cursor => farhelm_proto::AgentKind::Generic,
             farhelm_proto::LaunchHarness::OpenCode => farhelm_proto::AgentKind::Generic,
             farhelm_proto::LaunchHarness::Goose => farhelm_proto::AgentKind::Goose,
             farhelm_proto::LaunchHarness::Pi => farhelm_proto::AgentKind::Pi,
@@ -7067,70 +7068,90 @@ mod tests {
         assert_columns(rows.iter().find(|row| row.id == "s1").expect("present"));
     }
 
-    /// An OMP structured launch round-trips through the strict decode with
-    /// its matching agent kind — the newest harness/kind pair in the
-    /// consistency check, pinned here because a decode that coerced either
-    /// half would silently reclassify a durable launch.
+    /// Structured launches retain their integration kind across storage. OMP
+    /// needs its resume template; Cursor must remain Generic without one.
+    /// Coercing either half would silently reclassify a durable launch.
     #[farhelm_testtrace::test]
-    async fn an_omp_structured_launch_round_trips_with_its_matching_kind() {
-        let (_dir, store) = fresh_store().await;
-        let launch = farhelm_proto::LaunchSelection {
-            harness: farhelm_proto::LaunchHarness::Omp,
-            model: Some("x-ai/grok-4.6".to_string()),
-            effort: Some(farhelm_proto::LaunchEffort::Max),
-            permissions: Some(farhelm_proto::LaunchPermission::Approve),
-        };
-        store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    id: "s-omp".to_string(),
-                    parent: None,
-                    title: "structured omp".to_string(),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: "/tmp/work".to_string(),
-                    invocation: "omp --provider openrouter --model x-ai/grok-4.6 \
-                                 --thinking max --approval-mode always-ask"
-                        .to_string(),
-                    launch: Some(launch.clone()),
-                    tmux_name: "fh-s-omp".to_string(),
-                    pane: String::new(),
-                    outcome: LastOutcome::Exited {
-                        exit_code: Some(0),
-                        annotation: None,
-                    },
-                    agent_kind: farhelm_proto::AgentKind::Omp,
-                    // A real structured create stores the derived
-                    // placeholder-bearing template beside the kind; the
-                    // decoder refuses an integrated kind without one.
-                    resume_template: Some(vec![
-                        "omp".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
-                    canonical_cwd: None,
-                    captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: None,
-                },
+    async fn structured_launches_round_trip_with_their_matching_kind() {
+        for (harness, kind, model, effort, permissions, invocation, resume_template) in [
+            (
+                farhelm_proto::LaunchHarness::Omp,
+                farhelm_proto::AgentKind::Omp,
+                "x-ai/grok-4.6",
+                Some(farhelm_proto::LaunchEffort::Max),
+                farhelm_proto::LaunchPermission::Approve,
+                "omp --provider openrouter --model x-ai/grok-4.6 --thinking max --approval-mode always-ask",
+                Some(vec![
+                    "omp".to_string(),
+                    "--resume".to_string(),
+                    crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                ]),
+            ),
+            (
+                farhelm_proto::LaunchHarness::Cursor,
+                farhelm_proto::AgentKind::Generic,
+                "composer-2.5",
                 None,
-            )
-            .await
-            .expect("insert OMP structured fixture");
-        let row = store
-            .session("s-omp")
-            .await
-            .expect("read")
-            .expect("present");
-        assert_eq!(row.launch.as_ref(), Some(&launch));
-        assert_eq!(row.agent_kind, farhelm_proto::AgentKind::Omp);
+                farhelm_proto::LaunchPermission::Yolo,
+                "agent --model composer-2.5 --force",
+                None,
+            ),
+        ] {
+            let (_dir, store) = fresh_store().await;
+            let launch = farhelm_proto::LaunchSelection {
+                harness,
+                model: Some(model.to_string()),
+                effort,
+                permissions: Some(permissions),
+            };
+            store
+                .insert_session(
+                    StoredSession {
+                        conversation_source: None,
+                        id: "s-structured".to_string(),
+                        parent: None,
+                        title: "structured launch".to_string(),
+                        created_at: now_unix(),
+                        last_activity_at: now_unix(),
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        cwd: "/tmp/work".to_string(),
+                        invocation: invocation.to_string(),
+                        launch: Some(launch.clone()),
+                        tmux_name: "fh-s-structured".to_string(),
+                        pane: String::new(),
+                        outcome: LastOutcome::Exited {
+                            exit_code: Some(0),
+                            annotation: None,
+                        },
+                        agent_kind: kind,
+                        // A real structured create stores the derived
+                        // placeholder-bearing template beside the kind; the
+                        // decoder refuses an integrated kind without one.
+                        resume_template: resume_template.clone(),
+                        canonical_cwd: None,
+                        captured_conversation: None,
+                        captured_record: None,
+                        capture_ambiguous: false,
+                        first_input_at: None,
+                        generation: 0,
+                        launch_scoped: false,
+                        source_profile: None,
+                    },
+                    None,
+                )
+                .await
+                .expect("insert structured fixture");
+            let row = store
+                .session("s-structured")
+                .await
+                .expect("read")
+                .expect("present");
+            assert_eq!(row.launch.as_ref(), Some(&launch));
+            assert_eq!(row.agent_kind, kind);
+            assert_eq!(row.resume_template, resume_template);
+            assert_eq!(row.invocation, invocation);
+        }
     }
 
     /// Checkout storage must preserve sessions written by the OMP release.
