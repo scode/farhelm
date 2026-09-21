@@ -592,8 +592,10 @@
   satisfies the behavior without additional call-site helpers.
 - Completion criteria: add the narrow behavior and simplicity preference to SPEC_impl.md. No code change or general
   validation framework is requested. Remove this feedback file and its index entry during execution.
-- Execution: `in progress`; the requested implementation-spec clarification is applied locally and formatting checked.
-  Queue removal and the execution PR remain pending.
+- Execution: `complete`; verified SPEC_impl.md's "Session IDs in logs" rule, already committed at the triage anchor.
+  Removed the feedback and index entry without adding escaping helpers or a validation framework. jj change:
+  `trxwxuywtovvskosvytpysluvwrxlyzn`; bookmark: `triage-complete-session-log-spec`; draft PR:
+  https://github.com/scode/farhelm/pull/837/changes.
 
 ## cancelled-request-leaks-pending-entry.md
 
