@@ -6,8 +6,6 @@ One line per open item. This file must always match the feedback files in this d
   generation's exit.
 - `cancelled-request-leaks-pending-entry.md` — cancelled request without a reply leaks its pending entry for the
   connection's lifetime.
-- `clone-audit-log-skips-escape-for-log.md` — clone audit log prints agent-chosen ids raw, letting one id render as
-  another.
 - `commit-window-reads-unpublished-outcome.md` — a commit in the close-to-publish window gets the generic error.
 - `create-runs-inline-on-read-loop.md` — CreateSession runs its full validate-and-launch inline on the read loop.
 - `detach-timeout-abandons-upstream-detach.md` — detach timeout drops the send, leaving the supervisor-side attachment
