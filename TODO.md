@@ -154,10 +154,6 @@ severity.
   `KERN_PROC_ALL`, so every stop and delete reports success having examined nothing, against the module's own
   fail-closed contract at procs.rs:91-99. Fix: after the walk, return `Err` unless the map contains
   `std::process::id()`. Also backstops the real-uid changes below.
-- **Small contained items.** `A6-D26`. Low, trivial. `LastOutcome::Exited`'s doc (supervisor store.rs:222-225) says the
-  annotation is set only by a user-initiated stop, but archive writes it too. Fix: name both writers in the doc without
-  blessing the archive overwrite. Fence: leave the acceptance checks alone, they are specified policy; no
-  prompt-injection promise.
 
 ### Next: high confidence, needs care
 
@@ -268,8 +264,8 @@ Real enough to keep, not established enough to act on. Each names what would set
   existing agent/supervisor-originated creation and retry paths: a delayed resubmission must be considered when deciding
   what launch authority remains valid, including whether a forgotten retry key can launch a session again. Permanent
   retention of these agent-originated retry records is not required; their replay exposure is accepted pending this
-  work. Do not add further exceptions or infer a waiver of user-initiated GUI request correctness. Cross-host stop,
-  archive, and rename remain intentionally allowed bounded operations.
+  work. Do not add further exceptions or infer a waiver of user-initiated GUI request correctness. Cross-host stop and
+  rename remain intentionally allowed bounded operations.
 
 - Let the user mark each host as "yolo is fine" or "yolo is not fine", controlling which hosts appear red in the session
   list. This could also support warnings when the user is about to run an unsandboxed agent on a host marked "yolo is
@@ -316,13 +312,13 @@ Real enough to keep, not established enough to act on. Each names what would set
   install to a from-main build while the newest release was still 0.1.1.
 
 - Custom hover tooltips on buttons and menu items. Native `title` tooltips are free (the UI already uses them on the
-  activity time, the cwd line, the profile chip and the header's archive button) but the browser owns their ~1s delay
-  and nothing — no CSS, attribute, or JS — shortens it; WebKit's web content ignores the macOS tooltip-delay default
-  too. A faster, themed tooltip is a component shown on hover after a delay of the app's own choosing (~300ms), and it
-  has to escape the sidebar: `.app-sidebar`'s `overflow: hidden auto` clips anything anchored inside a row near its
-  edges, so the tooltip needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's
-  popover is the pattern to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop /
-  archive / delete, the host row's buttons) is an hour and needs none of this.
+  activity time, the cwd line and the profile chip) but the browser owns their ~1s delay and nothing — no CSS,
+  attribute, or JS — shortens it; WebKit's web content ignores the macOS tooltip-delay default too. A faster, themed
+  tooltip is a component shown on hover after a delay of the app's own choosing (~300ms), and it has to escape the
+  sidebar: `.app-sidebar`'s `overflow: hidden auto` clips anything anchored inside a row near its edges, so the tooltip
+  needs a body-level portal or `position: fixed` with measured coordinates — the row `…` menu's popover is the pattern
+  to copy. If the native delay turns out tolerable, a `title` pass over the terse actions (stop / delete, the host row's
+  buttons) is an hour and needs none of this.
 
 - Consider dropping conversation-identity SCAN support and keeping only the per-launch hook. The resume promise stays;
   what goes is the second mechanism. The hook is the agent's own answer and covers `/clear` and `/new`, which the scan
@@ -453,15 +449,15 @@ Real enough to keep, not established enough to act on. Each names what would set
   helms are unsupported in v1, with the supervisor's one-attachment-per-session rule as the only backstop. Observed on
   2026-08-27 while acceptance-testing the 0.1.0 rc: a desktop helm (0.1.0-rc.1) and the browser helm (0.0.3) both
   registered the same host and both listed the same sessions, live, with no disconnects, and switching between the two
-  surfaces worked. That is not luck — sessions, their status and `archived` are supervisor-owned and the helm's
-  `session_cache` is an explicit mirror, so any helm reaching the supervisor sees the same list. What was deliberately
-  NOT tested: opening the SAME session in both helms. The expected result is the displaced-client path the spec defines
-  for a second client (snapshot plus take-control, and auto-reconnect never seizing), since the supervisor enforces that
-  rule, but the path has only ever been exercised between two clients of one helm. Known gaps before this could be
-  called supported: (1) D2 version coupling — each helm expects the supervisor at its OWN version and offers `update`
-  otherwise, so helms of different versions would tug the host up and down (the rc helm already offered to "update" the
-  0.0.3 production supervisor; a compatibility rule such as "at least mine" plus a protocol version is design work, not
-  a fix); (2) no lock against two helms provisioning or updating the same host at once; (3) the cross-helm takeover,
+  surfaces worked. That is not luck — sessions and their status are supervisor-owned and the helm's `session_cache` is
+  an explicit mirror, so any helm reaching the supervisor sees the same list. What was deliberately NOT tested: opening
+  the SAME session in both helms. The expected result is the displaced-client path the spec defines for a second client
+  (snapshot plus take-control, and auto-reconnect never seizing), since the supervisor enforces that rule, but the path
+  has only ever been exercised between two clients of one helm. Known gaps before this could be called supported: (1) D2
+  version coupling — each helm expects the supervisor at its OWN version and offers `update` otherwise, so helms of
+  different versions would tug the host up and down (the rc helm already offered to "update" the 0.0.3 production
+  supervisor; a compatibility rule such as "at least mine" plus a protocol version is design work, not a fix); (2) no
+  lock against two helms provisioning or updating the same host at once; (3) the cross-helm takeover,
   replay-after-takeover and dimension handoff have no tests; (4) SPEC.md and SPEC_impl.md would need to state the
   supported model. Same-version helms look like a small step; mixed versions are the real work. First action when
   returning: run the untested case with two same-version helms and record what the displaced side shows.

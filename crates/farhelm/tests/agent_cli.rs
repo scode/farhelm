@@ -445,7 +445,7 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "caller": {"session_id": "session-1", "host_id": "host-local"},
             "reply": {
                 "reply": "hosts",
@@ -517,7 +517,7 @@ fn profiles_prints_the_id_name_and_builtin_table() {
 }
 
 /// Spec: `farhelm agent sessions` sends the `Sessions` verb and renders the
-/// marked table, with archive and staleness visible in the STATUS column and
+/// marked table, with staleness visible in the STATUS column and
 /// the non-secret restart capability in OFFER.
 ///
 /// The column ORDER is the contract being pinned. `farhelm agent` is a
@@ -526,13 +526,10 @@ fn profiles_prints_the_id_name_and_builtin_table() {
 /// reordering silently changes what every existing wrapper, alias and
 /// transcript means by "the fourth column".
 ///
-/// The STATUS cell carries the two facts a status word cannot. An archived
-/// session's live status is history the user filed away — showing `running`
-/// there invites an agent to go and interact with it — and a cached row
-/// from an unreachable host is indistinguishable from a live one without
-/// the `(stale)` mark SPEC.md requires.
+/// A cached row from an unreachable host is indistinguishable from a live
+/// one without the `(stale)` mark SPEC.md requires.
 #[farhelm_testtrace::test]
-fn sessions_prints_the_marked_table_with_archive_and_staleness() {
+fn sessions_prints_the_marked_table_with_staleness() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let (done, thread) = mock_supervisor(&socket, |request| {
@@ -558,7 +555,6 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                             agent: "claude".to_string(),
                             status: "running".to_string(),
                             current: true,
-                            archived: false,
                             restart_offer: Default::default(),
                             stale: false,
                         },
@@ -571,7 +567,6 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                             agent: "codex".to_string(),
                             status: "idle".to_string(),
                             current: false,
-                            archived: false,
                             restart_offer: Default::default(),
                             stale: true,
                         },
@@ -584,7 +579,6 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
                             agent: "codex".to_string(),
                             status: "exited".to_string(),
                             current: false,
-                            archived: true,
                             restart_offer: Default::default(),
                             stale: false,
                         },
@@ -605,7 +599,7 @@ fn sessions_prints_the_marked_table_with_archive_and_staleness() {
             "  ID        HOST         TITLE CWD     AGENT  STATUS       OFFER",
             "* session-1 this machine auth  /w/auth claude running      fresh",
             "  session-2 builder      docs  /w      codex  idle (stale) fresh",
-            "  session-3 builder      old   /w      codex  archived     fresh",
+            "  session-3 builder      old   /w      codex  exited       fresh",
             "",
         ]
         .join("\n")
@@ -646,7 +640,6 @@ fn a_truncated_listing_prints_its_rows_and_warns_on_stderr() {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: true,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     }],
@@ -1212,14 +1205,14 @@ fn an_untrustworthy_answer_to_a_mutation_says_the_outcome_is_unknown() {
 }
 
 // ---------------------------------------------------------------
-// The three lifecycle verbs: what `farhelm agent rename/stop/archive`
+// The lifecycle verbs: what `farhelm agent rename/stop`
 // sends, and the one confirmation line each prints on success.
 //
 // "Prints on success" holds unconditionally against a MOCK and not against
-// the real stack: an explicit self-stop or self-archive targets the asking
+// the real stack: an explicit self-stop targets the asking
 // session's process tree, whose marker-keyed sweep reaches this CLI process
 // too, so it can be SIGTERMed before its own `println!` runs (see
-// `main`'s Rename/Stop/Archive comment, and the e2e lifecycle test that
+// `main`'s Rename/Stop comment, and the e2e lifecycle test that
 // routes around it). Every case below sends its verb to a mock that stops
 // nothing, which is what makes the confirmation observable at all.
 // ---------------------------------------------------------------
@@ -1272,7 +1265,6 @@ fn rename_sends_the_title_and_named_target_and_prints_the_confirmation() {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -1323,73 +1315,6 @@ fn stop_without_a_session_is_refused_before_anything_is_sent() {
         "the refusal must name it: {stderr}"
     );
 }
-
-/// Spec: `farhelm agent archive --session <id>` sends `Archive` naming that
-/// target, and prints the id from the REPLY rather than the one typed.
-///
-/// The reply's id and the argument are deliberately the same string here,
-/// which makes this the weaker half of a pair: the distinction between
-/// "printed the answer" and "echoed the argument" is what
-/// [`a_rename_confirmation_escapes_and_delimits_both_of_its_fields`] and
-/// the rename target test pin, and this exists for the WIRE half —
-/// `--session` reaching `AgentVerb::Archive::session_id` as `Some`, which
-/// is the encoding the helm's whole target-resolution rule keys off. Its
-/// twin [`bare_archive_sends_no_target_and_lets_the_helm_substitute_the_asker`]
-/// pins the `None` side; neither is meaningful without the other, since a
-/// CLI that hardcoded either one would pass exactly one of them.
-#[farhelm_testtrace::test]
-fn archive_sends_the_named_target_and_prints_its_id() {
-    let temp = farhelm_teststate::tempdir().unwrap();
-    let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest {
-            req_id, request, ..
-        } = request
-        else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        assert_eq!(
-            request,
-            AgentVerb::Archive {
-                session_id: Some("other-session".to_string()),
-            }
-        );
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Session {
-                    session: AgentSession {
-                        id: "other-session".to_string(),
-                        host_id: "1".to_string(),
-                        host: Some("this machine".to_string()),
-                        title: "auth".to_string(),
-                        cwd: "/w".to_string(),
-                        agent: "claude".to_string(),
-                        status: "exited".to_string(),
-                        current: false,
-                        archived: true,
-                        restart_offer: Default::default(),
-                        stale: false,
-                    },
-                },
-            },
-        })
-    });
-
-    let output = output_with_timeout(agent_command_with_args(
-        &socket,
-        &["archive", "--session", "other-session"],
-    ));
-    finish_server(done, thread);
-
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "archived other-session\n"
-    );
-    assert!(output.stderr.is_empty());
-}
-
 /// Spec: a rename confirmation is sanitized through the SAME cell-escaping
 /// the listing tables use — SPEC_impl.md's contract for every dynamic cell
 /// this CLI ever prints, extended here to the lifecycle confirmations —
@@ -1436,7 +1361,6 @@ fn a_rename_confirmation_escapes_and_delimits_both_of_its_fields() {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: true,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -1518,69 +1442,6 @@ fn a_stop_confirmation_escapes_control_characters_in_the_target() {
     );
     assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
 }
-
-/// Spec: an archive confirmation escapes control characters in the id it
-/// reads back from the reply.
-///
-/// The other half of the pair with the stop test above, and the half that
-/// covers PEER-supplied text rather than this process's own argument:
-/// `archive`'s confirmation prints the reply's `AgentSession::id` (see
-/// `main`'s `Archive` arm), so the hostile value is planted in what the
-/// mock answers.
-///
-/// Defence in depth for the same reason its sibling is. A conforming helm
-/// answers with the id it acted on, which cannot carry a control character
-/// once the relay has refused one going the other way — so what this pins
-/// is that a MALFORMED or nonconforming reply cannot repaint the terminal
-/// on the way to being printed. Nothing in this CLI verifies that the id
-/// coming back is one it could have sent, and this is deliberately not an
-/// argument for adding such a check: escaping every printed field is the
-/// cheaper invariant and does not need to know what a legal id looks like.
-#[farhelm_testtrace::test]
-fn an_archive_confirmation_escapes_control_characters_in_the_id() {
-    let temp = farhelm_teststate::tempdir().unwrap();
-    let socket = temp.path().join("supervisor.sock");
-    let (done, thread) = mock_supervisor(&socket, |request| {
-        let ControlMsg::AgentRequest { req_id, .. } = request else {
-            panic!("farhelm agent must send an AgentRequest, got {request:?}");
-        };
-        Some(ControlMsg::AgentResponse {
-            req_id,
-            outcome: AgentOutcome::Ok {
-                reply: AgentReply::Session {
-                    session: AgentSession {
-                        id: "line one\nline two".to_string(),
-                        host_id: "1".to_string(),
-                        host: Some("this machine".to_string()),
-                        title: "t".to_string(),
-                        cwd: "/w".to_string(),
-                        agent: "claude".to_string(),
-                        status: "exited".to_string(),
-                        current: true,
-                        archived: true,
-                        restart_offer: Default::default(),
-                        stale: false,
-                    },
-                },
-            },
-        })
-    });
-
-    let output = output_with_timeout(agent_command_with_args(
-        &socket,
-        &["archive", "--session", "session-1"],
-    ));
-    finish_server(done, thread);
-
-    assert_eq!(output.status.code(), Some(0));
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(
-        stdout, "archived line one\\nline two\n",
-        "the embedded newline in the reply's id must be escaped, not printed raw"
-    );
-    assert_eq!(stdout.lines().count(), 1, "{stdout:?}");
-}
-
 /// Spec: rename requires both the target id and the title observed during
 /// discovery before it opens the supervisor socket.
 ///
@@ -1605,24 +1466,6 @@ fn rename_without_consequential_selectors_is_refused_before_sending() {
         "the refusal must name the condition: {stderr}"
     );
 }
-
-/// Spec: archive refuses an omitted target before opening the supervisor
-/// socket, matching stop's explicit-target contract.
-#[farhelm_testtrace::test]
-fn archive_without_a_session_is_refused_before_anything_is_sent() {
-    let temp = farhelm_teststate::tempdir().unwrap();
-    let socket = temp.path().join("supervisor.sock");
-    let output = output_with_timeout(agent_command_with_args(&socket, &["archive"]));
-
-    assert_eq!(output.status.code(), Some(2), "clap's usage-error status");
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("--session"),
-        "the refusal must name it: {stderr}"
-    );
-}
-
 /// Spec: a rename title starting with a hyphen is sent verbatim as the
 /// title, not misparsed as an unrecognized flag.
 ///
@@ -1667,7 +1510,6 @@ fn a_rename_title_starting_with_a_hyphen_is_not_misparsed_as_a_flag() {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: true,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -1759,7 +1601,6 @@ fn instructions_print_every_verb_without_a_session() {
         "profiles",
         "rename",
         "stop",
-        "archive",
         "create",
         "clone",
         "instructions",
@@ -1867,7 +1708,6 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
                         agent: "Claude Code".to_string(),
                         status: String::new(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -1986,7 +1826,6 @@ fn a_clone_sends_every_option_and_escapes_control_characters_in_its_confirmation
                         agent: "Claude".to_string(),
                         status: String::new(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -2159,7 +1998,6 @@ fn hyphen_leading_create_values_are_not_misparsed_as_flags() {
                         agent: "weird-program".to_string(),
                         status: String::new(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -2230,7 +2068,6 @@ fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
                         agent: "-dash-profile".to_string(),
                         status: String::new(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -2275,7 +2112,7 @@ fn a_hyphen_leading_profile_name_is_not_misparsed_as_a_flag() {
 /// payloads, so the tag is the entire difference between "a row that did
 /// not exist a moment ago" and "the row you renamed". Accepting the wrong
 /// one would print an EXISTING session's id as though this command had
-/// created it — a target an agent might then go on to stop or archive. No
+/// created it — a target an agent might then go on to mutate. No
 /// other test in the stack can see this: the relay hands a response back by
 /// `req_id` alone across two hops, and neither hop re-checks the shape.
 #[farhelm_testtrace::test]
@@ -2297,7 +2134,6 @@ fn a_session_reply_to_a_creating_verb_is_refused() {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },

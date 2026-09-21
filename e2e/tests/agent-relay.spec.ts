@@ -331,7 +331,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
 
       // ...on the other host, from the same helm profile, carrying the
       // source's directory and title.
-      const listing = await request.get("/api/sessions?include_archived=true");
+      const listing = await request.get("/api/sessions");
       expect(listing.ok(), `GET /api/sessions: ${listing.status()}`).toBe(true);
       const rows = (await listing.json()).sessions;
       const row = rows.find((entry: any) => entry.id === cloned);
@@ -426,7 +426,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
 
       driver = await context.newPage();
       await openRelayTerminal(driver, source.id);
-      const before = await (await request.get("/api/sessions?include_archived=true")).json();
+      const before = await (await request.get("/api/sessions")).json();
 
       await submitPrompt(driver, `$farhelm clone this session onto ${LOCAL_HOST_NAME}`, 200);
       await waitForFlatText(driver, "CLONE-ERROR:");
@@ -438,7 +438,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
         "a refused clone must not report a session id — that is what a silent fallback would look like",
       ).not.toContain("CLONED:");
 
-      const after = await (await request.get("/api/sessions?include_archived=true")).json();
+      const after = await (await request.get("/api/sessions")).json();
       const ids = new Set(before.sessions.map((row: any) => row.id));
       const created = after.sessions.filter((row: any) => !ids.has(row.id));
       expect(created, `a refused clone must create nothing: ${JSON.stringify(created)}`).toEqual([]);
@@ -588,7 +588,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
         await submitPrompt(driver, `$farhelm clone this session onto ${alias}`, 200);
         cloned = await clonedId(driver);
 
-        const listing = await request.get("/api/sessions?include_archived=true");
+        const listing = await request.get("/api/sessions");
         expect(listing.ok(), `GET /api/sessions: ${listing.status()}`).toBe(true);
         const rows = (await listing.json()).sessions;
         const row = rows.find((entry: any) => entry.id === cloned);
@@ -684,7 +684,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
 
         driver = await context.newPage();
         await openRelayTerminal(driver, source.id);
-        const before = await (await request.get("/api/sessions?include_archived=true")).json();
+        const before = await (await request.get("/api/sessions")).json();
 
         await submitPrompt(driver, `$farhelm clone this session onto ${rawDestination}`, 200);
         await waitForFlatText(driver, "CLONE-ERROR:");
@@ -699,7 +699,7 @@ test.describe("agent relay: an agent clones its own session across hosts", () =>
           "a refused clone must not report a session id — that is what a silent fallback would look like",
         ).not.toContain("CLONED:");
 
-        const after = await (await request.get("/api/sessions?include_archived=true")).json();
+        const after = await (await request.get("/api/sessions")).json();
         const ids = new Set(before.sessions.map((row: any) => row.id));
         const created = after.sessions.filter((row: any) => !ids.has(row.id));
         expect(created, `a refused clone must create nothing: ${JSON.stringify(created)}`).toEqual([]);

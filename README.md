@@ -41,7 +41,8 @@ and Farhelm startup stopped until uninstall finishes.
 
 # More info
 
-See [fresh GitHub checkouts](docs/github-checkouts.md) to configure `gh:owner/repo` launches and their archive behavior.
+See [fresh GitHub checkouts](docs/github-checkouts.md) to configure `gh:owner/repo` launches and checkout retention
+after deletion.
 
 Setup and development instructions are still parked at [docs/old_readme.md](docs/old_readme.md) while this README is
 being rebuilt.

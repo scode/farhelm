@@ -163,7 +163,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 28;
+const SCHEMA_VERSION: i64 = 29;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -441,8 +441,7 @@ type RawHostRow = (
 );
 
 /// One decodable row of the session cache as [`HelmStore::cached_rows`]
-/// reads it: which host filed it, the archive flag it was filed under, and
-/// its payload.
+/// reads it: which host filed it and its payload.
 ///
 /// Only rows that DECODE come back as one of these. A cache row is
 /// last-known display data, so a payload that no longer decodes (or that
@@ -455,7 +454,6 @@ type RawHostRow = (
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedRow {
     pub host: HostId,
-    pub archived: bool,
     pub info: SessionInfo,
 }
 
@@ -597,12 +595,6 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
 /// dimensions belong to which half. The split below follows the
 /// shape of the data rather than the wording:
 ///
-/// - **archive is a default-off inclusion switch.** Withholding archived
-///   rows is the ordinary view; enabling the switch removes that predicate
-///   rather than selecting archived rows alone. It is also the one dimension
-///   the served `total` follows (`crate::aggregate`): the switch picks
-///   which view is being counted, while every other dimension narrows a view
-///   whose size the count goes on reporting.
 /// - **host, parent, status, profile — EXACT.** Each is an identifier or a
 ///   value chosen from a finite set
 ///   the client already has in hand (the hosts list, the status vocabulary,
@@ -632,10 +624,6 @@ fn decode_profile_row(columns: ProfileColumns) -> anyhow::Result<farhelm_proto::
 /// by any profile.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFilter {
-    /// Whether archived rows participate in this view. False is the public
-    /// default: archive removes a session from ordinary browsing without
-    /// removing it from the fleet or its durable history.
-    include_archived: bool,
     host: Option<HostId>,
     parent: Option<String>,
     directory: Option<Folded>,
@@ -893,29 +881,6 @@ where
 }
 
 impl SessionFilter {
-    /// Admit archived rows as well as active ones.
-    ///
-    /// This is an inclusion switch, not a value to compare against: callers
-    /// cannot ask for archived-only rows, and turning it on removes the
-    /// implicit default predicate rather than adding a new one.
-    pub fn include_archived(mut self, include: bool) -> SessionFilter {
-        self.include_archived = include;
-        self
-    }
-
-    /// Whether this view admits archived rows.
-    ///
-    /// Exposed for the DENOMINATOR rather than for the predicate: unlike
-    /// every other dimension, this one changes which view `total` is a count
-    /// of, so the merge (`crate::aggregate`) applies it as a scope before it
-    /// counts. [`Self::matches`] applies it independently — the predicate is
-    /// the contract and the scope is what makes the count right. The host
-    /// dimension deliberately has no such scope: it is a filter like any
-    /// other, and narrowing the read to it would make `total` follow it.
-    pub fn includes_archived(&self) -> bool {
-        self.include_archived
-    }
-
     /// Narrow to one host.
     pub fn host(mut self, host: HostId) -> SessionFilter {
         self.host = Some(host);
@@ -970,7 +935,7 @@ impl SessionFilter {
     /// a listing reply carries a `matching` count at all
     /// (`crate::aggregate::SessionListBody::matching`).
     pub fn is_empty(&self) -> bool {
-        *self == SessionFilter::default().include_archived(true)
+        *self == SessionFilter::default()
     }
 
     /// Whether one session, on `host`, satisfies every dimension set.
@@ -981,9 +946,6 @@ impl SessionFilter {
     /// question about a row, and there is no row this can fail to answer
     /// for.
     pub fn matches(&self, host: HostId, info: &SessionInfo) -> bool {
-        if info.archived && !self.include_archived {
-            return false;
-        }
         if let Some(wanted) = self.host
             && wanted != host
         {
@@ -1647,20 +1609,6 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
                  -- itself — see this table's own comment above for the
                  -- cross-upgrade format contract this column is bound by.
                  info_json  TEXT NOT NULL,
-                 -- Whether the payload said this session was archived,
-                 -- extracted at write time exactly as created_at is and for
-                 -- the same reason (schema version 10): the default view
-                 -- EXCLUDES archived rows, and the column lets a read leave
-                 -- an archived row undecoded rather than decoding every
-                 -- payload to find out which view it belongs to.
-                 --
-                 -- Written from the payload, never re-derived. A row whose
-                 -- info_json has since gone undecodable is dropped from every
-                 -- read and every count (see HelmStore::cached_rows), so the
-                 -- column's value for such a row decides nothing any more;
-                 -- version 10's backfill files a payload it cannot parse as
-                 -- active for want of anything better to read.
-                 archived   INTEGER NOT NULL DEFAULT 0,
                  PRIMARY KEY (host_id, session_id)
              ) STRICT;
              -- At most one HOST may cache a given session id (schema
@@ -1823,7 +1771,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 28;",
+              PRAGMA user_version = 29;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2554,6 +2502,47 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         )
         .context("migrating helm.db to schema version 28")?;
         version = 28;
+    }
+    if version == 28 {
+        // Keep every cache row and its unknown JSON members. Valid object
+        // payloads lose only the retired archive flag; malformed payloads
+        // remain untouched for the existing skip-and-log read policy.
+        let cached = {
+            let mut stmt = tx
+                .prepare("SELECT host_id, session_id, info_json FROM session_cache")
+                .context("preparing cached sessions for schema version 29")?;
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, HostId>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .context("reading cached sessions for schema version 29")?
+            .collect::<Result<Vec<_>, _>>()
+            .context("decoding cached session rows for schema version 29")?
+        };
+        for (host, session_id, json) in cached {
+            let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&json) else {
+                continue;
+            };
+            let Some(object) = value.as_object_mut() else {
+                continue;
+            };
+            if object.remove("archived").is_some() {
+                tx.execute(
+                    "UPDATE session_cache SET info_json = ?3 WHERE host_id = ?1 AND session_id = ?2",
+                    rusqlite::params![host, session_id, serde_json::to_string(&value)?],
+                )
+                .context("removing archived from cached session JSON")?;
+            }
+        }
+        tx.execute_batch(
+            "ALTER TABLE session_cache DROP COLUMN archived;
+             PRAGMA user_version = 29;",
+        )
+        .context("migrating helm.db to schema version 29")?;
+        version = 29;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -4258,11 +4247,9 @@ impl HelmStore {
     /// there is no such row to plant honestly; a genuine schema-level
     /// constraint violation is the cheaper, and more realistic, seam.)
     ///
-    /// `created_at` and `archived` are extracted from each `entry` into
-    /// columns of their own beside the payload: `created_at` is the identity
-    /// cross-check every read applies to a decoded row, and `archived` lets
-    /// the default view skip a row before decoding it. Nothing orders by
-    /// either — the merge sorts in memory.
+    /// `created_at` is extracted from each `entry` into a column beside the
+    /// payload as the identity cross-check every read applies to a decoded
+    /// row. The merge sorts in memory.
     ///
     /// `truncated` is written to the host's own row in the same transaction
     /// (`hosts.cache_truncated`): whether this list was cut at the wire's
@@ -4344,10 +4331,7 @@ impl HelmStore {
             // applies), so a row whose payload is unchanged while its
             // timestamp is repaired IS a change — and reporting otherwise
             // would starve the feed of exactly the re-read a client needs.
-            // The `archived` column needs no further comparison: it is
-            // extracted from the payload on the way in, so it cannot move
-            // without `info_json` moving with it. A session that produced
-            // output, or was renamed, therefore already flips `changed` —
+            // A session that produced output or was renamed already flips `changed` —
             // which is what makes the activity and title orders live
             // surfaces rather than ones that settle at the next refresh.
             //
@@ -4395,10 +4379,10 @@ impl HelmStore {
                         // skipped row is announced below rather than
                         // swallowed.
                         "INSERT INTO session_cache \
-                             (host_id, session_id, created_at, info_json, archived) \
-                         VALUES (?1, ?2, ?3, ?4, ?5) \
+                             (host_id, session_id, created_at, info_json) \
+                         VALUES (?1, ?2, ?3, ?4) \
                          ON CONFLICT (session_id) DO NOTHING",
-                        rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
+                        rusqlite::params![host, entry.id, entry.created_at, json],
                     )
                     .context("inserting cached session")?;
                 if inserted == 0 {
@@ -4598,12 +4582,11 @@ impl HelmStore {
             let json = serde_json::to_string(entry).context("serializing cached session")?;
             tx.execute(
                 "INSERT INTO session_cache \
-                     (host_id, session_id, created_at, info_json, archived) \
-                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                     (host_id, session_id, created_at, info_json) \
+                 VALUES (?1, ?2, ?3, ?4) \
                  ON CONFLICT (session_id) DO UPDATE SET \
-                     created_at = excluded.created_at, info_json = excluded.info_json, \
-                     archived = excluded.archived",
-                rusqlite::params![host, entry.id, entry.created_at, json, entry.archived],
+                     created_at = excluded.created_at, info_json = excluded.info_json",
+                rusqlite::params![host, entry.id, entry.created_at, json],
             )
             .context("seeding a cached session")?;
             // The cap holds for the seed path too — but by EVICTION, never
@@ -5609,13 +5592,13 @@ impl HelmStore {
                 .join(", ");
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT host_id, session_id, created_at, archived, info_json \
+                    "SELECT host_id, session_id, created_at, info_json \
                      FROM session_cache WHERE host_id IN ({placeholders})"
                 ))
                 .context("preparing the cached rows query")?;
-            let rows: Vec<(HostId, String, i64, bool, String)> = stmt
+            let rows: Vec<(HostId, String, i64, String)> = stmt
                 .query_map(rusqlite::params_from_iter(hosts.iter()), |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
                 })
                 .context("querying cached rows")?
                 .collect::<Result<_, _>>()
@@ -5633,7 +5616,7 @@ impl HelmStore {
                 .context("reading cache flags")?;
             let rows = rows
                 .into_iter()
-                .filter_map(|(host, session_id, created_at, archived, json)| {
+                .filter_map(|(host, session_id, created_at, json)| {
                     let info = match serde_json::from_str::<SessionInfo>(&json) {
                         Ok(info) if info.id == session_id && info.created_at == created_at => info,
                         Ok(info) => {
@@ -5657,11 +5640,7 @@ impl HelmStore {
                             return None;
                         }
                     };
-                    Some(CachedRow {
-                        host,
-                        archived,
-                        info,
-                    })
+                    Some(CachedRow { host, info })
                 })
                 .collect();
             Ok(CachedSlice {
@@ -6208,7 +6187,6 @@ mod tests {
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
             parent: None,
-            archived: false,
             id: id.to_string(),
             title: id.to_string(),
             created_at,
@@ -6508,7 +6486,14 @@ mod tests {
         let schema = schema_objects(&store.conn.lock().unwrap());
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute_batch("ALTER TABLE create_history_sessions DROP COLUMN github_repo; PRAGMA user_version = 27;").unwrap();
+            // Restore the historical cache column as well: the upgrade must
+            // cross its removal after adding repository intent to history.
+            conn.execute_batch(
+                "ALTER TABLE create_history_sessions DROP COLUMN github_repo;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 PRAGMA user_version = 27;",
+            )
+            .unwrap();
             let version: i64 = conn
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
@@ -8278,6 +8263,90 @@ mod tests {
         assert_eq!(hosts[0].destination, None);
     }
 
+    /// The archive-removal migration strips only the retired member from
+    /// valid cache objects and leaves malformed or non-object cache evidence
+    /// byte-for-byte.
+    #[farhelm_testtrace::test]
+    async fn schema_28_cache_rows_keep_their_visible_payload_and_malformed_bytes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("helm.db");
+        let store = HelmStore::open(&db_path).await.expect("open current store");
+        let host = store.list_hosts().await.expect("list hosts")[0].id;
+        let mut value = serde_json::to_value(session("retained", 42)).expect("session JSON");
+        let object = value.as_object_mut().expect("session is an object");
+        object.insert("archived".to_string(), serde_json::json!(true));
+        object.insert("future_field".to_string(), serde_json::json!("kept"));
+        let valid = serde_json::to_string(&value).expect("serialize fixture");
+        let malformed = "{not-json";
+        let non_object = r#"["retained-array"]"#;
+        {
+            let conn = store.conn.lock().expect("db mutex");
+            conn.execute_batch(
+                "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 PRAGMA user_version = 28;",
+            )
+            .expect("restore schema 28");
+            conn.execute(
+                "INSERT INTO session_cache (host_id, session_id, created_at, info_json, archived)
+                 VALUES (?1, 'retained', 42, ?2, 1),
+                        (?1, 'malformed', 7, ?3, 1),
+                        (?1, 'non-object', 8, ?4, 1)",
+                rusqlite::params![host, valid, malformed, non_object],
+            )
+            .expect("seed schema-28 cache rows");
+            let premise: (i64, i64, i64) = conn
+                .query_row(
+                    "SELECT (SELECT user_version FROM pragma_user_version),
+                            (SELECT archived FROM session_cache WHERE session_id = 'retained'),
+                            (SELECT COUNT(*) FROM pragma_table_info('session_cache') WHERE name = 'archived')",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("read schema-28 premise");
+            assert_eq!(premise, (28, 1, 1));
+        }
+        drop(store);
+
+        let migrated = HelmStore::open(&db_path).await.expect("migrate schema 28");
+        let conn = migrated.conn.lock().expect("db mutex");
+        let retained: String = conn
+            .query_row(
+                "SELECT info_json FROM session_cache WHERE session_id = 'retained'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated payload");
+        let retained: serde_json::Value = serde_json::from_str(&retained).expect("valid JSON");
+        assert_eq!(retained["id"], "retained");
+        assert_eq!(retained["title"], "retained");
+        assert_eq!(retained["future_field"], "kept");
+        assert!(retained.get("archived").is_none());
+        let untouched: String = conn
+            .query_row(
+                "SELECT info_json FROM session_cache WHERE session_id = 'malformed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read malformed payload");
+        assert_eq!(untouched, malformed);
+        let untouched_non_object: String = conn
+            .query_row(
+                "SELECT info_json FROM session_cache WHERE session_id = 'non-object'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read non-object payload");
+        assert_eq!(untouched_non_object, non_object);
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(session_cache)")
+            .expect("prepare schema read")
+            .query_map([], |row| row.get(1))
+            .expect("read schema")
+            .collect::<Result<_, _>>()
+            .expect("decode schema");
+        assert!(!columns.iter().any(|column| column == "archived"));
+    }
+
     /// Reopening an already-current database must be a no-op on the schema
     /// and must not mint a second local row — the sequential counterpart to
     /// the genuine-race test below.
@@ -8619,161 +8688,6 @@ mod tests {
             "the stale detail view behind an unreachable-host notice must decode too"
         );
     }
-
-    /// The version-10 migration, which is what makes an UPGRADED helm's
-    /// default view count itself correctly on its very first read.
-    ///
-    /// Spec: every row that predates the `archived` column is backfilled
-    /// from the flag inside its own payload, the version stamp lands at 10,
-    /// and both counts survive a reopen — so the default view's `total`
-    /// excludes archived sessions from the first read onward and the
-    /// inclusion switch brings them back.
-    ///
-    /// Without the backfill the column would be 0 everywhere and every
-    /// archived session would silently rejoin the denominator on upgrade —
-    /// the exact incoherence this schema version exists to remove, restored
-    /// by the migration meant to fix it.
-    ///
-    /// Three payload shapes, because the backfill reads JSON TEXT rather
-    /// than `SessionInfo` and each shape pins a different consequence of
-    /// that:
-    ///
-    /// - A well-formed payload is the ordinary case, in both flag positions.
-    /// - A payload that is not JSON at all is the one case the backfill
-    ///   cannot answer, and the direction it fails in is a decision rather
-    ///   than an accident: it stays ACTIVE, matching [`HelmStore::cached_rows`]'s
-    ///   standing rule that a row's presence in the fleet is never quietly
-    ///   hidden just because nothing can read it.
-    /// - A payload that is valid JSON this build's struct would reject —
-    ///   what a NEWER farhelm's cache looks like to an older one — is still
-    ///   classified from its `archived` member. That is the whole reason the
-    ///   statement asks SQLite's JSON functions instead of serde, and a
-    ///   regression to a struct decode would file such a row as active and
-    ///   put a session the user archived back into the ordinary list.
-    ///
-    /// Reopened at the end because the point of a COLUMN is durability: a
-    /// second `open` must find version 10, skip the ladder entirely, and
-    /// still report the same two numbers. That is what distinguishes a
-    /// backfilled column from a value some read path recomputes.
-    ///
-    /// Driven through a genuinely planted OLD database, like the version-4
-    /// test above, so the whole ladder runs over the fixture a real user's
-    /// file would have been.
-    #[farhelm_testtrace::test]
-    async fn migrating_to_v10_backfills_the_archive_flag_from_each_payload() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("helm.db");
-        {
-            let conn = plant_v1_database(&db_path);
-            conn.execute_batch("INSERT INTO hosts (kind) VALUES ('local');")
-                .expect("plant the local row");
-            let archived = serde_json::to_string(&SessionInfo {
-                archived: true,
-                ..session("archived-1", 300)
-            })
-            .unwrap();
-            let active = serde_json::to_string(&session("active-1", 200)).unwrap();
-            for (id, created_at, json) in [
-                ("archived-1", 300, archived.as_str()),
-                ("active-1", 200, active.as_str()),
-                // Not JSON at all: the payload the backfill cannot read.
-                ("undecodable", 100, "not valid json"),
-                // Valid JSON, and NOT a `SessionInfo` this build could
-                // decode — the stand-in for a cache written by a newer
-                // farhelm. Its archive flag is still right there to read.
-                (
-                    "from-the-future",
-                    50,
-                    r#"{"archived":true,"shape":"unknown"}"#,
-                ),
-            ] {
-                conn.execute(
-                    "INSERT INTO session_cache (host_id, session_id, created_at, info_json)
-                     VALUES (1, ?1, ?2, ?3)",
-                    rusqlite::params![id, created_at, json],
-                )
-                .expect("plant a pre-column cache row");
-            }
-        }
-
-        let store = HelmStore::open(&db_path).await.expect("migrate and open");
-        // The reserved local row planted above; ids start at 1.
-        let host: HostId = 1;
-
-        let (flags, user_version): (Vec<(String, i64)>, i64) = {
-            let conn = Arc::clone(&store.conn);
-            tokio::task::spawn_blocking(move || {
-                let conn = conn.lock().unwrap();
-                let flags = {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT session_id, archived FROM session_cache ORDER BY session_id",
-                        )
-                        .unwrap();
-                    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-                        .unwrap()
-                        .collect::<Result<_, _>>()
-                        .unwrap()
-                };
-                let version: i64 = conn
-                    .query_row("PRAGMA user_version", [], |r| r.get(0))
-                    .unwrap();
-                (flags, version)
-            })
-            .await
-            .unwrap()
-        };
-        assert_eq!(
-            flags,
-            vec![
-                ("active-1".to_string(), 0),
-                ("archived-1".to_string(), 1),
-                ("from-the-future".to_string(), 1),
-                ("undecodable".to_string(), 0),
-            ],
-            "each row's flag must come from the JSON in its own payload, and a payload that is \
-             not JSON at all stays active"
-        );
-        assert_eq!(
-            user_version, SCHEMA_VERSION,
-            "an unstamped migration replays the ADD COLUMN on the next open and fails there"
-        );
-
-        // What each view SERVES, as a pair, taken twice: once against the
-        // store that just migrated, and once against a fresh open of the
-        // same file. `cached_rows` is the merged-list backing read now — it
-        // returns every row that decodes, regardless of view, and the
-        // `archived` column is what a caller filters the two views by. The
-        // two rows that do not decode are dropped from the read (and so
-        // from both totals), which is what keeps the served counts about
-        // rows a client can see; the column assertions above are what pin
-        // that the backfill still classified them.
-        async fn both_totals(store: &HelmStore, host: HostId) -> (u64, u64) {
-            let rows = store.cached_rows(&[host]).await.expect("cached rows");
-            let default_view = rows.iter().filter(|row| !row.archived).count() as u64;
-            let widened_view = rows.len() as u64;
-            (default_view, widened_view)
-        }
-        assert_eq!(
-            both_totals(&store, host).await,
-            (1, 2),
-            "the default view serves the one active row that decodes; the inclusion switch \
-             brings the decodable archived row back into the denominator, and neither view \
-             counts the two rows nothing can show"
-        );
-
-        drop(store);
-        let reopened = HelmStore::open(&db_path)
-            .await
-            .expect("reopen at the current version");
-        assert_eq!(
-            both_totals(&reopened, host).await,
-            (1, 2),
-            "the flag is stored, not recomputed: a reopen that skips the ladder must count the \
-             same two views"
-        );
-    }
-
     /// A migrated database and a freshly created one must end up with
     /// identical schemas after SQL formatting normalization — the invariant
     /// that lets [`apply_schema`]'s version-0 branch create the final shape directly instead of
@@ -8875,6 +8789,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 22;",
             )
             .expect("replace current history with the schema-22 shape");
@@ -8992,6 +8907,7 @@ mod tests {
                  -- plain `CREATE TABLE`.
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 17;",
             )
             .expect("plant schema-17 preferences");
@@ -9036,6 +8952,7 @@ mod tests {
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 25;",
             )
             .expect("plant schema-25 preferences");
@@ -9078,13 +8995,9 @@ mod tests {
         };
 
         // Back to the shape version 5 shipped: no identity column, and a row
-        // recorded under it. The session cache is downgraded too — a fixture
-        // stamped `user_version = 5` while still carrying a later version's
-        // `archived` or ordering columns would make the ladder replay the ADD
-        // COLUMN over a column that is already there, which is the migration
-        // failing loudly at a state no real database can be in. (Version 12
-        // already dropped the version-11 ordering columns, so only the
-        // version-10 flag is left to remove.) `session_seen` (version 17)
+        // recorded under it. The current cache already lacks the historical
+        // archive and ordering columns, so the ladder can add and remove them
+        // without a fixture-only duplicate-column failure. `session_seen` (version 17)
         // goes the same way as every other post-version-5 table: it must
         // not exist yet, or the version-17 migration's plain `CREATE TABLE`
         // fails against one that is already there.
@@ -9099,7 +9012,6 @@ mod tests {
                  DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE hosts DROP COLUMN alias;
-                 ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id    INTEGER PRIMARY KEY
                                 REFERENCES hosts (id) ON DELETE CASCADE,
@@ -9182,6 +9094,7 @@ mod tests {
                  DROP TABLE IF EXISTS preferences;
                  DROP TABLE IF EXISTS checkout_config_host;
                  DROP TABLE IF EXISTS checkout_config;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 11;",
             )
             .expect("downgrade the table");
@@ -9233,11 +9146,8 @@ mod tests {
         };
         {
             let conn = Connection::open(&path).unwrap();
-            // The session cache goes back with it: a fixture stamped at
-            // version 7 that still carried a later version's `archived` or
-            // ordering columns would replay the ADD COLUMN over an existing
-            // one and fail the open, on a state no real database reaches.
-            // (Version 12 already dropped the version-11 ordering columns.)
+            // The current cache already lacks the archive and ordering
+            // columns that the replayed ladder adds and later removes.
             conn.execute_batch(
                 "DROP TABLE profiles;
                  DROP TABLE remembered_profile;
@@ -9245,7 +9155,6 @@ mod tests {
                  DROP TABLE session_seen;
                  ALTER TABLE hosts DROP COLUMN cache_truncated;
                  ALTER TABLE hosts DROP COLUMN alias;
-                 ALTER TABLE session_cache DROP COLUMN archived;
                  CREATE TABLE remembered_profiles (
                      host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
                      profile_id TEXT NOT NULL,
@@ -9335,6 +9244,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 16;",
             )
             .expect("downgrade to version 16");
@@ -10635,6 +10545,7 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN alias;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
+                 ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 15;",
             )
             .expect("downgrade to the version-15 shape");
@@ -12471,8 +12382,8 @@ mod tests {
     ///
     /// The durable half of `crate::manager::merge_cached_session`'s
     /// contract, pinned where it is actually reachable. The race is
-    /// routine rather than exotic: a refresh drain and a create, rename,
-    /// restart, or archive reply both write this cache, nothing orders
+    /// routine rather than exotic: a refresh drain and a create, rename, or
+    /// restart reply both write this cache, nothing orders
     /// them, and a reply merely echoes whatever the supervisor's session
     /// entry held when it was built. So a reply that overwrote the field
     /// wholesale would regularly move a session BACKWARDS in a
@@ -12834,63 +12745,6 @@ mod tests {
             );
         }
     }
-
-    /// A session that comes back UNARCHIVED rejoins the default view's
-    /// column, and therefore whatever count a caller derives from it.
-    ///
-    /// The single-row write's `ON CONFLICT` clause has to carry `archived`
-    /// in both directions, and only one of them is exercised by ordinary
-    /// use. Drop it from the update and an archived row's flag becomes
-    /// permanent in the cache: the session would be invisible in the
-    /// ordinary list no matter what the supervisor went on to say about it,
-    /// with no way back short of deleting the cache — a wrong answer that
-    /// survives every refresh is the worst kind for a denormalized column to
-    /// give.
-    #[farhelm_testtrace::test]
-    async fn a_session_that_comes_back_unarchived_rejoins_the_default_view() {
-        let (_dir, store) = fresh_store().await;
-        let host = host_with_identity(&store, "flip@host", "flip-identity").await;
-        let default_view = async |store: &HelmStore| {
-            store
-                .cached_rows(&[host])
-                .await
-                .expect("cached rows")
-                .into_iter()
-                .filter(|row| !row.archived)
-                .count()
-        };
-
-        store
-            .remember_session(
-                host,
-                "flip-identity",
-                &SessionInfo {
-                    archived: true,
-                    ..session("s-1", 100)
-                },
-            )
-            .await
-            .expect("remember an archived session");
-        assert_eq!(
-            default_view(&store).await,
-            0,
-            "an archived session is outside the default view"
-        );
-
-        assert!(
-            store
-                .remember_session(host, "flip-identity", &session("s-1", 100))
-                .await
-                .expect("remember it as active"),
-            "the payload changed, so the write is a change clients must be told about"
-        );
-        assert_eq!(
-            default_view(&store).await,
-            1,
-            "and the row rejoins the default view the moment its column flips back"
-        );
-    }
-
     /// `hosts` is [`HelmStore::cached_rows`]'s SCOPE, not a predicate over a
     /// wider read: a host left out of the slice contributes nothing, and a
     /// host that never registered any sessions contributes nothing either.
@@ -13036,11 +12890,7 @@ mod tests {
                 .status("running")
                 .matches(1, &info)
         );
-        assert!(
-            !SessionFilter::default().is_empty(),
-            "the default archive exclusion requires the predicate scan"
-        );
-        assert!(SessionFilter::default().include_archived(true).is_empty());
+        assert!(SessionFilter::default().is_empty());
         assert!(!SessionFilter::default().title("x").is_empty());
         assert!(!SessionFilter::default().parent("parent-7").is_empty());
     }

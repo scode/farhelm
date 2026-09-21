@@ -157,7 +157,7 @@ pub(crate) fn retain_pane_tail(transcript: &str, max_bytes: usize) -> String {
 /// The tmux window option carrying a TAB's minted id (PLAN_M4.md item 2).
 ///
 /// Windows are the substrate for terminal tabs, and tabs are deliberately
-/// not durable metadata — SPEC.md says a reboot or an archive erases them
+/// not durable metadata — SPEC.md says a reboot erases them
 /// and nothing recreates them — so the marker on the window IS the record.
 /// It has to be a marker rather than a position: a pane's own processes
 /// inherit `TMUX` and can create windows on this private server, so a
@@ -2510,7 +2510,7 @@ impl TmuxDriver {
     ///
     /// Four callers, all of them tearing something down: a create
     /// unwinding a window whose SQLite insert failed (`create_session`'s
-    /// failure-ordering contract), `DeleteSession`, archive, and a RESTART
+    /// failure-ordering contract), `DeleteSession`, and a RESTART
     /// clearing the husk of a tmux session whose pane it can no longer find
     /// before building a fresh terminal under the same name. The
     /// already-gone case this tolerates is NOT the agent
@@ -2880,7 +2880,7 @@ impl TmuxDriver {
     /// server segfaulted mid-flight: nothing refreshes `Terminal` rows
     /// while a supervisor runs, the replacement server's pane counter
     /// restarted at `%0`, another session claimed that id, and every
-    /// lifecycle verb for the original session — delete, archive, stop,
+    /// lifecycle verb for the original session — delete, stop,
     /// restart, close-tab — failed on the mismatch until the supervisor
     /// was restarted. The invariant holds only at load; the mismatch is
     /// reachable in normal operation.

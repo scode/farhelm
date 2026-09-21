@@ -90,7 +90,6 @@ pub(crate) enum EndedGlyph {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QualifierGlyph {
     Stale,
-    Archived,
 }
 
 /// Draw the one-character harness mark used in the sidebar's agent track.
@@ -203,13 +202,11 @@ pub(crate) fn EndedStatusIcon(glyph: EndedGlyph) -> Element {
 pub(crate) fn QualifierIcon(glyph: QualifierGlyph) -> Element {
     let token = match glyph {
         QualifierGlyph::Stale => "stale",
-        QualifierGlyph::Archived => "archived",
     };
     rsx! {
         svg { class: "sidebar-glyph qualifier-glyph", "data-glyph": "{token}", view_box: "0 0 12 12", fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round", "aria-hidden": "true",
             match glyph {
                 QualifierGlyph::Stale => rsx! { path { d: "M6 2v4l2.5 1.5M6 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" } },
-                QualifierGlyph::Archived => rsx! { path { d: "M2 4h8v6H2zM1.5 2.3h9v1.5h-9zM4.5 6.5h3" } },
             }
         }
     }

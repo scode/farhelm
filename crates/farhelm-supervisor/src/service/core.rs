@@ -308,7 +308,7 @@ pub const AGENT_DELIVER_TIMEOUT: Duration = Duration::from_secs(5);
 /// already gets.
 ///
 /// Ten minutes: far past any plausible far-hop mutation — a
-/// rename/stop/archive, or a create/clone (the helm
+/// rename or stop, or a create/clone (the helm
 /// routes it to another supervisor, which has its own budgets an order of
 /// magnitude shorter), and short enough that a wedged link is not a
 /// permanent one. Deliberately not tight — reaching it means killing a
@@ -655,32 +655,6 @@ pub type ForwarderCleanupGate = SinkReservationGate;
 /// the settle's own timing is untouched.
 pub type TabSettleGate = SinkReservationGate;
 
-/// A named boundary in archive teardown where tests may pause or fail the
-/// operation before it publishes the archived row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArchiveStage {
-    PaneProbe,
-    TabRediscovery,
-    ScopeEnumeration,
-    Sweep,
-    ArtifactRemoval,
-}
-
-/// An asynchronous archive fault seam.
-///
-/// Archive correctness depends on failures and disconnects at boundaries
-/// that real tmux, systemd, and filesystem calls cannot produce reliably.
-/// Production installs no hook; tests use one to prove every such boundary
-/// fails closed and that a connection disappearing cannot cancel teardown.
-pub type ArchiveGate = Arc<
-    dyn Fn(
-            ArchiveStage,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>
-        + Send
-        + Sync,
->;
-
 /// The injectable seams a `Supervisor` is built with. All default to
 /// production behavior; grouped into one struct so a new injection point
 /// does not grow the constructor's signature again.
@@ -816,8 +790,6 @@ pub struct SupervisorSeams {
     pub natural_detach_gate: Option<NaturalDetachGate>,
     /// See [`ForwarderCleanupGate`]. `None` in production.
     pub forwarder_cleanup_gate: Option<ForwarderCleanupGate>,
-    /// See [`ArchiveGate`]. `None` in production.
-    pub archive_gate: Option<ArchiveGate>,
     /// See [`AgentAuthGate`]. `None` in production.
     pub agent_auth_gate: Option<AgentAuthGate>,
     /// See [`SampleFault`]. `None` in production.
@@ -982,7 +954,6 @@ impl Default for SupervisorSeams {
             sink_candidate_wait_gate: None,
             natural_detach_gate: None,
             forwarder_cleanup_gate: None,
-            archive_gate: None,
             agent_auth_gate: None,
             sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
@@ -2306,14 +2277,6 @@ enum RelaunchDisposition {
     Published,
 }
 
-/// Archive-state half of failed-relaunch recovery.
-///
-/// Only a definitive failure restores the prior durable generation; an
-/// ambiguous failure may have launched an agent and must remain visible.
-pub(crate) fn recovered_archive_flag(definitive: bool, prior_archived: bool) -> bool {
-    definitive && prior_archived
-}
-
 /// Why a relaunch failed, and what the caller may do about it.
 struct RelaunchFailure {
     error: anyhow::Error,
@@ -2356,7 +2319,7 @@ impl RelaunchFailure {
 /// contract and a bare value at the call sites invites getting it wrong
 /// without noticing. Here the contract is that this cell is SESSION-wide —
 /// only a session's first entry mints one, and every later entry for the
-/// same session (rename, archive, relaunch) clones the `Arc` instead. A
+/// same session (rename or relaunch) clones the `Arc` instead. A
 /// call to this function anywhere but a create, a reload, or a test
 /// fixture is a bug; see the field's own docs.
 pub(crate) fn activity_stamp(at: i64) -> Arc<std::sync::atomic::AtomicI64> {
@@ -4125,7 +4088,7 @@ pub(crate) struct SessionEntry {
     /// cell would advance the abandoned copy while its own durable write
     /// moved the row, leaving this process answering from a value older
     /// than its own database until the next observed change crossed the
-    /// quantum. Sharing one cell per session across renames, archives, and
+    /// quantum. Sharing one cell per session across renames and
     /// relaunches alike makes every holder of any entry a writer to the
     /// same place, which is what the value's meaning already implies.
     /// Cross-process and clock-step monotonicity stay the store's job
@@ -4536,8 +4499,8 @@ pub struct Supervisor {
     /// for this fence too — deadlocks the common case: a self-targeting
     /// verb (an explicit `--session` naming the asking session itself) would
     /// hold `lifecycle_locks(id)` on the way up while the mutation's OWN
-    /// execution, reached moments later through `StopSession`/
-    /// `RenameSession`/`ArchiveSession`, tries to claim the identical key
+    /// execution, reached moments later through `StopSession` or
+    /// `RenameSession`, tries to claim the identical key
     /// to do the work. Two registries mean the fence and the target's own
     /// lifecycle claim can never be the same lock, so a self-targeting
     /// verb cannot block on itself.
@@ -4618,7 +4581,7 @@ pub struct Supervisor {
 }
 
 /// The refusal every lifecycle verb returns for an UNRECOGNIZED foreign
-/// pane owner — delete, archive, stop, restart, and close-tab all say this
+/// pane owner — delete, stop, restart, and close-tab all say this
 /// same sentence, which is why it is written once.
 ///
 /// It has to carry both halves an operator needs to act: which tmux
@@ -5715,14 +5678,6 @@ impl Supervisor {
                 continue;
             }
 
-            // Archive is durable evidence that this session intentionally
-            // has no terminal. Do not rediscover a same-named tmux husk as
-            // its agent: restart is the only operation allowed to clear the
-            // flag and create a new terminal generation.
-            if row.archived {
-                continue;
-            }
-
             // A launch sentinel discovered now outranks every pane-based
             // inference (PLAN_M3.md item 3) — including "no pane was even
             // found", which is exactly the case a vanished tmux window
@@ -6046,7 +6001,6 @@ impl Supervisor {
                 Arc::new(SessionEntry {
                     info: SessionInfo {
                         parent: row.parent,
-                        archived: row.archived,
                         id: row.id,
                         title: row.title,
                         created_at: row.created_at,
@@ -8224,7 +8178,6 @@ impl Supervisor {
                 });
                 let info = SessionInfo {
                     parent: row.parent,
-                    archived: row.archived,
                     restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
                     id: row.id,
                     title: row.title,
@@ -8641,7 +8594,6 @@ impl Supervisor {
                 conversation_source: None,
                 id: id.clone(),
                 parent: parent.clone(),
-                archived: false,
                 title: title.clone(),
                 created_at,
                 // Seeded to creation, never to 0: a session nobody has
@@ -8783,7 +8735,6 @@ impl Supervisor {
                 conversation_source: None,
                 id: id.clone(),
                 parent: parent.clone(),
-                archived: false,
                 title: title.clone(),
                 created_at,
                 // Nothing has been observed happening in a session
@@ -9120,7 +9071,6 @@ impl Supervisor {
         let launch_scope = launch_scope_unit(&id, generation, scoped);
         let info = SessionInfo {
             parent,
-            archived: false,
             id: id.clone(),
             title,
             // The same value just persisted: a fresh mint for a first-time
@@ -9728,7 +9678,7 @@ impl Supervisor {
     /// running agent, merely answering to a different name. Every verb
     /// then has something to lose by proceeding: restart and delete would
     /// kill a live agent without consent, stop would record a plain exit
-    /// that never happened, and delete/archive/close-tab would leave the
+    /// that never happened, and delete or close-tab would leave the
     /// renamed container, its scrollback, and its tabs behind while
     /// reporting success. So the verbs fail closed there, exactly as they
     /// did before the probe was made classifying.
@@ -10354,12 +10304,7 @@ impl Supervisor {
                     }
                 };
                 if still_exists {
-                    let mut recovered_info = entry.info.clone();
-                    // An ambiguous launch may be running. Keeping the
-                    // archived flag would hide the only row that can be
-                    // used to stop, inspect, or restart it.
-                    recovered_info.archived =
-                        recovered_archive_flag(definitive, claim.prior.archived);
+                    let recovered_info = entry.info.clone();
                     self.sessions.lock().await.insert(
                         id.clone(),
                         relaunched_entry(
@@ -10898,7 +10843,6 @@ impl Supervisor {
         };
         let info = SessionInfo {
             parent: entry.info.parent.clone(),
-            archived: false,
             id: entry.info.id.clone(),
             title: entry.info.title.clone(),
             // A restart is a new LAUNCH GENERATION of the same session, not
@@ -11092,7 +11036,8 @@ impl Supervisor {
     /// Fallible on purpose, and the two failure shapes are not the same
     /// answer. tmux definitively reporting that there is no server (or no
     /// panes) is `Ok(vec![])` — the session genuinely has no tabs, which
-    /// is exactly what a rebooted or archived session looks like. Any
+    /// is exactly what a session whose terminal no longer exists looks like.
+    /// Any
     /// OTHER query failure is an `Err`: "we could not ask" is not "there
     /// are none", and a caller that flattened the two would publish an
     /// empty tab strip for a session whose tabs are alive and attached.
@@ -11118,7 +11063,7 @@ impl Supervisor {
     }
 
     /// [`Self::session_tabs`] with dead tabs INCLUDED — the teardown
-    /// spelling. Archive and delete enumerate per-tab cgroup scopes from
+    /// spelling. Delete enumerates per-tab cgroup scopes from
     /// this list, and a tab whose shell exited a moment ago still owns a
     /// scope (its daemonized children live there until something stops
     /// it); the reply-facing filter would skip exactly that scope in the
@@ -11350,7 +11295,7 @@ impl Supervisor {
     /// 1. **Resolve the session's agent terminal.** Not because a tab
     ///    needs it, but because it is where the tmux session name lives —
     ///    and its absence IS the restart-first refusal: a session whose
-    ///    terminals a reboot or archive erased has no tmux session to add
+    ///    terminal no longer exists has no tmux session to add
     ///    a window to, and building a tab-only substrate for an agent-less
     ///    session is not a state this system has.
     /// 2. **Check the working directory.** The same `ensure_cwd_usable`
@@ -11411,8 +11356,7 @@ impl Supervisor {
             RequestError::new(
                 ErrorKind::Conflict,
                 format!(
-                    "session {} has no terminals to add a tab to (a reboot or an archive ended \
-                     them); restart the session first",
+                    "session {} has no terminals to add a tab to; restart the session first",
                     truncate_for_error(session_id)
                 ),
             )
@@ -11853,8 +11797,8 @@ impl Supervisor {
     /// control client attached to the tmux SESSION, so losing the tab's
     /// WINDOW does not end that client the way losing the session would —
     /// the stream simply goes quiet. Every path the product itself offers
-    /// is covered (a close comes through here; a reboot or archive takes
-    /// the whole tmux session, which does end the client). A window killed
+    /// is covered (a close comes through here; losing the whole tmux session
+    /// does end the client). A window killed
     /// by hand, directly against the private tmux server, is the residual:
     /// its viewer sees a terminal that stops updating until it detaches or
     /// reattaches. Detecting it would mean teaching the output stream
@@ -12649,7 +12593,6 @@ impl Supervisor {
         };
         let info = SessionInfo {
             parent: row.parent.clone(),
-            archived: row.archived,
             id: row.id.clone(),
             title: row.title.clone(),
             created_at: row.created_at,
@@ -14531,7 +14474,6 @@ pub(crate) mod tests {
         SessionEntry {
             info: SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "t".to_string(),
                 created_at: 1_700_000_000,
@@ -14589,7 +14531,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: entry.info.id.clone(),
                     parent: None,
-                    archived: false,
                     title: title.to_string(),
                     created_at: entry.info.created_at,
                     last_activity_at: entry.info.last_activity_at,
@@ -15247,7 +15188,6 @@ pub(crate) mod tests {
                         conversation_source: None,
                         id: id.to_string(),
                         parent: None,
-                        archived: false,
                         title: id.to_string(),
                         created_at: now_unix(),
                         last_activity_at: stored_activity_at,
@@ -15396,7 +15336,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: "error row".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -15553,7 +15492,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: scoped_id.clone(),
                     parent: None,
-                    archived: false,
                     title: "scoped".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -15640,7 +15578,6 @@ pub(crate) mod tests {
                         conversation_source: source,
                         id: id.clone(),
                         parent: None,
-                        archived: false,
                         title: "identity".to_string(),
                         created_at: now_unix(),
                         last_activity_at: now_unix(),
@@ -15749,7 +15686,6 @@ pub(crate) mod tests {
                 StoredSession {
                     id: id.clone(),
                     parent: None,
-                    archived: false,
                     title: "Pi".into(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -15864,7 +15800,6 @@ pub(crate) mod tests {
                 StoredSession {
                     id: id.clone(),
                     parent: None,
-                    archived: false,
                     title: "Omp".into(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -16088,7 +16023,6 @@ pub(crate) mod tests {
                 StoredSession {
                     id: id.clone(),
                     parent: None,
-                    archived: false,
                     title: "Omp".into(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -16265,7 +16199,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: doomed.to_string(),
                     parent: None,
-                    archived: false,
                     title: "hooked".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -16359,7 +16292,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: "unhooked".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -16439,7 +16371,6 @@ pub(crate) mod tests {
                         conversation_source: None,
                         id: id.to_string(),
                         parent: None,
-                        archived: false,
                         title: id.to_string(),
                         created_at: now_unix(),
                         last_activity_at: now_unix(),
@@ -16539,7 +16470,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -16632,7 +16562,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -16722,7 +16651,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "pending archive".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -17449,7 +17377,9 @@ pub(crate) mod tests {
     /// and migration invents no checkout origin or membership for either.
     /// The OMP row is literal historical data: a stale-base release once
     /// migrated this schema successfully, then failed startup decoding `omp`.
-    /// Starting a supervisor here guards that boundary beyond schema opening.
+    /// Starting a supervisor here guards that boundary beyond schema opening
+    /// and proves retired archive state never turns an ended, terminal-less
+    /// row into a launch attempt.
     #[farhelm_testtrace::test]
     async fn populated_v17_upgrade_preserves_sessions_and_literal_key_semantics() {
         use rusqlite::{Connection, types::Value};
@@ -17533,6 +17463,9 @@ pub(crate) mod tests {
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap()
+                .into_iter()
+                .filter(|column| column != "archived")
+                .collect::<Vec<_>>()
                 .join(",");
             let rows = historical_rows(&conn, &columns);
             assert_eq!(rows.len(), 4);
@@ -17545,7 +17478,7 @@ pub(crate) mod tests {
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                18
+                19
             );
             assert_eq!(
                 conn.query_row(
@@ -17622,6 +17555,13 @@ pub(crate) mod tests {
         let omp = sup.session_snapshot("old-omp").await.unwrap().unwrap();
         assert_eq!(omp.kind, AgentKind::Omp);
         let sessions = sup.sessions.lock().await;
+        let retired_archive = sessions
+            .get("old-replay")
+            .expect("the retired archive row becomes an ordinary session");
+        assert!(
+            retired_archive.terminal.is_none(),
+            "startup must preserve terminal absence rather than launching the retired row"
+        );
         let omp = &sessions
             .get("old-omp")
             .expect("OMP reloaded into live state")
@@ -17636,6 +17576,13 @@ pub(crate) mod tests {
             })
         );
         drop(sessions);
+        assert!(
+            std::fs::read_dir(state.path().join("launch"))
+                .expect("launch directory")
+                .next()
+                .is_none(),
+            "migration and startup must not publish a launch specification"
+        );
         assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
         assert_eq!(
             sup.store
@@ -17760,7 +17707,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -18652,7 +18598,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -18739,7 +18684,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "ended".to_string(),
                     parent: None,
-                    archived: false,
                     title: "ended".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -19269,7 +19213,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -19365,7 +19308,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -19791,7 +19733,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -19901,7 +19842,6 @@ pub(crate) mod tests {
             conversation_source: None,
             id: "stranded".to_string(),
             parent: None,
-            archived: false,
             title: "as created".to_string(),
             created_at: now_unix(),
             last_activity_at: now_unix(),
@@ -20070,7 +20010,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -20293,7 +20232,6 @@ pub(crate) mod tests {
                     conversation_source: None,
                     id: "stranded".to_string(),
                     parent: None,
-                    archived: false,
                     title: "stranded".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),

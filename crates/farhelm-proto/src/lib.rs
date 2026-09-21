@@ -237,7 +237,11 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// is not compatibility: the exact-version handshake refuses an older peer
 /// before it can ignore the capability or reject the new verb mid-relay.
 ///
-/// `protocol_version_is_pinned_at_25` (renamed at every bump since `_at_4`)
+/// Version 26 removes session-archive state and operations from every wire
+/// shape. Exact-version negotiation keeps an older peer from presenting or
+/// accepting that removed lifecycle vocabulary.
+///
+/// `protocol_version_is_pinned_at_26` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -249,7 +253,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
 /// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 26;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -260,7 +264,7 @@ pub const PROTOCOL_VERSION: u32 = 25;
 /// rendered WHOLE up to "a fixed cap of a few hundred". Five hundred is an
 /// order of magnitude past the assumption — comfortably above anything a
 /// person accumulates by hand, so hitting it means something has gone
-/// wrong (a runaway agent spawning sessions, an archive nobody prunes)
+/// wrong (a runaway agent spawning sessions, retained sessions nobody deletes)
 /// rather than an ordinary fleet — while staying small enough that every
 /// consumer downstream (the helm merging and sorting every host's reply
 /// in memory, a browser holding and rendering the capped array) does so in
@@ -272,13 +276,9 @@ pub const PROTOCOL_VERSION: u32 = 25;
 /// such a frame whole and the helm keeps its previous cache, which is an
 /// accepted failure mode rather than a case the wire budgets for.
 ///
-/// The cut is blind to the archive flag: a supervisor cuts its list in
-/// creation order, newest first, over archived and live sessions alike, so
-/// a host with more archived sessions than the cap can push a LIVE session
-/// off the wire — and off the helm's default view, where the client sees
-/// `truncated` but not that a live session is what went missing. Accepted
-/// rather than solved: a host at the cap is already outside the fleet this
-/// product is built for, and the notice is the whole of the answer.
+/// A supervisor cuts its list in creation order, newest first. A host at the
+/// cap is already outside the fleet this product is built for, and the
+/// truncation notice is the whole of the answer.
 ///
 /// The helm's own listing applies the same cap to its merged view, so the
 /// notice a client shows when the cap was hit is the one SPEC.md calls
@@ -969,11 +969,6 @@ pub struct SessionInfo {
     /// tabs known.
     #[serde(default)]
     pub tabs: Vec<TabInfo>,
-    /// Durable archive metadata, not a session status (PLAN_M7.md item 2).
-    /// An older sender has no archive vocabulary, so absence honestly
-    /// decodes as `false`.
-    #[serde(default)]
-    pub archived: bool,
     /// The profile this session was CREATED from, if it was created from
     /// one at all (PLAN_M6_75.md item 3). `None` means raw-created — the
     /// session names an invocation and no profile ever shaped it — which is
@@ -1743,8 +1738,7 @@ pub enum AgentVerb {
     /// Every host the helm knows, so an agent can name one without
     /// guessing. See [`AgentHost`].
     Hosts {},
-    /// Every session the helm knows, across every host, archived ones
-    /// included and flagged. See [`AgentSession`].
+    /// Every session the helm knows across every host. See [`AgentSession`].
     ///
     /// "Every" up to the listing cap ([`LIST_SESSIONS_CAP`]), and the reply
     /// says when that cap was reached — see
@@ -1775,17 +1769,9 @@ pub enum AgentVerb {
     /// Kill a session's agent process tree, leaving the session listed and
     /// its terminal viewable — SPEC.md's "stop". Answered with
     /// [`AgentReply::Stopped`], which carries nothing beyond success: unlike
-    /// `Rename`/`Archive`, a stop's REST counterpart already replies with an
+    /// `Rename`, a stop's REST counterpart already replies with an
     /// empty object, so there is no fresher row to hand back.
     Stop {
-        /// The exact target id, including for an intentional self action.
-        session_id: Option<String>,
-    },
-    /// Stop a session's agent and tabs, remove its terminal, and retain its
-    /// metadata and attachments — SPEC.md's archive. Answered with
-    /// [`AgentReply::Session`], carrying the durable post-teardown state
-    /// (`archived: true`) exactly as the REST `/archive` route does.
-    Archive {
         /// The exact target id, including for an intentional self action.
         session_id: Option<String>,
     },
@@ -1904,7 +1890,6 @@ impl AgentVerb {
             // reported as a free retry.
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
-            | AgentVerb::Archive { .. }
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. } => true,
@@ -1975,12 +1960,7 @@ pub enum AgentReply {
         /// Stable host identity of the authenticated asking session.
         caller_host_id: String,
     },
-    /// Answers `Rename` and `Archive` alike: the ONE session either verb
-    /// acted on, freshly recomputed by the host that owns it. Sharing a
-    /// reply shape between two verbs is deliberate — both are "here is the
-    /// row now", and inventing `Renamed`/`Archived` twins would only be two
-    /// names for the same fact with no behavioral difference a caller could
-    /// key on.
+    /// Answers `Rename` with the one freshly recomputed session row.
     Session { session: AgentSession },
     /// Answers `Restart` with the session's post-relaunch row. This is a
     /// distinct tag from [`AgentReply::Session`] because a restart's
@@ -2183,27 +2163,6 @@ pub struct AgentSession {
     /// never on the id alone (see [`AgentHost::current`] for who computes
     /// this and how).
     pub current: bool,
-    /// True for a session the user has archived.
-    ///
-    /// Archived rows are IN this listing, unlike the UI's default browse
-    /// view, because the verb's promise is every session the helm knows and
-    /// an agent has no archive switch to flip. The flag is what keeps them
-    /// interpretable: an archived session is durable history rather than a
-    /// live one, which a reader should weigh before acting on it — not a
-    /// row the lifecycle verbs refuse to touch. `Rename`, `Stop`, `Archive`,
-    /// and `Restart` may all target an archived session's id exactly as they
-    /// would any other: restart unarchives it through the ordinary lifecycle
-    /// contract.
-    ///
-    /// `Stop` on an archived session is the one to be careful describing.
-    /// It is not a request the supervisor short-circuits: it runs the same
-    /// process-tree teardown any stop runs, against a session whose
-    /// processes archiving already ended. The ordinary result is therefore
-    /// success with nothing left to kill — but it is a real teardown that
-    /// can report a real failure (a pane probe that cannot reach tmux, say),
-    /// so a caller must not read "already archived" as "this call cannot
-    /// fail".
-    pub archived: bool,
     /// The currently advertised non-secret restart capability. It tells a
     /// caller which mode may be requested, but not the command or captured
     /// conversation that would implement it; the target still revalidates
@@ -2680,18 +2639,6 @@ pub enum ControlMsg {
     /// handle on a possibly-running agent is the one outcome that must
     /// never happen silently).
     SessionDeleted { req_id: u64 },
-    /// Tear a session down and hide it from the default merged view while
-    /// retaining its metadata (PLAN_M7.md item 5). Confirmation is a client
-    /// obligation, so no confirmation flag appears on the wire.
-    ArchiveSession { req_id: u64, session_id: String },
-    /// Acknowledges [`ControlMsg::ArchiveSession`] with the session as it
-    /// stands after teardown. Returning the row makes an ambiguous retry
-    /// and an already-archived request the same successful answer, and lets
-    /// the helm update its cache before it answers its own caller.
-    ///
-    /// There is deliberately no unarchive message; restarting an archived
-    /// session clears the flag in PLAN_M7.md item 5.
-    SessionArchived { req_id: u64, session: SessionInfo },
     /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
     /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
     /// when opening an interrupted session sends this same message, not a
@@ -2898,7 +2845,7 @@ pub enum ControlMsg {
     /// (PLAN_M4.md item 2). Refused — with the session untouched — when
     /// the working directory has vanished (M3's restart precondition,
     /// same error shape), when the session's tmux session no longer
-    /// exists (a rebooted or archived session must be restarted first;
+    /// exists (a rebooted session must be restarted first;
     /// a tab-only terminal substrate is not a state this system has),
     /// and when the shell is already dead by reply time (the pane's last
     /// words travel as the error detail — a launch that failed must not
@@ -3211,7 +3158,7 @@ pub enum ControlMsg {
     /// final publication wait is interrupted, completion is unknown: a
     /// complete attachment may remain without an acknowledged path.
     /// It has ordinary retention until session deletion, not cleanup on
-    /// startup, Stop, or Archive. Retrying may create another copy; there
+    /// startup or Stop. Retrying may create another copy; there
     /// is no rollback or deduplication. A torn or partial file is never
     /// observable at the published path. Failures BEFORE commit are not
     /// this message's to report: they already tore the channel down as
@@ -3405,7 +3352,6 @@ impl ControlMsg {
             | ControlMsg::GithubRepoResults { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
-            | ControlMsg::SessionArchived { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
             | ControlMsg::ConversationReported { req_id, .. }
             | ControlMsg::SessionRenamed { req_id, .. }
@@ -3433,7 +3379,6 @@ impl ControlMsg {
             | ControlMsg::GithubRepoSearch { .. }
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
-            | ControlMsg::ArchiveSession { .. }
             | ControlMsg::RestartSession { .. }
             | ControlMsg::ReportConversation { .. }
             | ControlMsg::RenameSession { .. }
@@ -3477,7 +3422,6 @@ impl ControlMsg {
             | ControlMsg::GithubRepoSearch { req_id, .. }
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
-            | ControlMsg::ArchiveSession { req_id, .. }
             | ControlMsg::RestartSession { req_id, .. }
             | ControlMsg::ReportConversation { req_id, .. }
             | ControlMsg::RenameSession { req_id, .. }
@@ -3499,7 +3443,6 @@ impl ControlMsg {
             | ControlMsg::GithubRepoResults { .. }
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
-            | ControlMsg::SessionArchived { .. }
             | ControlMsg::SessionRestarted { .. }
             | ControlMsg::ConversationReported { .. }
             | ControlMsg::SessionRenamed { .. }
@@ -3560,8 +3503,6 @@ impl ControlMsg {
             ControlMsg::SessionStopped { .. } => "SessionStopped",
             ControlMsg::DeleteSession { .. } => "DeleteSession",
             ControlMsg::SessionDeleted { .. } => "SessionDeleted",
-            ControlMsg::ArchiveSession { .. } => "ArchiveSession",
-            ControlMsg::SessionArchived { .. } => "SessionArchived",
             ControlMsg::RestartSession { .. } => "RestartSession",
             ControlMsg::SessionRestarted { .. } => "SessionRestarted",
             ControlMsg::ReportConversation { .. } => "ReportConversation",
@@ -4237,7 +4178,6 @@ mod tests {
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
             parent: None,
-            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
@@ -4267,49 +4207,6 @@ mod tests {
             "the accepted identity is distinct from the display spelling on the wire"
         );
     }
-
-    /// PLAN_M7.md item 2's parent and archive flag, including both default
-    /// and populated wire shapes. Archive remains metadata beside status;
-    /// it is never serialized as a status variant.
-    #[farhelm_testtrace::test]
-    fn session_info_parent_and_archived_json_shapes_are_pinned() {
-        for (parent, archived, expected_parent) in [
-            (None, false, serde_json::Value::Null),
-            (
-                Some("parent-1".to_string()),
-                true,
-                serde_json::json!("parent-1"),
-            ),
-        ] {
-            let info = SessionInfo {
-                id: "child-1".to_string(),
-                parent,
-                title: "child".to_string(),
-                created_at: 1_700_000_000,
-                last_activity_at: 1_700_000_000,
-                last_work_started_at: 0,
-                creation_seq: None,
-                cwd: "/tmp".to_string(),
-                canonical_cwd: None,
-                invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
-                status: SessionStatus::Unknown,
-                annotation: None,
-                restart_offer: RestartOffer::FreshOnly,
-                tabs: Vec::new(),
-                archived,
-                source_profile: None,
-                github_repo: None,
-                working_copy: None,
-            };
-            let json = serde_json::to_value(&info).unwrap();
-            assert_eq!(json["parent"], expected_parent);
-            assert_eq!(json["archived"], serde_json::json!(archived));
-            assert_eq!(serde_json::from_value::<SessionInfo>(json).unwrap(), info);
-        }
-    }
-
     /// The GitHub-checkout vocabulary is protocol 24's surface, so its wire
     /// JSON is golden-pinned like every request/reply pair before it: a
     /// serde-attribute change here would compile and pass a round-trip
@@ -4419,7 +4316,6 @@ mod tests {
     fn session_info_github_fields_decode_absent_and_roundtrip() {
         let mut info = SessionInfo {
             parent: None,
-            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 0,
@@ -4563,9 +4459,9 @@ mod tests {
     /// lost `total`/`next_cursor` and gained `truncated`) — field removals,
     /// the other non-additive case. The bump to 24 adds the GitHub-checkout
     /// messages and the optional `CreateSession::github_checkout` payload;
-    /// version 25 adds the agent restart tag and its discovery capability,
-    /// which likewise need a handshake refusal rather than silent
-    /// tolerance. Pinning the
+    /// version 25 adds the agent restart tag and its discovery capability;
+    /// version 26 removes session archive state and operations. Both need a
+    /// handshake refusal rather than silent tolerance. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
     /// drift discovered only by two builds refusing to talk to each other.
@@ -4576,8 +4472,8 @@ mod tests {
     /// an edit per bump; this test and the literal-24 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_25() {
-        assert_eq!(PROTOCOL_VERSION, 25);
+    fn protocol_version_is_pinned_at_26() {
+        assert_eq!(PROTOCOL_VERSION, 26);
     }
 
     /// Pins the skew direction the GitHub-checkout bump exists to create, in
@@ -4599,7 +4495,7 @@ mod tests {
     /// rename; this test is the one that fails when the constant and the
     /// version history disagree.
     #[farhelm_testtrace::test]
-    async fn v24_and_v25_peers_refuse_each_other() {
+    async fn v25_and_v26_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4619,7 +4515,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(24)).await.unwrap();
+        w.write_control(&stale_hello(25)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4639,8 +4535,8 @@ mod tests {
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 24);
-        assert_eq!(skew.our_protocol, 25);
+        assert_eq!(skew.peer_protocol, 25);
+        assert_eq!(skew.our_protocol, 26);
 
         // The reverse direction: a v24 receiver (the refusal rule itself,
         // modeled by its exact-version check) meets a v25 hello and hangs up.
@@ -4650,7 +4546,7 @@ mod tests {
         let v24_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(24)).await.unwrap();
+            w.write_control(&stale_hello(25)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4659,7 +4555,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 24 {
+            if protocol_version != 25 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4818,83 +4714,6 @@ mod tests {
             );
         }
     }
-
-    /// Archive's request and fresh-session reply are golden-pinned here.
-    /// The reply carries the archived row so an idempotent retry returns
-    /// the same useful answer as the first request.
-    #[farhelm_testtrace::test]
-    fn archive_session_json_shapes_are_pinned() {
-        let session = SessionInfo {
-            parent: None,
-            archived: true,
-            id: "s1".to_string(),
-            title: "demo".to_string(),
-            created_at: 1_700_000_000,
-            last_activity_at: 1_700_000_000,
-            last_work_started_at: 0,
-            creation_seq: Some(7),
-            cwd: "/tmp".to_string(),
-            canonical_cwd: None,
-            invocation: "agent".to_string(),
-            resume_template: None,
-            launch: None,
-            status: SessionStatus::Exited { exit_code: None },
-            annotation: Some(STOP_ANNOTATION.to_string()),
-            restart_offer: RestartOffer::FreshOnly,
-            tabs: Vec::new(),
-            source_profile: None,
-            github_repo: None,
-            working_copy: None,
-        };
-        for (msg, expected) in [
-            (
-                ControlMsg::ArchiveSession {
-                    req_id: 13,
-                    session_id: "s1".to_string(),
-                },
-                serde_json::json!({
-                    "type": "archive_session",
-                    "req_id": 13,
-                    "session_id": "s1",
-                }),
-            ),
-            (
-                ControlMsg::SessionArchived {
-                    req_id: 13,
-                    session: session.clone(),
-                },
-                serde_json::json!({
-                    "type": "session_archived",
-                    "req_id": 13,
-                    "session": {
-                        "id": "s1",
-                        "parent": null,
-                        "title": "demo",
-                        "created_at": 1_700_000_000,
-                        "last_activity_at": 1_700_000_000,
-                        "last_work_started_at": 0,
-                        "creation_seq": 7,
-                        "cwd": "/tmp",
-                        "invocation": "agent",
-                        "status": { "state": "exited", "exit_code": null },
-                        "annotation": STOP_ANNOTATION,
-                        "restart_offer": "fresh_only",
-                        "tabs": [],
-                        "archived": true,
-                        "source_profile": null,
-                        "github_repo": null,
-                        "working_copy": null,
-                        "resume_template": null,
-                        "launch": null,
-                    },
-                }),
-            ),
-        ] {
-            assert_eq!(serde_json::to_value(&msg).unwrap(), expected);
-            assert_eq!(serde_json::from_value::<ControlMsg>(expected).unwrap(), msg);
-        }
-    }
-
     /// `PauseOutput`/`ResumeOutput` round-tripped through the real
     /// encode/decode path, matching how `stop_and_delete_roundtrip_through_frames`
     /// exercises the M2 additions above — this is what would catch a drift
@@ -5264,100 +5083,6 @@ mod tests {
         serde_json::from_value::<LegacyV10ControlMsg>(serde_json::to_value(error).unwrap())
             .expect_err("a v10 decoder must fail on the v11 unauthorized error kind");
     }
-
-    /// A v10 decoder has neither archive tag and must reject both messages
-    /// rather than ignore either as an additive field on an older operation.
-    #[farhelm_testtrace::test]
-    fn archive_messages_fail_under_a_legacy_v10_decoder() {
-        for archive in [
-            ControlMsg::ArchiveSession {
-                req_id: 2,
-                session_id: "s1".to_string(),
-            },
-            ControlMsg::SessionArchived {
-                req_id: 2,
-                session: SessionInfo {
-                    parent: None,
-                    archived: true,
-                    id: "s1".to_string(),
-                    title: "demo".to_string(),
-                    created_at: 0,
-                    last_activity_at: 0,
-                    last_work_started_at: 0,
-                    creation_seq: Some(1),
-                    cwd: "/tmp".to_string(),
-                    canonical_cwd: None,
-                    invocation: "agent".to_string(),
-                    resume_template: None,
-                    launch: None,
-                    status: SessionStatus::Exited { exit_code: None },
-                    annotation: Some(STOP_ANNOTATION.to_string()),
-                    restart_offer: RestartOffer::FreshOnly,
-                    tabs: Vec::new(),
-                    source_profile: None,
-                    github_repo: None,
-                    working_copy: None,
-                },
-            },
-        ] {
-            let decoded = serde_json::from_value::<LegacyV10ControlMsg>(
-                serde_json::to_value(&archive).unwrap(),
-            );
-            assert!(
-                decoded.is_err(),
-                "a v10 decoder accepted a v11 archive tag: {archive:?}"
-            );
-        }
-    }
-
-    /// Version 11 has one archive-reply shape: the post-teardown session is
-    /// required, not an optional field a same-version peer may omit.
-    #[farhelm_testtrace::test]
-    fn original_v11_archive_reply_requires_the_session() {
-        #[derive(Debug, Deserialize)]
-        #[serde(tag = "type", rename_all = "snake_case")]
-        enum OriginalV11Reply {
-            SessionArchived { req_id: u64, session: SessionInfo },
-        }
-
-        let value = serde_json::to_value(ControlMsg::SessionArchived {
-            req_id: 9,
-            session: SessionInfo {
-                parent: None,
-                archived: true,
-                id: "s1".to_string(),
-                title: "demo".to_string(),
-                created_at: 0,
-                last_activity_at: 0,
-                last_work_started_at: 0,
-                creation_seq: Some(1),
-                cwd: "/tmp".to_string(),
-                canonical_cwd: None,
-                invocation: "agent".to_string(),
-                resume_template: None,
-                launch: None,
-                status: SessionStatus::Exited { exit_code: None },
-                annotation: Some(STOP_ANNOTATION.to_string()),
-                restart_offer: RestartOffer::FreshOnly,
-                tabs: Vec::new(),
-                source_profile: None,
-                github_repo: None,
-                working_copy: None,
-            },
-        })
-        .unwrap();
-        let OriginalV11Reply::SessionArchived { req_id, session } =
-            serde_json::from_value(value).expect("the current reply is the original v11 shape");
-        assert_eq!(req_id, 9);
-        assert!(session.archived);
-
-        serde_json::from_value::<OriginalV11Reply>(serde_json::json!({
-            "type": "session_archived",
-            "req_id": 9,
-        }))
-        .expect_err("a v11 archive reply without its session must fail");
-    }
-
     /// `SessionList`'s shape at `PROTOCOL_VERSION` 14: the whole list plus
     /// a required `truncated` flag, and nothing else — no `total`, no
     /// `next_cursor`. Golden-pinned in both the complete and the capped
@@ -5457,7 +5182,6 @@ mod tests {
             sessions[0].creation_seq, None,
             "an older sender has no supervisor creation sequence"
         );
-        assert!(!sessions[0].archived, "a v10 session is not archived");
     }
 
     /// The REVERSE direction from the test above: a hand-rolled decoder
@@ -5506,7 +5230,6 @@ mod tests {
             req_id: 4,
             sessions: vec![SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -5568,11 +5291,12 @@ mod tests {
     /// `last_activity_at` and `last_work_started_at` ride along in both
     /// halves rather than earning separate wire-shape tests. Their distinct
     /// values pin that output age and stable work ordering are independent.
+    /// The populated half also preserves clone-parent identity on the wire;
+    /// removing unrelated fields must not erase that relationship.
     #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
             parent: None,
-            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
@@ -5608,7 +5332,6 @@ mod tests {
                 "annotation": null,
                 "restart_offer": "fresh_only",
                 "tabs": [],
-                "archived": false,
                 "source_profile": null,
                 "github_repo": null,
                 "working_copy": null,
@@ -5634,6 +5357,7 @@ mod tests {
         );
 
         let stopped = SessionInfo {
+            parent: Some("parent-session".to_string()),
             status: SessionStatus::Exited { exit_code: Some(0) },
             annotation: Some(STOP_ANNOTATION.to_string()),
             restart_offer: RestartOffer::Resume,
@@ -5646,6 +5370,12 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&stopped).unwrap()["restart_offer"],
             serde_json::json!("resume")
+        );
+        let json = serde_json::to_value(&stopped).unwrap();
+        assert_eq!(json["parent"], "parent-session");
+        assert_eq!(
+            serde_json::from_value::<SessionInfo>(json).unwrap(),
+            stopped
         );
 
         // JSON shaped as if none of `annotation`, `restart_offer`, `tabs`,
@@ -5674,7 +5404,6 @@ mod tests {
         assert_eq!(decoded.annotation, None);
         assert_eq!(decoded.parent, None);
         assert_eq!(decoded.creation_seq, None);
-        assert!(!decoded.archived);
         assert_eq!(decoded.restart_offer, RestartOffer::FreshOnly);
         assert_eq!(
             decoded.tabs,
@@ -5725,7 +5454,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            archived: false,
             source_profile: None,
             github_repo: None,
             working_copy: None,
@@ -5768,7 +5496,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::default(),
             tabs: Vec::new(),
-            archived: false,
             source_profile: None,
             github_repo: None,
             working_copy: None,
@@ -5799,7 +5526,6 @@ mod tests {
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
             parent: None,
-            archived: false,
             id: "s1".to_string(),
             title: "demo".to_string(),
             created_at: 1_700_000_000,
@@ -6659,7 +6385,6 @@ mod tests {
             req_id: 42,
             session: SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -6759,7 +6484,6 @@ mod tests {
             req_id: 8,
             session: SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -6799,7 +6523,6 @@ mod tests {
                     "annotation": null,
                     "restart_offer": "resume",
                     "tabs": [],
-                    "archived": false,
                     "source_profile": null,
                     "github_repo": null,
                     "working_copy": null,
@@ -7000,7 +6723,6 @@ mod tests {
                     req_id: 50,
                     session: SessionInfo {
                         parent: None,
-                        archived: false,
                         id: "s1".to_string(),
                         title: "renamed title".to_string(),
                         created_at: 1_700_000_000,
@@ -7038,7 +6760,6 @@ mod tests {
                         "annotation": null,
                         "restart_offer": "resume",
                         "tabs": [],
-                        "archived": false,
                         "source_profile": null,
                         "github_repo": null,
                         "working_copy": null,
@@ -7267,7 +6988,6 @@ mod tests {
             };
             let info = SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -8001,7 +7721,6 @@ mod tests {
             req_id: 1,
             sessions: vec![SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "t".repeat(4096),
                 created_at: 0,
@@ -8205,7 +7924,6 @@ mod tests {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: true,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: true,
                     }],
@@ -8234,7 +7952,6 @@ mod tests {
                             "agent": "claude",
                             "status": "running",
                             "current": true,
-                            "archived": false,
                             "restart_offer": "fresh_only",
                             "stale": true,
                         }],
@@ -8370,25 +8087,6 @@ mod tests {
             })
         );
 
-        let archive = ControlMsg::AgentRequest {
-            req_id: 8,
-            session_id: "s1".to_string(),
-            request: AgentVerb::Archive {
-                session_id: Some("s2".to_string()),
-            },
-        };
-        assert_eq!(archive.request_req_id(), Some(8));
-        assert_eq!(archive.reply_req_id(), None);
-        assert_eq!(
-            serde_json::to_value(&archive).unwrap(),
-            serde_json::json!({
-                "type": "agent_request",
-                "req_id": 8,
-                "session_id": "s1",
-                "request": { "verb": "archive", "session_id": "s2" },
-            })
-        );
-
         // Restart is a new tagged mutation, not a stop/create composition:
         // the mode and live-stop consent must cross the relay together so
         // the target can revalidate them under its lifecycle claim.
@@ -8435,7 +8133,6 @@ mod tests {
                         agent: "claude".to_string(),
                         status: "running".to_string(),
                         current: true,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -8462,7 +8159,6 @@ mod tests {
                             "agent": "claude",
                             "status": "running",
                             "current": true,
-                            "archived": false,
                             "restart_offer": "fresh_only",
                             "stale": false,
                         },
@@ -8630,7 +8326,6 @@ mod tests {
                         agent: "Claude Code".to_string(),
                         status: "running".to_string(),
                         current: false,
-                        archived: false,
                         restart_offer: Default::default(),
                         stale: false,
                     },
@@ -8663,7 +8358,6 @@ mod tests {
                             "agent": "Claude Code",
                             "status": "running",
                             "current": false,
-                            "archived": false,
                             "restart_offer": "fresh_only",
                             "stale": false,
                         },
@@ -8718,7 +8412,6 @@ mod tests {
                     agent: "claude".to_string(),
                     status: "running".to_string(),
                     current: true,
-                    archived: true,
                     restart_offer: Default::default(),
                     stale: true,
                 }],
@@ -8761,7 +8454,6 @@ mod tests {
                     agent: "codex".to_string(),
                     status: "idle".to_string(),
                     current: true,
-                    archived: true,
                     restart_offer: Default::default(),
                     stale: true,
                 },
@@ -8780,7 +8472,6 @@ mod tests {
                     agent: "codex".to_string(),
                     status: "running".to_string(),
                     current: true,
-                    archived: false,
                     restart_offer: RestartOffer::Resume,
                     stale: false,
                 },
@@ -8800,7 +8491,6 @@ mod tests {
                     agent: "Claude Code".to_string(),
                     status: String::new(),
                     current: false,
-                    archived: false,
                     restart_offer: Default::default(),
                     stale: false,
                 },

@@ -21,8 +21,8 @@
  * almost none of it can be checked anywhere else: the anchor's covered-
  * toggle safety property, the ARIA menu-button relationship read out of
  * the accessibility tree rather than out of class names, arrow/Home/End
- * navigation over the real nodes (including an archived row's shorter
- * list), the roving `tabindex` and Tab's exit, the keys the menu leaves
+ * navigation over the real nodes, the roving `tabindex` and Tab's exit,
+ * the keys the menu leaves
  * native, the prompt states' refusal to answer any of them, focus
  * returning to the toggle on an automatic dismissal, a busy menu staying
  * navigable, and the raised surface's computed style. The pure decisions
@@ -146,6 +146,99 @@ test("the sidebar app bar shows the helm build and client tooltip", async ({ pag
   await page.goto("/");
   await expect(version).toHaveText(stamp);
   await expect(version).toHaveAttribute("title", `this client was built as farhelm ${stamp}`);
+});
+
+/**
+ * An authoritative list refresh may disable a rename whose source was
+ * deleted elsewhere, but it must preserve the user's unsent draft so it can
+ * still be copied before the dialog is closed.
+ */
+test("external deletion disables rename without discarding its draft", async ({ page, request }) => {
+  const session = await createSession(request, { title: `deleted-rename-${Date.now()}` });
+  const draft = `${session.title}-copy-me`;
+  try {
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
+    await target.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    await dialog.locator(".rename-input").fill(draft);
+
+    const deleted = await request.delete(`/api/sessions/${session.id}`);
+    expect(deleted.ok(), await deleted.text()).toBeTruthy();
+    await expect(target).toHaveCount(0, { timeout: 20_000 });
+    await expect(dialog.locator(".rename-unavailable")).toBeVisible();
+    await expect(dialog.locator(".rename-input")).toHaveValue(draft);
+    await expect(dialog.locator(".rename-input")).toBeEditable();
+    await expect(dialog.locator(".rename-submit")).toBeDisabled();
+    await expect(dialog.locator(".rename-cancel")).toBeEnabled();
+    await dialog.locator(".rename-cancel").click();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * A narrowed list cannot decide that a rename source left the fleet.
+ *
+ * The editor belongs to the list rather than its row, so filtering that row
+ * out must leave the exact draft available and submittable. This is the
+ * previous default-list regression's surviving contract: absence in a reply
+ * that omits fleet members is not deletion evidence.
+ */
+test("filtered-list absence retains an enabled rename editor and its draft", async ({
+  page,
+  request,
+}) => {
+  const local = await localHostId(request);
+  const hosts = await (await request.get("/api/hosts")).json();
+  const remote = hosts.hosts.find((host: { id: number }) => host.id !== local);
+  expect(remote, "the fixture needs another host to narrow the listing").toBeTruthy();
+  const session = await createSession(request, {
+    title: `filtered-rename-${Date.now()}`,
+    cwd: "/tmp",
+    invocation: "sleep 300",
+    host: local,
+  });
+  const draft = `${session.title}-copy-me`;
+  let decoy: { id: string } | undefined;
+  try {
+    decoy = await createSession(request, {
+      title: `filtered-rename-decoy-${Date.now()}`,
+      cwd: "/tmp",
+      invocation: "sleep 300",
+      host: remote.id,
+    });
+    const remoteListing = await (await request.get(`/api/sessions?host=${remote.id}`)).json();
+    expect(remoteListing.sessions.some((row: { id: string }) => row.id === decoy!.id)).toBe(true);
+    expect(remoteListing.sessions.some((row: { id: string }) => row.id === session.id)).toBe(false);
+
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await openRowMenu(target);
+    await target.locator(".session-row-rename").click();
+    const dialog = page.locator(".rename-dialog");
+    const field = dialog.locator(".rename-input");
+    await field.fill(draft);
+    await field.focus();
+
+    await page.locator(".filter-host").selectOption(String(remote.id));
+    await expect(target).toHaveCount(0, { timeout: 20_000 });
+    await expect(row(page, decoy.id)).toBeVisible();
+    await expect(dialog.locator(".rename-unavailable")).toHaveCount(0);
+    await expect(field).toHaveValue(draft);
+    await expect(field).toBeFocused();
+    await expect(dialog.locator(".rename-submit")).toBeEnabled();
+    await expect(dialog.locator(".rename-cancel")).toBeEnabled();
+    await dialog.locator(".rename-cancel").click();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await cleanupSession(request, session.id);
+    if (decoy) await cleanupSession(request, decoy.id);
+  }
 });
 
 /**
@@ -1298,7 +1391,6 @@ test("row actions exist only inside the open actions panel", async ({ page, requ
       ".session-row-rename",
       ".session-row-clone",
       ".session-row-stop",
-      ".session-row-archive",
       ".session-row-delete",
     ]) {
       await expect(target.locator(control)).toHaveCount(0);
@@ -1312,7 +1404,6 @@ test("row actions exist only inside the open actions panel", async ({ page, requ
       ".session-row-rename",
       ".session-row-clone",
       ".session-row-stop",
-      ".session-row-archive",
       ".session-row-delete",
     ]) {
       await expect(target.locator(control)).toHaveCount(1);
@@ -1381,7 +1472,7 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
   try {
     // This test is about the ARIA relationship, not the seen-state feature
     // (which has its own tests) — hiding the field keeps the item list at
-    // its fixed seven regardless of whether the real supervisor's
+    // its fixed six regardless of whether the real supervisor's
     // classifier has settled this fixture into a live status by the time
     // the menu opens (see `hideSeenState`'s own doc for why that race is
     // otherwise real, not hypothetical).
@@ -1412,11 +1503,10 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
       "replace with",
       "replace",
       "stop",
-      "archive",
       "delete",
     ]);
     // The boundary before the destructive item exists in the tree, not
-    // only in the paint — seven consecutive commands with nothing marking
+    // only in the paint — six consecutive commands with nothing marking
     // the last as different in kind is what this replaces.
     await expect(menu.getByRole("separator")).toHaveCount(1);
     // The profile footer and any refusal line are the panel's, not the
@@ -1446,19 +1536,18 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
  * jump — through the real nodes, not through index arithmetic.
  *
  * `next_menu_focus` in menu_panel.rs already pins the arithmetic,
- * and it cannot prove any of what this proves: that all seven items
+ * and it cannot prove any of what this proves: that all six items
  * mounted, that each registered a handle under its own action, and that
  * the positions the key handler derives from `MenuOrder` line up with the
  * order the panel actually renders. A previous version of this test
- * walked two of the four items THEN offered, which left archive and delete
- * — the two with separately duplicated wiring, and the two whose misfire
+ * walked two of the four items THEN offered, which left delete
+ * — whose misfire
  * is destructive — covered by nothing at all; clone, then replace with,
  * then replace joined the walk when each joined the menu, for the same
  * reason.
  *
- * The separator sitting between archive and delete is part of what is
- * being checked: it is not focusable and not counted, so ArrowDown must
- * step straight over it.
+ * The separator before delete is part of what is being checked: it is not
+ * focusable and not counted, so ArrowDown must step straight over it.
  */
 test("the actions menu walks every item and wraps at both ends", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -1467,7 +1556,7 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     invocation: "sleep 300",
   });
   try {
-    // Fixed seven-item navigation, not the seen-state feature — see
+    // Fixed six-item navigation, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
     await page.goto("/");
@@ -1485,7 +1574,6 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
     const stop = target.locator(".session-row-stop");
-    const archive = target.locator(".session-row-archive");
     const remove = target.locator(".session-row-delete");
 
     // Focus is put on the toggle EXPLICITLY rather than left where the
@@ -1504,8 +1592,6 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
     await expect(replace).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(stop).toBeFocused();
-    await page.keyboard.press("ArrowDown");
-    await expect(archive).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(remove, "the separator is not a stop on the way to delete").toBeFocused();
     // Both wrap boundaries, in the two directions that reach them.
@@ -1530,181 +1616,6 @@ test("the actions menu walks every item and wraps at both ends", async ({ page, 
   } finally {
     await cleanupSession(request, session.id);
   }
-});
-
-/**
- * An archived row's SHORTER menu navigates on its own length.
- *
- * Archiving withdraws stop and archive, which moves delete from position
- * 6 to position 4 (clone, replace with, and replace, all offered
- * unconditionally, keep positions 1 through 3 in both retention states).
- * Nothing durable may remember the old number — this is the bug that
- * motivated keying mounted handles by ACTION rather than by index — and
- * wrapping has to happen on five, not on an assumed seven. Only a real
- * browser can show that the surviving nodes registered themselves under
- * the shorter list.
- */
-test("an archived row's five-item menu navigates on its own length", async ({ page, request }) => {
-  const session = await createSession(request, {
-    title: `menu-archived-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
-  try {
-    const archived = await request.post(`/api/sessions/${session.id}/archive`);
-    expect(archived.ok(), await archived.text()).toBeTruthy();
-    const archivedListing = await request.get("/api/sessions?include_archived=true");
-    expect(archivedListing.ok(), await archivedListing.text()).toBeTruthy();
-    const body = await archivedListing.json();
-    const stamp = archivedListing.headers()["x-farhelm-build"] ?? "";
-    await page.route((url) => url.pathname === "/api/sessions", async (route) => {
-      if (route.request().method() !== "GET") return route.continue();
-      await route.fulfill({ headers: { "content-type": "application/json", "x-farhelm-build": stamp }, json: body });
-    });
-    await page.goto("/");
-    const target = row(page, session.id);
-    await expect(target).toBeVisible({ timeout: 20_000 });
-    await waitForHostsListSettled(page);
-
-    await openRowMenu(target);
-    const menu = target.getByRole("menu");
-    await expect(menu.getByRole("menuitem")).toHaveText([
-      "rename",
-      "clone",
-      "replace with",
-      "replace",
-      "delete",
-    ]);
-
-    const toggle = target.locator(".session-row-menu");
-    const rename = target.locator(".session-row-rename");
-    const clone = target.locator(".session-row-clone");
-    const replaceWith = target.locator(".session-row-replace-with");
-    const replace = target.locator(".session-row-replace");
-    const remove = target.locator(".session-row-delete");
-    await toggle.focus();
-    await page.keyboard.press("ArrowDown");
-    await expect(rename).toBeFocused();
-    await page.keyboard.press("ArrowDown");
-    await expect(clone).toBeFocused();
-    await page.keyboard.press("ArrowDown");
-    await expect(replaceWith).toBeFocused();
-    await page.keyboard.press("ArrowDown");
-    await expect(replace).toBeFocused();
-    await page.keyboard.press("ArrowDown");
-    await expect(remove).toBeFocused();
-    // Wraps on FIVE. A list that still believed it had seven would leave
-    // focus where it was, or reach for a handle nothing mounted.
-    await page.keyboard.press("ArrowDown");
-    await expect(rename).toBeFocused();
-    await page.keyboard.press("End");
-    await expect(remove).toBeFocused();
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
-
-/**
- * The item set changing UNDER an open menu re-numbers it, and navigation
- * follows.
- *
- * This is the regression for a bug the type system cannot prevent.
- * Archiving a session withdraws stop and archive while the panel stays
- * up; delete survives that change, and a scheme that filed its mounted
- * handle under "position 3" left that handle stranded at an index the
- * two-item list no longer reaches, while the key handler had already
- * moved on to the shorter numbering. Arrow, Home and End then targeted a
- * node that was not there and silently did nothing.
- *
- * The listing is STUBBED rather than driven through a real archive call,
- * for the same reason the refresh test below stubs it: the row must stay
- * at the same index across the change, and a shared stack with other
- * specs' sessions in it cannot promise that. Flipping one field in a
- * frozen fabrication isolates exactly the transition under test.
- */
-test("archiving under an open menu renumbers it and navigation follows", async ({
-  page,
-  request,
-}) => {
-  const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
-  expect(stamp, "the helm must stamp its replies").toBeTruthy();
-  const sessionId = "menu-renumber-fixture-session";
-  const listingBody = {
-    sessions: [
-      {
-        id: sessionId,
-        title: `menu-renumber-${Date.now()}`,
-        cwd: "/tmp",
-        invocation: "sleep 300",
-        status: { state: "idle" },
-        archived: false,
-      },
-    ],
-    total: 1,
-    matching: 1,
-    truncated: false,
-  };
-  await page.route(
-    (url) => url.pathname === "/api/sessions",
-    async (route) => {
-      if (route.request().method() !== "GET") {
-        await route.continue();
-        return;
-      }
-      await route.fulfill({
-        headers: { "x-farhelm-build": stamp, "content-type": "application/json" },
-        json: listingBody,
-      });
-    },
-  );
-  const feed = await stubFeed(page);
-  await page.goto("/");
-  await feed.waitForConnection(1);
-  feed.notify(1);
-
-  const target = row(page, sessionId);
-  await expect(target).toBeVisible({ timeout: 20_000 });
-  await waitForHostsListSettled(page);
-  await openRowMenu(target);
-  await expect(target.getByRole("menuitem")).toHaveCount(7);
-
-  // The change lands through an ordinary refresh, with the row keeping
-  // its place in the list — so nothing closes the menu, which is the
-  // whole premise.
-  listingBody.sessions[0].archived = true;
-  const responded = page.waitForResponse(
-    (r) => new URL(r.url()).pathname === "/api/sessions" && r.request().method() === "GET",
-  );
-  feed.notify(2);
-  await responded;
-  await expect(target).toHaveAttribute("data-session-archived", "true");
-  await expect(target.locator(".session-row-menu-panel")).toBeVisible();
-  await expect(target.getByRole("menuitem")).toHaveText([
-    "rename",
-    "clone",
-    "replace with",
-    "replace",
-    "delete",
-  ]);
-
-  // Delete is at position 4 now, not 6, and the node that survived the
-  // change answers to it — clone, replace with, and replace, all offered
-  // unconditionally, keep positions 1 through 3 in both retention states
-  // and do not need to be re-found here.
-  const toggle = target.locator(".session-row-menu");
-  await toggle.focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(target.locator(".session-row-rename")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(target.locator(".session-row-clone")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(target.locator(".session-row-replace-with")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(target.locator(".session-row-replace")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(target.locator(".session-row-delete")).toBeFocused();
-  await page.keyboard.press("End");
-  await expect(target.locator(".session-row-delete")).toBeFocused();
 });
 
 /**
@@ -1865,10 +1776,10 @@ test("opening the actions menu enters it, and Tab leaves it", async ({ page, req
     await page.keyboard.press("ArrowDown");
     await expect(stop).toBeFocused();
     await page.keyboard.press("ArrowDown");
-    await expect(target.locator(".session-row-archive")).toBeFocused();
+    await expect(target.locator(".session-row-delete")).toBeFocused();
     await page.keyboard.press("Space");
-    await expect(target.locator(".confirm-archive")).toBeVisible();
-    await target.locator(".archive-cancel").click();
+    await expect(target.locator(".confirm-consequence")).toBeVisible();
+    await target.locator(".confirm-cancel").click();
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -2089,7 +2000,6 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
     const replaceWith = target.locator(".session-row-replace-with");
     const replace = target.locator(".session-row-replace");
     const stop = target.locator(".session-row-stop");
-    const archive = target.locator(".session-row-archive");
 
     // Acceptance completes the interaction even with the request held.
     // A keyboard user must land back on the toggle, ready to reopen it.
@@ -2124,9 +2034,6 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
 
     // And the menu still navigates while every command in it is inert —
     // the property a native `disabled` cannot have.
-    await page.keyboard.press("ArrowDown");
-    await expect(archive).toBeFocused();
-    await expect(archive).toHaveAttribute("aria-disabled", "true");
     await page.keyboard.press("Home");
     await expect(rename).toBeFocused();
     // Escape is reachable, which is the point of keeping focus inside a
@@ -2341,7 +2248,7 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
     invocation: "sleep 300",
   });
   try {
-    // Fixed seven-item geometry, not the seen-state feature — see
+    // Fixed six-item geometry, not the seen-state feature — see
     // `hideSeenState`'s own doc.
     await hideSeenState(page);
     await page.goto("/");
@@ -2378,7 +2285,7 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
         };
       });
     });
-    expect(items).toHaveLength(7);
+    expect(items).toHaveLength(6);
     for (const item of items) {
       // `.btn` reserves a 1px border so an opaque edge costs no layout
       // shift; on a menu item it must stay fully transparent.
@@ -2388,8 +2295,8 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
       expect(item.overhangRight).toBeLessThanOrEqual(0);
     }
 
-    // The one rule in the list, on its own element between archive and
-    // delete rather than drawn on delete itself.
+    // The one rule in the list, on its own element before delete rather
+    // than drawn on delete itself.
     const separator = panel.locator(".session-row-menu-separator");
     await expect(separator).toHaveCount(1);
     expect(
@@ -2397,8 +2304,6 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
     ).toBe(await tokenColor(page, "--border-dim"));
     const separatorBox = (await separator.boundingBox())!;
     const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
-    const archiveBox = (await panel.locator(".session-row-archive").boundingBox())!;
-    expect(separatorBox.y).toBeGreaterThanOrEqual(archiveBox.y + archiveBox.height);
     expect(separatorBox.y).toBeLessThanOrEqual(deleteBox.y);
   } finally {
     await cleanupSession(request, session.id);
@@ -2581,57 +2486,6 @@ test("rename lives in a stable dialog and locks the row's open button while edit
     await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
     await expect(toggle).toBeFocused();
     await expect(target.locator(".session-row-open")).toBeEnabled();
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
-
-/**
- * The archive consequence — the longest safety sentence a panel shows —
- * wraps inside the panel with its full text readable.
- *
- * The panel relies on the consequence wrapping (`.confirm-consequence`
- * inherits normal white-space there); a stray `nowrap` would clip or
- * push the "what will be destroyed" half out of the 300px panel right
- * before the user confirms, and string assertions cannot see that.
- */
-test("the archive consequence wraps fully visible inside the panel", async ({
-  page,
-  request,
-}) => {
-  const session = await createSession(request, {
-    title: `wrap-${Date.now()}`,
-    cwd: "/tmp",
-    invocation: "sleep 300",
-  });
-  try {
-    await page.goto("/");
-    const target = row(page, session.id);
-    await expect(target).toBeVisible({ timeout: 20_000 });
-    // A LIVE session's archive confirms with the longest wording (the
-    // agent will be killed); wait for the live badge so the click takes
-    // the confirming branch rather than archiving outright.
-    await expect(target.locator(".status-badge")).toHaveText(/running|idle|waiting/, {
-      timeout: 30_000,
-    });
-    await openRowMenu(target);
-    await target.locator(".session-row-archive").click();
-
-    const consequence = target.locator(".session-row-menu-panel .confirm-consequence");
-    await expect(consequence).toBeVisible();
-    const panelBox = (await target.locator(".session-row-menu-panel").boundingBox())!;
-    const box = (await consequence.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(panelBox.x - 1);
-    expect(box.x + box.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
-    expect(box.y + box.height).toBeLessThanOrEqual(panelBox.y + panelBox.height + 1);
-    // Wrapped, not horizontally clipped: everything the element holds is
-    // painted within its own box.
-    expect(
-      await consequence.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
-      "the consequence must wrap rather than clip horizontally",
-    ).toBe(true);
-
-    await target.locator(".archive-cancel").click();
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -3142,12 +2996,12 @@ test("a local session's host line is provisional until the registry confirms it"
 
 /**
  * Hostile title and host lengths stay contained at 280px while simultaneous
- * stale/archive qualifiers render on their own full-width detail line
+ * stale qualifiers render on their own full-width detail line
  * between the identity and the host metadata. Two opposing content
  * shapes prove the second-line host floor and cap without coupling them to
  * the first-line title, agent, or activity columns.
  *
- * The fixture is route-controlled because stale plus archived plus a live
+ * The fixture is route-controlled because stale plus a live
  * status is useful layout pressure but not a lifecycle state the harness can
  * produce on demand. The peer-controlled host also carries a bidi override,
  * preserving the escaping and tooltip assertion from the earlier layout.
@@ -3182,7 +3036,6 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
               cwd: "/tmp",
               invocation: "sleep 300",
               stale: true,
-              archived: true,
               status: { state: "running" },
               last_activity_at: activityAgeSecs,
               // Not a real registered host — this fixture only needs an id
@@ -3236,7 +3089,6 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
       detail: (await target.locator(".session-row-detail").boundingBox())!,
       host: (await target.locator(".session-host").boundingBox())!,
       stale: (await target.locator(".stale-badge").boundingBox())!,
-      archived: (await target.locator(".archived-badge").boundingBox())!,
       age: (await target.locator(".status-time").boundingBox())!,
       statusSlot: (await target.locator(".session-status-slot").boundingBox())!,
       localitySlot: (await target.locator(".session-locality-slot").boundingBox())!,
@@ -3262,7 +3114,7 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   // #648 moved the qualifiers onto a full-width detail line between the
   // identity and the host metadata, so "contained" means inside that line's
   // box; the identity copy no longer holds them.
-  for (const qualifier of [dominant.stale, dominant.archived]) {
+  for (const qualifier of [dominant.stale]) {
     expect(qualifier.x).toBeGreaterThanOrEqual(dominant.detail.x - TOL);
     expect(qualifier.x + qualifier.width).toBeLessThanOrEqual(dominant.detail.x + dominant.detail.width + TOL);
     expect(qualifier.y).toBeGreaterThanOrEqual(dominant.detail.y - TOL);
@@ -3326,7 +3178,6 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
   // title and host lengths change.
   for (const [name, a, b] of [
     ["stale badge", dominant.stale, underdog.stale],
-    ["archived badge", dominant.archived, underdog.archived],
     ["activity age", dominant.age, underdog.age],
   ] as const) {
     expect(
@@ -3386,7 +3237,6 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
             host_name: "this machine",
             status: { state: "exited", exit_code: 17 },
             stale: true,
-            archived: true,
             last_activity_at: activity - 1000 * 86_400,
           },
           {
@@ -3502,13 +3352,12 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
     (await page.locator(".app-sidebar").boundingBox())!.width + 1,
   );
   await expect(rows[1].locator(".session-row-detail .stale-badge")).toBeVisible();
-  await expect(rows[1].locator(".session-row-detail .archived-badge")).toBeVisible();
-  // Stale/archive qualifiers must not mute the confirmed-local caution cue.
+  // Stale qualifiers must not mute the confirmed-local caution cue.
   await expect(rows[1].locator(".host-kind-icon")).toHaveCSS("color", "rgb(224, 128, 128)");
   /** DOM visibility alone misses a long detail clipping within its row. */
   const detail = rows[1].locator(".session-row-detail");
   const detailBox = (await detail.boundingBox())!;
-  for (const selector of [".status-badge", ".stale-badge", ".archived-badge"]) {
+  for (const selector of [".status-badge", ".stale-badge"]) {
     const detailPart = (await detail.locator(selector).boundingBox())!;
     expect(detailPart.width, `${selector} retains visible text space`).toBeGreaterThan(12);
     expect(detailPart.x).toBeGreaterThanOrEqual(detailBox.x - 1);
@@ -3565,7 +3414,6 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   await expect(rows[6].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "interrupted");
   await expect(rows[7].locator(".ended-status-glyph")).toHaveAttribute("data-glyph", "error");
   await expect(rows[1].locator(".compact-qualifier .qualifier-glyph[data-glyph='stale']")).toHaveCount(1);
-  await expect(rows[1].locator(".compact-qualifier .qualifier-glyph[data-glyph='archived']")).toHaveCount(1);
   await expect(rows[1].locator(".session-status-slot .visually-hidden")).toContainText("exited (code 17)");
   const compactRow = (await rows[1].boundingBox())!;
   const compactLive = (await rows[0].boundingBox())!;
@@ -3651,7 +3499,7 @@ test("opening one row's menu closes the other row kind's open one", async ({ pag
 /**
  * The selection policy itself: a clicked session is remembered across a
  * reload, a stale remembered id falls back to the newest-created
- * non-archived session, and the automatic selection ATTACHES — all
+ * session, and the automatic selection ATTACHES — all
  * without any click after load.
  *
  * This is the PR's primary behavior stated directly; every other test
@@ -3701,7 +3549,7 @@ test("auto-select remembers the last click, falls back to newest, and attaches",
     await waitForSessionRevealed(page, older.id);
 
     // A stale remembered id — a session that no longer exists — falls
-    // back to the newest-created non-archived session.
+    // back to the newest-created session.
     await patchPreferences(request, {
       last_selected: "00000000-0000-0000-0000-000000000000",
     });
@@ -3998,8 +3846,8 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // "bottom edge inside the viewport" assertion below is measured
     // against.
     await page.setViewportSize({ width: 900, height: 500 });
-    // The geometry under test is the panel's height at its FIXED seven-item
-    // count (rename, clone, replace with, replace, stop, archive, delete)
+    // The geometry under test is the panel's height at its FIXED six-item
+    // count (rename, clone, replace with, replace, stop, delete)
     // against `MENU_PANEL_MIN_RESERVE_PX` in menu_panel.rs, the room the
     // placement keeps below the panel's clamped top. A menu taller than
     // that reserve is clamped to the viewport edge and scrolls inside its
@@ -4129,8 +3977,8 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(viewport.height);
     expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
 
-    // The LAST action button specifically (rename → stop → archive →
-    // delete, per SessionRow's own doc): if the panel's bottom clipped at
+    // The LAST action button specifically (rename → stop → delete, per
+    // SessionRow's own doc): if the panel's bottom clipped at
     // all, this is the control most likely to be cut off or unreachable.
     const deleteButton = target.locator(".session-row-menu-panel .session-row-delete");
     const deleteBox = (await deleteButton.boundingBox())!;

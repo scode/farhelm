@@ -40,7 +40,7 @@
 //!
 //! ## Mutations write back what the host just said
 //!
-//! Create, restart, rename, and archive all record their reply
+//! Create, restart, and rename all record their reply
 //! (`record_session`), and delete forgets (`forget_session`). Without
 //! that, the list — which is served from the recording, not from the host —
 //! would show the user their own successful action as a no-op for up to a
@@ -60,14 +60,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
 
-/// Query parameters for `GET /api/sessions`: the view switch, the filters,
-/// and the order. There is no cursor and no page size, by contract (SPEC.md's
+/// Query parameters for `GET /api/sessions`: the filters and order. There is
+/// no cursor and no page size, by contract (SPEC.md's
 /// Session list section): the reply is the whole list.
-///
-/// Everything except the archive inclusion switch is absent-by-default.
-/// A caller sending no query sees the ordinary, non-archived fleet view;
-/// `include_archived=true` widens that view — rows AND `total` both — without
-/// changing any of the search dimensions.
 ///
 /// The filter parameters are SPEC.md's session-list dimensions: host,
 /// parent, directory, profile, status, and title. Their match semantics live on
@@ -83,14 +78,6 @@ use tracing::warn;
 /// such a client's paging is silently inert rather than loudly rejected.
 #[derive(Deserialize)]
 pub(crate) struct ListQuery {
-    /// Include archived sessions.
-    ///
-    /// The one parameter that moves `total`: it selects which view is being
-    /// served rather than narrowing one, so with it off the reply's rows and
-    /// its total are both about the non-archived list, and with it on both
-    /// are about the whole fleet (see [`aggregate::SessionListBody::total`]).
-    #[serde(default)]
-    include_archived: bool,
     /// Only sessions on this registered host (a `HostView::id`).
     host: Option<store::HostId>,
     /// Only direct children of this session id.
@@ -525,7 +512,7 @@ fn list_filter(q: &ListQuery) -> anyhow::Result<store::SessionFilter> {
             .filter(|text| !text.is_empty())
             .map(str::to_string)
     };
-    let mut filter = store::SessionFilter::default().include_archived(q.include_archived);
+    let mut filter = store::SessionFilter::default();
     if let Some(host) = q.host {
         filter = filter.host(host);
     }
@@ -600,12 +587,8 @@ fn list_sort(q: &ListQuery) -> anyhow::Result<store::ListSort> {
 ///
 /// The body is `sessions`/`total`/`matching`/`truncated`
 /// ([`aggregate::SessionListBody`]). `matching` is present whenever a
-/// predicate is active — including the ordinary request, whose implicit
-/// archive exclusion is a real predicate even though its false value is
-/// omitted from the query string; only `include_archived=true` with no
-/// search dimensions is fully unfiltered and makes no matching claim.
-/// `total` counts the merged view the request asked for, archived rows
-/// included only under `include_archived=true`. `truncated` means the
+/// predicate is active. `total` counts the merged view before those filters
+/// are applied. `truncated` means the
 /// client is not looking at the whole view — some host's reply or the
 /// merge hit `farhelm_proto::LIST_SESSIONS_CAP` — and is the only thing
 /// behind SPEC.md's "could not read to the end" notice.
@@ -2373,9 +2356,8 @@ async fn remember_default_profile(
 /// Shared verbatim between [`stop_session`] below and the agent relay's
 /// `Stop` verb (`agent_requests::HelmAgentRequests::handle`): both need
 /// exactly "route, then ask the owning supervisor to stop it", and nothing
-/// else — a stop's reply carries no fresh state to record, unlike rename
-/// and archive, which is what keeps this helper simpler than
-/// [`do_rename_session`]/[`do_archive_session`].
+/// else — a stop's reply carries no fresh state to record, unlike rename,
+/// which is what keeps this helper simpler than [`do_rename_session`].
 pub(crate) async fn do_stop_session(state: &AppState, id: &str) -> anyhow::Result<()> {
     let (_claim, client) = route_session(state, id).await?;
     client.stop_session(id).await
@@ -2700,50 +2682,6 @@ pub(crate) async fn rename_session(
     axum::Json(req): axum::Json<RenameReq>,
 ) -> impl IntoResponse {
     match do_rename_session(&state, &id, &req.title, None).await {
-        Ok((_claim, session)) => match browser_session_ready(&session) {
-            Ok(()) => axum::Json(session).into_response(),
-            Err(error) => http_error(error),
-        },
-        Err(e) => http_error(e),
-    }
-}
-
-/// Route to `id`'s owning host, ask it to archive the session, and record
-/// the fresh reply — [`archive_session`] below and the agent relay's
-/// `Archive` verb share this sequence for the same reason
-/// [`do_rename_session`] documents.
-///
-/// The supervisor returns the durable post-teardown state, including for an
-/// idempotent retry. Recording that exact reply before returning makes the
-/// default list hide the row immediately and publishes the ordinary
-/// changed-only fleet event. The profile identity index is loaded before the
-/// teardown so catalog failure cannot make a completed archive look failed;
-/// enriching the returned row afterwards is infallible.
-pub(crate) async fn do_archive_session(
-    state: &AppState,
-    id: &str,
-) -> anyhow::Result<(manager::SessionClaim, farhelm_proto::SessionInfo)> {
-    let (claim, client) = route_session(state, id).await?;
-    // Archive tears down live processes. Resolve the catalog dependency
-    // first so a failed read cannot report that teardown as unsuccessful.
-    let profile_names = load_profile_name_index(&state.store).await?;
-    let mut session = client.archive_session(id).await?;
-    resolve_session_profiles(&profile_names, std::iter::once(&mut session));
-    record_session(state, &claim, &session).await;
-    Ok((claim, session))
-}
-
-/// `POST /api/sessions/{id}/archive` — stop the session's agent and tabs,
-/// remove its terminal, and retain its metadata and attachments.
-///
-/// Owner routing happens first ([`do_archive_session`]), so an archive on
-/// an unreachable host is refused with that host's state rather than
-/// pretending the retained session is missing.
-pub(crate) async fn archive_session(
-    State(state): State<Arc<AppState>>,
-    AxPath(id): AxPath<String>,
-) -> impl IntoResponse {
-    match do_archive_session(&state, &id).await {
         Ok((_claim, session)) => match browser_session_ready(&session) {
             Ok(()) => axum::Json(session).into_response(),
             Err(error) => http_error(error),

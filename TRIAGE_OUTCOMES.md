@@ -524,8 +524,9 @@
   maintained documentation to describe the resulting product.
 - Completion criteria: no supported operation archives or unarchives a session, and no active session model or listing
   depends on an archived-session flag. Remove obsolete feature-specific code and tests; validate remaining lifecycle
-  operations and address existing persisted archived rows explicitly. Do not silently delete those sessions, launch
-  their agents, or discard their retained metadata or attachments as a migration shortcut. Assess schema and protocol
+  operations and address existing persisted archived rows explicitly. The user's later decision permits restoring
+  ordinary visibility if very simple, preserving metadata, attachments and recorded outcomes without launching agents;
+  otherwise use ordinary session deletion with its cleanup and ownership safeguards. Assess schema and protocol
   compatibility during implementation, retaining only compatibility machinery actually required by repository policy.
   This decision does NOT remove or change OWNED GITHUB CHECKOUT DIRECTORY ARCHIVAL: deleting a session with an owned
   GitHub checkout must retain the existing behavior that moves the checkout into `farhelm-archived-working-copies`,
@@ -534,7 +535,12 @@
   containing "archive"; classify each reference by which feature it serves. Remove this feedback file and its index
   entry when the session-feature removal is complete. Other queued findings made obsolete by that removal must be
   explicitly accounted for, not silently fixed or discarded during triage.
-- Execution: `pending`.
+- Execution: `complete`; jj change: `smnpywstvpqqmssztqquontnxprzumuv`; bookmark: `triage-remove-session-archive`; draft
+  PR: https://github.com/scode/farhelm/pull/834/changes. Supervisor schema 19 drops the archive flag while retaining
+  sessions and their data; helm schema 29 drops its mirror and removes the retired JSON member. This straightforward
+  migration restores visibility without launching agents. Protocol 26 and agent JSON schema 2 remove the corresponding
+  vocabulary. Owned-checkout directory archival remains supported. The dependent archived-retry finding is resolved
+  separately; the other queued findings mentioning Archive retain independent deletion or restart concerns.
 
 ## archived-retry-resurrects-session.md
 

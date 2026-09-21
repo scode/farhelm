@@ -1,6 +1,6 @@
 /**
  * The consolidated session header (the 2026-08 UI refresh): title, metadata,
- * status badge, and the archive/restart actions folded into one row over
+ * status badge, and the restart action folded into one row over
  * the tab strip. `session_view.rs`'s own docs carry the design; this file
  * proves the two properties that only a real layout engine can check —
  * that the row survives the SUPPORTED minimum width without clipping a
@@ -49,8 +49,7 @@ test(
       await waitForTermText(page, "FAKE-AGENT READY");
 
       const restartButton = page.locator(".restart-primary");
-      const archiveButton = page.locator(".archive-primary");
-      // Both controls are reachable the moment the agent is classified
+      // Restart is reachable the moment the agent is classified
       // live — the same signal the restart-confirmation tests wait on —
       // which is also the point at which a badge is guaranteed to exist
       // (a live status is always classified, so `status_badge` never
@@ -67,16 +66,14 @@ test(
         48,
       );
 
-      // The badge and both actions never shrink (`.titlebar .status-badge`
+      // The badge and action never shrink (`.titlebar .status-badge`
       // and `.titlebar-actions` are both `flex-shrink: 0`) and must
       // therefore stay fully on screen regardless of how much `.title` and
       // `.meta` have to give up.
       const badgeBox = (await page.locator(".titlebar .status-badge").boundingBox())!;
-      const archiveBox = (await archiveButton.boundingBox())!;
       const restartBox = (await restartButton.boundingBox())!;
       for (const [name, box] of [
         ["badge", badgeBox],
-        ["archive button", archiveBox],
         ["restart button", restartBox],
       ] as const) {
         expect(box.x, `the ${name} must not be pushed off the left edge`).toBeGreaterThanOrEqual(0);
@@ -98,24 +95,6 @@ test(
       // Opening a popover must not reflow anything below the header: the
       // panel is `position: absolute`, out of flow, so the tab strip's own
       // box is the cheapest proof that holds.
-      await archiveButton.click();
-      const archivePanel = page.locator("#archive-confirm-panel");
-      await expect(archivePanel).toBeVisible();
-      const archivePanelBox = (await archivePanel.boundingBox())!;
-      expect(
-        (await page.locator(".tab-strip").boundingBox())!,
-        "an open archive confirmation must not move the tab strip",
-      ).toEqual(tabStripBoxBefore);
-      expect(archivePanelBox.x).toBeGreaterThanOrEqual(0);
-      expect(archivePanelBox.x + archivePanelBox.width).toBeLessThanOrEqual(VIEWPORT_WIDTH + 1);
-      expect(archivePanelBox.y + archivePanelBox.height).toBeLessThanOrEqual(VIEWPORT_HEIGHT + 1);
-      expect(
-        archivePanelBox.y,
-        "the archive confirmation must hang BENEATH the button that opened it",
-      ).toBeGreaterThanOrEqual(archiveBox.y + archiveBox.height - 1);
-      await page.locator(".archive-cancel").click();
-      await expect(archivePanel).toHaveCount(0);
-
       await restartButton.click();
       const restartPanel = page.locator("#restart-confirm-panel");
       await expect(restartPanel).toBeVisible();

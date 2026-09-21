@@ -1022,7 +1022,7 @@ pub fn allocate_with_fault(
 }
 
 /// Reusing a deleted directory's name must preserve sessions that still
-/// refer to that name. Their stopped, errored or archived status does not
+/// refer to that name. Their stopped or errored status does not
 /// shorten the checkout's lifetime. This runs in the identity-publication
 /// transaction so no Allocated row can omit those retained references.
 fn attach_retained_sessions(conn: &Connection, working_copy_id: &str, path: &Path) -> Result<()> {

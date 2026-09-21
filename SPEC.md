@@ -28,10 +28,9 @@ combination of: durable remote execution, real-terminal fidelity, VCS neutrality
   Killing a client, or the helm itself, never affects a session.
 - **Session**: the unit of supervision. A session has a working directory, an agent invocation, a title, and a live
   terminal. A session is agent-centric: it has one main agent terminal, plus optional additional terminal tabs (plain
-  shells) that open in the same working directory. Session metadata — title, archived flag, parent reference, stop
-  annotations, captured conversation identity — is durable and lives with the session's supervisor, so it survives helm
-  loss and re-registration; terminal contents live only as long as the host-side terminal does (see Terminal
-  experience).
+  shells) that open in the same working directory. Session metadata — title, parent reference, stop annotations,
+  captured conversation identity — is durable and lives with the session's supervisor, so it survives helm loss and
+  re-registration; terminal contents live only as long as the host-side terminal does (see Terminal experience).
 - **Agent profile**: a named definition of how to run an agent. Stored profiles are user-editable; release-owned
   built-ins are read-only. Its fields: the launch invocation (command line including arguments, e.g. `claude`,
   `claude --dangerously-skip-permissions`, `codex`); an optional resume invocation, a template that may reference the
@@ -415,11 +414,11 @@ session and plan, with a diagnostic naming the preserved path; the directory rem
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
-exited, errored and archived sessions still count. Archive changes the session's visibility without moving files. Delete
-releases its reference; only the final reference causes the recorded checkout to move into
-`farhelm-archived-working-copies` under its original root, using its original basename plus a timestamp and collision
-handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback. Unresolved move
-failures retain recoverable metadata. A foreign object replacing the recorded path must remain untouched.
+exited, and errored sessions still count. Delete releases its reference; only the final reference causes the recorded
+checkout to move into `farhelm-archived-working-copies` under its original root, using its original basename plus a
+timestamp and collision handling. This is a no-overwrite move, never recursive deletion or a cross-device copy fallback.
+Unresolved move failures retain recoverable metadata. A foreign object replacing the recorded path must remain
+untouched.
 
 Repository suggestions combine successful repository launches for the same host installation with immediate Git clones
 under the configured root. Discovery does not confer ownership, contact GitHub, fetch, recurse, run repository code, or
@@ -436,7 +435,7 @@ authority or steal focus. An already ambiguous submission remains bound to its o
 
 ### Lifecycle operations
 
-The client supports: create, open, rename, restart, clone, replace, replace with, stop, archive, delete.
+The client supports: create, open, rename, restart, clone, replace, replace with, stop, delete.
 
 A list rename opens in a modal editor owned by the list rather than by the row-actions popup. Listing updates may
 reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
@@ -451,8 +450,8 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   an interrupted session is this same operation, not a separate feature. There is no fresh-restart variant in v1 — for a
   clean conversation, create a new session in the same directory. Restart on a session whose agent is still running
   confirms, stops the agent, then relaunches. Restart reuses the session's terminal when it still exists — whatever
-  scrollback the terminal itself retained is still there — and creates a fresh one when it does not (after a reboot, or
-  on an archived session). Restart does NOT preserve the previous run's last visible screen: the pane is blank until the
+  scrollback the terminal itself retained is still there — and creates a fresh one when the terminal no longer exists,
+  such as after a reboot. Restart does NOT preserve the previous run's last visible screen: the pane is blank until the
   new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing
   it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of
   the new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real
@@ -466,29 +465,23 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   over as a profile only while the source's profile is still the one it names (the same identity a session's own profile
   snapshot already tracks); otherwise the form falls back to the source's raw invocation, exactly as "the client asks
   instead of guessing" already requires for a vanished remembered default. Cloning does not deduplicate titles — a
-  duplicate is allowed, the same as any other create. Clone is offered on archived sessions too: it is the only way to
-  get a new, running agent out of one without restarting (and thereby unarchiving) the original.
+  duplicate is allowed, the same as any other create.
 - **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and agent (a
   profile while the source's profile is still the one it names, otherwise the source's raw invocation, exactly as clone
-  resolves it) — and then DELETES the source; it never archives it. Confirmed directly from the row menu, with one
-  inline confirmation and nothing to edit first, since the whole point is the same settings. Contrast restart, which
-  keeps the session's own id and its conversation: restart continues a session, replace starts one over under the same
-  settings. If the create fails, the source is untouched. If the create succeeds and the removal that follows fails, the
-  reply names both sessions; whether the source is still there depends on how the removal failed, and the user checks or
-  removes it by hand. Replace is offered wherever clone is offered, archived sessions included — an archived source has
-  no agent to kill, only a record to delete.
+  resolves it) — and then DELETES the source. Confirmed directly from the row menu, with one inline confirmation and
+  nothing to edit first, since the whole point is the same settings. Contrast restart, which keeps the session's own id
+  and its conversation: restart continues a session, replace starts one over under the same settings. If the create
+  fails, the source is untouched. If the create succeeds and the removal that follows fails, the reply names both
+  sessions; whether the source is still there depends on how the removal failed, and the user checks or removes it by
+  hand. Replace is offered wherever clone is offered.
 - **Replace with** opens the same editable create form clone opens, pre-filled the same way clone pre-fills it, so every
   field can be edited before launching — the key use is starting an equivalent session on a different harness or effort.
   Launching creates the new session and then deletes the source, with exactly Replace's create-then-delete contract and
   failure reporting (the same asymmetry: an untouched source on a failed create, both ids named on a failed removal).
   Unlike clone, it keeps the source's own host — clone is the way to start a session on a different host. Offered
-  wherever clone and replace are offered, archived sessions included. Clone, replace with, and New are one launcher —
-  same layout, same controls, same search, same validation — differing only in what is pre-filled when they open and in
-  what launching does (create; create then delete the source).
-- **Archive** hides the session from the default list and shuts down everything in it — agent and terminal tabs — with
-  confirmation when anything is still running. Archived sessions keep their metadata; their terminal contents are gone
-  (see Terminal experience). Restart on an archived session unarchives it and recovers the conversation where the agent
-  supports resume.
+  wherever clone and replace are offered. Clone, replace with, and New are one launcher — same layout, same controls,
+  same search, same validation — differing only in what is pre-filled when they open and in what launching does (create;
+  create then delete the source).
 - **Delete** removes the session and its stored state, in any state, terminating the agent and tabs if running — with
   confirmation that says so when anything is still alive. Deletion may make partial progress before failing, including
   removing attachment files while retaining the session row for retry. There is no rollback guarantee. Report the
@@ -496,10 +489,10 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   been restored.
 
 Process-tree ownership is session-wide. Restart reaps any leftover descendants of the prior run before relaunching —
-never alongside them. Stop, archive, and delete reap everything the agent started. An agent exiting on its own does not
-trigger a hunt for daemonized survivors; the session's next restart or its teardown does. Operations that need the
-working directory — restart, opening a terminal tab — fail with a clear error naming the directory if it has vanished
-since creation; the session itself remains, and archive and delete still work.
+never alongside them. Stop and delete reap everything the agent started. An agent exiting on its own does not trigger a
+hunt for daemonized survivors; the session's next restart or its teardown does. Operations that need the working
+directory — restart, opening a terminal tab — fail with a clear error naming the directory if it has vanished since
+creation; the session itself remains, and delete still works.
 
 This cleanup covers ordinary agent descendants, including accidentally daemonized processes, rather than hostile
 same-account processes deliberately escaping cleanup. Detached services started by shell initialization before the agent
@@ -516,17 +509,17 @@ check.
 Opening a session shows the agent's real TUI, live. The session view supports additional terminal tabs: plain shells
 spawned in the session's working directory, for poking at the workspace next to the agent. Tabs survive client
 disconnects and supervisor restarts exactly like the agent terminal, but they are not durable metadata: after a host
-reboot or an archive, tabs are gone and the user re-adds them; nothing recreates them automatically. A tab can be closed
-individually, which kills that shell and its processes — that is the whole per-tab operation set in v1. A tab whose
-process exits on its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's
-scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract —
-an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user being done with the tab.
-A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
-error. A tab someone has hand-split into several panes (through the session's own tmux access) counts as exited only
-when EVERY pane in it has — one exited half must not condemn a shell still running beside it.
+reboot, tabs are gone and the user re-adds them; nothing recreates them automatically. A tab can be closed individually,
+which kills that shell and its processes — that is the whole per-tab operation set in v1. A tab whose process exits on
+its own is reaped automatically and silently: the tab disappears as if closed, its dead pane's scrollback is discarded,
+and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract — an exited agent stays
+viewable with its scrollback — because a tab's shell exiting is the user being done with the tab. A shell that dies
+before the tab's open completes still refuses the open loudly, with the shell's last words as the error. A tab someone
+has hand-split into several panes (through the session's own tmux access) counts as exited only when EVERY pane in it
+has — one exited half must not condemn a shell still running beside it.
 
-When a session's terminal contents no longer exist on a reachable host — exited across a reboot, or archived — opening
-it shows the session's metadata and says why there is no terminal, rather than an empty pane.
+When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
+metadata and says why there is no terminal, rather than an empty pane.
 
 ### Session list
 
@@ -554,9 +547,8 @@ seen/unseen comparison stay independent: they describe output recency and keep a
 a row. The grouping and the key are authoritative helm and supervisor data, so every client agrees without keeping a
 private rank.
 
-The list always carries a count, and it counts the list you are looking at: archived sessions are outside the default
-view, so they are outside its count. The host selector is a narrowing query, so its count says how many matched
-alongside how big the default non-archived view is.
+The list always carries a count of every session. The host selector is a narrowing query, so its count says how many
+matched alongside how big the whole fleet is.
 
 The list is served and rendered WHOLE. The fleet this product is for is tens of sessions across a few hosts, not
 thousands, and the design assumes that scale outright: every supervisor answers a listing with its entire list in one
@@ -605,7 +597,7 @@ otherwise — never a guess (see Durability). A user-initiated stop yields exite
 distinct status. Host unreachability is per-host connection state, not a session status.
 
 An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
-restart, archive, or delete are the ways out.
+restart or delete are the ways out.
 
 How a status is DRAWN depends on how much it has to say. The three live states are a color-coded dot beside the
 session's title — running pulses, waiting and idle do not — with the status word itself always present as text for
@@ -675,21 +667,20 @@ whatever the agent renders is what you see. There is no composer, no message abs
   line editing — stock emacs-mode zsh inserts a newline, bash's default quietly ignores the pair — the same outcomes
   those shells give under a reference terminal that encodes the chord identically (Ghostty).
 - Scrollback is whatever the host-side terminal naturally retains, and it survives client disconnects: detach, reconnect
-  a day later, and the buffer is still there. There is no separate history store — when a host reboots or a session is
-  archived, terminal contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited
-  session's terminal stays viewable while its host is up, since the terminal outlives the process. Viewable means what
-  the terminal itself holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is
-  taken or stored.
+  a day later, and the buffer is still there. There is no separate history store — when a host reboots, terminal
+  contents are gone, and recovering the conversation is the agent's job (resume). A stopped or exited session's terminal
+  stays viewable while its host is up, since the terminal outlives the process. Viewable means what the terminal itself
+  holds: a full-screen program's last frame is not retained after it exits, and no snapshot of it is taken or stored.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session: with a non-empty fleet, a freshly
   loaded client selects and attaches the session the user most recently selected from any client — the helm remembers
-  one selection for all of them (see Session list) — falling back to the newest-created non-archived one (chosen from
-  the rows the listing carries, so when the list was cut at its cap under an order other than creation time the pick can
-  be the newest the reply reached rather than the fleet's true newest — the accepted edge of the whole-list cap), so
-  launching the app is itself the deliberate act the attach semantics below key off. Opening a second client therefore
-  attaches to whatever was most recently selected anywhere and takes the terminal over exactly as clicking the same
-  session there would. The attached client owns input and terminal dimensions: the PTY resizes to that client, and the
-  last size sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would have had
-  the client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
+  one selection for all of them (see Session list) — falling back to the newest-created one (chosen from the rows the
+  listing carries, so when the list was cut at its cap under an order other than creation time the pick can be the
+  newest the reply reached rather than the fleet's true newest — the accepted edge of the whole-list cap), so launching
+  the app is itself the deliberate act the attach semantics below key off. Opening a second client therefore attaches to
+  whatever was most recently selected anywhere and takes the terminal over exactly as clicking the same session there
+  would. The attached client owns input and terminal dimensions: the PTY resizes to that client, and the last size
+  sticks when nothing is attached. Reconnecting replays the terminal so the session looks as it would have had the
+  client stayed attached, modulo redraws caused by dimension changes. The floor: the host-side terminal retains, and
   replay covers, at least the current screen plus 10,000 lines of scrollback. The sidebar visibly marks the selected
   session's row whenever that session is listed, so which session the main pane is interacting with is readable at a
   glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the
@@ -717,10 +708,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   displaced on purpose, and a client that came back on its own would fight the one that displaced it. A viewer detached
   for stalling keeps its reason: the wedge is why it was detached, and returning into the same wedge repeats it. Both
   come back the way any client attaches — because someone asks.
-- If Delete or Archive fails after disconnecting a viewer, automatic reconnection to a surviving terminal and remaining
-  detached until the user reconnects are both explicitly acceptable. Prefer whichever is simpler to implement; neither
-  outcome is a defect or a reason to add recovery machinery. Keep the cleanup failure visible. Recovery must not restart
-  an agent or take control from another viewer, and retaining the session record does not guarantee that its terminal or
+- If Delete fails after disconnecting a viewer, automatic reconnection to a surviving terminal and remaining detached
+  until the user reconnects are both explicitly acceptable. Prefer whichever is simpler to implement; neither outcome is
+  a defect or a reason to add recovery machinery. Keep the cleanup failure visible. Recovery must not restart an agent
+  or take control from another viewer, and retaining the session record does not guarantee that its terminal or
   scrollback survived cleanup.
 - A terminal recovering on its own never TAKES the session. Recovery is unattended by definition — the client was not
   there to be told anything while its connection was gone — so if someone else has attached meanwhile, the automatic
@@ -756,14 +747,14 @@ Files land in a per-session attachments directory under the supervisor's own dat
 dropping untracked files into a workspace would be exactly the kind of implicit mutation this system promises not to
 make. Attachment files are removed as part of deleting their session. An explicitly requested Delete may remove them
 before a later step fails and leaves the session row for retry; this partial deletion is acceptable, with a visible
-failure and no rollback guarantee. Archive and Stop do not gain permission to remove attachment files from this rule.
+failure and no rollback guarantee. Stop does not gain permission to remove attachment files from this rule.
 
 Cancellation or disconnection during final publication, including desktop Quit, may leave a complete attachment even
 though the client receives no acknowledged path. Stopping the wait does not roll back publication. Such a file is an
-ordinary attachment: it is retained until session deletion, not removed on startup, Stop, or Archive. Retrying may
-create an additional copy under a different name. Before publication starts, ordinary staging cleanup still applies;
-partial files must never become published attachments. A failure response must distinguish a definitely unpublished
-upload from one whose publication outcome is unknown.
+ordinary attachment: it is retained until session deletion, not removed on startup or Stop. Retrying may create an
+additional copy under a different name. Before publication starts, ordinary staging cleanup still applies; partial files
+must never become published attachments. A failure response must distinguish a definitely unpublished upload from one
+whose publication outcome is unknown.
 
 Attachment bytes ride the existing edges — client to helm, helm to supervisor. There is no direct client-to-supervisor
 path; a browser never needs to reach any machine but the helm's.
@@ -971,10 +962,10 @@ whichever machine they are on — with the asking session and its host marked. T
 own-host-only rule above, which stands unchanged: creating is a local act, asking is not. Every verb goes this way,
 including questions about the session's own host, so there is one answer to what an agent sees. The failure this defines
 is "no helm is attached to this session", reported as such, with opening the session in a client as the remedy — never a
-silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, archive,
-restart — on any session named by id, including the asking session when the caller deliberately supplies its id, with
-the helm applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the
-title the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
+silent fallback to what the supervisor alone could have answered. The verbs may also ACT — rename, stop, restart — on
+any session named by id, including the asking session when the caller deliberately supplies its id, with the helm
+applying its ordinary rules to the operation exactly as it would for a client request. Rename also requires the title
+the caller observed; the owning supervisor compares and changes it atomically, so a stale agent cannot overwrite a
 concurrent rename. Restart requires an explicit `--session` target, one mode selected from that session's discovery
 offer (`resume`, `fallback-template`, or `fresh`), and an explicit `--stop-if-running` consent when the target is live.
 The owning supervisor revalidates both the offer and liveness at handling time: a stale mode is refused rather than
@@ -996,8 +987,8 @@ refused with its state named. The new session appears in every client the way an
 Agent-requested cross-host create and clone are temporary exceptions to the host-to-host security boundary below. They
 currently allow arbitrary execution on the target host; this exposure is explicitly accepted pending the guardrails
 tracked in TODO.md's Maybe later bucket. Their existence does not authorize additional cross-host execution
-capabilities. Cross-host stop, archive, rename, and restart are separately permitted bounded operations. Restart uses
-only the selected session's stored launch configuration on its owning host; it accepts no replacement command.
+capabilities. Cross-host stop, rename, and restart are separately permitted bounded operations. Restart uses only the
+selected session's stored launch configuration on its owning host; it accepts no replacement command.
 
 `create --profile` resolves an exact NAME in the helm's catalog; duplicate names are refused. `create --profile-id`
 selects an exact ID without falling back to a matching name. A clone follows its explicitly selected source's
@@ -1197,7 +1188,7 @@ An explicitly requested Delete may partially remove a session's state before a l
 its attachment files while its database row remains listed for retry. The failure must be visible, and another Delete
 must be able to continue cleanup. Rollback or preservation of already-removed files is not required; reviewers must not
 flag partial deletion alone as a defect or require transactional recovery machinery for that accepted outcome. This
-allowance applies to Delete, not to removing attachment files during Archive or Stop.
+allowance applies to Delete, not to removing attachment files during Stop.
 
 ### Terminal-tab working directory
 
@@ -1233,10 +1224,10 @@ user-initiated paste is intentional delivery of the pasted content to the select
 program-initiated clipboard reads. Clipboard writes remain best-effort as specified in Terminal experience; an opt-out
 control is not a current requirement.
 
-Agents may intentionally stop, archive, rename, and restart sessions on other hosts through the helm. Those named,
-bounded effects are authorized even when invoked by a malicious agent. Existing agent-requested session creation and
-cloning across hosts are the only temporary execution exceptions: they permit arbitrary execution on the target today,
-and that exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TODO.md#maybe-later). Existing
+Agents may intentionally stop, rename, and restart sessions on other hosts through the helm. Those named, bounded
+effects are authorized even when invoked by a malicious agent. Existing agent-requested session creation and cloning
+across hosts are the only temporary execution exceptions: they permit arbitrary execution on the target today, and that
+exposure is accepted pending the guardrails in [TODO.md's Maybe later bucket](TODO.md#maybe-later). Existing
 agent/supervisor-originated creation retries share that acceptance; permanent retention of their retry records is not
 required. This does not waive correctness of user-initiated GUI requests or select a pruning implementation.
 
@@ -1277,11 +1268,11 @@ wrong object. The helm and GUI must still handle the resulting remote failures s
 Session teardown covers ordinary agent descendants, including background servers. Detached services started by shell
 initialization before the agent launches are outside that guarantee; see [Lifecycle operations](#lifecycle-operations).
 
-After a failed Delete or Archive disconnects a viewer, either automatically reconnecting to a surviving terminal or
-remaining detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must
-not treat either outcome alone as a bug or require additional recovery machinery to choose between them. The cleanup
-failure must remain visible; recovery must not restart an agent or take control from another viewer. A retained session
-record does not promise that cleanup preserved the terminal or its scrollback.
+After a failed Delete disconnects a viewer, either automatically reconnecting to a surviving terminal or remaining
+detached until the user reconnects is explicitly acceptable. Choose the simpler implementation. Reviewers must not treat
+either outcome alone as a bug or require additional recovery machinery to choose between them. The cleanup failure must
+remain visible; recovery must not restart an agent or take control from another viewer. A retained session record does
+not promise that cleanup preserved the terminal or its scrollback.
 
 Provisioning may enforce permissions on directories dedicated to Farhelm. It must preserve permissions on existing
 shared directories merely used to hold its executable or service files. If those permissions prevent installation,

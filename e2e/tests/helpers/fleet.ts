@@ -834,7 +834,7 @@ export async function forceBuildSkew(page: Page, stamp: string): Promise<void> {
  *
  * For the many menu-mechanics tests in `sidebar.spec.ts` that predate that
  * item and assert an exact, positional item list or a fixed arrow-key
- * sequence over `rename`/`clone`/`stop`/`archive`/`delete`: those tests are
+ * sequence over `rename`/`clone`/`stop`/`delete`: those tests are
  * about generic ARIA/keyboard mechanics, not about the seen-state feature
  * (which has its own tests), and their fixture sessions genuinely do reach
  * a live classification under enough real wall-clock time — the real
@@ -948,7 +948,7 @@ export async function resetPreferences(request: APIRequestContext): Promise<void
  *
  * Auto-select (BUGS_BURNDOWN.md issue 5) opens the remembered session — the
  * helm's shared preference `last_selected`, one row for every client — falling
- * back to the newest-created non-archived one. Tests that stage route holds
+ * back to the newest-created one. Tests that stage route holds
  * or stubs around a SPECIFIC session's first reads must pin the selection
  * AWAY from that session (usually to the shared e2e-session) before `goto`,
  * or the auto-open races the staging exactly like a user clicking too early.
@@ -967,7 +967,7 @@ export async function pinAutoSelect(page: Page, id: string): Promise<void> {
  * remembered selection.
  *
  * For the tests whose subject is the FALLBACK — what a client with nothing
- * remembered opens (SPEC.md's newest-created non-archived session). A
+ * remembered opens (SPEC.md's newest-created session). A
  * remembered id short-circuits that path entirely: the sidebar resolves it
  * against the helm and opens it, and the fallback the test came to check
  * never runs. Such a test has to state the precondition rather than inherit
@@ -1009,7 +1009,7 @@ export async function openHostsPanel(page: Page): Promise<void> {
  * Open a session row's actions menu when it is not already open.
  *
  * The sidebar redesign (BUGS_BURNDOWN.md issue 5) moved every per-row
- * action — rename, stop, archive, delete, and their confirms — off the row
+ * action — rename, stop, delete, and their confirms — off the row
  * and into a floating panel behind the row's `⋯` toggle, so any test that
  * clicks or asserts on those controls opens the menu first through this
  * helper.
@@ -1149,7 +1149,7 @@ async function openMenuPanel(
  * Open a session row's actions menu when it is not already open.
  *
  * The sidebar redesign (BUGS_BURNDOWN.md issue 5) moved every per-row
- * action — rename, stop, archive, delete, and their confirms — off the row
+ * action — rename, stop, delete, and their confirms — off the row
  * and into a floating panel behind the row's `⋯` toggle, so any test that
  * clicks or asserts on those controls opens the menu first through this
  * helper. See `openMenuPanel`'s own doc for the toggle-idempotence,

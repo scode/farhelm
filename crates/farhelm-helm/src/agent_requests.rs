@@ -19,7 +19,7 @@
 //! Every verb here is served from the exact code path its REST counterpart
 //! uses — `hosts::host_views` for hosts, `aggregate::session_list` for
 //! sessions, `sessions::do_rename_session`/`do_stop_session`/
-//! `do_archive_session`/`do_restart_session` for the four lifecycle verbs, and
+//! `do_restart_session` for the three lifecycle verbs, and
 //! `sessions::do_create_session` for `create` and `clone`. Not for economy:
 //! the point of routing an agent's questions (and its actions) through the
 //! helm at all is that the agent and the user see, and act on, one fleet.
@@ -49,7 +49,7 @@
 //!
 //! # Lifecycle verbs act on ANY session, not only the asker's own
 //!
-//! `Rename`, `Stop`, `Archive`, and `Restart` each carry `session_id: Option<String>` so
+//! `Rename`, `Stop`, and `Restart` each carry `session_id: Option<String>` so
 //! an old wire shape can still be decoded and refused. The relay and this
 //! authoritative boundary both require `Some(id)`, including for a deliberate
 //! self-action. The id may name any session the helm knows, on any host.
@@ -353,14 +353,6 @@ impl AgentRequestHandler for HelmAgentRequests {
                     .await
                     .map(|()| AgentReply::Stopped {})
             }
-            AgentVerb::Archive { session_id: target } => {
-                let target = resolve_target(target.expect("validated"), session_id, "archive");
-                crate::sessions::do_archive_session(&state, &target)
-                    .await
-                    .map(|(claim, info)| {
-                        agent_session_reply(&state, &claim, info, origin.host, session_id)
-                    })
-            }
             AgentVerb::Restart {
                 session_id: target,
                 mode,
@@ -464,7 +456,7 @@ impl AgentRequestHandler for HelmAgentRequests {
 /// The helm sits in the middle of two hops, and this is the far one: the
 /// asking session's supervisor forwarded the verb up to the helm, and the
 /// helm routed it down to the supervisor that owns the target session. A
-/// MUTATION — `Rename`/`Stop`/`Archive`/`Restart`, or a `Create`/`Clone` — that
+/// MUTATION — `Rename`/`Stop`/`Restart`, or a `Create`/`Clone` — that
 /// reached THAT supervisor and lost only its reply is the same
 /// delivered-outcome-unknown ending the near hop already speaks about
 /// (`service::agent_relay::connection_lost_after_queueing`) — and it used to
@@ -624,9 +616,9 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
             }
             Ok(())
         }
-        AgentVerb::Stop { session_id }
-        | AgentVerb::Archive { session_id }
-        | AgentVerb::Restart { session_id, .. } => required(session_id.as_deref(), "--session"),
+        AgentVerb::Stop { session_id } | AgentVerb::Restart { session_id, .. } => {
+            required(session_id.as_deref(), "--session")
+        }
         AgentVerb::Create {
             host,
             cwd,
@@ -683,8 +675,8 @@ fn validate_authoritative_verb(verb: &AgentVerb) -> Result<(), String> {
 /// routing path.
 ///
 /// Also where "which session asked to act on which" is logged, at `info`
-/// rather than left to be reconstructed from a `RenameSession`/
-/// `StopSession`/`ArchiveSession` line on whatever supervisor eventually
+/// rather than left to be reconstructed from a `RenameSession` or
+/// `StopSession` line on whatever supervisor eventually
 /// answers: an operator reading the HELM's own log wants to see, in one
 /// place, that a session reached across the fleet (or renamed itself)
 /// before the request ever leaves this process — see the module's own docs
@@ -1317,7 +1309,7 @@ fn reject_clone_replay(
 }
 
 /// Project a session a lifecycle verb just mutated into the same
-/// [`AgentSession`] shape the `sessions` listing uses, so a rename/archive
+/// [`AgentSession`] shape the `sessions` listing uses, so a rename
 /// reply and a later listing agree about the row they both describe.
 ///
 /// Built from the [`crate::manager::SessionClaim`] `route_session` already
@@ -1462,12 +1454,7 @@ async fn session_listing(
     asking_host: HostId,
     asking_session: &str,
 ) -> anyhow::Result<AgentReply> {
-    // Archive-INCLUSIVE, unlike the UI's default browse view. The verb
-    // promises every session the helm knows and an agent has no archive
-    // switch to flip, so the honest listing carries them and flags them
-    // (see `AgentSession::archived`) rather than silently omitting durable
-    // history.
-    let filter = crate::store::SessionFilter::default().include_archived(true);
+    let filter = crate::store::SessionFilter::default();
     let sort = crate::store::ListSort::default();
     let listing =
         crate::aggregate::session_list(&state.manager, &state.store, &filter, sort).await?;
@@ -1565,7 +1552,6 @@ fn agent_session(
         agent: agent_label(&row.info),
         status: status_word(&row.info.status).to_string(),
         current: row.host == asking_host && row.info.id == asking_session,
-        archived: row.info.archived,
         restart_offer: row.info.restart_offer,
         stale: row.stale,
     }
@@ -1629,7 +1615,7 @@ fn basename(program: &str) -> &str {
 /// Exit codes and stop annotations are deliberately NOT folded in the way
 /// the UI's badge folds them. The badge is one capped string a person
 /// reads; this is a column in a table an agent may go on to match against,
-/// so the word stays a word. Staleness and archive state are separate
+/// so the word stays a word. Staleness is separate
 /// fields for the same reason — see [`AgentSession::stale`].
 fn status_word(status: &SessionStatus) -> &'static str {
     match status {
@@ -1682,7 +1668,6 @@ mod tests {
             annotation: None,
             restart_offer: RestartOffer::FreshOnly,
             tabs: Vec::new(),
-            archived: false,
             source_profile: None,
             github_repo: None,
             working_copy: None,
@@ -1705,7 +1690,7 @@ mod tests {
     ///
     /// A helper rather than the argument spelled out at a dozen call sites
     /// because the interesting variable in these tests is never the name —
-    /// it is `current`, `agent`, `archived`, `stale`. The one caller that
+    /// it is `current`, `agent`, `stale`. The one caller that
     /// passes something else is `agent_session_reply`, whose own test
     /// exercises the `None` case deliberately.
     fn projected(
@@ -2124,38 +2109,6 @@ mod tests {
             "a row on another host must not be marked as the asker's own"
         );
     }
-
-    /// Spec: `archived` and `stale` travel as their own fields rather than
-    /// being folded into `status` or dropped.
-    ///
-    /// Both carry information `status` cannot. A cached `running` from a
-    /// host that went offline overnight is byte-identical to one observed a
-    /// second ago, and SPEC.md requires retained rows from unreachable
-    /// hosts to be clearly marked; an archived session is durable history
-    /// rather than something to go and act on. Folding either into the
-    /// status word would also break that column's promise of being a word
-    /// an agent can match against.
-    #[farhelm_testtrace::test]
-    fn archive_and_staleness_travel_as_their_own_fields() {
-        let mut archived = session_info("s1", SessionStatus::Running);
-        archived.archived = true;
-        let mut row = session_row(archived, "builder");
-        row.stale = true;
-
-        let filed = projected(&row, 1, "other");
-        assert!(filed.archived);
-        assert!(filed.stale);
-        assert_eq!(
-            filed.status, "running",
-            "the status word stays a word; the two flags say the rest"
-        );
-
-        let live = session_row(session_info("s2", SessionStatus::Running), "this machine");
-        let live = projected(&live, 1, "other");
-        assert!(!live.archived);
-        assert!(!live.stale);
-    }
-
     /// Spec: every live and ended status becomes the word the UI shows, and
     /// `Unknown` becomes the empty string rather than a word of its own
     /// beside the six real ones.
@@ -2191,7 +2144,7 @@ mod tests {
     // `HelmAgentRequests::handle` itself over a real `AppState` — a real
     // connection manager, a real helm.db, scripted supervisors — because
     // the assembly is where the interesting mistakes live: the wrong
-    // archive filter, one host instead of the fleet, the local host only,
+    // one host instead of the fleet, the local host only,
     // a `current` marker computed from the wrong side.
     // ---------------------------------------------------------------
 
@@ -2221,16 +2174,15 @@ mod tests {
 
     /// Sessions the fleet builder scripts, differing in exactly the
     /// dimensions the reply has fields for.
-    fn scripted(id: &str, created_at: i64, archived: bool, profile: Option<&str>) -> SessionInfo {
+    fn scripted(id: &str, created_at: i64, profile: Option<&str>) -> SessionInfo {
         SessionInfo {
-            archived,
             invocation: "/usr/local/bin/claude --api-key sk-not-for-agents".to_string(),
             source_profile: profile.map(|name| snapshot(name, ProfileExistence::Present)),
             ..session(id, created_at)
         }
     }
 
-    /// A local host with three sessions (one archived, one from a profile)
+    /// A local host with three sessions (including one from a profile)
     /// and an ssh host that connects, caches two sessions, and then goes
     /// away — leaving stale rows behind.
     ///
@@ -2244,9 +2196,9 @@ mod tests {
             .local(HostScript {
                 identity: Some("identity-local".to_string()),
                 sessions: vec![
-                    scripted("local-live", 30, false, None),
-                    scripted("local-archived", 20, true, None),
-                    scripted("local-profile", 10, false, Some("Claude")),
+                    scripted("local-live", 30, None),
+                    scripted("local-old", 20, None),
+                    scripted("local-profile", 10, Some("Claude")),
                 ],
                 ..HostScript::default()
             })
@@ -2256,8 +2208,8 @@ mod tests {
                 HostScript {
                     identity: Some("identity-builder".to_string()),
                     sessions: vec![
-                        scripted("remote-a", 40, false, None),
-                        scripted("remote-b", 5, false, None),
+                        scripted("remote-a", 40, None),
+                        scripted("remote-b", 5, None),
                     ],
                     ..HostScript::default()
                 },
@@ -2350,14 +2302,14 @@ mod tests {
     }
 
     /// Spec: `sessions` answered by the production handler carries the
-    /// WHOLE fleet — both hosts, archived rows included, each row flagged
-    /// for archive and staleness — with `current` on exactly the asking
+    /// WHOLE fleet — both hosts, each row flagged for staleness — with
+    /// `current` on exactly the asking
     /// session's row and `truncated` false for a fleet that fits.
     ///
     /// This is the one test that exercises the assembly rather than the
     /// projection, and every clause is a bug that the pure unit tests above
     /// cannot see: a handler that listed only the local host, or passed the
-    /// default archive-excluding filter, or listed one host and called it
+    /// default filter, or listed one host and called it
     /// the fleet, would satisfy every one of them.
     #[farhelm_testtrace::test]
     async fn the_production_handler_lists_the_whole_fleet_with_its_flags() {
@@ -2383,7 +2335,7 @@ mod tests {
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
         for expected in [
             "local-live",
-            "local-archived",
+            "local-old",
             "local-profile",
             "remote-a",
             "remote-b",
@@ -2397,8 +2349,6 @@ mod tests {
                 .find(|s| s.id == id)
                 .unwrap_or_else(|| panic!("{id} missing from {ids:?}"))
         };
-        assert!(by_id("local-archived").archived);
-        assert!(!by_id("local-live").archived);
         assert!(
             by_id("remote-a").stale,
             "a disconnected host's cached rows are last-known knowledge"
@@ -2862,10 +2812,10 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // The lifecycle verbs — Rename, Stop, Archive, Restart — against the same
+    // The lifecycle verbs — Rename, Stop, Restart — against the same
     // production handler and the same real fleet machinery as the read-only
-    // verbs above. Each drives `do_rename_session`/`do_stop_session`/
-    // `do_archive_session` (`sessions.rs`) through a REAL routed call to a
+    // verbs above. Each drives the matching helper in `sessions.rs` through
+    // a REAL routed call to a
     // scripted supervisor, so what is under test is the whole seam: origin
     // validation, explicit self and cross-session targets, the shared helper
     // functions the REST handlers also call, and the reply's
@@ -2994,7 +2944,7 @@ mod tests {
     /// makes the handler answer without forwarding — the wrong routing
     /// decision, a target the owner cache has not learned yet, a refusal
     /// raised too early — wedges the join forever rather than failing. That
-    /// is not hypothetical: the cross-host archive test hung exactly this
+    /// is not hypothetical: a cross-host lifecycle test hung exactly this
     /// way under a loaded suite, and the hang carried no clue as to why.
     ///
     /// The handler's own answer goes into the panic because it is the whole
@@ -3198,7 +3148,7 @@ mod tests {
     /// old omitted-target shape, which the preceding test refuses before
     /// dispatch.
     ///
-    /// `Rename` rather than `Stop`/`Archive` on purpose: it is the one
+    /// `Rename` rather than `Stop` on purpose: it is the one
     /// lifecycle verb whose self-targeting form does not also end the
     /// asking session, so the scenario stays about target resolution.
     #[farhelm_testtrace::test]
@@ -3274,103 +3224,6 @@ mod tests {
             other => panic!("expected a session reply, got {other:?}"),
         }
     }
-
-    /// Spec: an ALREADY-ARCHIVED session is a legal lifecycle target —
-    /// `AgentSession::archived`'s own docs promise rename/stop/archive/restart may
-    /// all name one — and the helm forwards such a request rather than
-    /// short-circuiting it.
-    ///
-    /// The promise was documented and untested, which is the combination
-    /// that rots: a future "archived sessions are read-only" guard added
-    /// anywhere on this path would contradict the wire's own documentation
-    /// with nothing failing. Asserted at the far end, because the whole
-    /// question is whether the request LEAVES the helm — a reply-only
-    /// assertion could not tell a forwarded request from a locally
-    /// synthesized one.
-    ///
-    /// `Rename` is the verb, for [`naming_the_asking_session_explicitly_targets_it`]'s
-    /// reason: it leaves the asking session alive and keeps the test about
-    /// the one property it names.
-    #[farhelm_testtrace::test]
-    async fn a_lifecycle_verb_may_target_an_already_archived_session() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let archived = SessionInfo {
-            archived: true,
-            ..session("filed-away", 2)
-        };
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let responder = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .expect("handshake");
-            let frame = reader
-                .read_frame()
-                .await
-                .expect("read frame")
-                .expect("a request");
-            let ControlMsg::RenameSession {
-                req_id,
-                session_id,
-                expected_title,
-                title,
-            } = parse_control(&frame).expect("decode request")
-            else {
-                panic!("expected RenameSession");
-            };
-            assert_eq!(
-                session_id, "filed-away",
-                "an archived session is forwarded like any other target"
-            );
-            assert_eq!(expected_title.as_deref(), Some("old title"));
-            writer
-                .write_control(&ControlMsg::SessionRenamed {
-                    req_id,
-                    session: SessionInfo {
-                        title,
-                        archived: true,
-                        ..session("filed-away", 2)
-                    },
-                })
-                .await
-                .expect("write reply");
-        });
-        let (h, local) =
-            spliced_local_fleet(client_side, vec![archived, session("asker", 1)]).await;
-
-        let handler = HelmAgentRequests::for_state(&h.state);
-        let outcome = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                AgentVerb::Rename {
-                    session_id: Some("filed-away".to_string()),
-                    expected_title: Some("old title".to_string()),
-                    title: "renamed while archived".to_string(),
-                },
-            )
-            .await;
-        join_responder(responder, &outcome).await;
-
-        match outcome {
-            AgentOutcome::Ok {
-                reply: AgentReply::Session { session },
-            } => {
-                assert_eq!(session.id, "filed-away");
-                assert_eq!(session.title, "renamed while archived");
-                assert!(
-                    session.archived,
-                    "the row is still archived; renaming it does not un-file it"
-                );
-            }
-            other => panic!("expected a session reply, got {other:?}"),
-        }
-    }
-
     /// Spec: a title the supervisor refuses (SPEC.md's control-character
     /// rule) reaches the agent as the supervisor's OWN refusal text,
     /// verbatim — the same passthrough contract `rename_session`'s REST
@@ -3575,274 +3428,6 @@ mod tests {
             "expected an empty Stopped reply, got {outcome:?}"
         );
     }
-
-    /// Spec: a self-targeting `Archive` reaches the owning supervisor as an
-    /// `ArchiveSession` naming the asker, and its `SessionArchived` reply is
-    /// projected back through the same [`AgentReply::Session`] shape
-    /// `Rename` uses, `archived` flag and all.
-    ///
-    /// What this does NOT prove, despite the flag assertion below, is that
-    /// anything was actually archived: the flag in the reply is the one the
-    /// SCRIPTED supervisor was told to send back, so a helm that fabricated
-    /// the row without asking anyone would fail this test only because of
-    /// the far-end assertion on the forwarded frame, not because of the
-    /// flag. The earlier name (`archive_flips_the_archived_flag`) claimed
-    /// the stronger property and invited exactly that misreading. Real
-    /// archiving is `do_archive_session`'s own contract, exercised against
-    /// a real supervisor in the e2e suite.
-    #[farhelm_testtrace::test]
-    async fn archive_routes_to_the_owner_and_projects_the_reply() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let responder = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .expect("handshake");
-            let frame = reader
-                .read_frame()
-                .await
-                .expect("read frame")
-                .expect("a request");
-            let ControlMsg::ArchiveSession { req_id, session_id } =
-                parse_control(&frame).expect("decode request")
-            else {
-                panic!("expected ArchiveSession");
-            };
-            assert_eq!(session_id, "asker");
-            writer
-                .write_control(&ControlMsg::SessionArchived {
-                    req_id,
-                    session: SessionInfo {
-                        archived: true,
-                        ..session("asker", 1)
-                    },
-                })
-                .await
-                .expect("write reply");
-        });
-        let (h, local) = spliced_local_fleet(client_side, vec![session("asker", 1)]).await;
-
-        let handler = HelmAgentRequests::for_state(&h.state);
-        let outcome = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                AgentVerb::Archive {
-                    session_id: Some("asker".to_string()),
-                },
-            )
-            .await;
-        join_responder(responder, &outcome).await;
-
-        match outcome {
-            AgentOutcome::Ok {
-                reply: AgentReply::Session { session },
-            } => {
-                assert!(
-                    session.archived,
-                    "the owner's archived flag must survive the projection"
-                );
-            }
-            other => panic!("expected a session reply, got {other:?}"),
-        }
-    }
-
-    /// Spec: `Archive`, like `Rename` and `Stop`, can target ANY session
-    /// the helm knows, not only the asking one — see
-    /// `stop_can_target_a_named_session_other_than_the_asker`'s docs for
-    /// why a self target alone cannot prove this.
-    #[farhelm_testtrace::test]
-    async fn archive_can_target_a_named_session_other_than_the_asker() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        let responder = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .expect("handshake");
-            let frame = reader
-                .read_frame()
-                .await
-                .expect("read frame")
-                .expect("a request");
-            let ControlMsg::ArchiveSession { req_id, session_id } =
-                parse_control(&frame).expect("decode request")
-            else {
-                panic!("expected ArchiveSession");
-            };
-            assert_eq!(session_id, "other", "the NAMED target, not the asker");
-            writer
-                .write_control(&ControlMsg::SessionArchived {
-                    req_id,
-                    session: SessionInfo {
-                        archived: true,
-                        ..session("other", 2)
-                    },
-                })
-                .await
-                .expect("write reply");
-        });
-        let (h, local) =
-            spliced_local_fleet(client_side, vec![session("other", 2), session("asker", 1)]).await;
-
-        let handler = HelmAgentRequests::for_state(&h.state);
-        let outcome = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                AgentVerb::Archive {
-                    session_id: Some("other".to_string()),
-                },
-            )
-            .await;
-        join_responder(responder, &outcome).await;
-
-        match outcome {
-            AgentOutcome::Ok {
-                reply: AgentReply::Session { session },
-            } => {
-                assert_eq!(session.id, "other");
-                assert!(session.archived, "the archived flag must flip in the reply");
-                assert!(
-                    !session.current,
-                    "the row acted on is not the asking session's own"
-                );
-            }
-            other => panic!("expected a session reply, got {other:?}"),
-        }
-    }
-
-    /// Spec: a lifecycle verb can target a session on a DIFFERENT host than
-    /// the asker's own — the fleet-wide authority every prior cross-session
-    /// test in this module (`rename_can_target_any_named_session_...`,
-    /// `stop_can_target_a_named_session_...`,
-    /// `archive_can_target_a_named_session_...`) exercised only within ONE
-    /// host's cache.
-    ///
-    /// This matters as its own case because routing a MUTATION across
-    /// hosts touches machinery the same-host tests never reach:
-    /// `route_session` resolving an owner from helm.db rather than from
-    /// the asking host's own in-memory list, and the mutation traveling
-    /// out over a DIFFERENT supervisor connection than the one the request
-    /// arrived on. Only the REMOTE host needs a scripted peer — the
-    /// mutation is the only frame that ever reaches it; the local
-    /// (asking) host is served standalone, exactly as every read-only
-    /// fleet test above already does.
-    #[farhelm_testtrace::test]
-    async fn archive_can_target_a_session_on_a_different_host_than_the_asker() {
-        use farhelm_proto::ControlMsg;
-        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-        let (client_side, peer) = tokio::io::duplex(64 * 1024);
-        // Spawned BEFORE the fleet is built — see `spliced_local_fleet`'s
-        // docs for why the order is load-bearing rather than cosmetic; the
-        // same ordering constraint applies here even though the spliced
-        // host is `ssh` rather than `local`.
-        let responder = tokio::spawn(async move {
-            let (r, w) = tokio::io::split(peer);
-            let mut reader = FrameReader::new(r);
-            let mut writer = FrameWriter::new(w);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .expect("handshake");
-            let frame = reader
-                .read_frame()
-                .await
-                .expect("read frame")
-                .expect("a request");
-            let ControlMsg::ArchiveSession { req_id, session_id } =
-                parse_control(&frame).expect("decode request")
-            else {
-                panic!("expected ArchiveSession");
-            };
-            assert_eq!(session_id, "remote-target");
-            writer
-                .write_control(&ControlMsg::SessionArchived {
-                    req_id,
-                    session: SessionInfo {
-                        archived: true,
-                        ..session("remote-target", 2)
-                    },
-                })
-                .await
-                .expect("write reply");
-        });
-
-        let (builder, remote) = FleetBuilder::new()
-            .await
-            .local(HostScript {
-                identity: Some("identity-local".to_string()),
-                sessions: vec![session("asker", 1)],
-                ..HostScript::default()
-            })
-            .await
-            .ssh(
-                "user@builder",
-                HostScript {
-                    identity: Some("identity-builder".to_string()),
-                    sessions: vec![session("remote-target", 2)],
-                    peer: Some(client_side),
-                    ..HostScript::default()
-                },
-            )
-            .await;
-        let h = builder.start().await;
-        let local = local_id(&h.store).await;
-        // BOTH refreshes, and the remote one is the load-bearing half. The
-        // owner cache this dispatch routes by is written when a host's
-        // first refresh lands, and the target lives on the REMOTE host —
-        // so waiting only for the local host's refresh (which is all this
-        // test used to do) left the dispatch racing the very lookup it
-        // depends on. Losing that race did not fail the test; it HUNG it,
-        // because `route_session` then answered `NotFound` without
-        // forwarding anything and the scripted responder below waited
-        // forever for a frame that was never going to be sent. Rare when
-        // the test ran alone and reproducible under a loaded suite: two of
-        // twenty-four concurrent runs wedged before this line existed.
-        h.await_refreshed(local).await;
-        h.await_refreshed(remote).await;
-
-        let handler = HelmAgentRequests::for_state(&h.state);
-        let outcome = handler
-            .handle(
-                origin_of(&h, local),
-                "asker",
-                AgentVerb::Archive {
-                    session_id: Some("remote-target".to_string()),
-                },
-            )
-            .await;
-        join_responder(responder, &outcome).await;
-
-        match outcome {
-            AgentOutcome::Ok {
-                reply: AgentReply::Session { session },
-            } => {
-                assert_eq!(session.id, "remote-target");
-                assert_eq!(
-                    session.host.as_deref(),
-                    Some("user@builder"),
-                    "the reply names the TARGET's host, not the asker's"
-                );
-                assert!(session.archived);
-                assert!(
-                    !session.current,
-                    "a session on another host is never the asker's own row"
-                );
-            }
-            other => panic!("expected a session reply, got {other:?}"),
-        }
-    }
-
     /// Spec: a lifecycle verb naming a session whose owning host is CACHED
     /// but not currently connected is refused `Conflict`, naming that
     /// host's state — the same refusal `route_session` produces for the

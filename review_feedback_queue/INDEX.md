@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
-- `archive-discards-stopped-agent-exit-code.md` — archive drops a stopped agent's exit code and can misattribute a
-  natural exit.
 - `archived-retry-resurrects-session.md` — retried create resurrects an archived session and launches a stood-down
   agent.
 - `cached-session-skips-created-at-check.md` — cached session detail shows a row the list hides as poison.

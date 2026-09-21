@@ -46,7 +46,7 @@
 //! provably is not.
 //!
 //! **Mutations end differently from questions.** Once `PROTOCOL_VERSION` 13
-//! put `rename`/`stop`/`archive` on this wire, an ending stopped being
+//! put `rename`/`stop`/`restart` on this wire, an ending stopped being
 //! merely a failure to report and became a claim about whether something
 //! happened. A lost connection after the request was queued means "nothing
 //! happened, ask again" for a listing and "the outcome is unknown" for a
@@ -232,7 +232,7 @@ impl HelmLink {
     /// clock, and that is the intended shape rather than a leak: while a
     /// mutation's outcome is genuinely unknown, letting a delete proceed
     /// would be choosing to tear down a session that a still-running
-    /// mutation was authorized against — a rename/stop/archive, or a
+    /// mutation was authorized against — a rename/stop/restart, or a
     /// create/clone that is about to put a real session on some host.
     ///
     /// ## Why the link's life needed a bound of its own
@@ -432,7 +432,7 @@ impl HelmLink {
     /// queue — the pre-queue endings are all handled inside
     /// [`Self::upcall`] itself, which never observes a value deposited here
     /// unless the send succeeded — so the helm may well have received a
-    /// mutation (a rename/stop/archive, or a create/clone that puts a new
+    /// mutation (a rename/stop/restart, or a create/clone that puts a new
     /// session on some host), performed it, and lost only the answer. Calling
     /// that `Unavailable`, whose whole contract is "the request was never
     /// delivered and nothing happened", would invite the asking agent to
@@ -787,7 +787,7 @@ mod tests {
     /// accepted by the writer queue, the connection then died, nobody knows
     /// what the helm did with it. What differs is the CONSEQUENCE of being
     /// wrong: `Unavailable` tells the asking agent that nothing happened
-    /// and it may send the request again, which for a rename/stop/archive
+    /// and it may send the request again, which for a rename/stop/restart
     /// that already took effect is an instruction to apply it twice.
     /// `Timeout`'s documented contract is "delivered, outcome unknown",
     /// which is the truth here.
@@ -887,7 +887,7 @@ mod tests {
             let outcome = link
                 .upcall(
                     "s1".to_string(),
-                    AgentVerb::Archive { session_id: None },
+                    AgentVerb::Stop { session_id: None },
                     Duration::from_secs(5),
                     Duration::from_secs(30),
                     RETAIN_FOREVER,
@@ -1166,7 +1166,7 @@ mod tests {
             async move {
                 link.upcall(
                     "s1".to_string(),
-                    AgentVerb::Archive { session_id: None },
+                    AgentVerb::Stop { session_id: None },
                     Duration::from_secs(5),
                     Duration::from_secs(30),
                     RETAIN_FOREVER,
@@ -1267,7 +1267,7 @@ mod tests {
         let outcome = link
             .upcall(
                 "s1".to_string(),
-                AgentVerb::Archive { session_id: None },
+                AgentVerb::Stop { session_id: None },
                 Duration::from_secs(5),
                 Duration::from_secs(30),
                 retain,

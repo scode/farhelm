@@ -107,12 +107,10 @@ mod uploads;
 
 pub use capture::{CaptureStoreFault, CaptureWrite};
 pub use connection::handle_connection;
-#[cfg(test)]
-pub(crate) use core::recovered_archive_flag;
 pub use core::{
-    ArchiveGate, ArchiveStage, BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage,
-    ForwarderCleanupGate, NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault, SampleRead,
-    SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorStartup,
-    SupervisorTimeouts, TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT,
-    UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, connect, run,
+    BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, ForwarderCleanupGate,
+    NaturalDetachGate, STALL_DETACH_TIMEOUT, SampleFault, SampleRead, SessionSnapshot,
+    StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts, TabOpenFault, TabOpenStage,
+    TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT,
 };
+pub use core::{SupervisorStartup, connect, run};

@@ -51,98 +51,23 @@
 //! channel. The handler still owns every byte that answers the
 //! `DeleteSession` itself.
 //!
-//! ## Archive is its own teardown
-//!
-//! Archive shares the process and terminal reach of delete, but not its
-//! retention story. It cancels in-flight uploads, reaps the agent and every
-//! tab, removes terminal-only launch artifacts, and detaches
-//! every viewer. It then KEEPS the database row and committed attachment
-//! directory, marks the row archived, and records the deliberate teardown
-//! as `Exited` with `STOP_ANNOTATION` only when it actually stopped a live
-//! agent. If the pane was already dead, archive retains the last witnessed
-//! outcome instead; treating that case as a fresh user stop would discard an
-//! exit code or an error detail that the supervisor already knows.
-
 use super::connection::notify_detached;
-use super::core::{ArchiveStage, SessionEntry, Supervisor, unknown_pane_owner_refusal};
+use super::core::{SessionEntry, Supervisor, unknown_pane_owner_refusal};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
-use super::status::session_status;
 use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree};
 use super::terminals::{ActiveAttach, AttachmentKey};
-use super::ticker::ActivitySample;
 use super::uploads::abort_session_uploads;
-use crate::store::LastOutcome;
 use crate::tmux::PaneProbe;
 
-use farhelm_proto::STOP_ANNOTATION;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tracing::{debug, warn};
 
-/// Every way a teardown can fail before the session is gone, as one
-/// variant per failure CLASS — not per failure site. The four probe/sweep
-/// variants each cover exactly one step of the teardown (whatever number
-/// of ways that step has of failing); [`TeardownError::FailClosed`]
-/// covers the four steps inside the fail-closed block, which is sound
-/// because those four already render their own site-specific message and
-/// this variant carries it through verbatim.
+/// Every way deletion can fail before the session is gone.
 ///
-/// Rendering deliberately lives with the handler rather than here: these
-/// are wire-visible strings, and keeping them at the boundary that owns
-/// the wire is what makes "the error text did not change" something a
-/// reader can check in one place.
-///
-/// Every one of them is fail-closed, and what that does and does not buy
-/// is worth being exact about. The DB row survives, so the session is
-/// still listed and a LATER DELETE can pick up where this one stopped —
-/// that retry is the only thing that finishes the deletion and removes the
-/// row. Startup reconciliation is not a fallback here: no delete INTENT is
-/// persisted anywhere, so a restart has no way to learn that a delete was
-/// ever attempted. What startup does clean up is debris it can recognize
-/// on its own (a leftover launch spec, an orphaned scope, a quarantined
-/// attachment directory), which bounds the mess a failed teardown leaves
-/// behind without ever completing it.
+/// Each variant is fail-closed: the durable row remains available for a
+/// later retry whenever teardown cannot prove the process tree and terminal
+/// are gone.
 pub(crate) enum TeardownError {
-    /// The agent's pane could not be resolved into a trustworthy root pid:
-    /// either tmux could not be asked at all, or it answered that the pane
-    /// belongs to a tmux session this supervisor does not recognize — a
-    /// possible rename or move of this session's own live terminal, which
-    /// a delete must not act on (see
-    /// [`Supervisor::known_session_tmux_name`]).
-    PaneProbe(anyhow::Error),
-    /// tmux could not be asked for this session's tabs. Strictly a
-    /// failure: see the call site for why "we could not ask" must not
-    /// collapse into "there are none".
-    TabRediscovery(anyhow::Error),
-    /// A systemd user manager exists but would not enumerate this
-    /// session's tab or launch-generation scopes.
-    TabScopeEnumeration(anyhow::Error),
-    /// The process-tree sweep itself failed — not "nothing was found to
-    /// kill", but "this could not be confirmed".
-    Sweep(anyhow::Error),
-    /// The fail-closed block failed — the tmux kill, the launch-artifact
-    /// removal, the attachment quarantine, or the row deletion and
-    /// reservation settlement.
-    ///
-    /// The one variant that does NOT carry a source error: those four
-    /// sites render their own message as they fail (each needs different
-    /// context — which artifact, which step), and this carries that
-    /// already-rendered string through unchanged so the reply still names
-    /// the step rather than a generic "teardown failed".
-    FailClosed(String),
-}
-
-/// Failures that prevent archive from truthfully claiming the session is
-/// terminal-less and archived.
-///
-/// Every variant is fail-closed: the archived flag is written only after
-/// the process sweep and tmux teardown have succeeded. The handler owns
-/// rendering because these messages are part of the wire contract.
-///
-/// The variants mirror [`TeardownError`]'s one-for-one and carry the same
-/// meanings; see that type for what each failure class covers.
-pub(crate) enum ArchiveError {
     PaneProbe(anyhow::Error),
     TabRediscovery(anyhow::Error),
     TabScopeEnumeration(anyhow::Error),
@@ -151,319 +76,6 @@ pub(crate) enum ArchiveError {
 }
 
 impl Supervisor {
-    /// Shut down an entire session while preserving its durable metadata,
-    /// committed attachments, and any already-known outcome.
-    ///
-    /// The caller holds the session lifecycle claim across this function.
-    /// The archive flag is committed only after every process, tab, tmux
-    /// terminal, and terminal-only artifact is gone; a failure therefore
-    /// leaves an ordinary visible session that can be retried. Committed
-    /// attachment files are never moved or removed. The outcome is replaced
-    /// with an annotated exit only when the pane probe found a live owned
-    /// agent and this teardown killed it; an already-ended session keeps its
-    /// exit code, annotation, or error detail.
-    pub(crate) async fn teardown_for_archive(
-        &self,
-        entry: &SessionEntry,
-        session_id: &str,
-    ) -> Result<Arc<SessionEntry>, ArchiveError> {
-        // The in-memory entry deliberately has no `Terminal` during a
-        // restart gap, but the durable tmux name exists for the whole row's
-        // lifetime. Archive must still kill a same-named husk in that state;
-        // tying the whole-session kill to the agent pane would leave tabs or
-        // a dead retained window behind while publishing a terminal-less
-        // archive.
-        let tmux_name = self
-            .store
-            .session(session_id)
-            .await
-            .map_err(|error| {
-                ArchiveError::FailClosed(format!(
-                    "reading the durable tmux name before archive: {error:#}"
-                ))
-            })?
-            .ok_or_else(|| {
-                ArchiveError::FailClosed(format!(
-                    "session {session_id} vanished before its tmux terminal could be removed"
-                ))
-            })?
-            .tmux_name;
-
-        let live_pane = match entry.terminal.as_ref() {
-            Some(terminal) => {
-                if let Some(gate) = &self.seams.archive_gate {
-                    gate(ArchiveStage::PaneProbe)
-                        .await
-                        .map_err(ArchiveError::PaneProbe)?;
-                }
-                match self
-                    .tmux
-                    .pane_process(&terminal.tmux_name, &terminal.pane)
-                    .await
-                    .map_err(ArchiveError::PaneProbe)?
-                {
-                    PaneProbe::Owned(pane) => Some(pane),
-                    PaneProbe::Gone => None,
-                    // Same treatment delete gives it, and for the same
-                    // reason. A RECOGNIZED owner means the recorded pane
-                    // predates the current tmux server, so there is no
-                    // root pid here and nothing left of that terminal to
-                    // clean — the marker sweep and the per-tab cgroup
-                    // scopes reaped below need no pane, and refusing here
-                    // is what wedged archive in the 2026-08-16 incident.
-                    // An UNRECOGNIZED owner fails closed: the pane may be
-                    // this session's own live terminal under a renamed
-                    // tmux session, and archiving it would publish a
-                    // terminal-less archive while that terminal, its
-                    // scrollback, and its tabs went on existing.
-                    PaneProbe::ForeignOwner { owner } => {
-                        if !self.known_session_tmux_name(&owner).await {
-                            return Err(ArchiveError::PaneProbe(anyhow::anyhow!(
-                                unknown_pane_owner_refusal(
-                                    &terminal.pane,
-                                    &owner,
-                                    &terminal.tmux_name
-                                )
-                            )));
-                        }
-                        warn!(
-                            session = %session_id, foreign_owner = %owner,
-                            "this session's recorded pane now belongs to another tmux session; \
-                             archiving on the marker sweep and cgroup scopes alone"
-                        );
-                        None
-                    }
-                }
-            }
-            None => None,
-        };
-        let root_pid = live_pane.filter(|pane| !pane.dead).map(|pane| pane.pid);
-        let stopped_live_agent = root_pid.is_some();
-
-        // Archive reaches the same whole-session ownership boundary as
-        // delete: tabs carry separate cgroup units, and the manager is the
-        // only source left when tmux died before its scrubbed daemon did.
-        let mut units = ScopeUnits::recorded(entry.scope.clone());
-        if let Some(terminal) = entry.terminal.as_ref() {
-            if let Some(gate) = &self.seams.archive_gate {
-                gate(ArchiveStage::TabRediscovery)
-                    .await
-                    .map_err(ArchiveError::TabRediscovery)?;
-            }
-            let tabs = self
-                .session_tabs_including_dead(terminal)
-                .await
-                .map_err(ArchiveError::TabRediscovery)?;
-            units.extend_derived(
-                tabs.iter()
-                    .filter_map(|tab| crate::scope::tab_unit_name(session_id, &tab.id)),
-            );
-        }
-        let globs = [
-            crate::scope::tab_unit_glob(session_id),
-            crate::scope::launch_unit_glob(session_id),
-        ];
-        if globs.iter().any(Option::is_some) {
-            if let Some(gate) = &self.seams.archive_gate {
-                gate(ArchiveStage::ScopeEnumeration)
-                    .await
-                    .map_err(ArchiveError::TabScopeEnumeration)?;
-            }
-            for glob in globs.into_iter().flatten() {
-                match self.seams.scopes.units_matching(&glob).await {
-                    Ok(found) => units.extend_derived(found),
-                    Err(error) if !self.seams.scopes.available().await => debug!(
-                        session = %session_id,
-                        error = %format!("{error:#}"),
-                        "no systemd user manager to enumerate this archived session's scopes; \
-                         the process-tree sweep is the whole mechanism"
-                    ),
-                    Err(error) => return Err(ArchiveError::TabScopeEnumeration(error)),
-                }
-            }
-        }
-        units.normalize();
-        if let Some(gate) = &self.seams.archive_gate {
-            gate(ArchiveStage::Sweep)
-                .await
-                .map_err(ArchiveError::Sweep)?;
-        }
-        // Everything above is a read-only preflight. Keep transfers alive
-        // until those checks have proved teardown can start: a refused
-        // archive must not discard an upload and then claim nothing changed.
-        // Once the checks pass, cancelling and joining immediately before
-        // the first process kill ends the async transfer tasks. An abandoned
-        // blocking publication may still complete; its attachment is retained
-        // just like one whose path was acknowledged.
-        abort_session_uploads(self, session_id, "the session was archived", false).await;
-        reap_process_tree(
-            &self.seams.scopes,
-            units,
-            root_pid,
-            session_id,
-            &SweepTarget::WholeSession,
-            ScopeKillFailure::Refuse,
-        )
-        .await
-        .map_err(ArchiveError::Sweep)?;
-
-        // From here through publication, the attachment-map guard prevents
-        // a racing attach from installing a viewer on the terminal being
-        // removed. Notices are initiated before the guard drops, matching
-        // the ordering guarantee described in the module docs.
-        let mut attachments = self.attachments.lock().await;
-        let doomed: Vec<(AttachmentKey, ActiveAttach)> = attachments
-            .extract_if(|key, _| key.session == session_id)
-            .collect();
-        for (key, old) in &doomed {
-            self.begin_forwarder_shutdown(key.clone(), old);
-        }
-        let mut notify_detach = Vec::with_capacity(doomed.len());
-        let mut forwarders = tokio::task::JoinSet::new();
-        for (key, old) in doomed {
-            let ActiveAttach {
-                channel,
-                notify,
-                forwarder,
-                sink,
-                ..
-            } = old;
-            forwarders.spawn(async move {
-                let joined = forwarder.await;
-                drop(sink);
-                (key, joined, channel, notify)
-            });
-        }
-        let mut forwarder_error = None;
-        while let Some(joined) = forwarders.join_next().await {
-            match joined {
-                Ok((key, result, channel, notify)) => {
-                    if let Err(error) = self.record_forwarder_join(key, result) {
-                        forwarder_error.get_or_insert(error.to_string());
-                    }
-                    notify_detach.push((channel, notify));
-                }
-                Err(join) => {
-                    forwarder_error
-                        .get_or_insert_with(|| format!("terminal cleanup wrapper failed: {join}"));
-                }
-            }
-        }
-        if forwarder_error.is_none() && self.has_output_reap_for_session(session_id) {
-            forwarder_error = Some(
-                "a terminal-output client is still crossing its safe shutdown boundary".to_string(),
-            );
-        }
-
-        let teardown: Result<(), String> = async {
-            if let Some(error) = forwarder_error {
-                return Err(error);
-            }
-            self.tmux
-                .kill_session(&tmux_name)
-                .await
-                .map_err(|error| format!("killing tmux session: {error:#}"))?;
-            if let Some(gate) = &self.seams.archive_gate {
-                gate(ArchiveStage::ArtifactRemoval)
-                    .await
-                    .map_err(|error| format!("removing archive artifacts: {error:#}"))?;
-            }
-            // Launch specs can contain credentials, and a spec is not
-            // metadata an archive promises to retain.
-            remove_launch_artifacts_for_session(&self.state_dir, session_id).await?;
-            self.store
-                .archive_session(session_id, stopped_live_agent)
-                .await
-                .map_err(|error| format!("recording the archived session: {error:#}"))?
-                .ok_or_else(|| {
-                    format!(
-                        "session {session_id} vanished before its archive metadata could be recorded"
-                    )
-                })?;
-            Ok(())
-        }
-        .await;
-
-        if let Err(message) = teardown {
-            for (channel, notify) in &notify_detach {
-                notify_detached(
-                    notify,
-                    *channel,
-                    format!("detached during a failed archive: {message}"),
-                );
-            }
-            drop(attachments);
-            return Err(ArchiveError::FailClosed(message));
-        }
-
-        let prior_outcome = entry
-            .outcome
-            .lock()
-            .expect("outcome mutex poisoned")
-            .clone();
-        let outcome = if stopped_live_agent && !prior_outcome.is_terminal() {
-            LastOutcome::Exited {
-                exit_code: None,
-                annotation: Some(STOP_ANNOTATION.to_string()),
-            }
-        } else {
-            prior_outcome
-        };
-        let mut info = entry.info.clone();
-        info.archived = true;
-        info.tabs.clear();
-        let mut archived = Arc::new(SessionEntry {
-            info,
-            terminal: None,
-            outcome: Arc::new(std::sync::Mutex::new(outcome)),
-            snapshot: entry.snapshot.clone(),
-            canonical_cwd: entry.canonical_cwd.clone(),
-            first_input: Arc::clone(&entry.first_input),
-            capture: Arc::clone(&entry.capture),
-            // Shared for the same reason `capture` is: archiving replaces
-            // the entry without ending the launch's story, so the tripwire
-            // must keep pointing at the same cells a tick may already be
-            // holding.
-            hooked: Arc::clone(&entry.hooked),
-            hook_warned: Arc::clone(&entry.hook_warned),
-            // Reset live classification but keep an accepted burst's failed
-            // durable write retryable after this session becomes archived.
-            activity: ActivitySample::replacement(&entry.activity),
-            last_work_started_at: Arc::clone(&entry.last_work_started_at),
-            // Shared rather than reset, unlike the sampler cell above:
-            // archiving ends the RUN, not the session's history. This cell
-            // is session-scoped everywhere (a relaunch shares it too — see
-            // its field docs), so a sampling pass still holding the
-            // pre-archive entry writes somewhere the archived entry can be
-            // read from, which is the right place for an observation made
-            // a moment before the teardown.
-            last_activity_at: Arc::clone(&entry.last_activity_at),
-            generation: entry.generation,
-            // Keep the prior launch's scope identity so a restart can run
-            // its ordinary leftover sweep. Archive has already emptied it,
-            // but losing the identity would weaken that defense after a
-            // partial external cleanup.
-            scope: entry.scope.clone(),
-        });
-        // Use the normal classifier for the published wire fields. Archive
-        // has no live pane after teardown, but the classifier still carries
-        // terminal codes, annotations, errors, and interrupted outcomes by
-        // their established precedence.
-        let (status, annotation) = session_status(&archived, &HashMap::new());
-        let archived_entry = Arc::get_mut(&mut archived).expect("new archive entry is unique");
-        archived_entry.info.status = status;
-        archived_entry.info.annotation = annotation;
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id.to_string(), Arc::clone(&archived));
-        for (channel, notify) in &notify_detach {
-            notify_detached(notify, *channel, "session archived".to_string());
-        }
-        drop(attachments);
-        Ok(archived)
-    }
-
     /// Tear this session down completely: cancel its transfers, kill
     /// everything it launched, remove its terminal, its files, and its
     /// row.
@@ -544,7 +156,7 @@ impl Supervisor {
         // directory teardown below; cancellation itself is not rollback.
         // The lifecycle claim keeps new transfers from staging here
         // (see `stage_upload`).
-        abort_session_uploads(self, session_id, "the session was deleted", true).await;
+        abort_session_uploads(self, session_id, "the session was deleted").await;
 
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
@@ -612,7 +224,7 @@ impl Supervisor {
         let root_pid = live_pane.filter(|pane| !pane.dead).map(|pane| pane.pid);
         // `WholeSession`: delete is the one lifecycle operation
         // that takes tabs down with the agent (SPEC.md — stop
-        // leaves them running, delete and archive do not), so this
+        // leaves them running), so this
         // sweep deliberately does NOT subtract tab processes. It
         // needs no per-tab PPID root either: a tab's shell carries
         // the session marker like everything else the session
@@ -1137,11 +749,10 @@ async fn cleanup_retired_preparation(state_dir: &std::path::Path, checkout_id: &
     }
 }
 
-/// The archived entry's cell-sharing rule, which has no other coverage:
-/// archiving REPLACES a session's entry, and the cells that describe the
-/// launch must be the same objects the replaced entry held.
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, test_admission};
     use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
     use super::*;
@@ -1172,7 +783,6 @@ mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: id.to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
@@ -1287,293 +897,6 @@ mod tests {
         );
     }
 
-    /// Archive must not publish its archived flag after a failed scope kill;
-    /// retaining an ordinary row is what makes the same request retryable.
-    #[farhelm_testtrace::test]
-    async fn archive_keeps_a_session_unarchived_when_scope_kill_fails_and_retries() {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (state, sup, entry) = scoped_session(
-            crate::scope::ScopeManager::fake_failing_kills(Arc::new(|_| {})),
-            &id,
-        )
-        .await;
-        let result = sup.teardown_for_archive(&entry, &id).await;
-        assert!(matches!(result, Err(ArchiveError::Sweep(_))));
-        assert!(
-            !sup.store
-                .session(&id)
-                .await
-                .expect("read retained archive row")
-                .expect("row must remain")
-                .archived,
-            "archive refusal must not publish the archived flag"
-        );
-        assert!(
-            sup.sessions.lock().await.contains_key(&id),
-            "archive refusal must retain the in-memory entry"
-        );
-        drop(sup);
-
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                scopes: Arc::new(working_scopes()),
-                ..SupervisorSeams::default()
-            },
-        )
-        .await
-        .expect("working retry supervisor");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&id)
-            .cloned()
-            .expect("retained row reloads into memory");
-        assert!(
-            sup.teardown_for_archive(&entry, &id).await.is_ok(),
-            "a working scope manager must allow the archive retry"
-        );
-        assert!(
-            sup.store
-                .session(&id)
-                .await
-                .expect("read archived row")
-                .expect("archive must retain the row")
-                .archived,
-            "the successful retry must publish the archived flag"
-        );
-    }
-
-    /// Archiving publishes a new entry that SHARES the run's live cells —
-    /// here the two hook-diagnostic flags — with the entry it replaced.
-    ///
-    /// The rule is the same one a rename follows and the opposite of the
-    /// one a relaunch follows, which is precisely why it needs pinning:
-    /// `relaunched_entry` mints `hooked` and `hook_warned` fresh on every
-    /// generation, and somebody applying that reasoning here would break
-    /// the tripwire. Archiving does not start a new launch. A tick already
-    /// holding the pre-archive entry — the capture pass runs on its own
-    /// schedule and resolves entries independently of archive — must be
-    /// able to spend the tripwire's once-per-launch latch through the entry
-    /// it has and have the published one see it, or a hooked session that
-    /// is archived near its horizon warns twice.
-    ///
-    /// Asserted by pointer identity rather than by value, because value
-    /// equality is exactly what a copied-flag implementation would also
-    /// satisfy at the moment of the copy while still splitting the two
-    /// writers afterwards.
-    ///
-    /// The entry is deliberately TERMINAL-LESS, which is the restart-gap
-    /// shape archive already has to handle: it takes the tmux work out of
-    /// the picture entirely, leaving the entry construction this test is
-    /// about. The row still has to exist, because archive reads the durable
-    /// tmux name before anything else.
-    #[farhelm_testtrace::test]
-    async fn archiving_shares_the_launchs_hook_cells_with_the_entry_it_replaces() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let id = "archived-session";
-        sup.store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    id: id.to_string(),
-                    parent: None,
-                    archived: false,
-                    title: "hooked".to_string(),
-                    created_at: 1_700_000_000,
-                    last_activity_at: 1_700_000_000,
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: "/tmp".to_string(),
-                    invocation: "claude".to_string(),
-                    launch: None,
-                    tmux_name: format!("fh-{id}"),
-                    pane: String::new(),
-                    outcome: LastOutcome::Exited {
-                        exit_code: Some(3),
-                        annotation: None,
-                    },
-                    agent_kind: farhelm_proto::AgentKind::Claude,
-                    // An integrated kind with the resume template its
-                    // snapshot is required to carry: archive reads the row
-                    // back through `SessionStore::session`, which refuses a
-                    // hook-capable kind whose template could never be
-                    // filled. A `Generic` row would sidestep that, but a
-                    // hooked launch is by definition an integrated one, so
-                    // the fixture stays the shape production produces.
-                    resume_template: Some(vec![
-                        "claude".to_string(),
-                        "--resume".to_string(),
-                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
-                    ]),
-                    canonical_cwd: Some("/tmp".to_string()),
-                    captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: None,
-                },
-                None,
-            )
-            .await
-            .expect("seed the session being archived");
-
-        let mut entry = entry_with(
-            None,
-            LastOutcome::Exited {
-                exit_code: Some(3),
-                annotation: None,
-            },
-        );
-        entry.info.id = id.to_string();
-        let entry = Arc::new(entry);
-        // The launch was hooked and the tripwire has not spoken yet: the
-        // state in which BOTH flags still have work left to do.
-        entry
-            .hooked
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-
-        // `ArchiveError` carries no `Debug`, so the failure is described
-        // here rather than unwrapped.
-        let Ok(archived) = sup.teardown_for_archive(&entry, id).await else {
-            panic!("a terminal-less session archives without tmux");
-        };
-
-        assert_eq!(
-            archived.outcome.lock().unwrap().clone(),
-            LastOutcome::Exited {
-                exit_code: Some(3),
-                annotation: None,
-            },
-            "archiving an already-ended agent must retain its witnessed exit"
-        );
-        assert_eq!(
-            archived.info.status,
-            farhelm_proto::SessionStatus::Exited { exit_code: Some(3) }
-        );
-        assert_eq!(archived.info.annotation, None);
-
-        assert!(
-            Arc::ptr_eq(&entry.hooked, &archived.hooked),
-            "the hook-injection flag must be the SAME cell across an archive"
-        );
-        assert!(
-            Arc::ptr_eq(&entry.hook_warned, &archived.hook_warned),
-            "the tripwire latch must be the SAME cell across an archive"
-        );
-        // And the sharing is live in the direction the bug takes: the
-        // writer holds the pre-archive entry, the reader the published one.
-        entry
-            .hook_warned
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        assert!(
-            archived
-                .hook_warned
-                .load(std::sync::atomic::Ordering::Relaxed),
-            "a tripwire warning spent through the pre-archive entry must not be spendable again"
-        );
-        assert!(
-            archived.hooked.load(std::sync::atomic::Ordering::Relaxed),
-            "and the archived entry must still describe the launch as hooked"
-        );
-    }
-
-    /// A live owned pane is the one archive case that creates a new outcome:
-    /// the teardown itself is the evidence for the user-stop annotation.
-    /// This uses the supervisor's private tmux server and the ordinary entry
-    /// fixture so the assertion covers the pane probe, process sweep, store
-    /// write, and published in-memory entry together.
-    #[farhelm_testtrace::test]
-    async fn archiving_a_live_agent_records_the_stop_annotation() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let id = "live-archive";
-        let tmux_name = format!("fh-{id}");
-        let pane = sup
-            .tmux
-            .create_session(
-                &tmux_name,
-                "/tmp",
-                80,
-                24,
-                &[],
-                &["sleep".to_string(), "60".to_string()],
-            )
-            .await
-            .expect("create the owned live pane");
-        assert!(
-            matches!(
-                sup.tmux.pane_process(&tmux_name, &pane).await,
-                Ok(PaneProbe::Owned(process)) if !process.dead
-            ),
-            "the fixture must prove the pane is live before archive relies on it"
-        );
-        sup.store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    id: id.to_string(),
-                    parent: None,
-                    archived: false,
-                    title: id.to_string(),
-                    created_at: 1_700_000_000,
-                    last_activity_at: 1_700_000_000,
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: "/tmp".to_string(),
-                    invocation: "sleep 60".to_string(),
-                    launch: None,
-                    tmux_name: tmux_name.clone(),
-                    pane: pane.clone(),
-                    outcome: LastOutcome::Running,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    resume_template: None,
-                    canonical_cwd: Some("/tmp".to_string()),
-                    captured_conversation: None,
-                    captured_record: None,
-                    capture_ambiguous: false,
-                    first_input_at: None,
-                    generation: 0,
-                    launch_scoped: false,
-                    source_profile: None,
-                },
-                None,
-            )
-            .await
-            .expect("seed the live session row");
-        let entry = Arc::new(entry_with(
-            Some(super::super::terminals::Terminal { tmux_name, pane }),
-            LastOutcome::Running,
-        ));
-
-        let Ok(archived) = sup.teardown_for_archive(&entry, id).await else {
-            panic!("archive the live session");
-        };
-
-        assert_eq!(
-            archived.outcome.lock().unwrap().clone(),
-            LastOutcome::Exited {
-                exit_code: None,
-                annotation: Some(STOP_ANNOTATION.to_string()),
-            }
-        );
-        assert_eq!(archived.info.annotation.as_deref(), Some(STOP_ANNOTATION));
-        assert_eq!(
-            archived.info.status,
-            farhelm_proto::SessionStatus::Exited { exit_code: None }
-        );
-    }
-
     /// Delete must enumerate launch scopes from the manager, not only from
     /// the current row generation. A failed old-generation kill can leave a
     /// scrubbed daemon after the sweep reported clean, and deleting later is
@@ -1615,7 +938,6 @@ mod tests {
                     conversation_source: None,
                     id: id.clone(),
                     parent: None,
-                    archived: false,
                     title: "previous scope".to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
@@ -1679,7 +1001,6 @@ mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: id.to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_000,
@@ -1744,9 +1065,9 @@ mod tests {
     /// multi-member delete moves NOTHING, and an unmanaged directory is
     /// never touched.
     ///
-    /// Preparation state and its lock survive Archive, owner deletion with a
-    /// borrower, and a failed last Delete; successful final retirement removes
-    /// both. This keeps cleanup tied to durable lifetime rather than visibility.
+    /// Preparation state and its lock survive owner deletion with a borrower
+    /// and a failed last Delete; successful final retirement removes both.
+    /// This keeps cleanup tied to durable checkout lifetime.
     ///
     /// The fixture plants registry rows through the SAME `&Connection`
     /// primitives production composes (`record_planned` + `allocate` +
@@ -1812,10 +1133,6 @@ mod tests {
         let entry_c = seeded_session(&sup, "s-c", &nested_path.to_string_lossy()).await;
         let (preparation, preparation_lock) = preparation_files(state.path(), &team_id);
         let prepared_bytes = std::fs::read(&preparation).unwrap();
-        let entry_a = sup
-            .teardown_for_archive(&entry_a, "s-a")
-            .await
-            .unwrap_or_else(|_| panic!("Archive retains checkout preparation"));
         assert_eq!(std::fs::read(&preparation).unwrap(), prepared_bytes);
         assert!(preparation_lock.is_file());
         assert_eq!(
@@ -2001,14 +1318,18 @@ mod tests {
                 made_fillers += 1;
                 filler_root = filler_root.join(format!("n{made_fillers}"));
             }
-            std::fs::remove_dir_all(
-                accepted
-                    .canonical_path
-                    .parent()
-                    .unwrap()
-                    .join("stranger-fx"),
-            )
-            .expect("drop the identity shifters");
+            // A filesystem that immediately gives the stranger a different
+            // inode never needed fillers and has no filler directory to remove.
+            if made_fillers != 0 {
+                std::fs::remove_dir_all(
+                    accepted
+                        .canonical_path
+                        .parent()
+                        .unwrap()
+                        .join("stranger-fx"),
+                )
+                .expect("drop the identity shifters");
+            }
             assert!(
                 differs,
                 "the fixture could not mint a stranger with a different identity"

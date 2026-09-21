@@ -1769,7 +1769,7 @@ fn HostRow(
     // re-probe does NOT, since `IdentityMismatch` is frozen until a user
     // decision resolves it; see `adopt_is_offered_only_for_an_identity_mismatch`
     // and the state's own doc), which is the host row's version of the
-    // session row's "archiving withdraws stop and archive" hazard — see
+    // session row's conditional-action hazard — see
     // that component's own `use_effect` for the stale-handle reasoning this
     // mirrors exactly.
     //

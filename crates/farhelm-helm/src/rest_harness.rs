@@ -83,7 +83,6 @@ fn test_cadence() -> Cadence {
 pub(crate) fn session(id: &str, created_at: i64) -> SessionInfo {
     SessionInfo {
         parent: None,
-        archived: false,
         id: id.to_string(),
         title: id.to_string(),
         created_at,

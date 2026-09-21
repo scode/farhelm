@@ -18,10 +18,8 @@ use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
-    archive_session, close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, restart_mode_for,
-    restart_session,
+    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, restart_mode_for, restart_session,
 };
-use crate::archive::confirmation as archive_confirmation;
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
@@ -63,10 +61,10 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 ///
 /// Everything that identifies the session lives in ONE ~40px row: the
 /// title, the `{cwd} — {invocation}` metadata, the status badge beside how
-/// long ago the session was last active, and the two session-level lifecycle
-/// actions (archive and restart — rename stays in the sidebar, which owns
+/// long ago the session was last active, and the session-level restart
+/// action (rename stays in the sidebar, which owns
 /// navigation; tabs stay in the strip below). It replaced a stack of four
-/// bands — titlebar, archive row, restart offer, tab strip — that cost
+/// bands — titlebar, restart offer, and tab strip — that cost
 /// ~170px of chrome before the terminal started, on a surface whose whole
 /// point is the terminal.
 ///
@@ -97,7 +95,7 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 ///   show, and the band standing where the panes would be states the
 ///   reason and carries the restart, because a tooltip the user has to find
 ///   is what let the old retry overlay advertise the wrong action there.
-///   Conditional, like the stale and archived bands, so the steady state
+///   Conditional, like the stale band, so the steady state
 ///   still pays nothing.
 /// - **A classified status renders in at most one place.** The header
 ///   normally, the stale band for a stale session (whose notice already
@@ -108,8 +106,8 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 ///   terms (`activity_destination`): a session nothing has classified yet
 ///   has no badge and still has an age.
 ///
-/// There is deliberately no overflow `⋯` menu: this view has exactly two
-/// actions (archive and restart), which is what the row is sized for. A menu
+/// There is deliberately no overflow `⋯` menu: this view has one action,
+/// restart, which is what the row is sized for. A menu
 /// added before there is anything to put in it would be one more click in
 /// front of both.
 ///
@@ -222,15 +220,6 @@ const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 /// helm's own words, which is the same bargain the list's stale rows make
 /// with their lifecycle controls.
 ///
-/// ## An archived session retains metadata, not terminals (PLAN_M7.md item 5)
-///
-/// Archive is a stronger terminal boundary than host staleness: the absence
-/// is deliberate and durable rather than last-known. The view therefore
-/// mounts no terminal, states that the agent and tabs were removed, and keeps
-/// the metadata plus restart affordance in place. Restart is the one route
-/// back; its fresh detail reply clears `archived`, and only then may the
-/// terminal island mount again.
-///
 /// ## Mount/unmount lifecycle (PLAN_M2.md step 7)
 ///
 /// M1 never unmounted this component (it was the only view), so
@@ -321,30 +310,11 @@ fn admit_detail(
     Admission::Apply
 }
 
-/// Carry the helm-owned routing labels from the row a mutation was issued
-/// against onto the mutation's bare-`SessionInfo` reply.
-///
-/// Mutation replies (archive today) carry none of the listing's flattened
-/// host fields, and the merged result stands in for the detail row until
-/// the authoritative follow-up read lands. Every label here is load-bearing
-/// for that interval: `host`/`host_name` keep the view routed and titled,
-/// `stale` keeps the staleness notice honest, and `host_identity` keeps the
-/// create default bound to the INSTALL the user was looking at — dropping
-/// it would leave the outer `None` that means "trust the row id", silently
-/// reopening the wrong-install create window for exactly the
-/// refresh-in-flight interval this merge exists to cover.
-fn retain_helm_routing_labels(reply: &mut Session, before: &Session) {
-    reply.host = before.host;
-    reply.host_name = before.host_name.clone();
-    reply.host_identity = before.host_identity.clone();
-    reply.stale = before.stale;
-}
-
 #[component]
 pub(crate) fn SessionView(
     session: Session,
     /// The cross-pane write gate (see `ops::PaneGate`): the shared token
-    /// this view's restart and archive claim, refused while the sidebar
+    /// this view's restart claim, refused while the sidebar
     /// has a per-row operation in flight. Owned by `AppBody`, because a
     /// view-private token would let the two panes mutate this session
     /// under each other.
@@ -387,17 +357,9 @@ pub(crate) fn SessionView(
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
     let mut restart_error = use_signal(|| None::<String>);
-    // Archive has its own in-flight and confirmation state because it
-    // destroys every terminal while retaining this view. A successful call
-    // therefore changes what the component may mount rather than navigating
-    // away as delete would.
-    let mut archiving = use_signal(|| false);
-    let mut confirming_archive = use_signal(|| false);
-    let mut archive_error = use_signal(|| None::<String>);
-    // Restart and archive each change the assumptions the other presents
-    // to the user. One synchronously claimed token covers their prompts as
-    // well as their requests, so two clicks in one render frame cannot
-    // authorize operations from two different snapshots. The token
+    // One synchronously claimed token covers the restart prompt as well as
+    // the request, so two clicks in one render frame cannot authorize
+    // operations from two different snapshots. The token
     // is the SHARED one (`gate` — see the prop doc), so the same claim
     // also excludes the sidebar's create/host mutations, and is refused
     // while a sidebar row operation runs.
@@ -641,13 +603,6 @@ pub(crate) fn SessionView(
                         !live.contains(id.as_str()) && index < *observed_from
                     });
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
-                    if fresh.archived {
-                        confirming.set(false);
-                        confirming_archive.set(false);
-                        if !restarting() && !archiving() {
-                            lifecycle.release();
-                        }
-                    }
                     current.set(fresh);
                     true
                 }
@@ -1085,48 +1040,6 @@ pub(crate) fn SessionView(
     let mut notice_restart = restart.clone();
     let mut fresh_restart = restart;
 
-    let archive_base = base.clone();
-    let refresh_after_archive = request_detail.clone();
-    let run_archive = move || {
-        // Tab opening deliberately does not hold the lifecycle token: the
-        // user may leave this view while it runs. It still excludes archive,
-        // because a tab whose POST is already in flight is live work the
-        // archive prompt could not have named. The render-time disabled
-        // state below mirrors this handler guard but does not replace it.
-        if archiving() || opening_tab() || current.peek().archived {
-            lifecycle.release();
-            return;
-        }
-        archiving.set(true);
-        archive_error.set(None);
-        restart_epoch += 1;
-        let base = archive_base.clone();
-        let before = current.peek().clone();
-        let id = before.id.clone();
-        let refresh = refresh_after_archive.clone();
-        spawn(async move {
-            match archive_session(&base, &id).await {
-                Ok(mut archived) => {
-                    retain_helm_routing_labels(&mut archived, &before);
-                    current.set(archived);
-                    confirming.set(false);
-                    confirming_archive.set(false);
-                    opened_tabs.write().clear();
-                    closed_tabs.write().clear();
-                    selected.set(None);
-                    mount_generation += 1;
-                }
-                Err(e) => archive_error.set(Some(e)),
-            }
-            restart_epoch += 1;
-            archiving.set(false);
-            lifecycle.release();
-            refresh(Trigger::Explicit);
-        });
-    };
-    let mut confirm_archive = run_archive.clone();
-    let mut direct_archive = run_archive;
-
     // The add-tab control. Unlike `ListView`'s create, navigating away
     // while this is in flight is deliberately NOT locked out: a stranded
     // create can cost the user a duplicate AGENT they never see, whereas a
@@ -1286,7 +1199,7 @@ pub(crate) fn SessionView(
         // sync is what tears down islands belonging to a host that went away
         // while this view was open, which returning `None` (the
         // lease-not-yet-minted case) would leave mounted and silently dead.
-        // Interrupted joins stale and archived here: the pane the attach
+        // Interrupted joins stale here: the pane the attach
         // would target is the one the reboot destroyed, and the ladder in
         // terminal.js would otherwise retry a refusal forever. The one
         // decision for all three is `terminal_absence`.
@@ -1447,7 +1360,6 @@ pub(crate) fn SessionView(
     let shown = current.read().clone();
     let alive = shown.status.is_live();
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
-    let archive_requires_confirmation = archive_confirmation(&shown, tabs.len()).is_some();
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
     // never reused (farhelm-proto's `TabInfo::id`): an id that has left the
@@ -1528,10 +1440,6 @@ pub(crate) fn SessionView(
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
-    // The refusal a failed archive left behind, suppressed once a refresh
-    // reports the session archived — see `visible_archive_error`'s own
-    // docs for the race this is closing.
-    let shown_archive_error = visible_archive_error(shown.archived, archive_error.read().clone());
     rsx! {
         div { class: "layout",
             // The one header row. Identity on the left, status in the
@@ -1561,91 +1469,6 @@ pub(crate) fn SessionView(
                     }
                 }
                 div { class: "titlebar-actions",
-                    if !shown.archived {
-                        // The trigger stays mounted while its confirmation is
-                        // open — the gate it claimed on the first click is
-                        // what renders it disabled — so the row's width does
-                        // not jump under an open prompt. `aria-expanded` is
-                        // what says the popover below belongs to it.
-                        div { class: "archive-offer",
-                            button {
-                                r#type: "button",
-                                class: "btn archive-primary",
-                                "data-confirms": "{archive_requires_confirmation}",
-                                "aria-expanded": "{confirming_archive()}",
-                                // `archive` is already the button's full
-                                // wording (there is no longer form of this
-                                // action to compact away, unlike restart) —
-                                // `aria-label`/`title` are set anyway so
-                                // both header actions carry the accessible
-                                // name and hover tooltip the same way.
-                                "aria-label": "archive",
-                                title: "archive",
-                                "aria-controls": "archive-confirm-panel",
-                                disabled: lifecycle.busy() || opening_tab(),
-                                onclick: move |_| {
-                                    if opening_tab() {
-                                        return;
-                                    }
-                                    if !lifecycle.claim() {
-                                        return;
-                                    }
-                                    if archive_requires_confirmation {
-                                        confirming_archive.set(true);
-                                    } else {
-                                        direct_archive();
-                                    }
-                                },
-                                "archive"
-                            }
-                            if confirming_archive() {
-                                // Anchored under the trigger rather than laid
-                                // out in the header row: the consequence is a
-                                // whole sentence, and a header that wrapped
-                                // (or ellipsized it) would be trading away the
-                                // one line standing between a click and a
-                                // destroyed terminal to save 40px.
-                                //
-                                // `id` pairs with the trigger's
-                                // `aria-controls` above: `aria-expanded`
-                                // alone only records that SOME popover is
-                                // open, not which one — a sidebar row menu
-                                // open at the same time also sets it, so
-                                // the pairing is what actually ties this
-                                // panel to the button that owns it.
-                                div { id: "archive-confirm-panel", class: "header-confirm",
-                                    if let Some(archive_text) = archive_confirmation(&shown, tabs.len()) {
-                                        span { class: "confirm-consequence", "{archive_text}:" }
-                                    } else {
-                                        span { class: "confirm-consequence", "archiving removes the terminal:" }
-                                    }
-                                    button {
-                                        r#type: "button",
-                                        class: "btn archive-confirm",
-                                        disabled: archiving() || opening_tab(),
-                                        onclick: move |_| {
-                                            if confirming_archive() && !opening_tab() {
-                                                confirming_archive.set(false);
-                                                confirm_archive();
-                                            }
-                                        },
-                                        "confirm archive"
-                                    }
-                                    button {
-                                        r#type: "button",
-                                        class: "btn archive-cancel",
-                                        autofocus: true,
-                                        disabled: archiving(),
-                                        onclick: move |_| {
-                                            confirming_archive.set(false);
-                                            lifecycle.release();
-                                        },
-                                        "cancel"
-                                    }
-                                }
-                            }
-                        }
-                    }
                     // SPEC.md: "Opening an interrupted session offers
                     // restart-with-resume" — which is why this is a
                     // first-class control in the header rather than hidden
@@ -1717,8 +1540,8 @@ pub(crate) fn SessionView(
                             // first, focus on cancel.
                             //
                             // `id` pairs with the trigger's `aria-controls`
-                            // above — see the archive panel's own comment for
-                            // why that pairing exists alongside `aria-expanded`.
+                            // above so assistive technology can identify the
+                            // panel represented by `aria-expanded`.
                             div { id: "restart-confirm-panel", class: "header-confirm",
                                 span { class: "confirm-consequence",
                                     "still running — restarting stops the agent and its whole process tree first:"
@@ -1726,7 +1549,7 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn restart-confirm",
-                                    disabled: restarting() || archiving(),
+                                    disabled: restarting(),
                                     onclick: move |_| {
                                         if !confirming() {
                                             return;
@@ -1762,14 +1585,6 @@ pub(crate) fn SessionView(
             // one sentence that says what to do next. Conditional, so they
             // cost the steady state nothing.
             //
-            // The archive error is filtered through `visible_archive_error`
-            // rather than read directly: a refusal this client received can
-            // be overtaken by another client's SUCCESSFUL archive of the
-            // same session, and once a refresh reports that, the refusal is
-            // stale — see that function's own docs.
-            if let Some(err) = shown_archive_error {
-                div { class: "archive-error", "{err}" }
-            }
             if let Some(err) = restart_error.read().clone() {
                 div { class: "restart-error", "{err}" }
             }
@@ -1801,11 +1616,6 @@ pub(crate) fn SessionView(
             // session metadata behind a notice and NO terminal, and an
             // empty strip beside a dead pane would be exactly the
             // unexplained blankness that rule exists to prevent.
-            if shown.archived {
-                div { class: "archived-notice",
-                    "this session is archived — its metadata and attachments remain, but its agent, tabs, and terminal were removed. restart creates a fresh terminal and resumes wherever this session's restart offer supports it."
-                }
-            }
             if let Some(notice) = &stale_notice {
                 // The notice is rendered as PARTS, not as one interpolated
                 // string: every peer-supplied value in it (the host's name,
@@ -2044,27 +1854,6 @@ pub(crate) fn SessionView(
     }
 }
 
-/// Whether a previously reported archive failure should still be shown
-/// beside the header, given the session's CURRENT `archived` reading.
-///
-/// The refusal answers one specific call, and that call can be overtaken by
-/// another client's SUCCESSFUL archive of the same session: the two raced,
-/// and this client lost the race for the write but a later refresh still
-/// reports the session archived. Continuing to display the refusal past
-/// that point is not a delayed truth about this client's own click — it is
-/// a stale complaint sitting beside an `.archived-notice` that says the
-/// opposite, which is what actually happened when the error moved out of
-/// the `!shown.archived` branch during the header consolidation without
-/// carrying this suppression with it.
-///
-/// A pure predicate over the two facts that decide it, rather than a
-/// signal read inline at the call site, so the race it closes can be
-/// pinned without standing up a `SessionView` and driving an HTTP round
-/// trip through it.
-fn visible_archive_error(archived: bool, error: Option<String>) -> Option<String> {
-    if archived { None } else { error }
-}
-
 /// Whether `session` is a candidate for the automatic "mark seen" effect
 /// at all — independent of whether it currently has anything unseen.
 ///
@@ -2194,13 +1983,11 @@ fn offer_clause(offer: RestartOffer) -> &'static str {
 
 /// Why this view mounts no terminal for a session, when it mounts none.
 ///
-/// Three states leave a session with nothing to attach, and each gets its
+/// Two states leave a session with nothing to attach, and each gets its
 /// own explanation instead of an empty pane (SPEC.md's missing-terminal
 /// rule). They are ordered by how much of the session is unreachable, and
 /// the first that applies wins: a stale host cannot be asked anything, so
-/// neither the archive nor the reboot is a fact the view can act on until
-/// the host is back; an archived session's terminal was removed on purpose
-/// and restart is the one route back whatever else happened; and an
+/// the reboot is not a fact the view can act on until the host is back; an
 /// interrupted session on a reachable host has a terminal the reboot took,
 /// where retrying an attach can only ever be refused
 /// (`resolve_terminal_inner` in the supervisor) and restart-with-resume is
@@ -2212,7 +1999,6 @@ fn offer_clause(offer: RestartOffer) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerminalAbsence {
     Stale,
-    Archived,
     Interrupted,
 }
 
@@ -2226,14 +2012,11 @@ enum TerminalAbsence {
 /// that name). A restart reply outruns the listing by a probe interval, and
 /// during that window the session is reported interrupted but is not: the
 /// supervisor has a new terminal for it, and mounting is what attaches it.
-/// So a relaunched session is never `Interrupted` here. Stale and archived
-/// are unaffected — neither is something a restart from this view resolves
-/// on its own.
+/// So a relaunched session is never `Interrupted` here. Staleness is
+/// unaffected because a restart from this view cannot resolve host reachability.
 fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsence> {
     if session.stale {
         Some(TerminalAbsence::Stale)
-    } else if session.archived {
-        Some(TerminalAbsence::Archived)
     } else if matches!(session.status, SessionStatus::Interrupted) && !relaunched {
         Some(TerminalAbsence::Interrupted)
     } else {
@@ -2275,8 +2058,8 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 mod tests {
     use super::*;
 
-    /// A session fixture for the terminal-surface decisions below: live,
-    /// reachable, not archived — the state that mounts terminals — so each
+    /// A session fixture for the terminal-surface decisions below: live and
+    /// reachable — the state that mounts terminals — so each
     /// test flips exactly the one fact it is about.
     fn live_session() -> Session {
         Session {
@@ -2291,7 +2074,6 @@ mod tests {
             restart_offer: crate::RestartOffer::Resume,
             created_at: 0,
             last_activity_at: 0,
-            archived: false,
             tabs: Vec::new(),
             host: Some(1),
             host_identity: None,
@@ -2325,8 +2107,8 @@ mod tests {
             terminal_absence(&interrupted, false),
             Some(TerminalAbsence::Interrupted)
         );
-        // Only interruption means "gone": every other status a reachable,
-        // unarchived session can carry mounts terminals, including the
+        // Only interruption means "gone": every other status a reachable
+        // session can carry mounts terminals, including the
         // ended ones — an exited pane keeps its scrollback (SPEC.md), and an
         // error's pane holds the launch shim's last words.
         for status in [
@@ -2351,17 +2133,16 @@ mod tests {
     }
 
     /// A session this view has just relaunched is not interrupted, however
-    /// the listing still describes it — and the exemption is for
-    /// interruption only.
+    /// the listing still describes it.
     ///
     /// This is the window after a restart reply and before the helm's next
     /// probe, when the row still says interrupted but the supervisor has a
     /// new terminal: the view must mount it (as it did before the
     /// interrupted surface existed) rather than keep offering a restart
-    /// that would now hit a running agent. Stale and archived stay put
-    /// under the same flag, because a restart from here resolves neither.
+    /// that would now hit a running agent. Staleness stays put because a
+    /// restart from here cannot restore host reachability.
     #[farhelm_testtrace::test]
-    fn a_relaunched_session_is_not_interrupted_but_stays_stale_or_archived() {
+    fn a_relaunched_session_is_not_interrupted_but_stays_stale() {
         let interrupted = Session {
             status: crate::SessionStatus::Interrupted,
             ..live_session()
@@ -2372,33 +2153,21 @@ mod tests {
             ..interrupted.clone()
         };
         assert_eq!(terminal_absence(&stale, true), Some(TerminalAbsence::Stale));
-        let archived = Session {
-            archived: true,
-            ..interrupted
-        };
-        assert_eq!(
-            terminal_absence(&archived, true),
-            Some(TerminalAbsence::Archived)
-        );
     }
 
-    /// The three explanations for an absent terminal have a fixed
-    /// precedence: stale over archived over interrupted.
+    /// Staleness outranks interruption because an unreachable host cannot
+    /// answer whether the previous terminal still exists.
     ///
     /// The order is what keeps one session from showing two competing
     /// explanations, and it encodes which fact the user can act on: an
-    /// unreachable host makes both the archive and the reboot moot until
-    /// it is back, and an archive is a deliberate removal whatever the
-    /// reboot did. The header's restart control exists in every state, so
+    /// unreachable host makes the reboot moot until it is back. The
+    /// header's restart control exists in every state, so
     /// what a regression here would produce is a SECOND control inside a
-    /// band whose explanation contradicts the notice above it. The
-    /// archived-only case guards the other direction: an archive stands on
-    /// its own, not only when it coincides with a reboot.
+    /// band whose explanation contradicts the notice above it.
     #[farhelm_testtrace::test]
-    fn stale_outranks_archived_outranks_interrupted() {
+    fn stale_outranks_interrupted() {
         let everything = Session {
             status: crate::SessionStatus::Interrupted,
-            archived: true,
             stale: true,
             ..live_session()
         };
@@ -2406,26 +2175,16 @@ mod tests {
             terminal_absence(&everything, false),
             Some(TerminalAbsence::Stale)
         );
-        let archived_and_interrupted = Session {
+        let interrupted = Session {
             stale: false,
             ..everything.clone()
         };
         assert_eq!(
-            terminal_absence(&archived_and_interrupted, false),
-            Some(TerminalAbsence::Archived)
-        );
-        let archived_only = Session {
-            status: crate::SessionStatus::Exited { exit_code: None },
-            archived: true,
-            ..live_session()
-        };
-        assert_eq!(
-            terminal_absence(&archived_only, false),
-            Some(TerminalAbsence::Archived)
+            terminal_absence(&interrupted, false),
+            Some(TerminalAbsence::Interrupted)
         );
         let stale_only = Session {
             status: crate::SessionStatus::Running,
-            archived: false,
             ..everything
         };
         assert_eq!(
@@ -2465,70 +2224,6 @@ mod tests {
             );
         }
     }
-
-    /// A mutation reply must not cost the view its install binding.
-    ///
-    /// Archive replies are bare `SessionInfo`: no host fields at all. The
-    /// merged result IS the selected session until the follow-up detail
-    /// read lands, and the create default reads its install binding from
-    /// exactly that value — so a merge that carries `host`/`host_name`/
-    /// `stale` but drops `host_identity` reverts the default to the row-id
-    /// check for the whole refresh-in-flight window (the regression this
-    /// pins, found in the item-2 review). All four labels are asserted so
-    /// no single one can fall out of the set unnoticed.
-    #[farhelm_testtrace::test]
-    fn a_mutation_reply_keeps_the_rows_routing_labels_and_install_binding() {
-        // A bare session as a mutation reply decodes: no helm-owned host
-        // fields on it. `Session` has no Default on purpose (the decoder
-        // is the only production constructor), so the fixture spells out
-        // every field.
-        fn bare(id: &str) -> Session {
-            Session {
-                id: id.to_string(),
-                title: id.to_string(),
-                cwd: "/tmp".to_string(),
-                canonical_cwd: None,
-                invocation: "agent".to_string(),
-                launch: None,
-                status: crate::SessionStatus::Exited { exit_code: Some(0) },
-                annotation: None,
-                restart_offer: crate::RestartOffer::FreshOnly,
-                created_at: 0,
-                last_activity_at: 0,
-                archived: true,
-                tabs: Vec::new(),
-                host: None,
-                host_identity: None,
-                host_name: None,
-                stale: false,
-                source_profile: None,
-                github_repo: None,
-                working_copy: None,
-                seen_activity_at: None,
-            }
-        }
-        let before = Session {
-            host: Some(7),
-            host_name: Some("user@remote".to_string()),
-            host_identity: Some(Some("install-a".to_string())),
-            stale: true,
-            ..bare("sess")
-        };
-        let mut reply = bare("sess");
-
-        retain_helm_routing_labels(&mut reply, &before);
-
-        assert_eq!(reply.host, Some(7));
-        assert_eq!(reply.host_name.as_deref(), Some("user@remote"));
-        assert_eq!(
-            reply.host_identity,
-            Some(Some("install-a".to_string())),
-            "the install binding survives the merge — outer None here would \
-             mean \"trust the row id\" until the next detail refresh"
-        );
-        assert!(reply.stale);
-    }
-
     /// An older detail reply must never overwrite a newer one, and the case
     /// that matters is the one that happens: the NEWER read completing
     /// first.
@@ -2716,7 +2411,6 @@ mod tests {
                 restart_offer: RestartOffer::FreshOnly,
                 created_at: 0,
                 last_activity_at: 0,
-                archived: false,
                 tabs: Vec::new(),
                 host: None,
                 host_identity: None,
@@ -2808,7 +2502,6 @@ mod tests {
             restart_offer: RestartOffer::FreshOnly,
             created_at: 0,
             last_activity_at: 1_700_000_000 - 120,
-            archived: false,
             tabs: Vec::new(),
             host: None,
             host_identity: None,
@@ -2831,36 +2524,6 @@ mod tests {
             ),
             (None, Some(stamp)),
             "and the age is still a fact about it, so the header still prints it"
-        );
-    }
-
-    /// A refused archive must not linger once another client's archive of
-    /// the SAME session is confirmed by a later refresh — the exact race
-    /// that used to reach the screen: `archive_error` rendered outside the
-    /// `!shown.archived` branch, so nothing suppressed a stale refusal once
-    /// `shown.archived` flipped true underneath it.
-    ///
-    /// The two assertions are one scenario read at two points in time, not
-    /// two independent cases: the SAME `error` value is honest before the
-    /// refresh lands (this client genuinely does not yet know the session
-    /// archived) and stale after it (a refresh has since said otherwise) —
-    /// pinning that the truth value alone, not any change to the error
-    /// text, is what flips the outcome.
-    #[farhelm_testtrace::test]
-    fn an_archive_refusal_is_hidden_once_a_refresh_reports_the_session_archived() {
-        let refusal =
-            Some("archive refused: a lifecycle operation is already in flight".to_string());
-
-        assert_eq!(
-            visible_archive_error(false, refusal.clone()),
-            refusal,
-            "before any refresh lands, the refusal is still the honest state"
-        );
-        assert_eq!(
-            visible_archive_error(true, refusal),
-            None,
-            "once a refresh reports the session archived, the earlier refusal \
-             must not keep rendering beside the archived-notice that contradicts it"
         );
     }
 
@@ -2904,7 +2567,6 @@ mod tests {
                 restart_offer: crate::RestartOffer::FreshOnly,
                 created_at: 0,
                 last_activity_at: 0,
-                archived: false,
                 tabs: Vec::new(),
                 host: None,
                 host_identity: None,
@@ -2963,7 +2625,6 @@ mod tests {
             restart_offer: crate::RestartOffer::FreshOnly,
             created_at: 0,
             last_activity_at: 1_700_000_000,
-            archived: false,
             tabs: Vec::new(),
             host: None,
             host_identity: None,

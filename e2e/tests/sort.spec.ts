@@ -208,7 +208,6 @@ function syntheticRow(id: string, title: string, createdAt: number) {
     cwd: "/tmp",
     invocation: "true",
     created_at: createdAt,
-    archived: false,
     status: { state: "exited", exit_code: 0 },
     annotation: null,
   };
@@ -1086,7 +1085,7 @@ test.describe("session list ordering", () => {
    * The auto-select fallback picks the newest-created session out of the
    * rows in hand, under a non-creation order, with no extra request.
    *
-   * SPEC.md's fallback is "the newest-created non-archived session" for a
+   * SPEC.md's fallback is "the newest-created session" for a
    * client with no remembered selection. The rows arrive in title order, so
    * the newest is not the first row — it has to be picked by `created_at`
    * — and the whole-list reply is the whole list, so nothing needs asking

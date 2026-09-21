@@ -538,7 +538,7 @@ mod tests {
         ));
     }
 
-    /// Delete and archive must remove an orphaned staged copy for the same
+    /// Delete must remove an orphaned staged copy for the same
     /// session, while preserving another session's active write and a temp
     /// file whose stem is not a launch name.
     #[farhelm_testtrace::test]

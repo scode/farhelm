@@ -131,7 +131,6 @@ use serde::{Deserialize, Serialize};
 mod activity;
 mod api;
 mod app_bar;
-mod archive;
 mod attachments;
 mod auth;
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
@@ -453,7 +452,7 @@ pub struct Session {
     /// off the wire (`SessionInfo::created_at`).
     ///
     /// Decoded for ONE reason: the sidebar's auto-select fallback is
-    /// specified as "the newest-created non-archived session" (SPEC.md), and
+    /// specified as the newest-created session (SPEC.md), and
     /// once the list could be ordered by activity or by title the head of
     /// the rows could no longer be ASSUMED to be that session. The fallback
     /// therefore picks by this field rather than by position — see
@@ -462,8 +461,8 @@ pub struct Session {
     /// `#[serde(default)]` to `0` means "this helm predates the field", not
     /// "created in 1970" (the proto's own reading), and the fallback treats
     /// it that way: a row with no stamp is not a candidate at all, so a
-    /// fleet served by such a helm degrades to the listing's own first
-    /// non-archived row — the behavior this fallback had before the field
+    /// fleet served by such a helm degrades to the listing's own first row —
+    /// the behavior this fallback had before the field
     /// was decoded — rather than to whichever row a comparator over zeroes
     /// happened to favor.
     #[serde(default)]
@@ -493,12 +492,6 @@ pub struct Session {
     /// difference between "unknown" and a real stamp is the point.
     #[serde(default)]
     pub last_activity_at: i64,
-    /// Whether archive has deliberately removed this session's processes
-    /// and terminal while retaining the conversation metadata and committed
-    /// attachments.
-    /// Missing on older helm replies, where no session could be archived.
-    #[serde(default)]
-    pub archived: bool,
     /// The session's terminal tabs, in the supervisor's creation order
     /// (PLAN_M4.md item 6). This is the ONE authoritative statement of
     /// which tabs exist and in what order — a tab-open reply deliberately
@@ -541,7 +534,7 @@ pub struct Session {
     /// default may degrade to the old row-id-only check — but mutation and
     /// create replies are bare `SessionInfo` from ANY helm, so their outer
     /// `None` says nothing about age and the caller normalizes it before
-    /// the value stands in for a row (the archive merge retains the prior
+    /// the value stands in for a row (mutation merges retain the prior
     /// binding; the create path backfills the submitted host's identity).
     /// `Some(None)` is "this helm says the host has no recorded identity"
     /// (JSON `null`), which still participates in the install comparison —
@@ -1352,7 +1345,7 @@ fn AppBody() -> Element {
     let mut current = use_signal(|| None::<Session>);
     // The cross-pane write gate lives HERE because both panes claim or
     // consult it (see ops.rs's module doc): the shared token covers the
-    // list's create/host mutations and the view's restart/archive,
+    // list's create/host mutations and the view's restart,
     // and `row_ops` is the list's live per-row-operation count the view's
     // `PaneGate` refuses claims against. Owning them above both panes is
     // what makes "neither pane writes under the other" a structural
@@ -1513,8 +1506,7 @@ fn AppBody() -> Element {
                             ops: page_ops,
                             row_ops,
                             // Selection reconciliation: a session the LIST
-                            // removed (successful delete, or an archive under
-                            // the default filter) must not stay selected — the
+                            // removed by a successful delete must not stay selected — the
                             // right pane would keep a terminal/detail surface
                             // for an object this client knows is gone.
                             on_removed: move |id: String| {
@@ -1534,13 +1526,10 @@ fn AppBody() -> Element {
                                 // that the pane says it is loading, and a
                                 // non-empty fleet with nothing selected shows
                                 // nothing at all — auto-select is about to end
-                                // that state (see `ListView`). "Active"
-                                // matters in the wording: an archived-only
-                                // fleet has sessions, but none the default
-                                // view lists or auto-select may take.
+                                // that state (see `ListView`).
                                 div { class: "main-empty",
                                     match *fleet_empty.read() {
-                                        Some(true) => "no active sessions — create one",
+                                        Some(true) => "no sessions — create one",
                                         Some(false) => "",
                                         None => "loading sessions…",
                                     }
@@ -2589,7 +2578,6 @@ mod tests {
             restart_offer: RestartOffer::FreshOnly,
             created_at,
             last_activity_at,
-            archived: false,
             tabs: Vec::new(),
             host: None,
             host_identity: None,
@@ -2653,7 +2641,6 @@ mod tests {
             restart_offer: RestartOffer::FreshOnly,
             created_at: 1_700_000_000,
             last_activity_at,
-            archived: false,
             tabs: Vec::new(),
             host: None,
             host_identity: None,

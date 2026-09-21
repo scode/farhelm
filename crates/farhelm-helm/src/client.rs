@@ -229,7 +229,7 @@ pub struct SupervisorError {
 ///
 /// A typed error rather than the bare `anyhow` string this replaces,
 /// because the two halves of that split are indistinguishable in prose and
-/// the distinction is exactly the one an agent's `Rename`/`Stop`/`Archive`
+/// the distinction is exactly the one an agent's `Rename`/`Stop`/`Restart`
 /// turns on. Everything above this client used to see both endings as an
 /// unclassified failure, which [`crate::error_kind`] reads as `Internal` —
 /// a kind that says nothing about retrying, for a situation where "may I
@@ -959,7 +959,7 @@ fn not_ready(message: &str) -> farhelm_proto::AgentOutcome {
 ///
 /// A function rather than an inline construction at each site because the
 /// phase claim it makes is the load-bearing part and must be made
-/// identically by every wrapper that makes it: `stop`, `rename`, `archive`
+/// identically by every wrapper that makes it: `stop`, `rename`, `restart`
 /// and the three creates are the verbs an agent can drive across two hops,
 /// so each of them is a place where a wrong answer has to keep the
 /// request's own "it was sent" fact rather than degrading into an untyped
@@ -1000,7 +1000,7 @@ fn wrong_reply(request: &'static str, reply: &ControlMsg) -> anyhow::Error {
 /// check-before-retrying remedy for the same reason every other
 /// delivered-outcome-unknown ending does: the handler had already begun,
 /// and this side cannot know whether it got as far as renaming, stopping or
-/// archiving the target before it died. A listing gets the ordinary
+/// restarting the target before it died. A listing gets the ordinary
 /// retry-safe refusal, having changed nothing whatever it did.
 fn panic_fallback(is_mutation: bool) -> farhelm_proto::AgentOutcome {
     if !is_mutation {
@@ -1046,7 +1046,7 @@ fn panic_fallback(is_mutation: bool) -> farhelm_proto::AgentOutcome {
 /// [`crate::agent_requests`]'s `transport_outcome` out of an error chain
 /// this side does not control the length of. Rewriting that to `Internal`
 /// tells the asking agent "this should not happen" about a mutation — a
-/// rename/stop/archive, or a create/clone — that may well have taken
+/// rename/stop/restart, or a create/clone — that may well have taken
 /// effect: the exact substitution the mutation vocabulary exists to
 /// prevent, arrived at through a size check.
 /// So the kind and the check-before-retrying remedy survive the
@@ -1422,7 +1422,7 @@ impl SupervisorClient {
                     // queue accepted. Returning here skipped the `fail_all()`
                     // tail below and left every one of them parked on a
                     // `oneshot` nothing would ever complete — for an agent's
-                    // rename/stop/archive, a supervisor-side delete fence held
+                    // rename/stop/restart, a supervisor-side delete fence held
                     // against the asking session for the life of the process
                     // while its host reconnected happily on a new connection.
                     // Every ending of this loop must drain, so they all leave
@@ -1522,7 +1522,7 @@ impl SupervisorClient {
     /// exactly the case where the peer is already gone.
     ///
     /// ABORTING A MUTATION DOES NOT UNDO IT, and nothing here pretends
-    /// otherwise. A `Rename`/`Stop`/`Archive` task aborted at an await
+    /// otherwise. A `Rename`/`Stop`/`Restart` task aborted at an await
     /// point may already have sent its mutation to the TARGET host — a
     /// different connection from this one, which this abort does not touch
     /// — so the durable change can land after the asking side has been told
@@ -1572,7 +1572,7 @@ impl SupervisorClient {
     /// back as [`SupervisorTransportError::SentUnanswered`] instead of
     /// waiting on a connection nobody is reading any more. A retirement is
     /// ordinary — a reconnect, a retarget, an adoption — so the waiter is
-    /// typically an agent's rename/stop/archive being relayed to this host,
+    /// typically an agent's rename/stop/restart being relayed to this host,
     /// and the supervisor that asked holds a delete fence until it hears
     /// something back. Retiring without draining strands that fence for the
     /// life of the process, on a fleet that has otherwise recovered.
@@ -2066,7 +2066,7 @@ impl SupervisorClient {
     /// is no honest "undo" once it has run, so the exit check is skipped
     /// rather than made to lie. This also sidesteps the one thing the exit
     /// check could still have caught for these verbs — a
-    /// `Rename`/`Archive`/`Create`/`Clone` reply's own host name going
+    /// `Rename`/`Create`/`Clone` reply's own host name going
     /// stale in the same window — because
     /// `agent_requests::agent_row_of_mutation` (behind both
     /// `agent_session_reply` and `agent_created_reply`) pins that name (and
@@ -2226,7 +2226,7 @@ impl SupervisorClient {
     /// supervisor has already accepted on the asking session's behalf, and
     /// dropping it used to be treated as harmless on the grounds that the
     /// supervisor's own budget would expire. That reasoning holds for a
-    /// listing and fails for a mutation: a rename/stop/archive whose answer
+    /// listing and fails for a mutation: a rename/stop/restart whose answer
     /// budget expires does not END there, because the budget expiring says
     /// nothing about whether the helm is still working, so the supervisor
     /// RETAINS the asking session's delete fence until the request resolves
@@ -2806,36 +2806,6 @@ impl SupervisorClient {
         {
             ControlMsg::SessionRenamed { session, .. } => Ok(session),
             other => Err(wrong_reply("RenameSession", &other)),
-        }
-    }
-
-    /// Archive a session, returning its retained post-teardown metadata.
-    ///
-    /// Success means the agent, tabs, and terminal are gone and the durable
-    /// row is marked archived; attachments deliberately remain available to
-    /// a later restart. Repeating the request is successful and returns the
-    /// same current state, which lets a caller recover from an ambiguous
-    /// transport failure without guessing whether the first request landed.
-    ///
-    /// A correlated reply of the wrong variant is
-    /// [`SupervisorTransportError::SentWrongReply`], not an untyped protocol
-    /// error, for the reason [`wrong_reply`] gives — even though this verb
-    /// is the one whose repeat is harmless, because the vocabulary is the
-    /// same across all three lifecycle verbs by design.
-    pub async fn archive_session(&self, id: &str) -> anyhow::Result<SessionInfo> {
-        let req_id = self.req_id();
-        match self
-            .request(
-                req_id,
-                ControlMsg::ArchiveSession {
-                    req_id,
-                    session_id: id.to_string(),
-                },
-            )
-            .await?
-        {
-            ControlMsg::SessionArchived { session, .. } => Ok(session),
-            other => Err(wrong_reply("ArchiveSession", &other)),
         }
     }
 
@@ -3757,7 +3727,6 @@ mod tests {
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
             parent: None,
-            archived: false,
             id: id.into(),
             title: id.into(),
             created_at: 1_700_000_000,
@@ -4204,7 +4173,7 @@ mod tests {
     /// that every other ending of that loop goes through, so a request on
     /// the old connection sat on a `oneshot` nobody would ever complete
     /// while the fleet visibly recovered around it. For an agent's
-    /// rename/stop/archive that is a supervisor-side delete fence held
+    /// rename/stop/restart that is a supervisor-side delete fence held
     /// against the asking session for the life of the process — the far end
     /// of the chain this drain feeds, pinned in the supervisor's own crate
     /// by `agent_relay::tests::a_mutations_fence_outlives_the_answer_budget`
@@ -4687,7 +4656,7 @@ mod tests {
     /// connection, and the obvious implementation — replace anything that
     /// does not fit with a small `Internal` — quietly changes what the
     /// answer CLAIMS. `Timeout` on this path is the relay's
-    /// "delivered, outcome unknown" verdict on a rename/stop/archive, built
+    /// "delivered, outcome unknown" verdict on a rename/stop/restart, built
     /// out of an error chain whose length this side does not control.
     /// Rewriting it to `Internal` tells the asking agent "this should not
     /// happen" about a mutation that may have taken effect, which is the
@@ -7139,7 +7108,7 @@ mod tests {
     /// This is the regression test for the bug fixed alongside it: before
     /// the fix, `spawn_agent_answer` downgraded ANY `Ok` outcome whose
     /// origin had gone stale to `Unavailable` — a kind callers read as
-    /// "never happened, safe to retry". A completed stop, rename or archive
+    /// "never happened, safe to retry". A completed stop, rename, or restart
     /// could therefore be reported as though it had not happened, inviting
     /// a retry that re-applies an action already taken.
     ///
@@ -7171,7 +7140,6 @@ mod tests {
             agent: "claude".to_string(),
             status: "running".to_string(),
             current: false,
-            archived: false,
             restart_offer: Default::default(),
             stale: false,
         };
@@ -7186,12 +7154,6 @@ mod tests {
                     expected_title: Some("old".to_string()),
                     title: "t".to_string(),
                 },
-                farhelm_proto::AgentReply::Session {
-                    session: renamed("s1"),
-                },
-            ),
-            (
-                farhelm_proto::AgentVerb::Archive { session_id: None },
                 farhelm_proto::AgentReply::Session {
                     session: renamed("s1"),
                 },
@@ -7439,7 +7401,6 @@ mod tests {
                 agent: "claude".to_string(),
                 status: "running".to_string(),
                 current: true,
-                archived: false,
                 restart_offer: Default::default(),
                 stale: false,
             }],

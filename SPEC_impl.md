@@ -151,50 +151,50 @@ source again clears only that state. A UI that tells the user its list is incomp
 complete would be disagreeing with the one line whose job is to be believed.
 
 One consequence is worth recording because nothing on screen shows it: the auto-select fallback (SPEC.md's
-"newest-created non-archived session", for a client with no remembered selection) cannot be assumed to be the first row
-of the listing, because the first row is whatever the chosen order put there. It picks by the session's `created_at`
-instead, which is why that field is decoded by the UI at all, and treats a missing stamp (an older helm) as unknown
-rather than as 1970 — a fleet with no stamps degrades to the listing's own first non-archived row. It picks from the
-rows in hand even when the cap cut the listing, where under a non-creation order the newest session may sit past the
-cut: a cut listing is a fleet of hundreds, the fallback exists to keep the pane from sitting empty rather than to be
-exact, and the alternative was a second request shape for that corner.
+"newest-created session", for a client with no remembered selection) cannot be assumed to be the first row of the
+listing, because the first row is whatever the chosen order put there. It picks by the session's `created_at` instead,
+which is why that field is decoded by the UI at all, and treats a missing stamp (an older helm) as unknown rather than
+as 1970 — a fleet with no stamps degrades to the listing's own first row. It picks from the rows in hand even when the
+cap cut the listing, where under a non-creation order the newest session may sit past the cut: a cut listing is a fleet
+of hundreds, the fallback exists to keep the pane from sitting empty rather than to be exact, and the alternative was a
+second request shape for that corner.
 
 The sidebar uses an identity line and, outside compact mode, a host/directory line plus a detail line when there is
-ended status or a stale/archive qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph
-agent badge, and a right-aligned activity-time column before the narrow menu gutter. The host line is the host name and
+ended status or a stale qualifier to explain. Its identity line is status, locality, title, a one- or two-glyph agent
+badge, and a right-aligned activity-time column before the narrow menu gutter. The host line is the host name and
 directory, joined by `:` when the helm supplied a name. This restores host visibility for confirmed local sessions too:
 a host name is an identity fact, while the locality icon answers a separate question. The status and locality tracks
 keep fixed icon-sized widths: live status uses the first slot's dot, compact ended status replaces that dot with a
 distinct stopped, exit, interrupted, or error glyph, and an absent status or unknown locality leaves its slot blank.
-Compact rows therefore remain one visual line; stale and archive survive there as small labelled glyphs. The full
-status, annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never
-acquire the live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line
-under the title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without
-ellipsis, clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded
-ages such as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch
-metadata is authoritative, while a legacy row receives only conservative shell-word executable/flag recognition; a
-profile name is not proof of either. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode
-uses its attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name
-leaves that fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the
-session's host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why),
-`Remote` when both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a
-hosts read that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale,
-archived and compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed
-`Local` verdict — an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim
-`session_locality` has no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality
-still never SUPPRESSES an available host label, it only ever leaves the row free to show one it already has, and the
-glyph rule adds a second promise on top rather than replacing the first. Legacy rows without a host name at all
-necessarily show none regardless — locality answers whether a name would be shown, not whether one exists to show. The
-agent track is rendered as glyphs: structured launch metadata decides the harness and permission mark when present,
-otherwise conservative recognition uses the program basename plus a permission glyph. Legacy recognition skips known
-option values and stops at unknown syntax, subcommands, or `--`, so argument data cannot earn a permission glyph. The
-closed approval glyph distinguishes Goose's `approve`, `smart approve`, and `chat` metadata from the open YOLO warning;
-an omitted Pi permission is rendered as YOLO for compatibility with older snapshots, while an omitted OMP permission is
-rendered as an honest absence — OMP has no rewrite-to-default rule for the raw-invocation marker to inherit. The full
-invocation and a profile's snapshotted name remain in its accessible text and tooltip. The working directory is
-tilde-folded against the `/home/<user>` and `/Users/<user>` shapes, since no home directory is on the wire to fold
-against properly. Every one of those abbreviations is lossy, so the untouched string rides along in a `title` attribute
-— the row is a summary, and the full truth stays one hover away.
+Compact rows therefore remain one visual line; stale survives there as a small labelled glyph. The full status,
+annotation, exit code, and qualifier meaning remain in accessible text and tooltips, and ended glyphs never acquire the
+live dot's mark-read action. Noncompact ended details and qualifier words occupy their own full-width line under the
+title through activity and above host/directory. Detail wraps unbroken peer text at any boundary without ellipsis,
+clamping, or widening the menu gutter. The activity track has a four-character minimum and grows for unbounded ages such
+as `1000d`. Agent glyphs are max-content rather than a text-badge allowance: declared structured launch metadata is
+authoritative, while a legacy row receives only conservative shell-word executable/flag recognition; a profile name is
+not proof of either. C/M/L/G/P are Farhelm letter paths for Codex, Muse, Claude, Goose, and Pi; OpenCode uses its
+attributed inline mark, and an unknown command uses the neutral terminal glyph. A legacy row with no name leaves that
+fact absent. `list::shared::session_locality` decides among three answers rather than two — `Local` when the session's
+host id matches the registry's `HostKind::Local` row (never by name; see that function's own doc for why), `Remote` when
+both ids are known and differ, and `Unknown` when either is missing (an old helm sending no host id, or a hosts read
+that has not landed). A confirmed local glyph uses the semantic red caution color, including selected, stale, and
+compact rows, to keep local execution conspicuous. The row draws the LOCAL glyph only for a confirmed `Local` verdict —
+an `Unknown` row draws no glyph at all, never the local one, because a glyph is a positive claim `session_locality` has
+no evidence to back. The 2026-08-23 rule's weaker promise survives underneath: unknown locality still never SUPPRESSES
+an available host label, it only ever leaves the row free to show one it already has, and the glyph rule adds a second
+promise on top rather than replacing the first. Legacy rows without a host name at all necessarily show none regardless
+— locality answers whether a name would be shown, not whether one exists to show. The agent track is rendered as glyphs:
+structured launch metadata decides the harness and permission mark when present, otherwise conservative recognition uses
+the program basename plus a permission glyph. Legacy recognition skips known option values and stops at unknown syntax,
+subcommands, or `--`, so argument data cannot earn a permission glyph. The closed approval glyph distinguishes Goose's
+`approve`, `smart approve`, and `chat` metadata from the open YOLO warning; an omitted Pi permission is rendered as YOLO
+for compatibility with older snapshots, while an omitted OMP permission is rendered as an honest absence — OMP has no
+rewrite-to-default rule for the raw-invocation marker to inherit. The full invocation and a profile's snapshotted name
+remain in its accessible text and tooltip. The working directory is tilde-folded against the `/home/<user>` and
+`/Users/<user>` shapes, since no home directory is on the wire to fold against properly. Every one of those
+abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
+truth stays one hover away.
 
 `status::status_badge` supplies the status wording; the row chooses its presentation according to compact mode. Live
 states keep their text for screen readers alongside the colored dot. Ended states use a distinct icon in compact mode,
@@ -257,17 +257,17 @@ that a field on a dialog does not read as a hole through to the page. The second
 it may be spent on is a closed list rather than a palette to decorate with: selection, `:focus-visible`, the one filled
 primary control a surface is allowed, and any PRESSED disclosure control — a trigger wearing the accent for exactly as
 long as the thing it opened is showing. That last entry covers the session row's actions-menu toggle and the header's
-own archive and restart triggers alike; they are one category, not a rule plus exceptions, and the accent is what
-separates "this one is open" from the hover fill every ghost control already takes. The filled-primary entry is scoped
-per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
-dialog that floats over it — create session, add a host, rename — supplies its own submit as THAT dialog's one primary,
-since a dialog is read as its own surface rather than counted against the sidebar's. Everything else, on any surface,
-stays ghost, including destructive actions, which mark themselves with red text rather than a red fill. SPEC.md requires
-the sidebar to mark the selected session's row readably at a glance, so anything joining that list has to be a place
-where the accent means "this is where you are" — the same thing the other entries say — because an accent spread across
-ordinary decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under
-them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on,
-which is what caps how light the selected row's fill may go.
+own restart trigger alike; they are one category, not a rule plus exceptions, and the accent is what separates "this one
+is open" from the hover fill every ghost control already takes. The filled-primary entry is scoped per SURFACE, not per
+screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each dialog that floats
+over it — create session, add a host, rename — supplies its own submit as THAT dialog's one primary, since a dialog is
+read as its own surface rather than counted against the sidebar's. Everything else, on any surface, stays ghost,
+including destructive actions, which mark themselves with red text rather than a red fill. SPEC.md requires the sidebar
+to mark the selected session's row readably at a glance, so anything joining that list has to be a place where the
+accent means "this is where you are" — the same thing the other entries say — because an accent spread across ordinary
+decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under them: the
+quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is
+what caps how light the selected row's fill may go.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and
@@ -294,24 +294,24 @@ app.css makes them inherit `font-family`, and a control added later cannot fall 
 most of the launch composer's buttons once did. The rule leaves font size alone, and it excludes xterm.js's own helper
 textarea, which belongs to the vendored widget.
 
-The open session's chrome is ONE header row — title, `{cwd} — {invocation}`, status badge, archive and restart — sized
-at about 40px, with the tab strip beneath it and nothing else in the steady state. It used to be four stacked bands
-costing roughly 170px before the terminal started, on a surface whose entire point is the terminal. Two of those bands
-had to go somewhere rather than merely shrink. The restart offer's explanation became the restart button's tooltip and
-its `aria-describedby` target: SPEC.md's "restart says so and offers that same fallback or a fresh launch" is carried by
-the button's accessible name (`aria-label` and, alongside the further elaboration, `title`) — naming the offer
+The open session's chrome is ONE header row — title, `{cwd} — {invocation}`, status badge, and restart — sized at about
+40px, with the tab strip beneath it and nothing else in the steady state. It used to be four stacked bands costing
+roughly 170px before the terminal started, on a surface whose entire point is the terminal. Two of those bands had to go
+somewhere rather than merely shrink. The restart offer's explanation became the restart button's tooltip and its
+`aria-describedby` target: SPEC.md's "restart says so and offers that same fallback or a fresh launch" is carried by the
+button's accessible name (`aria-label` and, alongside the further elaboration, `title`) — naming the offer
 (`resume conversation`, `restart (fresh launch)`, `restart with the configured resume command`) rather than the action —
 because the VISIBLE glyph is the compact "restart" every header action uses. The row's supported minimum width (~320px,
 the main pane's own floor) has no room for the longest offer's ~320px of text on the button's face, so "says so" now
-reaches a user through the accessible name and the hover tooltip rather than through the glyph itself. The archive and
-restart confirmations became popovers anchored under the button that opened them, still confirm-in-place with focus on
-cancel; the consequence sentence they lead with is the one line standing between a click and a killed process tree, and
-a header that kept it in flow would have to either wrap or truncate it. Everything conditional — a refused restart's
-prose, the archived notice, the host-unreachable notice and its last-known-status band, the "helm stopped listing this
-session" line — is still a full-width band, because a band that only appears when it has something to say costs the
-steady state nothing. A classified status renders in at most one place: the header normally, the stale notice's own
-metadata band for a stale session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere
-at all for a session nothing has classified yet.
+reaches a user through the accessible name and the hover tooltip rather than through the glyph itself. The restart
+confirmation became a popover anchored under the button that opened it, still confirm-in-place with focus on cancel; the
+consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
+that kept it in flow would have to either wrap or truncate it. Everything conditional — a refused restart's prose, the
+host-unreachable notice and its last-known-status band, the "helm stopped listing this session" line — is still a
+full-width band, because a band that only appears when it has something to say costs the steady state nothing. A
+classified status renders in at most one place: the header normally, the stale notice's own metadata band for a stale
+session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
+nothing has classified yet.
 
 The app-bar profiles popup has one explicit focus request at a time. Opening lands on `new profile`; opening an editor
 lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete prompt
@@ -926,25 +926,25 @@ only party that can tell them apart; the asking CLI blocks with no deadline of i
 reaches it.
 
 A MUTATING verb is fenced against its own asker being deleted mid-flight, and its failures speak a different vocabulary
-from a listing's. The credential that admits an `AgentRequest` is validated once, but a rename/stop/archive/restart
-stays in flight to the helm and back for as long as thirty seconds, which is ample room for a `DeleteSession` to revoke
-that very credential underneath it. So the supervisor claims a per-asking-session fence
-(`Supervisor::agent_request_locks`) BEFORE it checks the credential — checking first and claiming after leaves a gap a
-whole delete fits inside — and `handle_delete_session` waits on the same key before tearing anything down. The fence is
-released when the MUTATION ends, not when the CLI's answer budget does: a budget expiring says nothing about whether the
-helm is still working, so the guard is held until the helm answers or the connection dies. That is bounded by the LINK's
-life rather than by a clock, which is only a bound if the link can be counted on to end — and it cannot, because a
-response naming no pending entry is dropped, which is right for an ordinary late answer and indistinguishable from a
-helm answering under an id it has already used. So the retention has a last resort of its own (ten minutes), and its
-expiry RETIRES THE LINK rather than dropping the guard: dropping it would be the same budget-shaped release on a longer
-clock, still guessing that the mutation ended, whereas ending the connection makes every pending upcall on it resolve as
-the delivered-outcome-unknown ending the relay already speaks. A response correlated to a `req_id` that was NEVER ISSUED
-is retired the same way and immediately, on both legs of the relay: it cannot be a late answer, so the only readings are
-a broken peer and a hostile one, and on a connection that stays healthy the waiter it strands has nothing else to end
-it. Correspondingly, a connection lost after the request was queued is reported to a mutating caller as `Timeout`
-("delivered, outcome unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to
-look at the session before retrying — the change may already have taken effect, and the retry-safe kind would be an
-invitation to apply it twice. A listing keeps `Unavailable`, having nothing to double-apply. Which verbs are mutating is
+from a listing's. The credential that admits an `AgentRequest` is validated once, but a rename/stop/restart stays in
+flight to the helm and back for as long as thirty seconds, which is ample room for a `DeleteSession` to revoke that very
+credential underneath it. So the supervisor claims a per-asking-session fence (`Supervisor::agent_request_locks`) BEFORE
+it checks the credential — checking first and claiming after leaves a gap a whole delete fits inside — and
+`handle_delete_session` waits on the same key before tearing anything down. The fence is released when the MUTATION
+ends, not when the CLI's answer budget does: a budget expiring says nothing about whether the helm is still working, so
+the guard is held until the helm answers or the connection dies. That is bounded by the LINK's life rather than by a
+clock, which is only a bound if the link can be counted on to end — and it cannot, because a response naming no pending
+entry is dropped, which is right for an ordinary late answer and indistinguishable from a helm answering under an id it
+has already used. So the retention has a last resort of its own (ten minutes), and its expiry RETIRES THE LINK rather
+than dropping the guard: dropping it would be the same budget-shaped release on a longer clock, still guessing that the
+mutation ended, whereas ending the connection makes every pending upcall on it resolve as the delivered-outcome-unknown
+ending the relay already speaks. A response correlated to a `req_id` that was NEVER ISSUED is retired the same way and
+immediately, on both legs of the relay: it cannot be a late answer, so the only readings are a broken peer and a hostile
+one, and on a connection that stays healthy the waiter it strands has nothing else to end it. Correspondingly, a
+connection lost after the request was queued is reported to a mutating caller as `Timeout` ("delivered, outcome
+unknown") rather than `Unavailable` ("never delivered, retry freely"), with a remedy that says to look at the session
+before retrying — the change may already have taken effect, and the retry-safe kind would be an invitation to apply it
+twice. A listing keeps `Unavailable`, having nothing to double-apply. Which verbs are mutating is
 `AgentVerb::is_mutating`, one exhaustive match in the protocol crate that both the supervisor and the helm read, so a
 verb added later cannot be fenced on one side and not the other.
 
@@ -986,7 +986,7 @@ maintainer-confirmed decisions. Provisioning a supervisor does not establish tru
 check is that the connection is still the CURRENT one for that host row, since registry rows outlive the machines behind
 them. Version 14 replaced session-list pagination with a bounded whole-list reply, and version 15 carries helm-resolved
 launch bundles and upward profile resolution. The historical paragraph below describes why 13 was current at the time;
-later released additions took the wire to 19. Version 16 introduced the durable optional structured launch snapshot
+later released additions took the wire to 26. Version 16 introduced the durable optional structured launch snapshot
 carried with a create and `SessionInfo`. The snapshot is declarative provenance beside the resolved invocation, never a
 browser-owned compiler input; old sessions remain absent rather than being reconstructed from a command. Version 17 adds
 `BrowseDirectory` and `DirectoryListing`: the helm routes one authenticated, connection-incarnation-guarded request to
@@ -994,20 +994,21 @@ the chosen supervisor, which expands `~` from its own recorded home, canonicaliz
 only a sorted bounded immediate child-directory listing plus parent and truncation state. Neither the helm nor the
 client reads the target filesystem. Version 18 adds accepted-create `canonical_cwd`, the identity fact that binds folder
 history to the destination the target supervisor actually accepted. Version 19 adds OpenCode to the structured-harness
-enum. A supervisor must retain that snapshot alongside the resolved invocation, so an older peer that cannot decode the
-new enum value refuses the connection rather than silently losing the selection. The following 13 paragraph is
-historical context, not the current protocol version; the frozen changelog stops at 11. Version 13 also carries
-`AgentVerb::Rename`/`Stop`/ `Archive` and the two creating verbs `AgentVerb::Create`/`Clone` (answered by
-`AgentReply::Created`), all added additively within the version rather than as version bumps of their own — which was
-possible ONLY because 13 itself had not yet shipped when they landed, still being developed on this branch with no
-released build speaking it yet. That is a one-time allowance for a version still in flight, not a standing license to
-keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape addition needs a version of its own,
-same as any other. The same allowance covers the one thing in 13 that is not an addition at all: `AgentSession::host`
-became `Option<String>`, so a reply carrying a row the helm just mutated or created can say "there is a session here but
-no host name I can vouch for" instead of encoding that as an empty string indistinguishable from a real value. A decoder
-built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null` outright — the running additive rule does not
-stretch to cover it under any reading — so it is allowed here only because nothing released speaks 13 yet. It must not
-be carried forward the same way once 13 ships: the identical edit made afterwards needs a version of its own.
+enum. Version 26 retires session archival and its wire fields and messages. A supervisor must retain that snapshot
+alongside the resolved invocation, so an older peer that cannot decode the new enum value refuses the connection rather
+than silently losing the selection. The following 13 paragraph is historical context, not the current protocol version;
+the frozen changelog stops at 11. Version 13 also carries `AgentVerb::Rename`/`Stop` and the two creating verbs
+`AgentVerb::Create`/`Clone` (answered by `AgentReply::Created`), all added additively within the version rather than as
+version bumps of their own — which was possible ONLY because 13 itself had not yet shipped when they landed, still being
+developed on this branch with no released build speaking it yet. That is a one-time allowance for a version still in
+flight, not a standing license to keep adding to 13 after it ships; once a protocol version has shipped, a wire-shape
+addition needs a version of its own, same as any other. The same allowance covers the one thing in 13 that is not an
+addition at all: `AgentSession::host` became `Option<String>`, so a reply carrying a row the helm just mutated or
+created can say "there is a session here but no host name I can vouch for" instead of encoding that as an empty string
+indistinguishable from a real value. A decoder built against 13 EARLIER IN ITS OWN DEVELOPMENT rejects `host: null`
+outright — the running additive rule does not stretch to cover it under any reading — so it is allowed here only because
+nothing released speaks 13 yet. It must not be carried forward the same way once 13 ships: the identical edit made
+afterwards needs a version of its own.
 
 Version 25 adds `AgentVerb::Restart`, `AgentReply::Restarted`, and the non-secret `AgentSession::restart_offer`
 discovery field. The new tagged request and reply require an exact-version handshake refusal for older peers. Each verb
@@ -1099,11 +1100,10 @@ because a partial fleet listing is otherwise shaped exactly like a complete one 
 be indistinguishable from "that session is past the cut". The byte allowance exists because rows bound nothing about
 size: session creation admits tens of kilobytes of caller-supplied text per row, and a fleet of legally fat records
 would otherwise produce an answer no frame could carry — discarded whole, reaching the agent as `Internal` rather than
-as the partial listing the verb promises. It includes archived sessions, flagged, since an agent has no archive switch
-to flip. And the per-session `agent` field is a non-secret label — the source profile's snapshotted name, or the
-invocation's program basename — never the raw command line. Users put credentials in command lines, this listing is
-readable with any one attached session's credential, and its reader is a model that will quote what it read, so
-arguments must not cross this wire at all.
+as the partial listing the verb promises. The per-session `agent` field is a non-secret label — the source profile's
+snapshotted name, or the invocation's program basename — never the raw command line. Users put credentials in command
+lines, this listing is readable with any one attached session's credential, and its reader is a model that will quote
+what it read, so arguments must not cross this wire at all.
 
 The session list is served WHOLE on this wire (protocol 14). `ListSessions` carries nothing but its request id, and
 `SessionList` answers with every session the supervisor has, cut at `LIST_SESSIONS_CAP` (a few hundred rows, one
@@ -1228,8 +1228,8 @@ failure can leave private evidence, but cannot authorize another directory move.
 
   New sessions start at their creation time in milliseconds. Rename and explicit restart share the same session key,
   while their new run gets fresh transition evidence, so neither operation itself promotes. A start writes immediately,
-  outside the last-activity minute throttle. Failed writes keep the exact key and retry it on later visits; restart and
-  archive transfer that accepted history into their fresh sampler state under the lifecycle claim, without inheriting
+  outside the last-activity minute throttle. Failed writes keep the exact key and retry it on later visits; rename and
+  restart transfer that accepted history into their fresh sampler state under the lifecycle claim, without inheriting
   old screen evidence. A later proven burst replaces an older pending key. The write holds the session lifecycle claim,
   checks that the sampled entry is still the published generation, and updates SQLite only where id and generation both
   match. No activity mutex is held across that write. Schema 17 adds the authoritative supervisor column and backfills
@@ -1384,9 +1384,9 @@ failure can leave private evidence, but cannot authorize another directory move.
 - Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
   foreground process group, and daemonized descendants escape it. The portable sweep combines the pane's descendant tree
   with environment-marker selection through the platform process API. Every marker selection requires the matching
-  `FARHELM_SESSION_ID`. Stop and restart select the agent's `FARHELM_AGENT_ID`; archive and delete select the whole
-  session, including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing
-  legacy case with neither kind marker. These are process-ownership hints, not authenticated credentials or a promise of
+  `FARHELM_SESSION_ID`. Stop and restart select the agent's `FARHELM_AGENT_ID`; delete selects the whole session,
+  including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing legacy
+  case with neither kind marker. These are process-ownership hints, not authenticated credentials or a promise of
   indefinite historical compatibility. Launch boundaries scrub the opposite kind's marker so nested supervisors do not
   misclassify a new agent as an outer tab's process.
 
@@ -1407,10 +1407,10 @@ failure can leave private evidence, but cannot authorize another directory move.
   write its exec-failure sentinel, so the supervisor classifies that shape (a launch spec nothing ever consumed, on a
   dead pane, for a scoped launch) as **error** rather than letting it masquerade as a plain exit.
 
-  Terminal tabs also receive separate scopes, named from the session and tab IDs. Archive and Delete collect those units
-  both from tmux-discovered tabs and independently from the systemd manager using the session-specific tab-unit glob.
-  The second source preserves a cleanup handle when tmux no longer supplies tab IDs. A manager enumeration failure is
-  distinct from having no usable manager; it can refuse Archive or Delete before the portable sweep.
+  Terminal tabs also receive separate scopes, named from the session and tab IDs. Delete collects those units both from
+  tmux-discovered tabs and independently from the systemd manager using the session-specific tab-unit glob. The second
+  source preserves a cleanup handle when tmux no longer supplies tab IDs. A manager enumeration failure is distinct from
+  having no usable manager; it can refuse Delete before the portable sweep.
 
   Containment starts at the agent launch, after login-shell initialization: the cgroup wrapper and the shim's
   environment markers deliberately exclude services started by shell startup files. A detached startup-file service may
@@ -1446,8 +1446,8 @@ failure can leave private evidence, but cannot authorize another directory move.
   candidate name without clobbering another attachment. Cancellation, disconnection, or a disk-stage timeout may stop
   awaiting that thread without stopping publication. An abandoned publication may therefore leave a complete file with
   no path acknowledged to the client. Its retention is the same as any attachment: until session deletion, not startup
-  reconciliation, Stop, or Archive. A retry may create another copy; there is no rollback, deduplication, or background
-  undo. Error responses must not claim nothing was stored when publication completion is unknown. This does not change
+  reconciliation or Stop. A retry may create another copy; there is no rollback, deduplication, or background undo.
+  Error responses must not claim nothing was stored when publication completion is unknown. This does not change
   prepublication staging cleanup, no-clobber semantics, prompt desktop Quit, or the healthy-local-filesystem assumption.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
   inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
@@ -1765,27 +1765,23 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   second page cut, a matching-count cache keyed to a store generation, and a client-side "underfilled listing" predicate
   — all of it existing because sorting by mutable keys under pagination lets a row cross the cursor between two pages.
   Schema version 13 drops the ordering columns and their indexes and adds the per-host cap flag; `session_cache` keeps
-  `created_at` (the identity cross-check a read applies to a decoded payload) and `archived` (so the default view can
-  skip a row before decoding it) as columns, not because anything orders by them. What the whole-list reply gives up is
-  a per-request cost that grows with the fleet — decoding every cached payload on every poll — and that is accepted
-  outright: the decode work is bounded per HOST (up to `LIST_SESSIONS_CAP` rows from every cache-serving host, before
-  the merged output is cut back to one cap), which at the spec's scale of a few hosts is a few hundred JSON decodes per
-  request. The one deliberate second cut anywhere in the listing paths is the agent verb's encoded-byte allowance (6
-  MiB, `agent_requests`): that reply must fit a single frame and its rows carry unbounded caller text, so the helm stops
-  projecting rows before the reply could exceed a frame and reports it through the same `truncated` flag.
+  `created_at` as the identity cross-check a read applies to a decoded payload. Schema version 29 removes the retired
+  archive column and strips the retired member from valid object payloads; malformed and non-object payload bytes stay
+  untouched so the migration does not turn pre-existing corruption into invented data. What the whole-list reply gives
+  up is a per-request cost that grows with the fleet — decoding every cached payload on every poll — and that is
+  accepted outright: the decode work is bounded per HOST (up to `LIST_SESSIONS_CAP` rows from every cache-serving host,
+  before the merged output is cut back to one cap), which at the spec's scale of a few hosts is a few hundred JSON
+  decodes per request. The one deliberate second cut anywhere in the listing paths is the agent verb's encoded-byte
+  allowance (6 MiB, `agent_requests`): that reply must fit a single frame and its rows carry unbounded caller text, so
+  the helm stops projecting rows before the reply could exceed a frame and reports it through the same `truncated` flag.
 - A listing reply carries two counts, and they answer different questions. `matching` is how many rows satisfy the
   caller's filter across the whole merged view, and it is present exactly when a predicate is active. `total` is how big
   the VIEW is — the denominator the UI's "N matching of M sessions" prints — and it deliberately does not move when a
-  query narrows membership, because a denominator that tracked the query would compare a number against itself. The
-  archive-inclusion API parameter instead selects which list is being served, so the default view's rows and its total
-  are both about the non-archived fleet and `include_archived=true` widens both. The flag is denormalized into a
-  `session_cache.archived` column (schema version 10, backfilled from each payload) so the default view can leave an
-  archived row unread rather than decoding it to find out. A row whose payload no longer decodes is in NEITHER count: it
-  is dropped at the read with a warning, so `total` and `matching` describe rows a client can see and "showing 4 of 5"
-  never appears over a row nobody can render (the corruption is for the log). Changed 2026-08-22: `total` used to count
-  archived rows in every view, so out of the box the default list showed ten rows above a count of twelve, with no
-  filter typed and nothing on screen able to explain the gap. The accepted consequence is that the ordinary list now
-  reads as unfiltered — "M sessions" — and the filtered wording belongs to filters a person applied.
+  query narrows membership, because a denominator that tracked the query would compare a number against itself. A row
+  whose payload no longer decodes is in NEITHER count: it is dropped at the read with a warning, so `total` and
+  `matching` describe rows a client can see and "showing 4 of 5" never appears over a row nobody can render (the
+  corruption is for the log). The ordinary list reads as unfiltered — "M sessions" — and the filtered wording belongs to
+  filters a person applied.
 - At most one HOST may cache a given session id, as a schema invariant. Session ids are supervisor-minted UUIDs, so two
   hosts naming one is either a bug or a hostile supervisor claiming a session it does not own — and the consequence is a
   routing decision, not a display one: owner lookup would resolve one host while the list showed another's row, so a
@@ -2044,7 +2040,7 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm agent hosts|sessions|profiles [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
   credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
   refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
-  model quoting its own shell output. The JSON form uses schema version 1, includes exact IDs, caller identity, and
+  model quoting its own shell output. The JSON form uses schema version 2, includes exact IDs, caller identity, and
   completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration. A
   session row's non-secret `OFFER` capability is the exact mode its restart command may request; it does not disclose
   the template, captured conversation locator, or a live-stop recommendation. Every dynamic table cell is escaped to one
@@ -2053,28 +2049,18 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   be padded onto every other row. A cut listing prints its rows on stdout and one warning on stderr, so a script
   capturing stdout still gets nothing but the table. It has no timeout of its own: the supervisor bounds the relay and
   is the only party that can distinguish its two failures (see the transport section's version-20 paragraph).
-- `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`,
-  `farhelm agent archive --session <id>`, and
+- `farhelm agent rename --session <id> --expected-title=<old> -- <new>`, `farhelm agent stop --session <id>`, and
   `farhelm agent restart --session <id> --mode <resume|fallback-template|fresh>
   [--stop-if-running]` — the in-session
   ACTING CLI, on the same relay and credential. Every target is explicit, including a deliberate self-action. Rename
   compares the observed title and changes it atomically in the owning supervisor; a mismatch is a conflict with no
   mutation. Success prints one plain confirmation line on stdout (`renamed <id> to "<title>"`, `stopped <id>`,
-  `archived <id>`, `restarted <id>`), its dynamic cells run through the same escaping the listing tables use, so a
-  scripted caller gets exactly one line rather than a table with one row. Restart forwards the mode and consent
-  unchanged to the owning supervisor, which rechecks both current offer and liveness; the CLI never infers consent from
-  discovery. An explicit self-stop, self-archive, or self-restart may terminate the CLI before its line is printed
-  because it belongs to the process tree being ended. Self restart prints its interruption/outcome-unknown warning
-  before dispatch and treats a lost reply as unknown rather than success.
-- SPEC.md's "with confirmation when anything is still running" rule for archive is a UI affordance and does NOT apply to
-  `farhelm agent archive`. It is written for the panel, where a person is one click from ending work they may not know
-  is running and a dialog is what puts the fact in front of them. This CLI has no such reader: its caller is the agent
-  itself, non-interactive by construction, and the only shapes a confirmation could take here would each defeat the rule
-  rather than implement it — a prompt on a stdin nobody is attached to hangs, and a `--yes` flag the agent always passes
-  is a confirmation in name only. The safeguard that does transfer is the audit trail: the helm logs, at `info`, which
-  session asked to act on which before the request leaves it (`agent_requests::resolve_target`), so an archive an
-  operator did not expect is attributable rather than anonymous. The same reasoning covers `stop`, whose SPEC wording
-  puts the confirmation on restart rather than on the stop itself.
+  `restarted <id>`), its dynamic cells run through the same escaping the listing tables use, so a scripted caller gets
+  exactly one line rather than a table with one row. Restart forwards the mode and consent unchanged to the owning
+  supervisor, which rechecks both current offer and liveness; the CLI never infers consent from discovery. An explicit
+  self-stop or self-restart may terminate the CLI before its line is printed because it belongs to the process tree
+  being ended. Self restart prints its interruption/outcome-unknown warning before dispatch and treats a lost reply as
+  unknown rather than success.
 - `farhelm agent create --host <name> --cwd <dir> (--profile <name> | --profile-id <id> | --invocation <cmd>) [--title ...]
   [--idempotency-key ...]`
   and `farhelm agent clone --source-session <id> --host <name> [--cwd <dir>] [--title ...]

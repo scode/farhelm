@@ -101,7 +101,6 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
         restart_offer: "resume",
         created_at: 0,
         last_activity_at: 0,
-        archived: false,
         tabs: [],
       }),
     });

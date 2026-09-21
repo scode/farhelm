@@ -83,10 +83,7 @@
 //!
 //! So both sources are narrowed by one predicate ([`store::SessionFilter`]),
 //! and a FILTERED reply carries TWO counts: how many matched, and how many
-//! the VIEW holds. "The view" rather than "the fleet" because one dimension
-//! is not a narrowing at all: the archive switch decides which list is
-//! being served, so `total` follows it and follows nothing else (see
-//! [`SessionListBody::total`]). An UNFILTERED reply carries only that total
+//! the VIEW holds. An UNFILTERED reply carries only that total
 //! and makes no matching claim at all (see [`SessionListBody::matching`]).
 //!
 //! ## One snapshot, one answer
@@ -236,18 +233,13 @@ pub(crate) struct SessionListBody {
     /// denominator the UI's "N matching of M sessions" prints.
     ///
     /// Deliberately does not move when the user types: a denominator that
-    /// tracked the filter would compare a number against itself. The one
-    /// thing that does move it is the archive-inclusion switch, which
-    /// selects which list is being served rather than narrowing one — the
-    /// default view's rows and its total are both about the non-archived
-    /// fleet, and `include_archived=true` widens both. A cached row whose
+    /// tracked the filter would compare a number against itself. A cached row whose
     /// payload no longer decodes is in neither the rows nor this count: it
     /// is dropped at the read with a warning (`store::CachedRow`), so the
     /// counts always describe rows a client can see.
     pub(crate) total: u64,
     /// How many rows of the view satisfy the caller's filter, present
-    /// exactly when a predicate is active (`!filter.is_empty()`, which
-    /// includes the default view's implicit "not archived").
+    /// exactly when a predicate is active (`!filter.is_empty()`).
     ///
     /// Equal to `sessions.len()` unless the cap cut the reply — the count
     /// is over the whole view, the array is what fits — so a client that
@@ -366,9 +358,8 @@ pub(crate) fn sort_rows(rows: &mut [SessionRow], sort: store::ListSort) {
 /// Build the reply from the merged view: filter, count, sort, cap.
 ///
 /// The pure core of [`session_list`], separated so the merge/sort/cap/count
-/// rules can be pinned without a fleet. `view` is every row of the view
-/// (archive switch already applied, since that is a scope rather than a
-/// predicate; a cached row that no longer decodes is not in it and not
+/// rules can be pinned without a fleet. `view` is every decodable fleet row;
+/// a cached row that no longer decodes is not in it and not
 /// counted — see `store::CachedRow`); `hosts_truncated` says whether any
 /// host's own list was cut at the wire's cap.
 ///
@@ -531,11 +522,6 @@ async fn session_list_staged(
     }
     let seen_activity = store.seen_activity(&seen_ids).await?;
     for cached in slice.rows {
-        // The archive switch is applied as a SCOPE, on the stored flag,
-        // before the payload is looked at.
-        if cached.archived && !filter.includes_archived() {
-            continue;
-        }
         let Some(host) = by_id.get(&cached.host) else {
             // A host the registry knows but the manager has no actor for
             // is a window during removal; its rows have nowhere to hang.
@@ -579,9 +565,6 @@ async fn session_list_staged(
         }
         let identity = identities.get(&snapshot.id).and_then(Option::as_deref);
         for info in live.iter() {
-            if info.archived && !filter.includes_archived() {
-                continue;
-            }
             let seen = seen_activity.get(&info.id).copied();
             view.push(row_of(snapshot, identity, info.clone(), seen));
         }
@@ -612,7 +595,6 @@ mod tests {
         SessionRow {
             info: SessionInfo {
                 parent: None,
-                archived: false,
                 id: id.to_string(),
                 title: id.to_string(),
                 created_at,
@@ -1089,7 +1071,7 @@ mod tests {
 
         let unfiltered = assemble(
             view.clone(),
-            &store::SessionFilter::default().include_archived(true),
+            &store::SessionFilter::default(),
             store::ListSort::Created,
             false,
         );
@@ -1103,9 +1085,7 @@ mod tests {
 
         let filtered = assemble(
             view,
-            &store::SessionFilter::default()
-                .include_archived(true)
-                .title("KEEP"),
+            &store::SessionFilter::default().title("KEEP"),
             store::ListSort::Created,
             false,
         );
@@ -1117,19 +1097,16 @@ mod tests {
         assert_eq!(ids(&filtered.sessions), ["keep"]);
     }
 
-    /// The default view's implicit "not archived" is a predicate, so it
-    /// reports `matching` too — the UI relies on the count being present to
-    /// print "N matching" wording only for filters a person applied, and
-    /// decides that on its own side.
+    /// The default view is unfiltered and therefore makes no matching claim.
     #[farhelm_testtrace::test]
-    fn the_default_view_reports_a_matching_count() {
+    fn the_default_view_reports_only_the_total_count() {
         let body = assemble(
             vec![row("a", 1, 1)],
             &store::SessionFilter::default(),
             store::ListSort::Created,
             false,
         );
-        assert_eq!(body.matching, Some(1));
+        assert_eq!(body.matching, None);
     }
 
     /// The cap cuts a SORTED, FILTERED array and says so; a host's own cap
@@ -1146,7 +1123,7 @@ mod tests {
             .collect();
         let body = assemble(
             view.clone(),
-            &store::SessionFilter::default().include_archived(true),
+            &store::SessionFilter::default(),
             store::ListSort::Created,
             false,
         );
@@ -1165,9 +1142,7 @@ mod tests {
 
         let filtered = assemble(
             view.clone(),
-            &store::SessionFilter::default()
-                .include_archived(true)
-                .title("s000"),
+            &store::SessionFilter::default().title("s000"),
             store::ListSort::Created,
             false,
         );
@@ -1180,7 +1155,7 @@ mod tests {
 
         let at_cap = assemble(
             view.into_iter().skip(1).collect(),
-            &store::SessionFilter::default().include_archived(true),
+            &store::SessionFilter::default(),
             store::ListSort::Created,
             false,
         );
@@ -1189,7 +1164,7 @@ mod tests {
 
         let host_capped = assemble(
             vec![row("a", 1, 1)],
-            &store::SessionFilter::default().include_archived(true),
+            &store::SessionFilter::default(),
             store::ListSort::Created,
             true,
         );
@@ -1232,12 +1207,7 @@ mod tests {
         view.push(special);
 
         for sort in [store::ListSort::Title, store::ListSort::Activity] {
-            let body = assemble(
-                view.clone(),
-                &store::SessionFilter::default().include_archived(true),
-                sort,
-                false,
-            );
+            let body = assemble(view.clone(), &store::SessionFilter::default(), sort, false);
             assert!(body.truncated);
             assert_eq!(body.sessions.len(), LIST_SESSIONS_CAP);
             assert_eq!(
@@ -1252,7 +1222,7 @@ mod tests {
         // its group counts there.
         let created = assemble(
             view,
-            &store::SessionFilter::default().include_archived(true),
+            &store::SessionFilter::default(),
             store::ListSort::Created,
             false,
         );

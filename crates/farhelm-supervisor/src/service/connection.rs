@@ -1707,7 +1707,6 @@ mod tests {
             req_id,
             sessions: vec![SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize),
                 created_at: 1_700_000_000,
@@ -1772,7 +1771,6 @@ mod tests {
             req_id: 7,
             session: SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,
@@ -1811,7 +1809,6 @@ mod tests {
             req_id: 9,
             session: SessionInfo {
                 parent: None,
-                archived: false,
                 id: "s1".to_string(),
                 title: "demo".to_string(),
                 created_at: 1_700_000_000,

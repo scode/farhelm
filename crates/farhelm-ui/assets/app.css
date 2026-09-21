@@ -202,7 +202,7 @@
      because the greys are already blue-cast, so it reads as the same
      family turned up rather than as a foreign hue, and because every
      other hue in this sheet is spoken for by a state (green ok, amber
-     warn, red danger, orange archive, mauve archived). --info's sky blue
+     warn, red danger). --info's sky blue
      is the near neighbor; the two are kept apart by role and weight —
      --info is a light tone that carries a WORD, the accent is a
      saturated fill, edge, or single glyph — never a run of prose.
@@ -284,11 +284,8 @@
   --danger-bg-dim: #3a2a2a; /* barely-there red hover behind a destructive icon button */
   --danger-fill-hover: #964a4a; /* hover on a control that sits on the red banner */
 
-  /* State hues outside the ok/warn/danger triad, each carrying a meaning
-     the triad would misreport if it borrowed one of them. */
+  /* State hues outside the ok/warn/danger triad. */
   --info: #6fb8f0; /* idle with output nobody has looked at (waiting moved to --danger) */
-  --archive: #d08770; /* archive notices and archive-path errors */
-  --archived-badge: #b48ead; /* the "archived" marker itself */
 
   /* Overlay. Black rather than the blue-grey it used to be: it lies over
      the terminal's `--terminal-bg` surface and must be darker than it,
@@ -863,8 +860,8 @@ samp {
    (`flex-shrink: 1`, the flex default), and the badge and
    `.titlebar-actions` never shrink at all — a badge or a button that
    ellipsizes is one a user cannot read before acting on it. The actions
-   cluster itself is sized to fit that floor: both buttons carry compact
-   glyphs (`archive`, `restart`) rather than the full offer wording — the
+   cluster itself is sized to fit that floor: the button carries a compact
+   `restart` glyph rather than the full offer wording — the
    longest of which ran to ~320px on its own, wider than the whole
    supported minimum — leaving the rest of the row's ~320px for identity
    and status to fight over instead of losing to a single control. */
@@ -950,7 +947,6 @@ samp {
    hangs off it (see `.header-confirm`). `inline-flex` rather than `block`
    keeps the wrapper exactly as wide as the button inside it, so the
    anchor and the trigger are the same rectangle. */
-.archive-offer,
 .restart-offer {
   position: relative;
   display: inline-flex;
@@ -976,7 +972,7 @@ samp {
   color: var(--fg-bright);
 }
 
-/* The archive/restart confirmation, anchored under the button that opened
+/* The restart confirmation, anchored under the button that opened
    it instead of laid out in the header row.
 
    The reason is the consequence sentence, not the pixels: "still running —
@@ -1020,10 +1016,7 @@ samp {
   align-items: center;
   gap: 6px;
   padding: 8px;
-  /* Hug short prompts, cap long ones. The longest archive consequence runs
-     ~140 characters — laid out on one line it would be wider than the
-     whole main pane, so a cap plus wrapping is what keeps the panel a
-     panel. `80vw` is the CAP that actually binds once the window is
+  /* Hug short prompts and cap long ones. `80vw` is the CAP that actually binds once the window is
      narrow — the smaller of `min()`'s two operands there — and letting it
      bind means the panel may reach back over the sidebar, which is a
      readable prompt in front of chrome rather than a sentence cut in
@@ -1048,14 +1041,7 @@ samp {
   white-space: normal;
 }
 
-/* Of the four buttons this panel ever renders (`archive-confirm`,
-   `archive-cancel`, `restart-confirm`, `restart-cancel`), only
-   `.archive-cancel` is actually in "Row actions and confirmations"'s
-   shared selector list below and picks up its `margin-right: 10px` — the
-   other three were never in it and have no margin of their own to reset.
-   This rule exists for that one button: the panel's own `gap` already
-   spaces every button correctly, so `.archive-cancel`'s borrowed margin is
-   pure double-spacing here and has to be zeroed. */
+/* The panel's own gap is the complete button spacing contract. */
 .header-confirm .btn {
   margin-right: 0;
 }
@@ -1100,7 +1086,7 @@ samp {
 /* ===== Shared button look ========================================= */
 
 /* Two-tier button system: before this, every `.btn` — from "new session"
-   down to the row's tiny rename/stop/archive/delete controls — drew the
+   down to the row's tiny rename/stop/delete controls — drew the
    SAME bordered gray box, so a sidebar with a dozen of them read as a wall
    of identical outlined rectangles with no cue for which one thing was
    worth clicking. `.btn` (below) is the GHOST tier — transparent border,
@@ -1170,10 +1156,7 @@ samp {
    it is — create session, add a host, rename (`.new-session-button`,
    `.create-session-submit`, `.add-host-submit`, `.rename-submit`). Nothing
    else in the sheet carries this class; a confirm-delete/-remove stays
-   ghost with red TEXT instead (see those rules below), and confirm-archive
-   stays plain ghost with no color override at all — archiving is
-   reversible (see the archived-state comment further down), so it never
-   earns the danger family's red in the first place. That keeps the one
+   ghost with red TEXT instead (see those rules below). That keeps the one
    filled control per surface meaning "the affirmative default action
    here" rather than becoming one more box among equals. `border-color`
    only, not a full `border` shorthand: `.btn` above already reserves the
@@ -1532,8 +1515,8 @@ samp {
    `:hover` gives every ghost button, so a toggle wearing it after the
    pointer has left reads as "stale hover" rather than "open". The accent
    is what separates the two, and it is the same rule the header's own
-   archive and restart triggers already follow while their confirmations
-   are up (`.titlebar-actions .btn[aria-expanded="true"]`, which spends
+   restart trigger already follows while its confirmation is up
+   (`.titlebar-actions .btn[aria-expanded="true"]`, which spends
    `--accent-fill` and `--accent-edge` for the same reason): a pressed disclosure
    control wears the accent for as long as what it opened is showing. See
    SPEC_impl.md's accent list — that entry covers this toggle and those
@@ -1568,7 +1551,7 @@ samp {
 
 /* ===== Row actions menu =========================================== */
 
-/* The floating panel the toggle anchors: rename/stop/archive/delete, and
+/* The floating panel the toggle anchors: rename/stop/delete, and
    the in-menu confirm that replaces them for a destructive action. Floats
    over the rows below rather than pushing them down — a menu that
    reflowed the list would move the very row the user is acting on.
@@ -1750,8 +1733,8 @@ samp {
    `.confirm-title` rule's `flex: 1 1 0` was written for the old
    horizontal action row, and in this COLUMN container a zero flex
    basis is a zero HEIGHT — combined with the shared rule's
-   `overflow: hidden`, the session name vanished from the delete and
-   archive prompts entirely (the same axis-flip class that collapsed
+   `overflow: hidden`, the session name vanished from the delete prompt
+   entirely (the same axis-flip class that collapsed
    the profile chip). Everything else — ellipsis, nowrap, color — comes
    from the shared rule. */
 .session-row-menu-panel .confirm-title {
@@ -1791,8 +1774,7 @@ samp {
 
 /* ===== Row actions and confirmations ============================== */
 
-/* The items of either row's actions menu (up to four on an active session
-   row and two on an archived one). Host rows conditionally offer Retry,
+/* The items of either row's actions menu. Host rows conditionally offer Retry,
    Adopt, Re-run, Automatic setup, Update, Edit destination, and Remove; see
    `hosts::host_menu_order`. Full-width
    rows that light up edge to edge on hover, not a stack of small centered
@@ -1892,8 +1874,6 @@ samp {
    same thing about neither. */
 .confirm-delete,
 .confirm-cancel,
-.confirm-archive,
-.archive-cancel,
 .confirm-replace,
 .replace-cancel,
 .rename-submit,
@@ -2323,8 +2303,8 @@ samp {
   padding: 0;
 }
 
-/* Local sessions need a persistent caution cue, including selected and
-   archived rows. Scope it to the session locality slot so host controls and
+/* Local sessions need a persistent caution cue, including selected rows.
+   Scope it to the session locality slot so host controls and
    remote glyphs keep their existing meaning. Classification still comes from
    confirmed host identity, never the host's displayed name. */
 .session-locality-slot .host-kind-icon[data-glyph="local"] {
@@ -4337,41 +4317,15 @@ samp {
   }
 }
 
-/* ===== Session view: restart, archive, banners ==================== */
+/* ===== Session view: restart and banners ========================= */
 
-/* The restart affordance (PLAN_M3.md item 9) and the archive one are both
-   header controls now — their box model lives with the header, under
-   "Main pane titlebar". What is left here is the conditional prose each of
-   them can produce, plus the session view's other notices.
+/* The restart affordance (PLAN_M3.md item 9) is a header control now — its
+   box model lives with the header, under "Main pane titlebar". What is left
+   here is its conditional prose, plus the session view's other notices.
 
    All of these are BANDS, and all of them are conditional: the header's
    ~40px steady state is the promise this section must not quietly break,
    so nothing below may render when it has nothing to say. */
-
-/* The archived state's own hue rather than the danger family: archiving is
-   a deliberate, reversible act, and a red band would report a successful
-   operation as a failure. `.archive-error` shares it because a refused
-   archive is still about the archive path — the sentence itself carries
-   whether it worked. */
-.archive-error,
-.archived-notice {
-  color: var(--archive);
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.archived-badge {
-  color: var(--archived-badge);
-  font-size: 11px;
-  text-transform: uppercase;
-  /* Matches `.stale-badge`'s `flex-shrink: 0` (2026-09-03): the title
-     line's width rule promises the stale and archived badges never shrink,
-     and this one was missing the property that actually makes that true —
-     without it, the flex default (`flex-shrink: 1`) let a long title and
-     host squeeze "archived" toward illegibility instead of taking their
-     own share of the pressure first. */
-  flex-shrink: 0;
-}
 
 /* A restart refusal is the supervisor's own prose — a stale-offer conflict
    names what the offer is NOW — so it gets a full-width line that wraps
@@ -4622,8 +4576,8 @@ samp {
 
    The vertical padding is 3px rather than the 4px it carried as one band
    among four: header plus strip is the whole budget between the window top
-   and the terminal ONLY in the steady state (~40px + ~30px) — an archive or
-   restart failure, or the "helm stopped listing this session" notice, is
+   and the terminal ONLY in the steady state (~40px + ~30px) — a restart
+   failure, or the "helm stopped listing this session" notice, is
    still free to land between them as its own conditional band, so this is
    a claim about the common case, not an invariant. The steady state is
    common enough that the strip's own few pixels are still worth counting

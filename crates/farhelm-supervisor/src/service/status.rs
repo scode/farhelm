@@ -556,7 +556,7 @@ pub(crate) async fn interrupted_preparation_detail(
     let Some(row) = store.session(session_id).await? else {
         return Ok(None);
     };
-    if row.generation != generation || row.pane.is_empty() || row.archived {
+    if row.generation != generation || row.pane.is_empty() {
         return Ok(None);
     }
     let Some(origin) = store.origin_working_copy(session_id).await? else {
