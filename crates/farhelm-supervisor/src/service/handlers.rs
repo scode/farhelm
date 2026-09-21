@@ -334,6 +334,7 @@ fn create_mode(fields: CreateSelectorFields) -> Result<CreateSelector, String> {
             LaunchHarness::Goose => AgentKind::Goose,
             LaunchHarness::Pi => AgentKind::Pi,
             LaunchHarness::Omp => AgentKind::Omp,
+            LaunchHarness::Grok => AgentKind::Grok,
         };
         if agent_kind != Some(expected_kind) {
             return Err("a structured launch's harness and agent_kind disagree".to_string());
@@ -457,6 +458,7 @@ async fn resolve_create_selector(
                     LaunchHarness::Goose => AgentKind::Goose,
                     LaunchHarness::Pi => AgentKind::Pi,
                     LaunchHarness::Omp => AgentKind::Omp,
+                    LaunchHarness::Grok => AgentKind::Grok,
                 };
                 return Ok(CreateMode::Structured {
                     invocation: parent.invocation,

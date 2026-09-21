@@ -349,6 +349,11 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
         }
     }
     argv.push(program(selection.harness).to_string());
+    if selection.harness == LaunchHarness::Grok {
+        // Grok's shared leader is outside Farhelm's tracked ownership
+        // boundary, so every supported launch opts into a private leader.
+        argv.push("--no-leader".to_string());
+    }
     if selection.harness == LaunchHarness::Goose {
         argv.push("session".to_string());
     }
@@ -373,6 +378,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
                 "--model".to_string(),
                 model.clone(),
             ]),
+            LaunchHarness::Grok => unreachable!("Grok has no supported model"),
         }
     }
     if let Some(effort) = selection.effort {
@@ -395,6 +401,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::Pi | LaunchHarness::Omp => {
                 argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
             }
+            LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
         }
     }
     // OMP carries its permission as one explicit approval-mode flag; the
@@ -417,6 +424,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
             LaunchHarness::OpenCode => Some("--auto"),
             LaunchHarness::Cursor => Some("--force"),
+            LaunchHarness::Grok => Some("--always-approve"),
             // Goose encodes every mode in the environment above; Pi has no
             // approval flag at all; OMP's own approval-mode arm above already
             // wrote its flag.
@@ -459,8 +467,16 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             LaunchHarness::Goose => AgentKind::Goose,
             LaunchHarness::Pi => AgentKind::Pi,
             LaunchHarness::Omp => AgentKind::Omp,
+            LaunchHarness::Grok => AgentKind::Grok,
         },
-        resume_template: None,
+        resume_template: (selection.harness == LaunchHarness::Grok).then(|| {
+            let mut template = vec!["grok".to_string(), "--no-leader".to_string()];
+            if selection.permissions == Some(LaunchPermission::Yolo) {
+                template.push("--always-approve".to_string());
+            }
+            template.extend(["--resume".to_string(), "{conversation}".to_string()]);
+            template
+        }),
         selection,
     })
 }
@@ -475,6 +491,7 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Goose => "goose",
         LaunchHarness::Pi => "pi",
         LaunchHarness::Omp => "omp",
+        LaunchHarness::Grok => "grok",
     }
 }
 
@@ -490,6 +507,9 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
         )
     {
         return Err("workspace trust is not offered by this harness".to_string());
+    }
+    if selection.harness == LaunchHarness::Grok && selection.model.is_some() {
+        return Err("Grok does not currently expose a verified model choice".to_string());
     }
     if let Some(model) = &selection.model {
         validate_model_id(model)?;
@@ -589,6 +609,7 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Goose => GOOSE_EFFORTS,
         LaunchHarness::Pi => PI_EFFORTS,
         LaunchHarness::Omp => OMP_EFFORTS,
+        LaunchHarness::Grok => &[],
     }
 }
 
@@ -1234,6 +1255,54 @@ mod tests {
                 assert_eq!(compiled.selection.permissions, Some(LaunchPermission::Yolo));
             }
         }
+    }
+
+    /// Grok's tracked launch keeps each ownership and resume token explicit;
+    /// the permissive choice changes only the deliberate approval flag.
+    #[test]
+    fn grok_compiles_native_launch_and_resume_template() {
+        let fresh = compile(selection(LaunchHarness::Grok)).expect("compile Grok launch");
+        assert_eq!(fresh.invocation, "grok --no-leader");
+        assert_eq!(fresh.agent_kind, AgentKind::Grok);
+        assert_eq!(
+            fresh.resume_template,
+            Some(vec![
+                "grok".to_string(),
+                "--no-leader".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+            ])
+        );
+
+        let permissive = compile(LaunchSelection {
+            harness: LaunchHarness::Grok,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
+        })
+        .expect("compile permissive Grok launch");
+        assert_eq!(permissive.invocation, "grok --no-leader --always-approve");
+        assert_eq!(
+            permissive.resume_template,
+            Some(vec![
+                "grok".to_string(),
+                "--no-leader".to_string(),
+                "--always-approve".to_string(),
+                "--resume".to_string(),
+                "{conversation}".to_string(),
+            ])
+        );
+    }
+
+    /// An unverified Grok model remains outside the structured contract.
+    #[test]
+    fn grok_rejects_unverified_model_choices() {
+        let mut choice = selection(LaunchHarness::Grok);
+        choice.model = Some("grok-experimental".to_string());
+        assert_eq!(
+            compile(choice).unwrap_err(),
+            "Grok does not currently expose a verified model choice"
+        );
     }
 
     /// Shared model IDs are valid for every OpenRouter owner, while

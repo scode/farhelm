@@ -225,6 +225,12 @@ pub(crate) fn model_enter_target(
     catalog: &[LaunchCatalogModel],
     harness: Option<LaunchHarness>,
 ) -> ModelEnterTarget {
+    // Grok's CLI model contract is deliberately absent from this release.
+    // Refuse stale keyboard state here as well as hiding the control, because
+    // a harness transition can leave one render's options in an event handler.
+    if harness == Some(LaunchHarness::Grok) {
+        return ModelEnterTarget::Nothing;
+    }
     if let Some(index) = active {
         return options
             .get(index)
@@ -277,6 +283,9 @@ pub(crate) fn model_options(
     query: &str,
     show_all: bool,
 ) -> Vec<ModelOption> {
+    if harness == Some(LaunchHarness::Grok) {
+        return Vec::new();
+    }
     let folded_query = query.to_ascii_lowercase();
     let mut options = Vec::new();
     options.push(ModelOption::HarnessDefault);
@@ -621,6 +630,7 @@ pub(crate) fn search_results(
             LaunchHarness::Pi,
             LaunchHarness::Omp,
             LaunchHarness::OpenCode,
+            LaunchHarness::Grok,
         ] {
             if query.is_empty() || harness_word(harness).contains(&folded_query) {
                 results.push(ComposerSearchResult::Harness(harness));
@@ -1027,6 +1037,11 @@ pub(crate) fn selection_is_compatible(
     selection: &LaunchSelection,
     catalog: &[LaunchCatalogModel],
 ) -> bool {
+    if selection.harness == LaunchHarness::Grok
+        && (selection.model.is_some() || selection.effort.is_some())
+    {
+        return false;
+    }
     let known_models = selection.model.as_ref().map(|model| {
         catalog
             .iter()
@@ -1060,6 +1075,7 @@ pub(crate) fn selection_is_compatible(
         // OMP offers the harness default, YOLO, and Approve; the Goose-only
         // labels clear on it rather than silently launching.
         | (LaunchHarness::Omp, None | Some(LaunchPermission::Yolo | LaunchPermission::Approve))
+        | (LaunchHarness::Grok, None | Some(LaunchPermission::Yolo))
         | (_, None | Some(LaunchPermission::Yolo)) => true,
         (
             _,
@@ -1091,6 +1107,15 @@ pub(crate) fn reconcile_harness_selection(
     catalog: &[LaunchCatalogModel],
 ) -> (LaunchSelection, Option<LaunchHarness>) {
     selection.harness = harness;
+    if harness == LaunchHarness::Grok {
+        // Grok exposes neither field. Clear retained values at the harness
+        // boundary so a recent setup or prior selection cannot manufacture a
+        // launch shape that the helm must reject later.
+        selection.model = None;
+        selection.effort = None;
+        selection.permissions = normalized_permissions(harness, selection.permissions);
+        return (selection, None);
+    }
     let known_owners = selection.model.as_ref().map(|model| {
         catalog
             .iter()
@@ -2763,7 +2788,7 @@ mod tests {
         }];
 
         let harnesses = search_results(&history, &catalog, "harness:", None, None);
-        assert_eq!(harnesses.len(), 9);
+        assert_eq!(harnesses.len(), 10);
         assert!(harnesses.iter().all(|result| {
             matches!(
                 result,
@@ -2943,5 +2968,75 @@ mod tests {
                 harness: LaunchHarness::Claude,
             })
         );
+    }
+
+    /// Grok stays searchable while every path refuses an unverified model.
+    ///
+    /// This protects more than the empty catalog: stale options, a custom
+    /// model draft, and a retained selection must not create a supported-looking
+    /// choice that only fails after the request reaches the helm.
+    #[test]
+    fn grok_composer_surface_has_no_model_choices() {
+        let catalog = Vec::new();
+        assert!(model_options(&catalog, Some(LaunchHarness::Grok), "", false).is_empty());
+        assert_eq!(
+            model_enter_target(
+                &[],
+                None,
+                "experimental-model",
+                &catalog,
+                Some(LaunchHarness::Grok),
+            ),
+            ModelEnterTarget::Nothing
+        );
+        assert!(selection_is_compatible(
+            &LaunchSelection {
+                harness: LaunchHarness::Grok,
+                model: None,
+                effort: None,
+                permissions: None,
+            },
+            &catalog,
+        ));
+        assert!(selection_is_compatible(
+            &LaunchSelection {
+                harness: LaunchHarness::Grok,
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Yolo),
+            },
+            &catalog,
+        ));
+        assert!(!selection_is_compatible(
+            &LaunchSelection {
+                harness: LaunchHarness::Grok,
+                model: Some("experimental-model".into()),
+                effort: None,
+                permissions: None,
+            },
+            &catalog,
+        ));
+        let (selection, owner) = reconcile_harness_selection(
+            LaunchSelection {
+                harness: LaunchHarness::Codex,
+                model: Some("experimental-model".into()),
+                effort: Some(LaunchEffort::High),
+                permissions: None,
+            },
+            Some(LaunchHarness::Codex),
+            LaunchHarness::Grok,
+            &catalog,
+        );
+        assert_eq!(selection.model, None);
+        assert_eq!(selection.effort, None);
+        assert_eq!(owner, None);
+
+        for query in ["grok", "harness:grok", "harness:"] {
+            let results = search_results(&LaunchHistory::default(), &catalog, query, None, None);
+            assert!(
+                results.contains(&ComposerSearchResult::Harness(LaunchHarness::Grok)),
+                "Grok must remain discoverable through {query:?}"
+            );
+        }
     }
 }

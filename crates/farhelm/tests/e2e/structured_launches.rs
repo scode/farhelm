@@ -77,6 +77,7 @@ impl FakeHarness {
                     LaunchHarness::Pi => "pi",
                     LaunchHarness::Omp => "omp",
                     LaunchHarness::OpenCode => "opencode",
+                    LaunchHarness::Grok => "grok",
                 })
                 .to_string_lossy()
                 .into_owned(),
@@ -90,6 +91,11 @@ impl FakeHarness {
             "--record-home".to_string(),
             self.home.path().to_string_lossy().into_owned(),
         ];
+        if selection.harness == LaunchHarness::Grok {
+            // The compiler owns exact ordering; this process fixture pins the
+            // ownership flag's survival through the supervisor boundary.
+            argv.push("--no-leader".to_string());
+        }
         if let Some(model) = &selection.model {
             match selection.harness {
                 LaunchHarness::Codex => argv.extend(["-m".to_string(), model.clone()]),
@@ -108,6 +114,7 @@ impl FakeHarness {
                     "--model".to_string(),
                     model.clone(),
                 ]),
+                LaunchHarness::Grok => unreachable!("Grok has no supported model"),
             }
         }
         if let Some(effort) = selection.effort {
@@ -131,6 +138,7 @@ impl FakeHarness {
                 }
                 LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
                 LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
+                LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
             }
         }
         if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -139,6 +147,7 @@ impl FakeHarness {
                 LaunchHarness::Claude => Some("--dangerously-skip-permissions"),
                 LaunchHarness::OpenCode => Some("--auto"),
                 LaunchHarness::Cursor => Some("--force"),
+                LaunchHarness::Grok => Some("--always-approve"),
                 LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => None,
             };
             if let Some(flag) = flag {
@@ -172,7 +181,7 @@ impl FakeHarness {
 pub(crate) fn fake_harness() -> FakeHarness {
     let bin = farhelm_teststate::tempdir().expect("fixture executable directory");
     let home = farhelm_teststate::tempdir().expect("structured launch agent home");
-    for name in ["codex", "claude", "muse", "opencode", "agent"] {
+    for name in ["codex", "claude", "muse", "opencode", "agent", "grok"] {
         let executable = bin.path().join(name);
         let counter = bin.path().join(format!("{name}.generation"));
         std::fs::write(
@@ -232,6 +241,7 @@ fn agent_kind(selection: &LaunchSelection) -> AgentKind {
         LaunchHarness::Goose => AgentKind::Goose,
         LaunchHarness::Pi => AgentKind::Pi,
         LaunchHarness::Omp => AgentKind::Omp,
+        LaunchHarness::Grok => AgentKind::Grok,
         // Muse deliberately remains a Generic runtime integration: it has no
         // conversation-resume contract for this release.
         LaunchHarness::Muse => AgentKind::Generic,
@@ -527,6 +537,12 @@ fn decode_generation_argv(observed: &[u8], session: &str, generation: u32) -> Ge
 /// unit tests own the exact vendor flag spellings and quoting grammar.
 fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
     let words = shell_words::split(argv).expect("fake executable printed shell-safe argv");
+    if selection.harness == LaunchHarness::Grok {
+        assert!(
+            words.iter().any(|word| word == "--no-leader"),
+            "Grok's tracked ownership flag must reach the executable: {words:?}"
+        );
+    }
     if let Some(model) = &selection.model {
         let model_flag = match selection.harness {
             LaunchHarness::Codex => "-m",
@@ -537,6 +553,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode => "--model",
+            LaunchHarness::Grok => unreachable!("Grok has no supported model"),
         };
         assert!(
             words.windows(2).any(|pair| pair == [model_flag, model]),
@@ -562,6 +579,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Pi | LaunchHarness::Omp => effort.as_cli_arg().to_string(),
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
+            LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
         };
         let flag = match selection.harness {
             LaunchHarness::Codex => "-c",
@@ -571,6 +589,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Pi | LaunchHarness::Omp => "--thinking",
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
+            LaunchHarness::Grok => unreachable!("Grok has no supported effort"),
         };
         assert!(
             words
@@ -617,6 +636,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Claude => "--dangerously-skip-permissions",
             LaunchHarness::OpenCode => "--auto",
             LaunchHarness::Cursor => "--force",
+            LaunchHarness::Grok => "--always-approve",
             LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp => return,
         };
         assert!(
@@ -641,6 +661,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         LaunchHarness::Claude,
         LaunchHarness::Muse,
         LaunchHarness::Cursor,
+        LaunchHarness::Grok,
     ];
 
     for harness in defaults {
@@ -657,8 +678,10 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
         let words = shell_words::split(&argv).expect("default fake argv");
         assert!(
             !words.iter().any(|word| {
-                matches!(word.as_str(), "--model" | "--effort" | "--yolo" | "--force")
-                    || word.starts_with("model_reasoning_effort=")
+                matches!(
+                    word.as_str(),
+                    "--model" | "--effort" | "--yolo" | "--force" | "--always-approve"
+                ) || word.starts_with("model_reasoning_effort=")
             }),
             "default selections must omit structured flags: {words:?}"
         );
@@ -671,6 +694,12 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
             workspace_trust: None,
+        },
+        LaunchSelection {
+            harness: LaunchHarness::Grok,
+            model: None,
+            effort: None,
+            permissions: Some(LaunchPermission::Yolo),
         },
         LaunchSelection {
             harness: LaunchHarness::Codex,
@@ -731,15 +760,18 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             .expect("created session remains stored");
         assert_eq!(stored.launch, Some(selection.clone()));
 
-        // Cursor retains launch choices across a fresh process generation,
-        // but Generic must never turn that into conversation Resume.
-        if selection.harness == LaunchHarness::Cursor {
+        // Cursor and the launch-only Grok kind retain launch choices across a
+        // fresh process generation, but neither may invent conversation Resume.
+        if matches!(
+            selection.harness,
+            LaunchHarness::Cursor | LaunchHarness::Grok
+        ) {
             assert_eq!(live.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
             let restarted = h
                 .client
                 .restart_session(&created.id, RestartMode::Fresh, true)
                 .await
-                .expect("fresh-restart Cursor fixture");
+                .expect("fresh-restart launch-only fixture");
             assert_eq!(restarted.launch, Some(selection.clone()));
             assert_forwarded(&observed_argv(&h, &created.id, 3).await, &selection);
         }

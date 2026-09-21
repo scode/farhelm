@@ -63,6 +63,7 @@ pub(crate) enum HarnessGlyph {
     /// mark, which is visibly a different drawing from Pi's pixel-grid "P"
     /// even at the smallest supported row width.
     Omp,
+    Grok,
     OpenCode,
     Terminal,
 }
@@ -151,6 +152,11 @@ const PI_BADGE: &str =
 /// Greek omega that was Farhelm's own invention.
 const OMP_PI: &str = "M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z";
 
+/// Farhelm's own Grok mark: a block "G" drawn as one path. xAI does not
+/// publish a self-serve brand kit for this use, so the sidebar names the
+/// harness without copying or approximating xAI's mark.
+const GROK_GLYPH: &str = "M21 4H8C4.686 4 2 6.686 2 10V14C2 17.314 4.686 20 8 20H21V11H12V15H16V16H8C6.895 16 6 15.105 6 14V10C6 8.895 6.895 8 8 8H21Z";
+
 /// OpenCode's favicon cut: one ring drawn with the even-odd rule. The
 /// project's logo file is a two-tone pair of nested frames whose inner
 /// mid-grey square collapses under `currentColor`; the favicon is the
@@ -183,6 +189,7 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
         HarnessGlyph::Goose => "goose",
         HarnessGlyph::Pi => "pi",
         HarnessGlyph::Omp => "omp",
+        HarnessGlyph::Grok => "grok",
         HarnessGlyph::OpenCode => "opencode",
         HarnessGlyph::Terminal => "terminal",
     };
@@ -208,6 +215,8 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
                 HarnessGlyph::Pi => rsx! { g { transform: "translate(1.0000 1.0000) scale(0.017857)", path { d: PI_BADGE, fill: "currentColor" } } },
                 // bbox 14,16 36x40 in a 64 box
                 HarnessGlyph::Omp => rsx! { g { transform: "translate(-2.0000 -3.0000) scale(0.250000)", path { d: OMP_PI, fill: "currentColor" } } },
+                // bbox 2,4 19x16 in a 24 box
+                HarnessGlyph::Grok => rsx! { g { transform: "translate(-0.0526 -0.3158) scale(0.526316)", path { d: GROK_GLYPH, fill: "currentColor" } } },
                 // bbox 128,96 256x320 in a 512 box
                 HarnessGlyph::OpenCode => rsx! { g { transform: "translate(-2.0000 -2.0000) scale(0.031250)", path { d: OPENCODE_RING, fill: "currentColor", fill_rule: "evenodd" } } },
                 // Stroke geometry: stem stroke 2.6 and dot stroke 4.2 with round

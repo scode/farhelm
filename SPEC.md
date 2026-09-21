@@ -151,6 +151,14 @@ no conversation tracking, automatic Resume, configuration editing, hooks or inst
 that tracking and Resume are unsupported. Restart starts fresh; history and clone preserve launch intent. See
 [Cursor](docs/harnesses/cursor.md).
 
+Grok is a structured harness for the official `grok` CLI. A normal launch is `grok --no-leader`; YOLO adds
+`--always-approve`. Farhelm exposes neither a Grok model picker nor an effort picker because those command-line
+contracts have not been verified. Every generated fresh and resume command retains `--no-leader`: the shared leader is
+outside the tracked process's ownership boundary, while a private leader still permits Grok's native subagents. Grok
+uses generic activity status. The launch layer preserves its exact `grok --no-leader --resume <conversation-id>` argv,
+but it does not offer Resume until the capture integration has verified an exact conversation. See
+[Grok](docs/harnesses/grok.md).
+
 Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
 recognition are not implemented; no Muse integration kind is implied by the presence of its built-in profiles.
@@ -317,33 +325,33 @@ checkout; the agent choice is independent of that destination:
   on creation — working directory, invocation, title, and any invocation override — must fit in 64 KiB between them, and
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
-- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Cursor, Goose, Pi,
+- Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Cursor, Grok, Goose, Pi,
   OpenCode, and OMP launches carry a harness plus model, effort, permission, and workspace-trust choices where that
   harness supports them; visible permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`.
   Absent optional choices mean the selected harness's defaults and omit their flags, except an omitted Pi permission
-  means its mandatory YOLO mode. Model selection is optional for every harness; OpenCode and Cursor offer no effort
-  choice. The helm owns the released model catalog and validates every structured choice, so the browser never turns a
-  model identifier into an argv fragment. A known model identifies its owning harness; a custom model needs an explicit
-  harness. A shared known model retains a selected owning harness, while an unselected ambiguous id asks for one.
-  Replacing a harness clears only choices that are incompatible with it. An invalid combination cannot launch. New
-  normally preselects no harness or model. The permissions mode remembers the last successful structured launch,
-  helm-wide across every client; an explicit workspace-trust choice on Codex, Muse, or Pi is remembered separately after
-  a successful user launch. `trust:true` and `trust:false` are single search actions on those harnesses. Codex true and
-  false set that launch's exact working directory to `trusted` and `untrusted` through its per-run project
-  configuration; a fresh checkout's path is filled only after the supervisor has resolved it. Muse true uses
-  `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. Each setting applies to one
-  launch and never writes vendor trust state; Muse false adds no flag and cannot revoke trust from YOLO or vendor
-  settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, and Claude may still ask for
-  directory trust. Farhelm does not silently answer their prompts. Claude, Goose, OMP, and Cursor have no supported
-  interactive workspace-trust switch. "reset choices" returns both segments to their remembered values rather than to
-  harness defaults, and a recent-setup row's own saved choice overrides it when used. The launch-composer search matches
-  harnesses, `other / command`, models scoped by the chosen harness, effort words offered by that harness and model,
-  supported trust actions, host and name actions, folders, and recent setups. `name:foo` applies the entire value as the
-  session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias.
-  The default local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box
-  while keeping focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch
-  path; Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing the
-  query, so Enter after Escape does nothing until the box is emptied.
+  means its mandatory YOLO mode. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer no
+  effort choice, and Grok accepts no model choice. The helm owns the released model catalog and validates every
+  structured choice, so the browser never turns a model identifier into an argv fragment. A known model identifies its
+  owning harness; a custom model needs an explicit harness. A shared known model retains a selected owning harness,
+  while an unselected ambiguous id asks for one. Replacing a harness clears only choices that are incompatible with it.
+  An invalid combination cannot launch. New normally preselects no harness or model. The permissions mode remembers the
+  last successful structured launch, helm-wide across every client; an explicit workspace-trust choice on Codex, Muse,
+  or Pi is remembered separately after a successful user launch. `trust:true` and `trust:false` are single search
+  actions on those harnesses. Codex true and false set that launch's exact working directory to `trusted` and
+  `untrusted` through its per-run project configuration; a fresh checkout's path is filled only after the supervisor has
+  resolved it. Muse true uses `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively.
+  Each setting applies to one launch and never writes vendor trust state; Muse false adds no flag and cannot revoke
+  trust from YOLO or vendor settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, and
+  Claude may still ask for directory trust. Farhelm does not silently answer their prompts. Claude, Goose, OMP, and
+  Cursor have no supported interactive workspace-trust switch. "reset choices" returns both segments to their remembered
+  values rather than to harness defaults, and a recent-setup row's own saved choice overrides it when used. The
+  launch-composer search matches harnesses, `other / command`, models scoped by the chosen harness, effort words offered
+  by that harness and model, supported trust actions, host and name actions, folders, and recent setups. `name:foo`
+  applies the entire value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local
+  host even if it has an alias. The default local host label in the GUI is `local (this machine)`. Accepting a result
+  applies it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid
+  selection through the ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape
+  closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
   replaces only the model, effort, permissions, and workspace-trust controls with the profile picker and raw invocation
   field. Existing callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not
