@@ -640,7 +640,9 @@
 - Decision: discarded under the user's authorization to discard rare timing-dependent findings whose only impact is
   slightly misleading presentation, without data loss or a serious operational consequence.
 - Completion criteria: remove the feedback file and its index entry during execution without code or spec changes.
-- Execution: `pending`.
+- Execution: `complete`; removed the feedback file and index entry without code or spec changes. jj change:
+  `rqovkxtksxxokxluomrtsqktqwttuytt`; bookmark: `triage-discard-host-view-mismatch`; draft PR:
+  https://github.com/scode/farhelm/pull/840/changes.
 
 ## supervisor-discards-actor-panic-cause.md
 
