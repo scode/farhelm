@@ -319,6 +319,35 @@ pub(crate) struct CountBanner {
     pub(crate) class: &'static str,
     /// The count sentence itself.
     pub(crate) text: String,
+    /// How many leading bytes of `text` are the count, when this banner is
+    /// the plain "N sessions" heading and nothing else; `None` for every
+    /// sentence-shaped variant.
+    ///
+    /// The plain count doubles as the sidebar's section heading, and a
+    /// heading is drawn label first with the number set apart ("SESSIONS
+    /// 12"), so the renderer needs to know where the number ends. It gets a
+    /// split point into `text` rather than a second string so that the two
+    /// spans it renders can only ever concatenate back to `text`: the
+    /// element's text content stays "12 sessions", which is what a screen
+    /// reader announces and what the browser suite asserts. The
+    /// reordering is visual only, done in CSS.
+    ///
+    /// A filtered or truncated banner is a sentence, not a heading ("2
+    /// matching of 12 sessions" has no single number to set apart), which
+    /// is why those carry `None` and render as one run of text.
+    pub(crate) count_len: Option<usize>,
+}
+
+impl CountBanner {
+    /// Split `text` into its count and the label after it, for the one
+    /// variant that has a count to set apart; `None` otherwise.
+    ///
+    /// The label keeps its leading space. The renderer puts the two halves
+    /// in adjacent spans, and dropping the space would change the element's
+    /// text content from "12 sessions" to "12sessions".
+    pub(crate) fn heading_parts(&self) -> Option<(&str, &str)> {
+        self.count_len.map(|len| self.text.split_at(len))
+    }
 }
 
 /// The clause a filtered banner carries when the helm never answered the
@@ -397,21 +426,32 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
     // beside it reasoned as though the list were whole would be the UI
     // disagreeing with itself about the one fact it just printed.
     let short = !listing_is_complete(listing);
-    let (class, text) = match (listing.filtered, listing.matching, short) {
-        (false, _, false) => (
-            "banner session-count",
-            format!("{} sessions", listing.total),
-        ),
+    // The third element is `CountBanner::count_len`: set by the one arm whose
+    // text is a bare count, right beside the `format!` it measures, so the
+    // split point and the sentence cannot be changed apart. A decimal `u64`
+    // is ASCII, so its byte length is always a char boundary for `split_at`.
+    let (class, text, count_len) = match (listing.filtered, listing.matching, short) {
+        (false, _, false) => {
+            let total = listing.total.to_string();
+            let count_len = total.len();
+            (
+                "banner session-count",
+                format!("{total} sessions"),
+                Some(count_len),
+            )
+        }
         (false, _, true) => (
             "banner truncation-banner",
             format!(
                 "showing {shown} of {} sessions{TRUNCATION_NOTE}",
                 listing.total
             ),
+            None,
         ),
         (true, Some(matching), false) => (
             "banner session-count filtered",
             format!("{matching} matching of {} sessions", listing.total),
+            None,
         ),
         // Three numbers, because all three are different questions: how many
         // are on screen, how many match, and how big the view is. Dropping
@@ -423,6 +463,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
                 "showing {shown} of {matching} matching sessions ({} in all){TRUNCATION_NOTE}",
                 listing.total
             ),
+            None,
         ),
         // No matching count to report: the sentence reverts to the
         // unfiltered one, which is what the rows actually are, and the
@@ -432,6 +473,7 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
         (true, None, false) => (
             "banner session-count filtered",
             format!("{} sessions{FILTER_UNSUPPORTED_NOTE}", listing.total),
+            None,
         ),
         (true, None, true) => (
             "banner truncation-banner filtered",
@@ -439,9 +481,14 @@ pub(crate) fn count_banner(listing: &SessionListing) -> CountBanner {
                 "showing {shown} of {} sessions{TRUNCATION_NOTE}{FILTER_UNSUPPORTED_NOTE}",
                 listing.total
             ),
+            None,
         ),
     };
-    CountBanner { class, text }
+    CountBanner {
+        class,
+        text,
+        count_len,
+    }
 }
 
 #[cfg(test)]
@@ -816,6 +863,45 @@ mod tests {
             let banner = count_banner(&listing);
             assert_eq!(banner.class, class, "class for {text:?}");
             assert_eq!(banner.text, text);
+        }
+    }
+
+    /// Only the plain count offers a number to set apart, and its two halves
+    /// concatenate back to the pinned sentence.
+    ///
+    /// The sidebar draws the plain count as a section heading, label first
+    /// ("SESSIONS 12"), by rendering the halves in two spans and reordering
+    /// them in CSS. That is only safe while the spans' text still reads "12
+    /// sessions" in DOM order: the browser suite asserts that exact text
+    /// across several spec files and a screen reader announces it. So the split must
+    /// lose nothing (the label keeps its leading space), must land exactly
+    /// after the digits for a multi-digit total, and must not be offered for
+    /// the sentence-shaped variants, where a lone leading number set apart
+    /// from "matching of 12 sessions" would be a heading made of half a
+    /// sentence.
+    #[farhelm_testtrace::test]
+    fn only_the_plain_count_splits_into_a_number_and_a_label() {
+        for total in [0, 4, 12, 700] {
+            let banner = count_banner(&listing(total as usize, total, false));
+            let (count, label) = banner
+                .heading_parts()
+                .expect("the plain count is a heading with a number to set apart");
+            assert_eq!(count, total.to_string());
+            assert_eq!(label, " sessions");
+            assert_eq!(format!("{count}{label}"), banner.text);
+        }
+        for sentence in [
+            listing(4, 4, true),
+            filtered_listing(2, 2, 12, false),
+            filtered_listing(2, 5, 12, true),
+        ] {
+            let banner = count_banner(&sentence);
+            assert_eq!(
+                banner.heading_parts(),
+                None,
+                "{:?} is a sentence, not a heading",
+                banner.text
+            );
         }
     }
 

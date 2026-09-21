@@ -3045,6 +3045,37 @@ test("the host list counts every host, humanizes phases, and clips long names", 
 });
 
 /**
+ * The sidebar's two counts are drawn as headings, label first ("HOSTS 2",
+ * "SESSIONS 1"), while their text stays count first ("2 hosts").
+ *
+ * Both halves matter and they pull against each other. The text is a
+ * contract: a screen reader announces it, and this suite asserts "N
+ * sessions" / "N hosts" across several spec files, so the markup keeps the number first. The
+ * heading order is the design, done by a CSS reorder of two spans. A change
+ * that "fixed" either one by touching the other (swapping the spans in the
+ * markup, or dropping the reorder) would pass every other test here.
+ */
+test("sidebar count headings read label first on screen and count first in text", async ({ page, request }) => {
+  const session = await createSession(request, { title: `heading-order-${Date.now()}` });
+  try {
+    await page.goto("/");
+    await expect(row(page, session.id)).toBeVisible({ timeout: 20_000 });
+    for (const heading of [page.locator(".hosts-heading .host-count"), page.locator(".session-heading .session-count")]) {
+      // Fixture premise: this is the plain count, the only variant that is a
+      // heading. A filtered or truncated banner is a sentence and keeps its
+      // single run of text, so it would have no spans to compare.
+      await expect(heading).toHaveText(/^\d+ (host|hosts|sessions)$/);
+      const count = (await heading.locator(".heading-count").boundingBox())!;
+      const label = (await heading.locator(".heading-label").boundingBox())!;
+      expect(label.x + label.width, "the label is painted to the left of the count").toBeLessThanOrEqual(count.x);
+      expect(label.width, "the label must be painted, not collapsed by the reorder").toBeGreaterThan(0);
+    }
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
  * A LOCAL session's locality mark is provisional until the registry answers:
  * the host name remains truthful on the second line throughout, while the
  * first-line slot changes from blank/unknown to the local glyph once the
@@ -5583,8 +5614,17 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
     await expect(row.locator(".launch-composer-recent-harness")).toHaveText(harness);
   }
   const firstRow = slots.getByRole("button").first();
-  const destination = firstRow.locator(".launch-composer-recent-destination");
-  expect(await destination.evaluate((span) => span.scrollWidth > span.clientWidth), "the long folder must truncate inside its own span, not push the row").toBe(true);
+  // The folder cell, not the destination span around it: the row is a grid
+  // whose columns line up down the list, and the destination span is
+  // `display: contents` (it exists for its "folder · host" text), so it has
+  // no box to overflow. The folder is the cell that gives way to a long path.
+  const folder = firstRow.locator(".launch-composer-recent-destination .launch-composer-recent-folder");
+  expect(await folder.evaluate((span) => span.scrollWidth > span.clientWidth), "the long folder must truncate inside its own cell, not push the row").toBe(true);
+  // Truncating the folder must not cost the host: it is its own cell, and a
+  // clipped host would name the wrong machine.
+  const host = firstRow.locator(".launch-composer-recent-destination .launch-composer-recent-host");
+  await expect(host).toHaveText("this machine");
+  expect(await host.evaluate((span) => span.scrollWidth <= span.clientWidth), "the host cell must show its whole name beside a truncated folder").toBe(true);
   const rowBox = await firstRow.boundingBox();
   const harnessBox = await firstRow.locator(".launch-composer-recent-harness").boundingBox();
   expect(rowBox, "the long recent row must have a measurable box").not.toBeNull();
@@ -5714,6 +5754,116 @@ test("composer recent rows lead with the harness", async ({ page, request }) => 
     `${cwd} · this machine`,
     `${cwd} · this machine`,
   ]);
+});
+
+/** The visible row lists only what a setup sets explicitly, in columns that
+ * line up down the list, while its title still names every default.
+ *
+ * Three rows that each spelled out "model: default · effort: default ·
+ * permissions: default" buried the one row that differed, so the row now
+ * shows what is unusual about a setup and the word `defaults` when nothing
+ * is. That must not cost the complete description: the summary helper names
+ * defaults on purpose, so that absence is never mistaken for an invisible
+ * retained value, and the title and accessible name are where that promise
+ * is still kept. Alignment is asserted because it is the point of the grid:
+ * rows whose columns start at different x positions are the ragged list this
+ * replaced. */
+test("composer recent rows list only explicit choices, in aligned columns", async ({ page, request }) => {
+  const cwd = "/composer-explicit-only";
+  await installComposerChoices(page, request, [
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "codex", model: "explicit-model", effort: "high", permissions: "yolo" }, created_at: 3, creation_seq: 3 },
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "claude", model: null, effort: null, permissions: null }, created_at: 2, creation_seq: 2 },
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "claude", model: null, effort: null, permissions: "yolo" }, created_at: 1, creation_seq: 1 },
+  ], [
+    { id: "explicit-model", harness: "codex", efforts: ["high"] },
+  ]);
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
+  const rows = form.locator(".launch-composer-recent-slots").getByRole("button");
+  // The fixture premise: all three saved setups are offered, in saved order,
+  // before any cell is read. A fresh form carries no explicit draft, which
+  // is the condition under which a default-valued recent is not hidden.
+  await expect(rows.locator(".launch-composer-recent-harness")).toHaveText(["Codex", "Claude", "Claude"]);
+
+  await expect(rows.locator(".launch-composer-recent-selection")).toHaveText([
+    "model: explicit-model · effort: High · permissions: yolo",
+    "defaults",
+    "permissions: yolo",
+  ]);
+  await expect(rows.nth(0).locator(".launch-composer-danger")).toHaveText("yolo");
+  await expect(rows.nth(1).locator(".launch-composer-danger")).toHaveCount(0);
+
+  // The complete description survives where it always was.
+  await expect(rows.nth(1)).toHaveAttribute(
+    "title",
+    `${cwd} · this machine · Claude · model: default · effort: default · permissions: default`,
+  );
+  await expect(rows.nth(1)).toHaveAccessibleName(
+    `${cwd} · this machine · Claude · model: default · effort: default · permissions: default`,
+  );
+
+  for (const cell of [".launch-composer-recent-folder", ".launch-composer-recent-host", ".launch-composer-recent-selection"]) {
+    const lefts = await rows.locator(cell).evaluateAll((cells) => cells.map((node) => Math.round(node.getBoundingClientRect().left)));
+    expect(lefts, `${cell} must be painted in every row`).toHaveLength(3);
+    expect(new Set(lefts).size, `${cell} must start at one x in every row, got ${lefts.join(", ")}`).toBe(1);
+  }
+
+  // Alignment has to survive keyboard focus. The focused row alone shows the
+  // "⏎ launch" hint, and a hint in a content-sized track took its width out
+  // of the folder and shifted that one row's host and choices left, exactly
+  // while someone tabs down the list. Reached by a real Tab so the row is
+  // `:focus-visible`, which programmatic focus does not grant in Chromium.
+  const search = form.getByRole("combobox", { name: "search folders, harnesses, models, and efforts", exact: true });
+  await search.focus();
+  await expect(search).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(rows.nth(0), "Tab from the search box must land on the first recent row").toBeFocused();
+  await expect(rows.nth(0).locator(".launch-composer-recent-hint"), "the focused row must be showing its hint").toBeVisible();
+  for (const cell of [".launch-composer-recent-host", ".launch-composer-recent-selection"]) {
+    const lefts = await rows.locator(cell).evaluateAll((cells) => cells.map((node) => Math.round(node.getBoundingClientRect().left)));
+    expect(new Set(lefts).size, `${cell} must not move in the focused row, got ${lefts.join(", ")}`).toBe(1);
+  }
+});
+
+/** At phone width a recent row keeps its folder and gives up its host.
+ *
+ * The folder is the one cell that tells two recent setups apart; the host is
+ * the same string in every row. A grid hands its fixed-maximum tracks their
+ * width before a flexible one gets any, so the folder on a flexible track was
+ * the first cell to reach zero width in a narrow window, leaving rows that
+ * read "Codex   this machine   …" with no folder at all. The phone layout
+ * drops the host cell by hiding it, which must not change the destination's
+ * TEXT: other tests and the accessible description rely on "folder · host". */
+test("a phone-width recent row shows its folder and hides its host", async ({ page, request }) => {
+  const cwd = "/composer-phone-row";
+  await installComposerChoices(page, request, [
+    { host: 1, canonical_cwd: cwd, cwd, selection: { harness: "codex", model: "phone-model", effort: "high", permissions: "yolo" }, created_at: 1, creation_seq: 1 },
+  ], [
+    { id: "phone-model", harness: "codex", efforts: ["high"] },
+  ]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator(".create-session-form");
+  await form.getByLabel("folder", { exact: true }).fill(cwd);
+  const recent = form.locator(".launch-composer-recent-slots").getByRole("button");
+  // Fixture premise: the one saved setup is offered before anything is measured.
+  await expect(recent).toHaveCount(1);
+  await recent.scrollIntoViewIfNeeded();
+
+  const folder = recent.locator(".launch-composer-recent-folder");
+  await expect(folder).toHaveText(cwd);
+  const folderBox = await folder.boundingBox();
+  expect(folderBox, "the folder cell must have a box at phone width").not.toBeNull();
+  expect(folderBox!.width, "the folder must keep real width, not collapse behind the fixed tracks").toBeGreaterThan(40);
+
+  await expect(recent.locator(".launch-composer-recent-host")).toBeHidden();
+  await expect(recent.locator(".launch-composer-recent-destination")).toHaveText(`${cwd} · this machine`);
+  const rowBox = (await recent.boundingBox())!;
+  const selectionBox = (await recent.locator(".launch-composer-recent-selection").boundingBox())!;
+  expect(selectionBox.x + selectionBox.width, "the choices cell must end inside the row").toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
 });
 
 /** Search recents retain their independent 44px two-line contract, including

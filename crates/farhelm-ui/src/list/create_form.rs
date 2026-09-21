@@ -2816,8 +2816,13 @@ pub(super) fn CreateSessionForm(
     // one), and one Element keeps the two handlers from drifting apart.
     // "home" reseeds only the folder; "local home" also moves the host to the
     // local machine and takes the clone's host binding off automatic handling.
+    // The two resets share the recent-folder grid (see the folder links in the
+    // rsx below) and carry their own class so the stylesheet can start them on
+    // a row of their own: they are fixed destinations, not history, and the
+    // row break is what says so now that no "·" separates the two kinds.
     let destination_resets = rsx! {
         button { r#type: "button", disabled: busy,
+            class: "launch-composer-folder-reset",
             aria_label: "reset folder to home",
             onclick: move |_| {
                 if !draft_transition_allowed(ops) { return; }
@@ -2833,8 +2838,8 @@ pub(super) fn CreateSessionForm(
             },
             "home"
         }
-        span { class: "launch-composer-folder-links-separator", aria_hidden: "true", "·" }
         button { r#type: "button", disabled: busy,
+            class: "launch-composer-folder-reset",
             aria_label: "reset destination to local home",
             onclick: move |_| {
                 if !draft_transition_allowed(ops) { return; }
@@ -3909,10 +3914,11 @@ pub(super) fn CreateSessionForm(
                     div { class: "launch-composer-recents",
                             span { class: "launch-composer-section-label", "recent setups" }
                             div { class: "launch-composer-recent-slots",
-                            for (entry, summary, before_permissions) in recent_launches.iter().take(3).map(|entry| (
+                            for (entry, summary, explicit, permission) in recent_launches.iter().take(3).map(|entry| (
                                 entry,
                                 crate::launch_composer::selection_summary(&entry.selection),
-                                crate::launch_composer::selection_summary_before_permissions(&entry.selection),
+                                crate::launch_composer::selection_explicit_before_permissions(&entry.selection).join(" · "),
+                                crate::launch_composer::selection_permission_value(&entry.selection),
                             )) {
                                 button {
                                     r#type: "button",
@@ -3951,21 +3957,54 @@ pub(super) fn CreateSessionForm(
                                             document::eval("document.querySelector('.create-session-form[role=\"dialog\"]')?.requestSubmit()");
                                         }
                                     },
+                                    // The row is a grid so that harness, folder,
+                                    // host, and choices line up as columns down
+                                    // the list (see `.launch-composer-recent-slots
+                                    // > button` in app.css). The folder and host
+                                    // are separate cells, but they stay children
+                                    // of ONE destination span, separator included,
+                                    // so that span's text is still "folder · host":
+                                    // the browser suite reads it, and the span
+                                    // turns into its children for layout
+                                    // (`display: contents`). The separators are
+                                    // real text for that reason and hidden by the
+                                    // stylesheet; the columns are what separate
+                                    // the cells on screen.
                                     span { class: "launch-composer-recent-harness", "{entry.selection.harness:?}" }
-                                    " · "
-                                    span { class: "launch-composer-recent-destination", dir: "ltr", "{display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label}" }
-                                    " · "
-                                    // The permission is spelled here, not by the
-                                    // summary helper, so the one danger-colored
-                                    // word cannot drift from the text around it
-                                    // the way string surgery on a Debug spelling
-                                    // would. Matched on the signal's value.
+                                    span { class: "launch-composer-recent-destination", dir: "ltr",
+                                        span { class: "launch-composer-recent-folder", "{display_peer(&crate::launch_composer::recent_destination_label(&entry))}" }
+                                        span { class: "launch-composer-recent-separator", " · " }
+                                        span { class: "launch-composer-recent-host", "{selected_host_label}" }
+                                    }
+                                    // Only what this setup sets explicitly, so
+                                    // the row that differs stands out; the title
+                                    // and accessible name above still name every
+                                    // default (`selection_explicit_before_permissions`
+                                    // has the reasoning). The permission is
+                                    // spelled here, not by a summary helper, so
+                                    // the one danger-colored word cannot drift
+                                    // from the text around it the way string
+                                    // surgery on a Debug spelling would.
                                     span { class: "launch-composer-recent-selection",
-                                        "{display_peer(&before_permissions)} · permissions: "
-                                        if crate::launch_composer::selection_permission_value(&entry.selection) == "yolo" {
-                                            span { class: "launch-composer-danger", "yolo" }
-                                        } else {
-                                            "{crate::launch_composer::selection_permission_value(&entry.selection)}"
+                                        if explicit.is_empty() && permission == "default" {
+                                            "{crate::launch_composer::RECENT_ALL_DEFAULTS}"
+                                        }
+                                        // Guarded, not interpolated bare:
+                                        // `display_peer` renders an empty
+                                        // string as the word "(empty)", which
+                                        // is right for a peer-authored field
+                                        // and wrong for "nothing to list".
+                                        if !explicit.is_empty() {
+                                            "{display_peer(&explicit)}"
+                                        }
+                                        if permission != "default" {
+                                            if !explicit.is_empty() { " · " }
+                                            "permissions: "
+                                            if permission == "yolo" {
+                                                span { class: "launch-composer-danger", "yolo" }
+                                            } else {
+                                                "{permission}"
+                                            }
                                         }
                                     }
                                     span { class: "launch-composer-recent-hint", "⏎ launch" }
@@ -4078,15 +4117,24 @@ pub(super) fn CreateSessionForm(
                             // Recent folders are destination shortcuts, rendered as
                             // text links rather than chips so they read as history
                             // beneath the field they fill, not as a second picker.
+                            // They sit in a grid, one path per cell. They used
+                            // to be a wrapping run of inline links behind a
+                            // "recent:" prefix with "·" between the two kinds,
+                            // and paths of different lengths wrapped raggedly
+                            // and left separators stranded at line ends. The
+                            // group's accessible name still says what it holds.
                             div { class: "launch-composer-folder-links", aria_label: "recent folders",
-                                if !recent_history.folders.is_empty() {
-                                    span { class: "launch-composer-folder-links-muted", "recent:" }
-                                }
                                 for folder in recent_history.folders.iter().take(3) {
                                     button {
                                         r#type: "button",
                                         class: if submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd { "selected" } else { "" },
                                         aria_pressed: submitted_field(&cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref()) == folder.display_cwd,
+                                        // A grid cell ellipsizes a long path at
+                                        // its END, which is the part that tells
+                                        // sibling checkouts apart, so the whole
+                                        // path has to be reachable without
+                                        // picking the link to find out.
+                                        title: "{display_peer(&folder.display_cwd)}",
                                         disabled: busy,
                                         onclick: {
                                             let folder = folder.display_cwd.clone();
@@ -4109,9 +4157,6 @@ pub(super) fn CreateSessionForm(
                                         },
                                         "{display_peer(&folder.display_cwd)}"
                                     }
-                                }
-                                if !recent_history.folders.is_empty() {
-                                    span { class: "launch-composer-folder-links-separator", aria_hidden: "true", "·" }
                                 }
                                 {destination_resets.clone()}
                             }

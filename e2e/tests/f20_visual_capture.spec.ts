@@ -54,6 +54,17 @@ async function installVisualFixture(page: Page) {
   }));
 }
 
+/** The recent-setup row whose title mentions `ending`.
+ *
+ * Scoped to the recent rows on purpose. A row's title is its complete
+ * description, which starts with its folder, and the recent-folder links
+ * below carry their folder as a title too (a grid cell ellipsizes a long
+ * path at its end, the part that tells these fixtures apart). An unscoped
+ * title lookup matches both and fails strict mode. */
+function recentRow(form: Locator, ending: string): Locator {
+  return form.locator(".launch-composer-recent-slots").getByTitle(new RegExp(ending));
+}
+
 /** Reopen a fresh form so each image has one named, reproducible precondition. */
 async function openComposer(page: Page): Promise<Locator> {
   await page.goto("/");
@@ -126,8 +137,8 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
   };
 
   await capture("three-recents-defaults", desktop, async (form) => {
-    await expect(form.getByTitle(new RegExp("alpha-the-ending-that-matters"))).toBeVisible();
-    await expect(form.getByTitle(new RegExp("bravo-the-different-ending"))).toBeVisible();
+    await expect(recentRow(form, "alpha-the-ending-that-matters")).toBeVisible();
+    await expect(recentRow(form, "bravo-the-different-ending")).toBeVisible();
   }, ["three 36px recent rows", "two long shared-prefix destinations", "default and explicit selections"]);
   await capture("claude-search-recents", desktop, async (form) => {
     await form.locator('.launch-composer-search input[role="combobox"]').fill("Claude");
@@ -150,7 +161,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await options.nth(0).hover();
   }, ["keyboard active descendant", "different pointer-hovered option"]);
   await capture("three-recents-defaults", narrow, async (form) => {
-    await expect(form.getByTitle(new RegExp("alpha-the-ending-that-matters"))).toBeVisible();
+    await expect(recentRow(form, "alpha-the-ending-that-matters")).toBeVisible();
   }, ["three 36px recent rows", "one-line rows truncate long detail without launch"]);
   await capture("explicit-long-folder", narrow, async (form) => {
     await selectExplicit(form);

@@ -746,6 +746,31 @@ samp {
   text-transform: uppercase;
 }
 
+/* The sidebar's two counts read as headings, label first: "HOSTS 3",
+   "SESSIONS 12". The markup keeps the number FIRST (`.heading-count` then
+   `.heading-label`, the label carrying its own leading space) so the
+   element's text content is still "3 hosts" / "12 sessions": that is the
+   sentence a screen reader announces, and the browser suite asserts it
+   across several spec files. `row-reverse` swaps the two on screen only, and
+   `flex-end` keeps the swapped pair at the row's start. A flex item drops
+   the leading space its text begins with, so `gap` is the visible
+   separation. The number is untracked, because it is the datum beside the
+   label and not part of the word. It is NOT a quieter color: the band is
+   `--bg-2`, where `--fg-2` falls under the AA floor, so both halves stay
+   `--fg-1`. */
+.session-heading .banner.session-count:not(.filtered),
+.hosts-heading .host-count {
+  display: inline-flex;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 1ch;
+}
+
+.heading-count {
+  letter-spacing: 0;
+}
+
 .compact-toggle,
 .host-details-control {
   display: inline-flex;
@@ -3578,10 +3603,24 @@ samp {
 .launch-composer-reset {
   border: 0;
   background: transparent;
-  color: var(--fg-0);
+  /* Quiet until approached. Reset is the row's escape hatch, not one of its
+     two actions, and it used to outweigh both: `font: inherit` with no size
+     gave it the dialog's 16px, larger than Launch's own label, underlined
+     and in the primary text color. It keeps `font: inherit` for the face and
+     sets the secondary size and color the composer's other quiet text uses;
+     the underline arrives with hover or keyboard focus, which is when "this
+     is a link-like control" is worth saying. */
+  color: var(--fg-1);
   font: inherit;
-  text-decoration: underline;
+  font-size: 12px;
   margin-left: auto;
+  cursor: pointer;
+}
+
+.launch-composer-reset:hover:not(:disabled),
+.launch-composer-reset:focus-visible:not(:disabled) {
+  color: var(--fg-0);
+  text-decoration: underline;
 }
 
 .launch-composer-recents,
@@ -3656,15 +3695,36 @@ samp {
   padding: 0 12px;
 }
 
+/* One path per cell, two cells across. Paths of different lengths line up
+   in two columns where an inline run wrapped raggedly. Two explicit columns
+   and not `auto-fill` over a `ch` minimum: the destination column is about
+   62ch wide, right at the edge of fitting two 30ch cells, and the engines
+   round `ch` differently, so the same rule gave two columns in Chromium and
+   one in WebKit. A path longer than its cell ellipsizes; the button's title
+   and accessible name carry it whole. The phone block drops to one column. */
 .launch-composer-folder-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 2ch;
   color: var(--fg-1);
   font-size: 12px;
 }
 
+/* The two resets ("home", "local home") are fixed destinations, not history,
+   so the first of them starts a row of its own. That row break replaces the
+   "·" that used to stand between the two kinds. With no history there is no
+   preceding sibling, the selector does not match, and the resets simply start
+   the grid. */
+.launch-composer-folder-links > :not(.launch-composer-folder-reset) + .launch-composer-folder-reset {
+  grid-column-start: 1;
+}
+
 .launch-composer-folder-links > button {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 4px;
   border: 1.5px solid transparent;
   border-radius: var(--radius-sm);
@@ -3679,13 +3739,6 @@ samp {
    `.launch-composer-segmented`. */
 .launch-composer-folder-links > button.selected {
   text-decoration: underline solid;
-}
-
-/* The "recent:" lead-in is a caption for the links, dimmer than the links
-   themselves so the eye lands on the destinations; the separators inherit
-   the line's muted color and need no rule of their own. */
-.launch-composer-folder-links-muted {
-  opacity: 0.75;
 }
 
 .launch-composer-summary {
@@ -4025,32 +4078,67 @@ samp {
   overflow: hidden;
   text-align: left;
   white-space: nowrap;
-  display: flex;
+  /* A grid with the SAME tracks on every row, which is what makes the rows
+     read as a table: harness, folder, host, and choices each start at one x
+     down the list. Each row is its own grid, so a track lines up across rows
+     only if its width does not depend on that row's content. That rules out
+     `auto` everywhere, the hint's track included: the hint shows only on the
+     focused row, and a track that grew for it would shove that one row's
+     host and choices out of line exactly while someone tabs down the list.
+     So the hint track is fixed and the hint is hidden with `visibility`,
+     which keeps its place (see `.launch-composer-recent-hint`).
+
+     Who gives way when the row is narrow is the other thing the tracks
+     decide. Grid hands the `minmax(0, Nch)` tracks their full width BEFORE
+     the `1fr` track gets anything, so a folder on a bare `1fr` was the first
+     cell to reach zero, and the folder is the one cell that tells two recent
+     setups apart (the host is the same string in every row). Hence its 12ch
+     floor: host and choices shrink together first, and both are in the row's
+     title. Below 560px there is no room for four cells at all and the host
+     goes; see the phone block. */
+  display: grid;
+  grid-template-columns: 9ch minmax(12ch, 1fr) minmax(0, 16ch) minmax(0, 34ch) 9ch;
   align-items: center;
-  gap: 0;
+  column-gap: 2ch;
   font-size: 13px;
   font-weight: 400;
 }
 
-/* A row is a compact launch shortcut. Its leading harness stays readable and
-   the hint stays pinned at the right; the destination and the choice detail
-   in between are the shrinkable items, each ellipsizing on its own (a flex
-   container ignores `text-overflow` on itself, so the spans must carry it),
-   rather than adding a second line that pushes the destination controls
-   farther down the dialog. */
+/* A row is a compact launch shortcut, one line high on purpose: a second
+   line would push the destination controls farther down the dialog. Every
+   cell ellipsizes on its own (a grid container ignores `text-overflow` on
+   itself, so the cells must carry it). */
 .launch-composer-recent-harness {
-  flex: none;
   color: var(--fg-0);
   font-weight: 700;
 }
 
-.launch-composer-recent-destination,
+/* The destination span exists for its TEXT ("folder · host", which the
+   browser suite reads) and not for its box: `display: contents` hands its
+   children to the row's grid as the folder and host cells. The separator is
+   part of that text and of nothing on screen, since the columns separate the
+   cells. */
+.launch-composer-recent-destination {
+  display: contents;
+}
+
+.launch-composer-recent-separator {
+  display: none;
+}
+
+.launch-composer-recent-harness,
+.launch-composer-recent-folder,
+.launch-composer-recent-host,
 .launch-composer-recent-selection {
-  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.launch-composer-recent-folder,
+.launch-composer-recent-host,
+.launch-composer-recent-selection {
   color: var(--fg-1);
 }
 
@@ -4060,10 +4148,14 @@ samp {
   font-weight: 400;
 }
 
+/* Hidden with `visibility`, not `display`, so the hint keeps its fixed track
+   whether or not it shows and the focused row's columns stay put (see the
+   grid above). A hidden hint is still out of the accessibility tree, and the
+   row's accessible name never included it. */
 .launch-composer-recent-hint {
-  display: none;
-  flex: none;
-  margin-left: auto;
+  visibility: hidden;
+  grid-column: -2;
+  justify-self: end;
   color: var(--fg-1);
   font-size: 12px;
 }
@@ -4086,7 +4178,7 @@ samp {
 }
 
 .launch-composer-recent-slots > button:focus-visible .launch-composer-recent-hint {
-  display: inline;
+  visibility: visible;
 }
 
 /* The first controls answer the maintainer's complaint directly: Launch says
@@ -4131,8 +4223,16 @@ samp {
   align-self: auto;
   max-width: 100%;
   min-width: 0;
+  /* The vertical padding is what centers the label. `align-items: baseline`
+     (needed, see above) packs both items against the TOP of the line, so
+     with `min-height` alone and no vertical padding the label sat in the
+     upper half of a 44px button. The padding is whatever is left of 44px
+     after one 20px line and the two 1.5px borders (a button sizes by its
+     border box), so Launch stays exactly as tall as Cancel beside it;
+     `min-height` remains as the floor. */
   min-height: 44px;
-  padding: 0 18px;
+  padding: calc((44px - 20px - 3px) / 2) 18px;
+  line-height: 20px;
   border: 1.5px solid var(--accent);
   border-radius: var(--radius-sm);
   background: var(--accent-edge);
@@ -4191,6 +4291,26 @@ samp {
   .launch-composer-backdrop .create-session-form {
     max-height: calc(100vh - 16px);
     padding: 16px;
+  }
+
+  /* A phone's row is about 40ch wide: no room for four cells and a hint.
+     The host is the cell to drop, because it is the same string in every
+     row and the folder is what tells the rows apart. `display: none` keeps
+     the destination span's TEXT intact ("folder · host"), the same way the
+     separator is already hidden, and the host stays in the row's title and
+     accessible name. The hint goes too: it names a keyboard shortcut, and
+     its fixed track is a fifth of a phone's width. */
+  .launch-composer-recent-slots > button {
+    grid-template-columns: 9ch minmax(0, 1fr) minmax(0, 12ch);
+  }
+
+  .launch-composer-recent-host,
+  .launch-composer-recent-hint {
+    display: none;
+  }
+
+  .launch-composer-folder-links {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   /* Reset is secondary, so a narrow row gives it the trailing line instead
