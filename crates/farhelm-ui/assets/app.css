@@ -444,6 +444,35 @@ samp {
   font-family: var(--font-ui);
 }
 
+/* Form controls are the other elements that opt out of `--font-ui` on
+ * their own: every engine's user-agent stylesheet gives `button`, `input`,
+ * `select`, and `textarea` a platform face instead of letting them inherit.
+ * Chrome used to fix that one class at a time (`font: inherit` on `.btn`,
+ * `.session-row-open`, and so on), which made the typeface depend on
+ * whoever wrote a rule remembering to ask for it. Most of the launch
+ * composer's buttons never did, so its harness chips, segments, recent
+ * rows, and cancel rendered in the platform sans-serif next to JetBrains
+ * Mono labels. Nobody chose that pairing. This rule makes the chrome face
+ * the default for every control, so a new one cannot miss it.
+ *
+ * `font-family` only, in the same spirit as the rule above: touch the
+ * typeface and nothing else. A full `font: inherit` would also replace the
+ * user-agent SIZE on any control that never set one, and resize it as a
+ * side effect of a typeface fix. That is also why the per-class
+ * `font: inherit` declarations stay where they are. They inherit size,
+ * weight, and line-height as well, which this rule leaves to the user
+ * agent, and some of them (`.btn`, `.session-row-open`) set no `font-size`
+ * of their own, so deleting one would resize the control it sits on.
+ *
+ * `:where()` holds the selector at zero specificity, so any class rule
+ * that does want a different face wins without an ordering fight. The
+ * `:not()` keeps xterm.js's hidden helper textarea out of it. That element
+ * belongs to the vendored widget, and this file stays out of the
+ * terminal's internal DOM (see the header). */
+:where(button, input, select, textarea):not(:where(.xterm *)) {
+  font-family: inherit;
+}
+
 /* The two-pane shell (BUGS_BURNDOWN.md issue 5): a fixed-width sidebar
  * holding the session list, and a main pane holding the selected session.
  * The sidebar width is FIXED by decision (no drag handle, no persistence);
@@ -3530,12 +3559,28 @@ samp {
 }
 
 .launch-composer-choice-pair {
-  /* The two short segmented decisions fit beside one another in a desktop
-     choice column. A 24px gutter keeps their borders distinct without
-     competing with the column's wider 32px destination-to-choices gap. */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 24px;
+  /* The two segmented decisions sit beside one another when the choice
+     column has room for both at their full width, and permissions drops to
+     its own line when it does not. A 24px gutter keeps their borders
+     distinct without competing with the column's wider 32px
+     destination-to-choices gap; 16px separates the lines after a wrap.
+
+     This used to be two equal `minmax(0, 1fr)` tracks. A harness with three
+     efforts makes effort a four-segment control (default, low, medium,
+     high), which is wider than half the column, and the segmented control
+     clips its overflow: `high` was cut off and could not be clicked. Sizing
+     each control to its content and letting the pair wrap fixes that for
+     any column at least as wide as the widest single control, which also
+     covers the phone layout that used to need its own one-column override.
+     A control wider than the whole column is the segmented control's own
+     problem, and it wraps its segments (see `.launch-composer-segmented`).
+
+     A visible consequence: the controls now hug their segments. As
+     stretched grid items they used to draw their border at the full track
+     width, with empty fill to the right of the last segment. */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
 }
 
 .launch-composer-options {
@@ -3665,27 +3710,43 @@ samp {
 }
 
 /* Fixed, mutually exclusive choices read as one decision when their buttons
-   share an outer border instead of looking like unrelated actions. */
+   share an outer border instead of looking like unrelated actions.
+
+   The control wraps onto a second row when it is wider than the line it sits
+   on. It has to: `overflow: hidden` (which is what clips the segments to the
+   rounded corners) also clips any segment that does not fit, and a clipped
+   segment cannot be clicked. Goose's five-segment permissions control is
+   about 420px wide, more than a phone's whole column, so without the wrap
+   its last choice disappears there.
+
+   Wrapping is also why the rules between segments are drawn as the
+   container's own color showing through a 1px `gap`, with each segment
+   painting the control fill, instead of a `border-left` on every segment but
+   the first: a left border would also land on the first segment of a wrapped
+   row and leave nothing between the rows, where a gap separates segments in
+   both directions. `flex: 1 0 auto` lets a wrapped row's segments grow to
+   fill the control's width, so no strip of separator color shows to the
+   right of a short last row; on a single row the control is content-sized
+   and there is nothing to grow into. */
 .launch-composer-segmented {
   display: inline-flex;
+  flex-wrap: wrap;
+  gap: 1px;
   overflow: hidden;
   border: 1.5px solid var(--composer-border);
   border-radius: 6px;
-  background: var(--composer-control-bg);
+  background: var(--composer-border);
 }
 
 .launch-composer-segmented > button {
+  flex: 1 0 auto;
   min-height: 30px;
   padding: 0 14px;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: var(--composer-control-bg);
   color: var(--composer-control-fg);
   font-size: 13px;
-}
-
-.launch-composer-segmented > button + button {
-  border-left: 1px solid var(--composer-border);
 }
 
 .launch-composer-segmented > button.selected {
@@ -3964,13 +4025,6 @@ samp {
   .launch-composer-reset {
     flex-basis: 100%;
     text-align: right;
-  }
-
-  /* A phone cannot carry two segmented decisions side by side without
-     shrinking their labels into ambiguity, so the pair returns to reading
-     order before either control can cause horizontal overflow. */
-  .launch-composer-choice-pair {
-    grid-template-columns: 1fr;
   }
 
   /* On a phone the row already wraps (Reset takes its own line), so the
