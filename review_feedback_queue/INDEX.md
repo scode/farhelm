@@ -2,8 +2,6 @@
 
 One line per open item. This file must always match the feedback files in this directory.
 
-- `agent-label-empty-cell-on-trailing-slash.md` — trailing-slash invocation renders a blank agent name in the session
-  list.
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
 - `archive-discards-stopped-agent-exit-code.md` — archive drops a stopped agent's exit code and can misattribute a
