@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
-- `cancelled-request-leaks-pending-entry.md` — cancelled request without a reply leaks its pending entry for the
-  connection's lifetime.
 - `commit-window-reads-unpublished-outcome.md` — a commit in the close-to-publish window gets the generic error.
 - `create-runs-inline-on-read-loop.md` — CreateSession runs its full validate-and-launch inline on the read loop.
 - `detach-timeout-abandons-upstream-detach.md` — detach timeout drops the send, leaving the supervisor-side attachment
