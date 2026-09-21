@@ -611,8 +611,10 @@
 - Completion criteria: state both principles in SPEC_impl.md without adding cancellation cleanup or removing existing
   cleanup. Preserve ordinary-operation boundedness and specified connection-retirement and host-removal cleanup. Remove
   this feedback file and its index entry during execution.
-- Execution: `in progress`; the requested implementation-spec clarification is applied locally and formatting checked.
-  Queue removal and the execution PR remain pending.
+- Execution: `complete`; verified SPEC_impl.md's "Supervisor metadata retention and nonresponse" principles, already
+  committed at the triage anchor. Removed the feedback and index entry without changing cleanup or ordinary boundedness.
+  jj change: `luwvxrmslsovvknmqnmyxpowwztzxpvt`; bookmark: `triage-complete-nonresponse-spec`; draft PR:
+  https://github.com/scode/farhelm/pull/838/changes.
 
 ## commit-window-reads-unpublished-outcome.md
 
