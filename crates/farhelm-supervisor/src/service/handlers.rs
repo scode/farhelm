@@ -3701,6 +3701,36 @@ pub(crate) async fn handle_restricted_control(
                 .await;
                 return;
             }
+            // Claude's transition vocabulary is the subscribed event AND
+            // Claude's own source words, checked raw for the same reason:
+            // sanitation exists for log safety, and a vocabulary decision
+            // must not depend on what it rewrites. Only an exact
+            // `SessionStart` with a `startup|resume|clear|compact|fork`
+            // source passes — a `SubagentStart`/`SubagentStop`, a missing
+            // or mistyped event, or any other source refuses here, before
+            // the discriminator's second check and long before any vendor
+            // I/O — and admission re-checks both against the same
+            // predicates. `agent_type` is never read (a legitimate
+            // top-level `--agent` carries one); a present subagent
+            // `agent_id` already refused above.
+            if vendor == farhelm_proto::ReportVendor::Claude {
+                let foreground_event = matches!(&hook_event_name, Some(value) if value.as_str().is_some_and(crate::agent_kind::claude::is_claude_foreground_event));
+                let foreground_source =
+                    crate::agent_kind::claude::is_claude_foreground_source(&source);
+                if !foreground_event || !foreground_source {
+                    send_reply(
+                        tx,
+                        &ControlMsg::Error {
+                            req_id,
+                            message: "Claude reported an unsupported foreground transition"
+                                .to_string(),
+                            kind: ErrorKind::InvalidRequest,
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            }
             // Bounded and stripped of control characters HERE, at the
             // doorway, so nothing downstream has to remember that this
             // field is attacker-chosen: `report_conversation` puts it in
@@ -4257,6 +4287,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -4280,6 +4311,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -4325,6 +4357,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -4349,6 +4382,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -5319,6 +5353,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -5338,6 +5373,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -5438,6 +5474,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: session_id.to_string(),
                     parent: None,
                     archived: false,
@@ -5457,6 +5494,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -5697,6 +5735,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -5716,6 +5755,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -7708,11 +7748,13 @@ mod tests {
     /// report driven through it would answer `NotFound` for a reason that
     /// has nothing to do with what is under test.
     ///
-    /// Claude-kind with a placeholder-carrying resume template, so an
-    /// accepted report can actually turn into `RestartOffer::Resume`: a
-    /// Generic session has no integration, and its offer would stay
-    /// `FreshOnly` no matter what was reported — an assertion that passed
-    /// for the wrong reason.
+    /// Claude-kind with a placeholder-carrying resume template, so the
+    /// offer shape is capable of `RestartOffer::Resume`: a Generic
+    /// session has no integration, and its offer would stay `FreshOnly`
+    /// no matter what was reported — an assertion that passed for the
+    /// wrong reason. (Whether the offer is actually extended depends on
+    /// the ownership proof, which this harness cannot satisfy — see
+    /// `reporting_pi_session` for the legacy verdicts.)
     async fn reporting_session(sup: &Arc<Supervisor>, id: &str) -> farhelm_proto::SessionAuth {
         let claimed = sup
             .store
@@ -7723,6 +7765,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -7746,6 +7789,7 @@ mod tests {
                     canonical_cwd: Some("/tmp".to_string()),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -7775,18 +7819,121 @@ mod tests {
         }
     }
 
-    /// Send one `ReportConversation` down a restricted connection and
-    /// decode the single reply it produces, with the ordinary `startup`
-    /// source every test that is not about the source field wants. The
-    /// discriminator is the caller's: tests targeting the kind's own
-    /// adapter pass it, and the mismatch tests pass another kind's.
+    /// Pi-kind with a placeholder-carrying resume template, for the tests
+    /// that need an admission VERDICT: Pi's ownership proof is not
+    /// implemented, so its reports still take the legacy path this
+    /// harness can drive end to end (no live processes needed). Claude
+    /// verdicts live in `service::core`'s `ClaudeAdmission` suite.
+    async fn reporting_pi_session(sup: &Arc<Supervisor>, id: &str) -> farhelm_proto::SessionAuth {
+        let claimed = sup
+            .store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    goose_launch_program: None,
+                    claude_launch_program: None,
+                    id: id.to_string(),
+                    parent: None,
+                    archived: false,
+                    title: id.to_string(),
+                    created_at: crate::store::now_unix(),
+                    last_activity_at: crate::store::now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "pi".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Running,
+                    agent_kind: AgentKind::Pi,
+                    resume_template: Some(vec![
+                        "pi".to_string(),
+                        "--session".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some("/tmp".to_string()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    claude_transcript_ready: false,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed a reporting session");
+        let crate::store::Claimed::Ours { session_token, .. } = claimed else {
+            panic!("an unkeyed insert cannot be taken");
+        };
+        let mut entry = entry_with(None, LastOutcome::Running);
+        entry.info.id = id.to_string();
+        entry.snapshot = IntegrationSnapshot {
+            kind: AgentKind::Pi,
+            resume_template: None,
+        };
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::new(entry));
+        farhelm_proto::SessionAuth {
+            session_id: id.to_string(),
+            token: session_token,
+        }
+    }
+
+    /// Send one Claude `ReportConversation` down a restricted connection
+    /// and decode the single reply it produces: the ordinary `startup`
+    /// source every test that is not about the source field wants, and
+    /// the subscribed `SessionStart` event every non-event test wants.
+    /// The event is load-bearing, not decoration — without it every
+    /// report below would refuse at the doorway and the tests would
+    /// pass for the wrong reason. Full admission needs live processes
+    /// this harness does not own (provenance, peer), so tests that need
+    /// an admission verdict use a legacy kind or assert the refusal the
+    /// harness can honestly produce.
     async fn send_report(
         sup: &Arc<Supervisor>,
         auth: &farhelm_proto::SessionAuth,
         req_id: u64,
         conversation: &str,
     ) -> ControlMsg {
-        send_report_with_vendor(sup, auth, req_id, conversation, ReportVendor::Claude).await
+        send_report_with_event(
+            sup,
+            auth,
+            req_id,
+            conversation,
+            ReportVendor::Claude,
+            "startup",
+            Some(serde_json::Value::String("SessionStart".to_string())),
+            // Shape-valid only: existence is admission's business, and
+            // these tests refuse before it. Without a locator every
+            // report below would refuse at the locator gate and the
+            // tests would pass for the wrong reason.
+            Some(serde_json::Value::String(
+                "/tmp/farhelm-doorway-control.jsonl".to_string(),
+            )),
+        )
+        .await
+    }
+
+    /// A well-formed, resumable Pi locator for `session_id`: the
+    /// legacy-path tests below run Pi-kind (this harness cannot satisfy
+    /// an ownership proof), and Pi only admits its own `pi:`-prefixed
+    /// token — a bare id refuses at the shape gate, which would prove
+    /// nothing about the behavior under test. The session file is what
+    /// makes the offer `Resume`: without it the binding is fileless and
+    /// offers nothing, which would pin the wrong half of the contract.
+    fn pi_locator(session_id: &str) -> String {
+        format!(
+            r#"pi:{{"version":1,"session_id":"{session_id}","session_file":"/work/conversation.jsonl"}}"#
+        )
     }
 
     /// [`send_report`] with the discriminator chosen by the caller, for
@@ -7800,27 +7947,6 @@ mod tests {
         vendor: ReportVendor,
     ) -> ControlMsg {
         send_report_with_vendor_and_source(sup, auth, req_id, conversation, vendor, "startup").await
-    }
-
-    /// [`send_report`] with the vendor's `source` string chosen by the
-    /// caller, for the one test that has to drive a HOSTILE value through
-    /// the real dispatch rather than through `sanitized_source` alone.
-    async fn send_report_with_source(
-        sup: &Arc<Supervisor>,
-        auth: &farhelm_proto::SessionAuth,
-        req_id: u64,
-        conversation: &str,
-        source: &str,
-    ) -> ControlMsg {
-        send_report_with_vendor_and_source(
-            sup,
-            auth,
-            req_id,
-            conversation,
-            ReportVendor::Claude,
-            source,
-        )
-        .await
     }
 
     /// [`send_report_with_vendor_and_source`] with the raw agent identity
@@ -7866,13 +7992,30 @@ mod tests {
         vendor: ReportVendor,
         source: &str,
     ) -> ControlMsg {
+        send_report_with_event(sup, auth, req_id, conversation, vendor, source, None, None).await
+    }
+
+    /// [`send_report_with_vendor_and_source`] with the raw hook event
+    /// and transcript locator chosen by the caller, for the tests that
+    /// pin the doorway's event vocabulary before sanitation.
+    #[allow(clippy::too_many_arguments)]
+    async fn send_report_with_event(
+        sup: &Arc<Supervisor>,
+        auth: &farhelm_proto::SessionAuth,
+        req_id: u64,
+        conversation: &str,
+        vendor: ReportVendor,
+        source: &str,
+        hook_event_name: Option<serde_json::Value>,
+        transcript_path: Option<serde_json::Value>,
+    ) -> ControlMsg {
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         handle_restricted_control(
             sup,
             ControlMsg::ReportConversation {
                 vendor,
-                transcript_path: None,
-                hook_event_name: None,
+                transcript_path,
+                hook_event_name,
                 agent_id: None,
                 req_id,
                 conversation: conversation.to_string(),
@@ -8123,8 +8266,12 @@ mod tests {
     }
 
     /// A report naming the session's own kind behind a matching
-    /// discriminator is still accepted: the gate rejects confusion, not
-    /// the foreground's own adapter.
+    /// discriminator still passes the gates: the gate rejects confusion,
+    /// not the foreground's own adapter. Full admission needs live
+    /// processes this harness does not own, so the assertion is doorway
+    /// passage (anything but the doorway's `InvalidRequest`) rather than
+    /// a durable landing — the landing half lives in `service::core`'s
+    /// `ClaudeAdmission` suite.
     ///
     /// Why this test matters alongside the mismatch test above: the two
     /// together pin that the discriminator is a routing check rather than
@@ -8139,10 +8286,16 @@ mod tests {
         let auth = reporting_session(&sup, "reporting-session").await;
 
         let reply = send_report(&sup, &auth, 75, "conv-own").await;
-        let ControlMsg::ConversationReported { req_id } = reply else {
-            panic!("the session's own adapter must be accepted: {reply:?}");
-        };
-        assert_eq!(req_id, 75);
+        assert!(
+            !matches!(
+                reply,
+                ControlMsg::Error {
+                    kind: ErrorKind::InvalidRequest,
+                    ..
+                }
+            ),
+            "the session's own adapter must pass the gates: {reply:?}"
+        );
         assert_eq!(
             sup.session_snapshot(&auth.session_id)
                 .await
@@ -8150,8 +8303,8 @@ mod tests {
                 .expect("the session still exists")
                 .captured_conversation
                 .as_deref(),
-            Some("conv-own"),
-            "the matching report must still land"
+            None,
+            "without live proof nothing may land"
         );
     }
 
@@ -8214,13 +8367,20 @@ mod tests {
                 "the refusal must answer the request that caused it"
             );
         }
-        // An explicit null carries no identity and stays accepted.
+        // An explicit null carries no identity and stays accepted. It
+        // runs Pi-kind through the legacy path: the agent-identity
+        // gate is vendor-independent, while a Claude report would
+        // need live processes past the doorway this harness cannot
+        // own — and the Claude identity matrix lives in
+        // `service::core`'s `ClaudeAdmission` tests.
+        let pi_auth = reporting_pi_session(&sup, "pi-null-agent").await;
+        let null_id = pi_locator("conv-null-agent");
         let reply = send_report_with_agent_identity(
             &sup,
-            &auth,
+            &pi_auth,
             79,
-            "conv-null-agent",
-            ReportVendor::Claude,
+            &null_id,
+            ReportVendor::Pi,
             Some(serde_json::Value::Null),
         )
         .await;
@@ -8229,15 +8389,213 @@ mod tests {
             "a null agent identity must stay accepted: {reply:?}"
         );
         assert_eq!(
+            sup.session_snapshot(&pi_auth.session_id)
+                .await
+                .unwrap()
+                .expect("the session still exists")
+                .captured_conversation
+                .as_deref(),
+            Some(null_id.as_str()),
+            "only the accepted report may land"
+        );
+    }
+
+    /// PRE-FIX REPRODUCTION (goal `foreground-capture`, PR-4): before the
+    /// Claude ownership proof, a `SubagentStart` report carrying a valid
+    /// session id was admitted exactly like a `SessionStart` — the hook
+    /// event rode the report but nothing on the Claude path ever consulted
+    /// it. This test failed on the pre-proof tree with the subagent's id
+    /// durably bound and offered for resume; with the proof, anything but
+    /// an exact `SessionStart` refuses at the doorway and the refused
+    /// report establishes nothing.
+    ///
+    /// Why this test matters: it is the doorway half of the subagent hole
+    /// the Claude proof closes, kept as the regression that reopens it if
+    /// the event check ever weakens. The admission half (a well-formed
+    /// `SessionStart` still proving through process attribution and the
+    /// transcript check) lives in `service::core`'s `ClaudeAdmission`
+    /// suite, which owns live processes; this harness owns none, so the
+    /// control below asserts doorway passage (anything but
+    /// `InvalidRequest`), not a full admission.
+    #[farhelm_testtrace::test]
+    async fn a_claude_subagent_event_is_refused_at_the_doorway() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+
+        for (req_id, event, what) in [
+            (
+                81u64,
+                Some(serde_json::Value::String("SubagentStart".to_string())),
+                "a subagent start",
+            ),
+            (
+                82,
+                Some(serde_json::Value::String("SubagentStop".to_string())),
+                "a subagent stop",
+            ),
+            (83, None, "a missing event"),
+            (84, Some(serde_json::Value::Null), "a null event"),
+            (85, Some(serde_json::Value::from(7)), "a wrong-typed event"),
+            (
+                86,
+                Some(serde_json::Value::String(String::new())),
+                "an empty event",
+            ),
+        ] {
+            let reply = send_report_with_event(
+                &sup,
+                &auth,
+                req_id,
+                "conv-subagent-event",
+                ReportVendor::Claude,
+                "startup",
+                event,
+                None,
+            )
+            .await;
+            let ControlMsg::Error {
+                req_id: answered,
+                kind,
+                ..
+            } = reply
+            else {
+                panic!("{what} must be refused at the doorway: {reply:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert_eq!(
+                answered, req_id,
+                "the refusal must answer the request that caused it"
+            );
+        }
+        assert_eq!(
             sup.session_snapshot(&auth.session_id)
                 .await
                 .unwrap()
                 .expect("the session still exists")
                 .captured_conversation
                 .as_deref(),
-            Some("conv-null-agent"),
-            "only the accepted report may land"
+            None,
+            "the refused reports establish nothing"
         );
+        // The control: the subscribed event passes the doorway. This
+        // harness owns no live runtime, so admission refuses later with
+        // `Conflict` (no provenance, no peer) — anything but the
+        // doorway's `InvalidRequest` is passage.
+        let reply = send_report_with_event(
+            &sup,
+            &auth,
+            87,
+            "conv-doorway-ok",
+            ReportVendor::Claude,
+            "startup",
+            Some(serde_json::Value::String("SessionStart".to_string())),
+            Some(serde_json::Value::String(
+                "/tmp/farhelm-doorway-control.jsonl".to_string(),
+            )),
+        )
+        .await;
+        assert!(
+            !matches!(
+                reply,
+                ControlMsg::Error {
+                    kind: ErrorKind::InvalidRequest,
+                    ..
+                }
+            ),
+            "the subscribed event must pass the doorway: {reply:?}"
+        );
+    }
+
+    /// PRE-FIX REPRODUCTION (goal `foreground-capture`, PR-4): before the
+    /// Claude ownership proof, the `source` word rode the report as a
+    /// diagnostic — any string (or none) was stored and logged. This test
+    /// failed on the pre-proof tree with every unknown source admitted;
+    /// with the proof, only Claude's own five-word vocabulary passes the
+    /// doorway, checked raw before sanitation so no normalizer can widen
+    /// it.
+    ///
+    /// Why this test matters: the source word is what distinguishes a
+    /// legitimate foreground transition (`startup`, `resume`, `clear`,
+    /// `compact`, `fork` — the exact enum the pinned `claude` binary's
+    /// `SessionStart` schema carries) from anything else a credentialed
+    /// process might send. Like the event test above, the accepts below
+    /// assert doorway passage rather than full admission.
+    #[farhelm_testtrace::test]
+    async fn a_claude_report_with_an_unknown_source_is_refused_at_the_doorway() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let auth = reporting_session(&sup, "reporting-session").await;
+        let session_start = Some(serde_json::Value::String("SessionStart".to_string()));
+
+        for (req_id, source, what) in [
+            (91u64, "session_start", "a foreign vocabulary word"),
+            (92, "SessionStart", "the event name as a source"),
+            (93, "subagent", "a delegated marker"),
+            (94, "", "an empty source"),
+            (95, "STARTUP", "a case-shifted word"),
+            (96, "startup ", "a padded word"),
+        ] {
+            let reply = send_report_with_event(
+                &sup,
+                &auth,
+                req_id,
+                "conv-bad-source",
+                ReportVendor::Claude,
+                source,
+                session_start.clone(),
+                None,
+            )
+            .await;
+            let ControlMsg::Error {
+                req_id: answered,
+                kind,
+                ..
+            } = reply
+            else {
+                panic!("{what} must be refused at the doorway: {reply:?}");
+            };
+            assert_eq!(kind, ErrorKind::InvalidRequest);
+            assert_eq!(
+                answered, req_id,
+                "the refusal must answer the request that caused it"
+            );
+        }
+        for (req_id, source) in [
+            (101u64, "startup"),
+            (102, "resume"),
+            (103, "clear"),
+            (104, "compact"),
+            (105, "fork"),
+        ] {
+            let reply = send_report_with_event(
+                &sup,
+                &auth,
+                req_id,
+                "conv-doorway-ok",
+                ReportVendor::Claude,
+                source,
+                session_start.clone(),
+                Some(serde_json::Value::String(
+                    "/tmp/farhelm-doorway-control.jsonl".to_string(),
+                )),
+            )
+            .await;
+            assert!(
+                !matches!(
+                    reply,
+                    ControlMsg::Error {
+                        kind: ErrorKind::InvalidRequest,
+                        ..
+                    }
+                ),
+                "the subscribed source {source} must pass the doorway: {reply:?}"
+            );
+        }
     }
 
     /// An accepted report becomes the session's resume identity, and a
@@ -8257,15 +8615,25 @@ mod tests {
     /// is then precisely what must never be resumed. A handler that
     /// treated the second report as a duplicate would leave farhelm
     /// offering to resume a conversation the user has already thrown away.
+    ///
+    /// Pi-kind, because this harness cannot satisfy an ownership proof:
+    /// the replace contract for Claude lives in `service::core`'s
+    /// `ClaudeAdmission` transition-sequence test, and this keeps the
+    /// legacy replace path pinned where it can still run.
     #[farhelm_testtrace::test]
     async fn a_report_claims_the_resume_identity_and_a_later_one_replaces_it() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let auth = reporting_session(&sup, "reporting-session").await;
+        let auth = reporting_pi_session(&sup, "reporting-session").await;
 
-        let first = send_report(&sup, &auth, 67, "conv-first").await;
+        // Well-formed Pi locators: Pi admits only its own token shape,
+        // so bare ids would refuse at the shape gate instead of
+        // exercising the replace contract.
+        let first_id = pi_locator("conv-first");
+        let second_id = pi_locator("conv-second");
+        let first = send_report_with_vendor(&sup, &auth, 67, &first_id, ReportVendor::Pi).await;
         assert!(
             matches!(first, ControlMsg::ConversationReported { req_id: 67 }),
             "a plausible report from the session's own agent must be accepted: {first:?}"
@@ -8277,7 +8645,7 @@ mod tests {
             .expect("the session exists");
         assert_eq!(
             snapshot.captured_conversation.as_deref(),
-            Some("conv-first")
+            Some(first_id.as_str())
         );
         assert_eq!(
             snapshot.restart_offer,
@@ -8285,7 +8653,7 @@ mod tests {
             "an integrated session with a stored identity owes the user a resume offer"
         );
 
-        let second = send_report(&sup, &auth, 68, "conv-second").await;
+        let second = send_report_with_vendor(&sup, &auth, 68, &second_id, ReportVendor::Pi).await;
         assert!(
             matches!(second, ControlMsg::ConversationReported { req_id: 68 }),
             "a second report is a new conversation, not a duplicate request: {second:?}"
@@ -8297,7 +8665,7 @@ mod tests {
             .expect("the session exists");
         assert_eq!(
             snapshot.captured_conversation.as_deref(),
-            Some("conv-second"),
+            Some(second_id.as_str()),
             "the identity the agent discarded must stop being offered"
         );
         let state = sup.sessions.lock().await[&auth.session_id]
@@ -8308,7 +8676,7 @@ mod tests {
         assert!(
             matches!(
                 &state,
-                CaptureState::Reported { conversation, .. } if conversation == "conv-second"
+                CaptureState::Reported { conversation, .. } if conversation == &second_id
             ),
             "and the in-memory mirror must follow the durable write: {state:?}"
         );
@@ -8326,9 +8694,9 @@ mod tests {
     /// restart there is a stored id to fill in, and there would not be.
     ///
     /// Nothing retries it: neither vendor re-fires the hook, so the report
-    /// is simply lost and the scan remains the fallback for that session,
-    /// which it still is precisely because this refusal left the state
-    /// unsettled.
+    /// is simply lost — and for a proof-carrying kind like Claude no scan
+    /// stands behind it either, which is exactly why this refusal leaves
+    /// the state unsettled rather than guessing.
     #[farhelm_testtrace::test]
     async fn a_report_is_refused_and_dropped_while_the_supervisor_is_not_recording() {
         let state = StateDir::new();
@@ -8407,9 +8775,17 @@ mod tests {
         )
         .await
         .expect("supervisor");
-        let auth = reporting_session(&sup, "reporting-session").await;
+        // Pi-kind: the fault seam under test sits behind admission,
+        // which this harness cannot satisfy for a proof-carrying kind
+        // (no live processes) — the legacy path drives the same seam.
+        let auth = reporting_pi_session(&sup, "reporting-session").await;
 
-        let reply = send_report(&sup, &auth, 70, "conv-unwritable").await;
+        // A well-formed Pi locator: the injected fault sits behind
+        // admission, and a bare id would refuse at the shape gate
+        // before ever attempting the write under test.
+        let unwritable_id = pi_locator("conv-unwritable");
+        let reply =
+            send_report_with_vendor(&sup, &auth, 70, &unwritable_id, ReportVendor::Pi).await;
         let ControlMsg::Error { req_id, kind, .. } = reply else {
             panic!("a report whose write failed must be refused: {reply:?}");
         };
@@ -8483,10 +8859,13 @@ mod tests {
             "a report must not wait on the session lifecycle claim; this timing out means the \
              report path started taking it and would otherwise deadlock the suite",
         );
-        assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 71 }),
-            "a report must not wait on the claim a restart holds: {reply:?}"
-        );
+        // The verdict is the harness's honest refusal — no live proof —
+        // not an admission: what this test pins is that the reply
+        // ARRIVES while the claim is held, never what it concludes.
+        let ControlMsg::Error { req_id, .. } = reply else {
+            panic!("a report must not wait on the claim a restart holds: {reply:?}");
+        };
+        assert_eq!(req_id, 71);
         drop(held);
         assert_eq!(
             sup.session_snapshot(&auth.session_id)
@@ -8495,8 +8874,8 @@ mod tests {
                 .expect("the session exists")
                 .captured_conversation
                 .as_deref(),
-            Some("conv-during-restart"),
-            "and it must have written, not merely replied"
+            None,
+            "and without live proof it must have written nothing"
         );
     }
 
@@ -8559,16 +8938,34 @@ mod tests {
     /// enough bytes to blow the cap — because the property is that NONE of
     /// them can reject a report, and separate cases would only make it
     /// easier to fix one and lose the others.
+    ///
+    /// Pi-kind: Claude's transition vocabulary now legitimately refuses
+    /// hostile sources at the doorway (see
+    /// `a_claude_report_with_an_unknown_source_is_refused_at_the_doorway`),
+    /// so the sanitation-without-cost property is pinned where the
+    /// source is still diagnostic — the legacy path.
     #[farhelm_testtrace::test]
     async fn a_hostile_report_source_is_sanitized_without_costing_the_report() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let auth = reporting_session(&sup, "reporting-session").await;
+        let auth = reporting_pi_session(&sup, "reporting-session").await;
 
         let hostile = format!("start\nup\u{1b}[2J{}", "🙂".repeat(1024));
-        let reply = send_report_with_source(&sup, &auth, 79, "conv-hostile-source", &hostile).await;
+        // A well-formed Pi locator: the hostility under test lives in
+        // the SOURCE field, and a bare id would refuse at the shape
+        // gate before sanitation is even reached.
+        let hostile_id = pi_locator("conv-hostile-source");
+        let reply = send_report_with_vendor_and_source(
+            &sup,
+            &auth,
+            79,
+            &hostile_id,
+            ReportVendor::Pi,
+            &hostile,
+        )
+        .await;
         assert!(
             matches!(reply, ControlMsg::ConversationReported { req_id: 79 }),
             "a diagnostic field's shape must never decide a report's fate: {reply:?}"
@@ -8580,7 +8977,7 @@ mod tests {
                 .expect("the session exists")
                 .captured_conversation
                 .as_deref(),
-            Some("conv-hostile-source"),
+            Some(hostile_id.as_str()),
             "and the identity must have been written, not merely acknowledged"
         );
         let capture = sup
@@ -8596,7 +8993,7 @@ mod tests {
         assert!(
             matches!(
                 &capture,
-                CaptureState::Reported { conversation, .. } if conversation == "conv-hostile-source"
+                CaptureState::Reported { conversation, .. } if conversation == &hostile_id
             ),
             "the in-memory mirror must follow the accepted report too: {capture:?}"
         );
@@ -8624,20 +9021,29 @@ mod tests {
     /// because the durable ROW is what makes the fallback possible and
     /// `reporting_session` is the one helper that seeds a row a report can
     /// legitimately claim.
+    ///
+    /// Pi-kind, because this harness cannot satisfy an ownership proof:
+    /// the gap fallback for Claude is exercised in `service::core`'s
+    /// `ClaudeAdmission` publication-gap test, and this keeps the
+    /// legacy fallback pinned where it can still run.
     #[farhelm_testtrace::test]
     async fn a_report_during_the_publication_gap_is_written_from_the_row() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let auth = reporting_session(&sup, "reporting-session").await;
+        let auth = reporting_pi_session(&sup, "reporting-session").await;
         sup.sessions
             .lock()
             .await
             .remove(&auth.session_id)
             .expect("test premise: the entry existed before the gap was simulated");
 
-        let reply = send_report(&sup, &auth, 73, "conv-early").await;
+        // A well-formed Pi locator: the gap fallback is what is under
+        // test, and a bare id would refuse at the shape gate instead
+        // of reaching it.
+        let early_id = pi_locator("conv-early");
+        let reply = send_report_with_vendor(&sup, &auth, 73, &early_id, ReportVendor::Pi).await;
         assert!(
             matches!(reply, ControlMsg::ConversationReported { req_id: 73 }),
             "a report arriving before publication must be accepted, not lost: {reply:?}"
@@ -8649,7 +9055,7 @@ mod tests {
                 .expect("the session exists")
                 .captured_conversation
                 .as_deref(),
-            Some("conv-early"),
+            Some(early_id.as_str()),
             "the durable row is what carries the report until an entry appears"
         );
         assert!(
@@ -8717,15 +9123,22 @@ mod tests {
         );
     }
 
-    /// An ordinary ID accepts 128 bytes and rejects 129, independently of the
-    /// larger report envelope needed for Pi's encoded locator.
+    /// An ordinary ID passes the byte gate at 128 bytes and fails it at
+    /// 129, independently of the larger report envelope needed for Pi's
+    /// encoded locator.
     ///
     /// Pin both sides of this boundary rather than borrowing the envelope cap:
     /// growing that cap must not change what this Claude fixture submits. The
     /// direction matters: a cap that refused at exactly 128 would not fail
     /// loudly anywhere — the session would simply stop being resumable the
-    /// day a vendor's id format grew, and the scan fallback would cover for
-    /// it convincingly enough that nobody would look here.
+    /// day a vendor's id format grew, and no fallback would cover for it
+    /// convincingly enough that anybody would look here.
+    ///
+    /// The 128-byte leg asserts `Conflict`, not acceptance: this harness
+    /// owns no live processes, so a byte-valid Claude report reaches the
+    /// foreground proof and refuses for want of a kernel-attributed peer
+    /// — which is exactly the observable that proves it survived the byte
+    /// gate rather than failing it. The 129-byte leg never gets that far.
     #[farhelm_testtrace::test]
     async fn ordinary_report_ids_keep_their_own_byte_cap() {
         let state = StateDir::new();
@@ -8737,8 +9150,16 @@ mod tests {
         let at_cap = "a".repeat(128);
         let reply = send_report(&sup, &auth, 72, &at_cap).await;
         assert!(
-            matches!(reply, ControlMsg::ConversationReported { req_id: 72 }),
-            "an ordinary id of exactly 128 bytes is inside the bound: {reply:?}"
+            matches!(
+                reply,
+                ControlMsg::Error {
+                    req_id: 72,
+                    kind: ErrorKind::Conflict,
+                    ..
+                }
+            ),
+            "an ordinary id of exactly 128 bytes is inside the bound, so it must reach the \
+             foreground proof rather than fail the byte gate: {reply:?}"
         );
         let oversized = format!("{at_cap}a");
         assert!(oversized.len() < MAX_CONVERSATION_BYTES);
@@ -8754,6 +9175,9 @@ mod tests {
             ),
             "the larger envelope must not permit a 129-byte ordinary id: {reply:?}"
         );
+        // Neither leg lands: the byte-valid id reaches the proof and
+        // refuses there for want of a peer, and the over-long one never
+        // passes the gate — so the column stays empty either way.
         assert_eq!(
             sup.session_snapshot(&auth.session_id)
                 .await
@@ -8761,7 +9185,7 @@ mod tests {
                 .expect("the session exists")
                 .captured_conversation
                 .as_deref(),
-            Some(at_cap.as_str())
+            None
         );
     }
 

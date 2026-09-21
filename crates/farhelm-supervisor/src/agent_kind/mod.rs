@@ -116,6 +116,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod capture;
+pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod goose;
 pub(crate) mod omp;
@@ -427,8 +428,9 @@ pub trait AgentIntegration: Send + Sync {
     /// identity through `farhelm internal hook`, appended verbatim after the
     /// user's argv by the caller (`Supervisor::with_hook_argv`). Empty
     /// means "this kind does not use this hook form". Some such kinds use a
-    /// different exact reporter; only integrations with a record root may
-    /// fall back to scanning.
+    /// different exact reporter; no integration falls back to scanning for
+    /// identity — report-driven identity plus exact-record validation is
+    /// the contract.
     ///
     /// Must be PURE: no I/O, no environment reads, and in particular no
     /// consulting the `FARHELM_AGENT_HOOKS` opt-out ([`AgentHooks`]) — the
@@ -1127,53 +1129,28 @@ impl AgentIntegration for ClaudeIntegration {
         template
     }
 
-    fn record_root(&self, home: &Path, canonical_cwd: &str) -> Option<PathBuf> {
-        Some(
-            home.join(".claude")
-                .join("projects")
-                .join(munge_cwd(canonical_cwd)),
-        )
+    // A hookless child's root-level transcript used to win the parent's
+    // identity through cwd/time correlation. Only an attributed
+    // foreground report can select a Claude record.
+    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        None
     }
 
     fn record_depth(&self) -> usize {
         0
     }
 
-    fn is_record_file(&self, name: &str) -> bool {
-        name.ends_with(".jsonl")
+    fn is_record_file(&self, _name: &str) -> bool {
+        false
     }
 
-    /// Claude puts `sessionId`, `cwd`, and `timestamp` at the TOP level of
-    /// every line, so the first line carrying all three answers all three
-    /// questions at once. Lines are scanned rather than only the first
-    /// taken because a record can legitimately open with a line that
-    /// carries only some of them (a summary or a meta entry) — and a line
-    /// missing one of the three CONTINUES to the next rather than failing
-    /// the file, since that is the ordinary shape rather than corruption.
-    ///
-    /// What does fail: a file whose prefix contains no such line at all
-    /// (`Ok(None)` would claim positively that this is not a Claude
-    /// record, which no amount of a 64 KiB prefix can establish), and a
-    /// line whose fields are present but unusable — an unparseable
-    /// timestamp or an implausible id. Both mark the scan incomplete.
-    fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
-        for line in leading_json_lines(text) {
-            let Some(object) = line.as_object() else {
-                continue;
-            };
-            let (Some(conversation), Some(cwd), Some(timestamp)) = (
-                object.get("sessionId").and_then(|v| v.as_str()),
-                object.get("cwd").and_then(|v| v.as_str()),
-                object.get("timestamp").and_then(|v| v.as_str()),
-            ) else {
-                continue;
-            };
-            return Ok(Some(correlators_from(conversation, cwd, timestamp)?));
-        }
-        anyhow::bail!(
-            "no line in this file's first {RECORD_PREFIX_BYTES} bytes carries Claude's \
-             sessionId/cwd/timestamp correlators"
-        )
+    // The correlation parser is gone with the scan fallback: after the
+    // cutover no caller may ask Claude for correlators. A report names
+    // its own conversation; the transcript path it carries is verified
+    // by exact open (`claude::transcript_session_matches`), never by
+    // scanning a directory for candidates.
+    fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        Ok(None)
     }
 
     /// Claude Code asks for permission through a bordered dialog at the
@@ -2242,19 +2219,6 @@ pub(crate) fn is_plausible_conversation_id(id: &str) -> bool {
             .all(|c| c.is_ascii_graphic() && c != '"' && c != '\'' && c != '\\')
 }
 
-/// The leading lines of a record prefix, parsed as JSON, skipping anything
-/// unparseable.
-///
-/// A truncated trailing line (the prefix may end mid-line) simply fails to
-/// parse and is skipped, which is why this never needs to know whether the
-/// text it was handed was complete. `serde_json` skips surrounding
-/// whitespace itself, so nothing is trimmed here.
-fn leading_json_lines(text: &str) -> impl Iterator<Item = serde_json::Value> + '_ {
-    text.lines()
-        .take(RECORD_PREFIX_LINES)
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-}
-
 /// Claude's project-directory name for a working directory.
 ///
 /// NON-INJECTIVE by construction (`/tmp/a.b` and `/tmp/a-b` both become
@@ -2421,7 +2385,13 @@ impl IntegrationSnapshot {
     /// is `FreshOnly`, never `FallbackTemplate`: SPEC.md forbids running a
     /// `{conversation}` invocation unfilled, so offering it would be
     /// offering a garbled command line.
-    pub fn restart_offer(&self, captured: Option<&str>, ownership_version: i64) -> RestartOffer {
+    pub fn restart_offer(
+        &self,
+        captured: Option<&str>,
+        ownership_version: i64,
+        record: Option<&str>,
+        transcript_ready: bool,
+    ) -> RestartOffer {
         // Provenance gate: kinds with an implemented ownership proof offer
         // exact Resume only for bindings admitted under this contract
         // (version 1). The deliberate Codex exception keeps existing valid
@@ -2438,6 +2408,22 @@ impl IntegrationSnapshot {
             && ownership_version != 1
             && !(self.kind == AgentKind::Codex && ownership_version == 0)
         {
+            return RestartOffer::FreshOnly;
+        }
+        // Claude's readiness rides a SEPARATE bit beside the saved
+        // transcript locator, the Claude analog of Pi/OMP's session file:
+        // a proven binding whose transcript has not (or no longer)
+        // verified offers nothing, while keeping both its identity and
+        // its locator for the next attributed report or refresh.
+        // Admission initializes the bit from its own read (a missing
+        // file admits with its path saved but readiness withheld);
+        // refresh moves the bit without moving the locator; pre-resume
+        // demotes the version when the resume itself cannot verify. The
+        // offer therefore follows the bit, never the locator alone — a
+        // kind that ignores the hint passes whatever its row holds and
+        // sees no change. The locator check stays as the backstop: a
+        // ready bit beside no saved path is not an offer either.
+        if self.kind == AgentKind::Claude && (record.is_none() || !transcript_ready) {
             return RestartOffer::FreshOnly;
         }
         if self.kind == AgentKind::Codex {
@@ -2552,8 +2538,8 @@ impl IntegrationSnapshot {
 /// preserved, not re-blessed, until their kind flips.
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
-        AgentKind::Codex | AgentKind::Omp | AgentKind::Goose => true,
-        AgentKind::Claude | AgentKind::Pi => false,
+        AgentKind::Codex | AgentKind::Omp | AgentKind::Goose | AgentKind::Claude => true,
+        AgentKind::Pi => false,
         AgentKind::Generic => false,
     }
 }
@@ -3611,15 +3597,44 @@ mod tests {
             "an option-shaped id must never be substituted into an argv"
         );
         assert_eq!(
-            snapshot.restart_offer(Some("--dangerously-bypass-approvals-and-sandbox"), 0),
+            snapshot.restart_offer(
+                Some("--dangerously-bypass-approvals-and-sandbox"),
+                0,
+                None,
+                false
+            ),
             RestartOffer::FreshOnly,
             "and must not be advertised as resumable either, or the offer would promise a \
              command the substitution then refuses to build"
         );
         // The honest case still works, or this test would pass for the
-        // wrong reason.
+        // wrong reason: a proven Claude binding (version 1) WITH its
+        // saved transcript locator offers Resume...
         let good = "0199a4d2-9c1a-7bd6-9d18-2c0f2f1c7f31";
-        assert_eq!(snapshot.restart_offer(Some(good), 0), RestartOffer::Resume);
+        assert_eq!(
+            snapshot.restart_offer(Some(good), 1, Some("/tmp/transcript.jsonl"), true),
+            RestartOffer::Resume
+        );
+        // ...while the same binding without proof, or without its
+        // locator, offers nothing.
+        assert_eq!(
+            snapshot.restart_offer(Some(good), 0, Some("/tmp/transcript.jsonl"), true),
+            RestartOffer::FreshOnly,
+            "an unproven binding never offers"
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some(good), 1, None, false),
+            RestartOffer::FreshOnly,
+            "a proven binding with no saved locator offers nothing"
+        );
+        // The P1 case: the locator is saved but has not verified — a
+        // missing-file admission persists its path for the later
+        // exact-file check while the offer stays silent.
+        assert_eq!(
+            snapshot.restart_offer(Some(good), 1, Some("/tmp/transcript.jsonl"), false),
+            RestartOffer::FreshOnly,
+            "a proven binding whose saved transcript has not verified offers nothing"
+        );
         assert_eq!(
             snapshot
                 .filled_resume_argv(good)
@@ -3929,10 +3944,13 @@ mod tests {
             } else {
                 RestartOffer::Resume
             };
-            assert_eq!(snapshot.restart_offer(Some(&encoded), 0), unproven_offer);
+            assert_eq!(
+                snapshot.restart_offer(Some(&encoded), 0, None, true),
+                unproven_offer
+            );
             if vendor == LocatorVendor::Omp {
                 assert_eq!(
-                    snapshot.restart_offer(Some(&encoded), 1),
+                    snapshot.restart_offer(Some(&encoded), 1, None, true),
                     RestartOffer::Resume,
                     "a proven OMP binding resumes"
                 );
@@ -3946,7 +3964,7 @@ mod tests {
             )
             .expect("encode fileless locator");
             assert_eq!(
-                snapshot.restart_offer(Some(&fileless), 0),
+                snapshot.restart_offer(Some(&fileless), 0, None, true),
                 RestartOffer::FreshOnly
             );
             assert!(
@@ -3992,7 +4010,7 @@ mod tests {
                 IntegrationSnapshot::resolve(&[other_argv0.to_string()], None, None)
                     .expect("integrated");
             assert_eq!(
-                other_snapshot.restart_offer(Some(&encoded), 0),
+                other_snapshot.restart_offer(Some(&encoded), 0, None, true),
                 RestartOffer::FreshOnly,
                 "a {vendor:?} locator cannot make a {other:?} session offer a resume"
             );
@@ -4008,7 +4026,7 @@ mod tests {
                 "omp:nonsense".to_string(),
             ] {
                 assert_eq!(
-                    snapshot.restart_offer(Some(&malformed), 0),
+                    snapshot.restart_offer(Some(&malformed), 0, None, true),
                     RestartOffer::FreshOnly,
                     "{malformed:?} cannot make a {vendor:?} session offer a resume"
                 );
@@ -4338,10 +4356,35 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_restart_offer_reflects_exactly_what_could_honestly_be_run() {
         let claude = IntegrationSnapshot::resolve(&["claude".into()], None, None).unwrap();
-        assert_eq!(claude.restart_offer(None, 0), RestartOffer::FreshOnly);
         assert_eq!(
-            claude.restart_offer(Some("conv-1"), 0),
+            claude.restart_offer(None, 0, None, false),
+            RestartOffer::FreshOnly
+        );
+        // A proven Claude binding WITH its saved transcript locator is
+        // the one shape that offers exact Resume...
+        assert_eq!(
+            claude.restart_offer(Some("conv-1"), 1, Some("/tmp/transcript.jsonl"), true),
             RestartOffer::Resume
+        );
+        // A saved-but-unverified locator is not readiness: the
+        // missing-file admission this row describes offers nothing
+        // until the exact refresh (or a later report) verifies it.
+        assert_eq!(
+            claude.restart_offer(Some("conv-1"), 1, Some("/tmp/transcript.jsonl"), false),
+            RestartOffer::FreshOnly,
+            "an admitted-but-unverified Claude binding never offers"
+        );
+        // ...while the same binding without proof, or with its locator
+        // withdrawn after a failed re-verification, offers nothing.
+        assert_eq!(
+            claude.restart_offer(Some("conv-1"), 0, Some("/tmp/transcript.jsonl"), true),
+            RestartOffer::FreshOnly,
+            "an unproven Claude binding never offers"
+        );
+        assert_eq!(
+            claude.restart_offer(Some("conv-1"), 1, None, false),
+            RestartOffer::FreshOnly,
+            "a proven Claude binding with no saved locator offers nothing"
         );
 
         let fallback = IntegrationSnapshot::resolve(
@@ -4351,13 +4394,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            fallback.restart_offer(None, 0),
+            fallback.restart_offer(None, 0, None, false),
             RestartOffer::FallbackTemplate,
             "a placeholder-free template is the one thing that can be run verbatim"
         );
 
         let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
-        assert_eq!(generic.restart_offer(None, 0), RestartOffer::FreshOnly);
+        assert_eq!(
+            generic.restart_offer(None, 0, None, false),
+            RestartOffer::FreshOnly
+        );
 
         // A generic session whose template DOES mention the placeholder can
         // never have an identity to fill it with, so it must not advertise
@@ -4371,7 +4417,10 @@ mod tests {
             ]),
         )
         .unwrap();
-        assert_eq!(unfillable.restart_offer(None, 0), RestartOffer::FreshOnly);
+        assert_eq!(
+            unfillable.restart_offer(None, 0, None, false),
+            RestartOffer::FreshOnly
+        );
     }
 
     /// The munging is the audited reason correlation cannot use directory
@@ -4386,35 +4435,6 @@ mod tests {
         assert_eq!(munge_cwd("/tmp/a_b"), "-tmp-a-b");
         assert_eq!(munge_cwd("/home/u/work"), "-home-u-work");
     }
-    /// Claude's correlators are top-level per-line JSON fields, and the
-    /// FIRST line need not carry all of them — real records open with
-    /// summary/meta lines. Pinned because taking line 1 unconditionally is
-    /// the obvious-looking implementation that silently captures nothing.
-    /// A file with no correlator line at all is an ERROR, not `Ok(None)`:
-    /// a 64 KiB prefix cannot establish that a file is not a record.
-    #[farhelm_testtrace::test]
-    fn claude_records_are_parsed_from_the_first_line_carrying_all_correlators() {
-        let text = "{\"type\":\"summary\",\"summary\":\"x\"}\n\
-                    {\"sessionId\":\"conv-7\",\"cwd\":\"/work\",\
-                    \"timestamp\":\"2026-07-29T12:00:05.123Z\"}\n";
-        let parsed = ClaudeIntegration.parse_record(text).unwrap().unwrap();
-        assert_eq!(
-            parsed,
-            RecordCorrelators {
-                conversation: "conv-7".to_string(),
-                cwd: "/work".to_string(),
-                created_at: parse_rfc3339("2026-07-29T12:00:05Z").unwrap(),
-            }
-        );
-        assert!(ClaudeIntegration.parse_record("not json at all").is_err());
-        assert!(
-            ClaudeIntegration
-                .parse_record("{\"sessionId\":\"a\",\"cwd\":\"/w\",\"timestamp\":\"nope\"}")
-                .is_err(),
-            "a correlator line with an unusable timestamp is a failure, not a skip"
-        );
-    }
-
     /// Codex's transcript contains events from internal work as well as the
     /// root conversation. A resumable locator needs the root session metadata
     /// payload; accepting a flat or mixed-level record would fabricate an
@@ -4454,12 +4474,12 @@ mod tests {
         assert!(CodexIntegration.parse_record(text).is_err());
     }
 
-    /// A conversation id crosses from an on-disk file into a durable
+    /// A conversation id crosses from a hook report into a durable
     /// column, a log line, and eventually an agent's argv. Anything that
-    /// is not an identifier under any plausible vendor format is refused —
-    /// and refused LOUDLY (an error, marking the scan incomplete) rather
-    /// than dropped, since a dropped candidate is exactly the second one
-    /// whose absence would turn an ambiguity into a wrong claim.
+    /// is not an identifier under any plausible vendor format is refused
+    /// at the report gate — never admitted and never stored — since a
+    /// stored over-long id is exactly what would turn a later argv
+    /// substitution into a smuggled command line.
     #[farhelm_testtrace::test]
     fn implausible_conversation_identifiers_are_refused() {
         assert!(is_plausible_conversation_id("0b0a3d65-a742-4b0e-bda5-c59"));
@@ -4467,14 +4487,16 @@ mod tests {
         assert!(!is_plausible_conversation_id("has space"));
         assert!(!is_plausible_conversation_id("has\nnewline"));
         assert!(!is_plausible_conversation_id("has\"quote"));
-        assert!(!is_plausible_conversation_id(
-            &"x".repeat(MAX_CONVERSATION_ID_LEN + 1)
+        let over_long = "x".repeat(MAX_CONVERSATION_ID_LEN + 1);
+        assert!(!is_plausible_conversation_id(&over_long));
+        // The live boundary is the report gate, not a scan parser:
+        // Claude admits only plausible bare ids, so an over-long one
+        // refuses before any vendor I/O rather than failing a file
+        // parse after it.
+        assert!(!accepts_reported_conversation(
+            AgentKind::Claude,
+            &over_long
         ));
-        let long = format!(
-            "{{\"sessionId\":\"{}\",\"cwd\":\"/w\",\"timestamp\":\"2026-07-29T12:00:05Z\"}}",
-            "x".repeat(MAX_CONVERSATION_ID_LEN + 1)
-        );
-        assert!(ClaudeIntegration.parse_record(&long).is_err());
     }
 
     // -----------------------------------------------------------------

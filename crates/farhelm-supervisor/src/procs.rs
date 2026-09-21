@@ -208,6 +208,36 @@ pub(crate) struct ChainLink {
     pub(crate) start: u64,
     pub(crate) exe: Vec<u8>,
     pub(crate) argv: Option<Vec<Vec<u8>>>,
+    /// What file descriptor 0 pointed at when this edge was observed:
+    /// the raw bytes of the fd target (a terminal path for a pane
+    /// shell, a script path for a stdin-fed shell, `pipe:[...]` or
+    /// `socket:[...]` for the anonymous kinds), or `None` when it
+    /// could not be read. `None` is missing evidence, never a walk
+    /// failure — the per-kind proof interprets it.
+    ///
+    /// What fd 0 distinguishes: a wrapper that redirects its own
+    /// stdin to a script and execs a bare shell keeps the script on
+    /// fd 0, which basename plus argc cannot see. What it does NOT
+    /// distinguish: a wrapper that restores the terminal fd before
+    /// spawning its runtimes (`exec 0<&3`), which reaches the same
+    /// image, argv, AND fd 0 as the launched shell — the record leg
+    /// in [`bare_pane_shell_provenance`] is what refuses that shape.
+    /// Unobservable on macOS (no `/proc`, no fd-path API in the
+    /// pinned libc), where it stays `None` and the corridor refuses
+    /// bare-shell ancestry for the missing leg.
+    pub(crate) fd0_target: Option<Vec<u8>>,
+}
+
+/// What one process's file descriptor 0 points at, as raw target
+/// bytes, or `None` when it cannot be read.
+///
+/// Linux reads `/proc/<pid>/fd/0`, the same trust level as the
+/// image and argv reads the walk already performs. macOS has no
+/// equivalent observable with the pinned libc, so it reports `None`
+/// unconditionally there — see [`ChainLink::fd0_target`] for what
+/// that costs the bare-pane-shell proof.
+pub(crate) fn read_fd0_target(pid: u32) -> Option<Vec<u8>> {
+    imp::read_fd0_target(pid)
 }
 
 /// The command-line evidence for one process, bounded per
@@ -267,27 +297,31 @@ pub(crate) fn walk_to_pane(peer: ProcessIdentity, pane_pid: u32) -> Result<Vec<C
         // always refused the report.
         let exe = imp::process_exe(pid)?;
         let argv = read_process_argv(pid);
+        let fd0_target = read_fd0_target(pid);
         chain.push(ChainLink {
             pid,
             ppid: parent,
             start,
             exe,
             argv,
+            fd0_target,
         });
         if pid == pane_pid {
-            // Re-read every edge plus every image before returning: a
-            // process that exec'd between the walk and this check is no
-            // longer the process the walk observed, and the report must
-            // not be admitted on the earlier observation. Edges or image
-            // changed both refuse; argv is per-observation evidence the
-            // repeat attribution re-captures rather than an identity
-            // input, so it is not compared here.
+            // Re-read every edge plus every image and fd 0 before
+            // returning: a process that exec'd — or redirected its own
+            // stdin — between the walk and this check is no longer the
+            // process the walk observed, and the report must not be
+            // admitted on the earlier observation. Edges, image, or fd
+            // 0 changed all refuse; argv is per-observation evidence
+            // the repeat attribution re-captures rather than an
+            // identity input, so it is not compared here.
             for link in &chain {
                 if read_process(link.pid)? != Some((link.ppid, link.start, ProcessState::Running))
                     || imp::process_exe(link.pid)
                         .map_err(|_| ())
                         .unwrap_or_default()
                         != link.exe
+                    || read_fd0_target(link.pid) != link.fd0_target
                 {
                     return Err("the hook ancestry changed during attribution".to_string());
                 }
@@ -436,9 +470,14 @@ fn is_hook_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
 /// counts. Such an intermediary means the report traveled through a
 /// different harness, and refuses with its own message so the diagnostic
 /// names the mechanism rather than a generic unclassified intermediary.
+///
+/// The `claude` arm is the shared [`is_claude_runtime_exe`] recognition,
+/// not a basename match: a versioned-install `claude` between the
+/// reporter and another kind's emitter is another session-hosting
+/// runtime, never an unclassified intermediary to skip.
 fn is_other_session_runtime(exe: &[u8]) -> bool {
     let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
-    matches!(name, b"claude" | b"goose" | b"pi" | b"omp")
+    matches!(name, b"goose" | b"pi" | b"omp") || is_claude_runtime_exe(exe)
 }
 
 /// Codex's instance of the restrictive corridor, over an already-walked
@@ -1234,6 +1273,522 @@ pub(crate) fn foreground_goose_emitter(
     goose_corridor(&chain, program)
 }
 
+/// Whether bytes are a plausible `claude` version token: dot-separated
+/// ASCII numerics with at least one dot (`2.1.278`, `2.1`), plus an
+/// optional prerelease suffix (`2.1.278-rc.1`).
+///
+/// The grammar is deliberately tight: every dot-separated segment of the
+/// numeric core must be non-empty digits; the suffix, when present, is a
+/// `-` followed by a non-empty run of ASCII alphanumerics, dots, and
+/// hyphens that starts and ends alphanumeric. That admits the probed
+/// install's tokens (`2.1.274`, `2.1.275`, `2.1.278`) and ordinary
+/// prereleases while refusing channel names (`latest`, `stable`), bare
+/// numbers (`278`), a `v` prefix, empty segments, and build-metadata
+/// `+` suffixes — all of which stay fail-closed rather than guessed at.
+fn is_claude_version_token(name: &[u8]) -> bool {
+    fn is_digit(byte: u8) -> bool {
+        byte.is_ascii_digit()
+    }
+    fn is_alnum(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric()
+    }
+    let (core, suffix) = match name.iter().position(|byte| *byte == b'-') {
+        Some(dash) => (&name[..dash], Some(&name[dash + 1..])),
+        None => (name, None),
+    };
+    let mut segments = core.split(|byte| *byte == b'.');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    if first.is_empty() || !first.iter().all(|byte| is_digit(*byte)) {
+        return false;
+    }
+    let mut dotted = false;
+    for segment in segments {
+        dotted = true;
+        if segment.is_empty() || !segment.iter().all(|byte| is_digit(*byte)) {
+            return false;
+        }
+    }
+    if !dotted {
+        return false;
+    }
+    if let Some(suffix) = suffix {
+        if suffix.is_empty() || !is_alnum(suffix[0]) || !is_alnum(suffix[suffix.len() - 1]) {
+            return false;
+        }
+        if !suffix
+            .iter()
+            .all(|byte| is_alnum(*byte) || *byte == b'.' || *byte == b'-')
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether raw `exe` bytes name the standard native install's versioned
+/// single file: `.../claude/versions/<version>`.
+///
+/// The standard native install is a symlink (`~/.local/bin/claude`) to a
+/// version-named ELF under a `versions/` directory owned by a `claude/`
+/// parent (probed 2026-09-21 on Linux:
+/// `~/.local/share/claude/versions/2.1.278`, with siblings `2.1.274` and
+/// `2.1.275`). The kernel resolves the symlink, so the walked image's
+/// basename is the version string, never `claude` — matching the basename
+/// alone fails closed for every real launch. This recognizes the tight
+/// layout instead: the parent directory must be exactly `versions`, its
+/// parent exactly `claude`, and the file basename a version token (see
+/// [`is_claude_version_token`]). The install root above `claude/` stays
+/// unconstrained — the layout, not the prefix, is the evidence. Anything
+/// else — wrong directory names, a non-version basename, a deeper nesting
+/// between the directories, a shallower path — is not this layout and
+/// stays fail-closed. No other platform's layout is claimed: this is
+/// grounded in the Linux probe alone.
+fn is_versioned_claude_exe(exe: &[u8]) -> bool {
+    let mut parts = exe.rsplit(|byte| *byte == b'/');
+    let Some(file) = parts.next() else {
+        return false;
+    };
+    let file = file.strip_suffix(b" (deleted)").unwrap_or(file);
+    if !is_claude_version_token(file) {
+        return false;
+    }
+    if parts.next() != Some(b"versions".as_slice()) {
+        return false;
+    }
+    if parts.next() != Some(b"claude".as_slice()) {
+        return false;
+    }
+    true
+}
+
+/// Whether raw `exe` bytes name a Claude runtime image: a native `claude`
+/// executable by basename, or the standard install's versioned single
+/// file (see [`is_versioned_claude_exe`]). Both shapes are the SAME
+/// recognition — the corridor's `C` descriptor and the nested-runtime
+/// matcher share it — so a versioned `claude` is a runtime everywhere a
+/// basename-`claude` one is: emitter candidate, never skipped, and a
+/// second one is nesting.
+fn is_claude_runtime_exe(exe: &[u8]) -> bool {
+    omp_image_basename(exe) == b"claude" || is_versioned_claude_exe(exe)
+}
+
+/// Whether one link's image is a Claude runtime executable (see
+/// [`is_claude_runtime_exe`]). A script named `claude` never matches:
+/// scripts resolve to their interpreter's image before this comparison
+/// runs. The ` (deleted)` suffix a replaced-while-running binary carries
+/// is stripped before comparing, the way the OMP/Goose halves do.
+fn is_claude_runtime_link(link: &ChainLink) -> bool {
+    is_claude_runtime_exe(&link.exe)
+}
+
+/// Whether one link's image is a POSIX shell of the kind launches and
+/// trampolines use. The set matches the launch classifier and the
+/// trampoline rule. Any other image still reaches the corridor — a
+/// user wrapper installed as `claude` resolves to its interpreter —
+/// and the anchor rule refuses it as a surviving wrapper rather than
+/// exempting it.
+fn is_claude_shell_image(link: &ChainLink) -> bool {
+    matches!(omp_image_basename(&link.exe), b"sh" | b"bash" | b"dash")
+}
+
+/// Whether the pane anchor is a bare shell by argv shape: a known
+/// shell image running no command of its own. A bare interactive
+/// shell names only itself (`-bash`): no script, no `-c` command.
+/// This shape alone admits nothing — see
+/// [`bare_pane_shell_provenance`]: argv cannot tell a bare
+/// interactive shell from a shell fed a script over stdin, and a
+/// wrapper that redirects its own stdin to a script and execs a bare
+/// shell keeps the pane PID with a single argv. Everything else at
+/// the anchor (a non-shell image of any shape, a shell carrying a
+/// script or a `-c` command, or no readable argv at all) is a
+/// surviving user wrapper until proven this launch's own
+/// transparency, and missing evidence refuses rather than admits.
+fn is_bare_pane_shell(link: &ChainLink) -> bool {
+    if !is_claude_shell_image(link) {
+        return false;
+    }
+    matches!(link.argv.as_deref(), Some([_]))
+}
+
+/// Whether a bare-shell anchor (see [`is_bare_pane_shell`]) is the
+/// session's own launched shell rather than a wrapper's replacement:
+/// its argv must still spell the supervisor's recorded launch, and
+/// its fd 0 must still be the session's terminal.
+///
+/// `launched` is the session's recorded launch argv — the
+/// `shell_words` parse of the stored invocation, made by the async
+/// caller because the corridor itself never touches the store. The
+/// comparison is exact, element-wise byte equality against the
+/// anchor's walked argv. This is the evidence `exec` cannot forge:
+/// `exec` preserves the pane PID while replacing image and argv, and
+/// a wrapper that redirects its own stdin to a script, execs a bare
+/// shell, and then restores the terminal fd reaches an anchor with
+/// the right image, the right argc, AND the right fd 0 — but it
+/// cannot change what the supervisor recorded at launch. The wrapper
+/// IS the recorded launch (its own path plus the injected
+/// arguments), while the forged anchor spells `sh`, so the strings
+/// differ and the report refuses. An empty `launched` is a missing
+/// record (an invocation that no longer parses) and refuses: a shell
+/// with nothing proving it is this launch's is a surviving wrapper.
+///
+/// `pane_tty` is the terminal tmux reports for the pane
+/// (`#{pane_tty}`), passed through from the async caller because the
+/// corridor itself never touches tmux. The comparison is byte
+/// equality against the fd-0 target the walk captured — not an
+/// "is a character device" check, which `/dev/null` would pass and
+/// which cannot tell the session's pty apart from a pty the wrapper
+/// made itself. A script file, `/dev/null`, a pipe, a socket, a
+/// foreign pty, and unreadable evidence all refuse. The fd leg is
+/// the junior partner, not the proof: on its own it cannot tell a
+/// restored terminal from the original (see the `exec 0<&3` shape
+/// the record leg refuses), but it still costs a hand-redirected
+/// shell (`exec <file` in the operator's own pane) its reports.
+///
+/// `pane_tty` is `None` where the caller has no session-terminal
+/// evidence to offer. That is macOS (fd-0 targets are unobservable
+/// there — see [`ChainLink::fd0_target`]), and `None` now refuses:
+/// without the terminal leg the record alone is one inference, and
+/// an ambiguous bare-shell capture fails closed where the evidence
+/// is thinner rather than admitting on the argv shape. Direct
+/// runtimes need no such leg — there is no surviving anchor to
+/// explain — so macOS direct launches are unaffected.
+///
+/// What this still does NOT prove: the record names the launched
+/// shell, not the runtime hand-typed into it. Two runtimes the
+/// operator runs by hand under one genuine shell are
+/// indistinguishable here, the same interactive residual the
+/// same-runtime wording in SPEC.md owns. The threat this closes is
+/// the launched wrapper substituting itself for the pane root, which
+/// cannot rewrite the store from inside the pane.
+fn bare_pane_shell_provenance(
+    anchor: &ChainLink,
+    pane_tty: Option<&[u8]>,
+    launched: &[Vec<u8>],
+) -> Result<(), String> {
+    let Some(expected) = pane_tty else {
+        return Err(
+            "the pane shell's session terminal is not observable on this platform; the report is \
+             refused"
+                .to_string(),
+        );
+    };
+    match anchor.fd0_target.as_deref() {
+        Some(actual) if actual == expected => {}
+        _ => {
+            return Err(
+                "the pane shell's stdin is not the session terminal; the report is refused"
+                    .to_string(),
+            );
+        }
+    }
+    match anchor.argv.as_deref() {
+        Some(actual) if actual == launched && !launched.is_empty() => Ok(()),
+        _ => Err(
+            "the pane shell does not match this session's recorded launch; the report is refused"
+                .to_string(),
+        ),
+    }
+}
+
+/// Whether one above-runtime link is this launch's transparent shell: a
+/// shell whose `-c` command shell-splits to exactly `exec claude` plus
+/// arguments. Same rule OMP's/Goose's `S` applies, no new generality —
+/// a trampoline exec'ing anything else is not this launch's
+/// transparency, and (like every shell rule here) unquoted shell syntax
+/// anywhere past the words refuses.
+fn is_claude_shell_trampoline(link: &ChainLink) -> bool {
+    if !is_claude_shell_image(link) {
+        return false;
+    }
+    let Some(argv) = link.argv.as_deref() else {
+        return false;
+    };
+    let [_, flag, command] = argv else {
+        return false;
+    };
+    if flag != b"-c" {
+        return false;
+    }
+    let command = match std::str::from_utf8(command) {
+        Ok(command) => command,
+        Err(_) => return false,
+    };
+    let words = match shell_words::split(command) {
+        Ok(words) => words,
+        Err(_) => return false,
+    };
+    let [exec, target, ..] = words.as_slice() else {
+        return false;
+    };
+    exec == "exec" && *target == "claude" && !has_unquoted_shell_syntax(command)
+}
+
+/// Whether the emitter link's live argv still describes a Claude
+/// foreground session, read through the SAME CLI grammar launch
+/// classification shares — decoded to UTF-8 here, decided in
+/// [`crate::agent_kind::claude`]. Missing or undecodable argv is missing
+/// evidence and refuses, as does any background, hookless, exiting, or
+/// utility shape. Print mode and top-level `--agent` are foreground
+/// shapes and pass: the probe watched both emit attributed
+/// `SessionStart` the same way an interactive session does.
+fn claude_runtime_cli_shape(link: &ChainLink) -> Result<(), String> {
+    let argv = link.argv.as_deref().ok_or_else(|| {
+        "the Claude runtime's command line could not be read; the report is refused".to_string()
+    })?;
+    let decoded: Option<Vec<String>> = argv
+        .iter()
+        .map(|arg| std::str::from_utf8(arg).map(str::to_string).ok())
+        .collect();
+    let Some(decoded) = decoded else {
+        return Err(
+            "the Claude runtime's command line is not valid UTF-8; the report is refused"
+                .to_string(),
+        );
+    };
+    if crate::agent_kind::claude::claude_foreground_cli_shape(&decoded) {
+        Ok(())
+    } else {
+        Err(
+            "the live Claude runtime no longer describes a foreground session; the report is \
+             refused"
+                .to_string(),
+        )
+    }
+}
+
+/// Claude's instance of the restrictive corridor, over an already-walked
+/// chain: the reporter (first link, the kernel-attributed socket peer)
+/// must be the supported hook invocation; exactly one Claude runtime
+/// image is the emitter — a native `claude` by basename OR the standard
+/// install's versioned single file (see [`is_claude_runtime_exe`]) —
+/// whose LIVE argv must still describe a foreground session through the
+/// shared CLI grammar; below the runtime only the narrow hook
+/// trampoline may appear; above it only this launch's transparent shell.
+/// The pane anchor (last link, the owned foreground) is CLASSIFIED,
+/// never exempted: it admits only as the session's own launched shell
+/// (a known shell image with no command of its own AND an argv still
+/// spelling the recorded launch AND a stdin still on the session
+/// terminal — see [`bare_pane_shell_provenance`], since a wrapper can
+/// exec a bare shell over redirected stdin and then restore the
+/// terminal fd) or as this launch's own transparent shell under the
+/// shell program — the same rule interior links obey. A shell anchor
+/// running a script or a `-c` command, a bare shell whose stdin left
+/// the terminal, a bare shell that no longer spells the recorded
+/// launch (the `exec`'d replacement keeps the pane PID but not the
+/// launch argv), and ANY non-shell anchor (an interpreter or binary
+/// image of any argv shape, including a single bare word), is a
+/// surviving user wrapper — the shape a backgrounded child reports
+/// through — and refuses. A second `claude` in EITHER layout, any
+/// other session-hosting runtime, or any unclassified intermediary
+/// refuses.
+///
+/// The reporter rule is the SHARED [`is_hook_invocation_argv`] prefix,
+/// not a Claude-specific matcher: Claude's hook runs as the direct
+/// command (`<farhelm> internal hook --vendor claude`, through the usual
+/// `sh -c`), which the prefix already covers — unlike Goose, whose
+/// persisted MCP declaration needs its own exact helper rule. A `sh -c`
+/// that has not exec'd the hook away is the narrow [`is_hook_trampoline`]
+/// below the runtime, never the reporter.
+///
+/// Pure over the chain so the shapes are unit-testable without live
+/// processes; every refusal names the shape it found.
+///
+/// `pane_tty` is the session terminal the bare-shell anchor rule
+/// compares against (see [`bare_pane_shell_provenance`]), or `None`
+/// where the caller has none to offer — which now refuses in that
+/// branch. `launched` is the session's recorded launch argv, the
+/// same rule's other leg; empty refuses there too.
+fn claude_corridor(
+    chain: &[ChainLink],
+    program: &crate::agent_kind::claude::ClaudeLaunchProgram,
+    pane_tty: Option<&[u8]>,
+    launched: &[Vec<u8>],
+) -> Result<ProcessIdentity, String> {
+    use crate::agent_kind::claude::ClaudeLaunchProgram;
+    // Package launches classify honestly but reach no evidence: no
+    // npm/npx/bun package/bin layout is proved on the pinned install
+    // (which is native), so there is no descriptor to bind the live
+    // chain to. Unknown never reaches evidence either.
+    if !matches!(
+        program,
+        ClaudeLaunchProgram::Claude | ClaudeLaunchProgram::Shell
+    ) {
+        return Err(
+            "the Claude launch shape is not a supported runtime; the report is refused".to_string(),
+        );
+    }
+    let Some(reporter) = chain.first() else {
+        return Err("the process chain is empty; the report is refused".to_string());
+    };
+    match reporter.argv.as_deref() {
+        Some(argv) if is_hook_invocation_argv(argv) => {}
+        _ => {
+            return Err(
+                "the reporting process is not the supported hook invocation; the report is \
+                 refused"
+                    .to_string(),
+            );
+        }
+    }
+    let mut emitter_index = None;
+    for (index, link) in chain.iter().enumerate().skip(1) {
+        if is_claude_runtime_link(link) {
+            if emitter_index.is_some() {
+                return Err(
+                    "two live Claude runtimes claim the report; the report is refused".to_string(),
+                );
+            }
+            emitter_index = Some(index);
+        }
+    }
+    let Some(emitter_index) = emitter_index else {
+        // Name the unverified execution shape when it is the reason: a
+        // directly interpreted entry point is deliberately unsupported,
+        // not merely unrecognized.
+        if chain
+            .iter()
+            .skip(1)
+            .any(|link| is_node_image(&link.exe) || is_bun_image(&link.exe))
+        {
+            return Err(
+                "directly interpreted Claude execution has no verified mapping; the report is \
+                 refused"
+                    .to_string(),
+            );
+        }
+        return Err("no live Claude runtime claims the report; the report is refused".to_string());
+    };
+    for link in &chain[1..emitter_index] {
+        let argv = link.argv.as_deref().ok_or_else(|| {
+            "a process between the reporter and the Claude runtime has no command line; the \
+             report is refused"
+                .to_string()
+        })?;
+        if !is_hook_trampoline(&link.exe, argv) {
+            // An interpreter here is not a failed trampoline but an
+            // unverified execution shape — the same deliberate gap the
+            // no-runtime arm names "no verified mapping" — so it keeps
+            // the unclassified classification instead of implying a
+            // trampoline was expected. Positioned honestly: between
+            // the reporter and the runtime, not above the emitter.
+            if is_node_image(&link.exe) || is_bun_image(&link.exe) {
+                return Err(
+                    "an unclassified process sits between the reporter and the Claude runtime; \
+                     the report is refused"
+                        .to_string(),
+                );
+            }
+            return Err(
+                "a process between the reporter and the Claude runtime is not the hook \
+                 trampoline; the report is refused"
+                    .to_string(),
+            );
+        }
+    }
+    // The runtime's OWN argv is re-read live and must still describe a
+    // foreground session: the launch-time classification says how this
+    // session started, not what this process is now.
+    claude_runtime_cli_shape(&chain[emitter_index])?;
+    // Links strictly between the emitter and the pane anchor — empty
+    // when the emitter IS the anchor (an exec'd pane), which the
+    // bounds check keeps from slicing backwards.
+    let last = chain.len() - 1;
+    if emitter_index + 1 < last {
+        for link in &chain[emitter_index + 1..last] {
+            // A native launch runs the runtime directly under the pane;
+            // only a shell-classified launch may show a trampoline above
+            // it, and only its own transparent one.
+            if matches!(program, ClaudeLaunchProgram::Shell) && is_claude_shell_trampoline(link) {
+                continue;
+            }
+            // A second `claude` cannot reach this loop — the emitter
+            // scan above refuses it first, with the nesting
+            // diagnostic — so only the other session-hosting
+            // runtimes are named here. The matcher already names
+            // `claude`; reaching this arm with one would be a skip,
+            // never an acceptance.
+            if is_other_session_runtime(&link.exe) {
+                return Err(
+                    "another session-hosting runtime sits above the Claude emitter; the report is \
+                     refused"
+                        .to_string(),
+                );
+            }
+            return Err(
+                "an unclassified process sits above the Claude emitter; the report is refused"
+                    .to_string(),
+            );
+        }
+    }
+    // The pane anchor itself, when it survives above the emitter: a
+    // wrapper that backgrounded the runtime reaches here with no
+    // interior links at all, so position alone would admit it. Every
+    // surviving anchor is therefore classified: the launch's own
+    // transparency (under the shell program only), or the session's
+    // own launched shell — a bare argv shape PLUS an argv still
+    // spelling the recorded launch PLUS a stdin still on the session
+    // terminal, since a wrapper can redirect its own stdin to a
+    // script, exec a bare shell over its own pane PID, and then
+    // restore the terminal fd (see [`bare_pane_shell_provenance`])
+    // — and nothing else. In particular a non-shell image is never
+    // a framework anchor: the supervisor starts panes under a shell,
+    // so an interpreter or binary at the pane root is a user wrapper
+    // (a script installed as `claude` that spawns background and
+    // foreground native Claudes reports through exactly this shape),
+    // whatever its argv looks like.
+    if emitter_index < last {
+        let anchor = &chain[last];
+        if matches!(program, ClaudeLaunchProgram::Shell) && is_claude_shell_trampoline(anchor) {
+            // The launch's own surviving transparency at the anchor.
+        } else if is_bare_pane_shell(anchor) {
+            // The session's own launched shell: known image, no
+            // command, still spelling the recorded launch, stdin
+            // still the session terminal.
+            bare_pane_shell_provenance(anchor, pane_tty, launched)?;
+        } else if is_claude_shell_image(anchor) {
+            return Err(
+                "a shell carrying a command survives above the Claude emitter; the report is \
+                 refused"
+                    .to_string(),
+            );
+        } else {
+            return Err(
+                "a non-shell process survives above the Claude emitter; the report is refused"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(ProcessIdentity {
+        pid: chain[emitter_index].pid,
+        start: chain[emitter_index].start,
+    })
+}
+
+/// Attribute a hook connection to the one Claude runtime under the owned
+/// pane that the launch installed.
+///
+/// The walk is the shared [`walk_to_pane`] mechanics; the corridor applied
+/// below is Claude's instance of the restrictive rule. `program` is the
+/// durable launch's program classification, so the live chain must agree
+/// with how the session was launched, not merely look like some Claude
+/// shape. `pane_tty` is the session terminal for the bare-shell anchor
+/// proof (see [`bare_pane_shell_provenance`]), or `None` where the
+/// caller has none — macOS, where the bare-shell branch refuses for
+/// exactly that reason. `launched` is the session's recorded launch
+/// argv, the same branch's other leg.
+pub(crate) fn foreground_claude_emitter(
+    peer: ProcessIdentity,
+    pane_pid: u32,
+    program: &crate::agent_kind::claude::ClaudeLaunchProgram,
+    pane_tty: Option<Vec<u8>>,
+    launched: Vec<Vec<u8>>,
+) -> Result<ProcessIdentity, String> {
+    let chain = walk_to_pane(peer, pane_pid)?;
+    claude_corridor(&chain, program, pane_tty.as_deref(), &launched)
+}
+
 /// Extract the environment region of a macOS `KERN_PROCARGS2` buffer,
 /// re-joined as the NUL-delimited block [`read_environ`] promises.
 ///
@@ -1607,6 +2162,21 @@ mod imp {
                 .map(|arg| arg.to_vec())
                 .collect(),
         )
+    }
+
+    /// What `/proc/<pid>/fd/0` points at: `/dev/pts/N` for a process
+    /// on a terminal, the script path for a stdin-fed shell,
+    /// `pipe:[...]`/`socket:[...]` for the anonymous kinds. `None`
+    /// when the link cannot be read (gone, foreign uid,
+    /// non-dumpable) — the caller's missing-evidence contract, not a
+    /// walk failure. Same trust level as the exe read two functions
+    /// up: where that one fails this one fails too, so an anchor
+    /// that hides its stdin already refuses on its image.
+    pub(super) fn read_fd0_target(pid: u32) -> Option<Vec<u8>> {
+        use std::os::unix::ffi::OsStrExt;
+        std::fs::read_link(format!("/proc/{pid}/fd/0"))
+            .ok()
+            .map(|path| path.as_os_str().as_bytes().to_vec())
     }
 
     #[cfg(test)]
@@ -2189,6 +2759,17 @@ mod imp {
         // data, not a short read.
         super::parse_procargs2_argv(&buf)
     }
+
+    /// No fd-0 target on macOS: there is no `/proc`, and the pinned
+    /// libc exposes `proc_pidfdinfo` but neither the vnode-path
+    /// flavor constant nor its struct, so hand-rolling the ABI is
+    /// unverifiable here. Always `None` — the corridor treats that
+    /// as "no session-terminal evidence" and refuses bare-shell
+    /// ancestry on this platform (documented residual, not a Linux
+    /// fallback).
+    pub(super) fn read_fd0_target(_pid: u32) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// A marked, long-lived child process for kill-sweep and environ tests —
@@ -2724,17 +3305,57 @@ mod tests {
         );
     }
 
+    /// The fd-0 read reports this process's own stdin target, and
+    /// nothing for a pid that is gone.
+    ///
+    /// Why this test matters: the bare-shell anchor proof compares
+    /// the walked fd-0 target against the session terminal, so the
+    /// read itself has to be pinned against a live process — and its
+    /// `None` has to mean "unreadable", never a fabricated target.
+    /// The expectation is platform-shaped: Linux reads
+    /// `/proc/<pid>/fd/0` (non-empty for any live process, whose
+    /// stdin is at least an open descriptor), while macOS reports
+    /// `None` unconditionally (see `imp::read_fd0_target`).
+    #[farhelm_testtrace::test]
+    fn fd0_target_reads_the_live_stdin_or_nothing() {
+        let me = std::process::id();
+        #[cfg(not(target_os = "macos"))]
+        assert!(
+            read_fd0_target(me).is_some_and(|target| !target.is_empty()),
+            "a live same-uid process must expose its stdin target"
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            read_fd0_target(me),
+            None,
+            "macOS has no fd-0 observable, so the read reports none"
+        );
+        assert_eq!(
+            read_fd0_target(1 << 30),
+            None,
+            "a pid that was never alive must report no stdin target"
+        );
+    }
+
     /// One synthetic chain link: pid/start are distinct per link so an
     /// admitted emitter is identifiable as the intended process, and argv
     /// is spelled exactly as the kernel would capture it (argv[0] is the
     /// executable spelling, never validated).
     fn corridor_link(pid: u32, exe: &str, argv: &[&str]) -> ChainLink {
+        corridor_link_fd0(pid, exe, argv, None)
+    }
+
+    /// One synthetic chain link with observed fd-0 evidence: `fd0` is
+    /// what `/proc/<pid>/fd/0` would have read at walk time
+    /// (`None` = unreadable, the way the real walk records it).
+    fn corridor_link_fd0(pid: u32, exe: &str, argv: &[&str], fd0: Option<&[u8]>) -> ChainLink {
         ChainLink {
             pid,
             ppid: 0,
             start: u64::from(pid) * 1_000,
             exe: exe.as_bytes().to_vec(),
             argv: Some(argv.iter().map(|arg| arg.as_bytes().to_vec()).collect()),
+            fd0_target: fd0.map(|target| target.to_vec()),
         }
     }
 
@@ -2745,7 +3366,15 @@ mod tests {
             start: u64::from(pid) * 1_000,
             exe: exe.as_bytes().to_vec(),
             argv: None,
+            fd0_target: None,
         }
+    }
+
+    /// One synthetic recorded launch argv, as the async caller parses
+    /// it from the stored invocation: byte words, the shape the
+    /// bare-shell branch compares the anchor's walked argv against.
+    fn launched(argv: &[&str]) -> Vec<Vec<u8>> {
+        argv.iter().map(|arg| arg.as_bytes().to_vec()).collect()
     }
 
     /// The installed hook command, as the kernel captures it on the
@@ -4036,6 +4665,7 @@ mod tests {
                 start: 11_000,
                 exe: b"/usr/local/bin/goose".to_vec(),
                 argv: Some(vec![b"goose".to_vec(), b"session".to_vec(), vec![0xff]]),
+                fd0_target: None,
             },
         ];
         let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
@@ -4112,6 +4742,1029 @@ mod tests {
         let refusal = goose_corridor(&chain, &crate::agent_kind::goose::GooseLaunchProgram::Goose)
             .expect_err("a foreign exec target must be refused");
         assert!(refusal.contains("unclassified process"), "{refusal}");
+    }
+
+    /// The hook invocation, as the kernel captures it on the reporter:
+    /// any `argv[0]` plus the exact `internal hook` words. Claude's
+    /// hook runs as this direct command (through the usual `sh -c`),
+    /// not through a persisted declaration like Goose's helper — which
+    /// is why the corridor shares the prefix matcher instead of
+    /// carrying its own reporter rule.
+    fn claude_hook_argv() -> Vec<&'static str> {
+        vec!["farhelm", "internal", "hook", "--vendor", "claude"]
+    }
+
+    /// One native `claude` image link running a foreground session,
+    /// with `tail` appended after the program word.
+    fn claude_runtime_link(pid: u32, tail: &[&str]) -> ChainLink {
+        let mut argv = vec!["claude"];
+        argv.extend(tail.iter().copied());
+        corridor_link(pid, "/usr/local/bin/claude", &argv)
+    }
+
+    /// A bare shell surviving above the runtime refuses under the
+    /// native program even when its stdin is the session terminal: a
+    /// native launch runs the runtime directly under the pane, so a
+    /// surviving shell is not this launch — and the recorded launch
+    /// says so too (`claude` does not spell `-bash`). The fd-restore
+    /// shape reaches exactly this chain (right image, bare argc,
+    /// restored terminal fd), which is why terminal equality alone
+    /// cannot admit it. The native program's supported shape is the
+    /// runtime AS the anchor, pinned by
+    /// `a_pane_execd_into_the_claude_runtime_is_still_the_emitter`.
+    ///
+    /// Why this test matters: it pins the record leg's refusal on a
+    /// chain the fd leg would admit, so a future change that drops
+    /// the record comparison fails loudly here instead of reopening
+    /// the P0.
+    #[farhelm_testtrace::test]
+    fn a_bare_shell_anchor_under_a_native_launch_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(11, &[]),
+            corridor_link_fd0(10, "/bin/bash", &["-bash"], Some(b"/dev/pts/7")),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            Some(b"/dev/pts/7".as_slice()),
+            &launched(&["claude"]),
+        )
+        .expect_err("a surviving shell under a native launch must be refused");
+        assert!(
+            refusal.contains("does not match this session's recorded launch"),
+            "{refusal}"
+        );
+    }
+
+    /// A bare shell that still spells the recorded launch, with its
+    /// stdin still on the session terminal, admits under the shell
+    /// program: the supervisor launched this shell itself, so the
+    /// anchor is the pane root it started rather than a wrapper's
+    /// replacement. The record is the whole distinction — the same
+    /// chain with a launch-shaped mismatch refuses (see the native
+    /// test above), and the same chain with a foreign stdin refuses
+    /// (see `a_stdin_fed_shell_anchor_above_the_claude_runtime_is_refused`).
+    ///
+    /// Why this test matters: it is the positive half of the
+    /// bare-shell anchor proof, the shape a runtime hand-typed into
+    /// a launched shell reports through. Without it a future
+    /// tightening could silently void every interactive shell
+    /// session's reports.
+    #[farhelm_testtrace::test]
+    fn a_launched_bare_shell_anchor_above_the_claude_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(11, &[]),
+            corridor_link_fd0(10, "/bin/sh", &["/bin/sh"], Some(b"/dev/pts/7")),
+        ];
+        let emitter = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            Some(b"/dev/pts/7".as_slice()),
+            &launched(&["/bin/sh"]),
+        )
+        .expect("the launched shell must be admitted");
+        assert_eq!(emitter.pid, 11, "the emitter is the claude runtime");
+    }
+
+    /// The `exec 0<&3` shape refuses on the record even though every
+    /// descriptor matches: the wrapper saved fd 0, redirected stdin
+    /// to a script, exec'd `/bin/sh` with argv `["sh"]`, and restored
+    /// the terminal fd before spawning background and foreground
+    /// siblings — so image, argc, AND fd 0 are all correct, and only
+    /// the launch spelling (`sh` is not the recorded wrapper
+    /// invocation) tells the replacement apart. Both programs refuse
+    /// alike: the record leg does not depend on how the session was
+    /// launched, only on what it was launched as.
+    ///
+    /// Why this test matters: it is the refix-3 P0, the stable
+    /// accepted state no fd re-read closes. The e2e twin test drives
+    /// the same shape through real reporting; this one pins the
+    /// corridor's diagnostic without processes.
+    #[farhelm_testtrace::test]
+    fn an_fd_restored_shell_anchor_above_the_claude_runtime_is_refused() {
+        for program in [
+            crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(11, &[]),
+                corridor_link_fd0(10, "/bin/sh", &["sh"], Some(b"/dev/pts/3")),
+            ];
+            let refusal = claude_corridor(
+                &chain,
+                &program,
+                Some(b"/dev/pts/3".as_slice()),
+                &launched(&["/tmp/bin/claude", "--settings", "{}"]),
+            )
+            .expect_err("a restored-terminal replacement anchor must be refused");
+            assert!(
+                refusal.contains("does not match this session's recorded launch"),
+                "{refusal}"
+            );
+        }
+    }
+
+    /// The pane anchor may itself be the runtime: a pane that exec'd
+    /// into the launch has no wrapper link left, and position must not
+    /// cost it the emitter role. Print mode and top-level `--agent`
+    /// are foreground shapes, not refusals.
+    #[farhelm_testtrace::test]
+    fn a_pane_execd_into_the_claude_runtime_is_still_the_emitter() {
+        for tail in [
+            vec![],
+            vec!["-p", "do the thing"],
+            vec!["--agent", "general-purpose", "-p", "do the thing"],
+            vec!["--resume", "conv-1"],
+            vec!["-c"],
+            vec!["--session-id", "conv-1"],
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(11, &tail),
+            ];
+            let emitter = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                None,
+                &[],
+            )
+            .unwrap_or_else(|error| panic!("{tail:?} must attribute: {error}"));
+            assert_eq!(emitter.pid, 11);
+        }
+    }
+
+    /// A shell launch program admits the exec'd-away wrapper: no link
+    /// survives a shell that already exec'd into the runtime, so the
+    /// chain looks exactly like a direct launch — and the provenance
+    /// saying `shell` must not void it.
+    #[farhelm_testtrace::test]
+    fn a_claude_shell_launch_program_with_an_execd_away_wrapper_is_admitted() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(11, &[]),
+        ];
+        let emitter = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            None,
+            &[],
+        )
+        .expect("an exec'd-away shell wrapper must be admitted");
+        assert_eq!(emitter.pid, 11);
+    }
+
+    /// A surviving shell trampoline above the runtime admits under the
+    /// shell program only: `sh -c` exec'ing exactly the runtime is this
+    /// launch's transparency. Under the native program the same link
+    /// refuses — a native launch runs the runtime directly under the
+    /// pane, so a surviving wrapper is not this launch.
+    #[farhelm_testtrace::test]
+    fn a_surviving_claude_shell_trampoline_admits_only_under_the_shell_program() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "exec claude"]),
+            corridor_link_fd0(10, "/bin/bash", &["-bash"], Some(b"/dev/pts/7")),
+        ];
+        let emitter = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            Some(b"/dev/pts/7".as_slice()),
+            &launched(&["-bash"]),
+        )
+        .expect("a surviving exec trampoline must be admitted");
+        assert_eq!(emitter.pid, 12);
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("the same wrapper under a native launch must be refused");
+        assert!(refusal.contains("unclassified process"), "{refusal}");
+    }
+
+    /// A wrapper shell surviving above the runtime refuses under every
+    /// program: a wrapper that backgrounds one `claude` and foregrounds
+    /// another reports the background child through exactly this chain —
+    /// hook, one native runtime, the wrapper as pane anchor, no interior
+    /// links — and position alone used to admit it, letting the
+    /// background child establish or replace the binding. The anchor
+    /// carries a command (`wrapper.sh`, a `-c` string), so it is not
+    /// the bare pane shell the corridor still accepts, and it is not
+    /// this launch's transparency either.
+    ///
+    /// Why this test matters: it is the P0 the anchor rule closes. A
+    /// missing-argv anchor refuses with it (missing evidence fails
+    /// closed), and the same wrapper shape refuses under the native
+    /// program too — provenance cannot bless a surviving wrapper.
+    #[farhelm_testtrace::test]
+    fn a_wrapper_shell_anchor_above_the_claude_runtime_is_refused() {
+        for program in [
+            crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+        ] {
+            for argv in [
+                vec!["sh", "/path/wrapper.sh"],
+                vec!["sh", "-c", "claude \"$@\" & claude \"$@\""],
+            ] {
+                let chain = vec![
+                    corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                    claude_runtime_link(11, &[]),
+                    corridor_link(10, "/bin/sh", &argv),
+                ];
+                let refusal = claude_corridor(&chain, &program, None, &[])
+                    .expect_err(&format!("{argv:?} wrapper anchor must be refused"));
+                assert!(
+                    refusal.contains("a shell carrying a command survives above"),
+                    "{argv:?}: {refusal}"
+                );
+            }
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(11, &[]),
+                corridor_link_no_argv(10, "/bin/sh"),
+            ];
+            let refusal = claude_corridor(&chain, &program, None, &[])
+                .expect_err("a shell anchor with no argv must be refused");
+            assert!(
+                refusal.contains("a shell carrying a command survives above"),
+                "{refusal}"
+            );
+        }
+    }
+
+    /// A non-shell wrapper surviving above the runtime refuses under every
+    /// program: a user wrapper installed as `claude` (a Python script, say)
+    /// that backgrounds one native Claude and foregrounds another reports
+    /// the background child through exactly this chain — hook, one native
+    /// runtime, the interpreter as pane anchor, no interior links — and
+    /// "not one of three shells" used to exempt it from classification,
+    /// letting the background child establish or replace the binding. The
+    /// anchor's argv shape is irrelevant: a bare single-word interpreter
+    /// is as much a surviving wrapper as one carrying a script path, and
+    /// missing argv refuses rather than admits.
+    ///
+    /// Why this test matters: it is the refix P0. The shell-anchor test
+    /// above pins only command-carrying shell anchors; without this one
+    /// the same capture steal survives through any other image.
+    #[farhelm_testtrace::test]
+    fn a_nonshell_wrapper_anchor_above_the_claude_runtime_is_refused() {
+        for program in [
+            crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+        ] {
+            for argv in [
+                vec!["/tmp/bin/claude"],
+                vec!["/tmp/bin/claude", "--resume", "conv-1"],
+                vec!["python3"],
+            ] {
+                let chain = vec![
+                    corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                    claude_runtime_link(11, &[]),
+                    corridor_link(10, "/usr/bin/python3", &argv),
+                ];
+                let refusal = claude_corridor(&chain, &program, None, &[])
+                    .expect_err(&format!("{argv:?} non-shell anchor must be refused"));
+                assert!(
+                    refusal.contains("a non-shell process survives above"),
+                    "{argv:?}: {refusal}"
+                );
+            }
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(11, &[]),
+                corridor_link_no_argv(10, "/usr/bin/python3"),
+            ];
+            let refusal = claude_corridor(&chain, &program, None, &[])
+                .expect_err("a non-shell anchor with no argv must be refused");
+            assert!(
+                refusal.contains("a non-shell process survives above"),
+                "{refusal}"
+            );
+        }
+    }
+
+    /// This launch's transparency AT the anchor still admits under the
+    /// shell program: the anchor rule exempts the same trampoline shape
+    /// interior links obey, so a surviving `sh -c 'exec claude'` pane
+    /// root is not collateral of the wrapper refusal above. Under the
+    /// native program the same anchor refuses — a native launch runs
+    /// the runtime directly under the pane.
+    ///
+    /// Why this test matters: it pins the exemption's boundary. Without
+    /// it a future tightening of the anchor rule could silently void
+    /// every transparent-shell launch whose wrapper did not exec away.
+    #[farhelm_testtrace::test]
+    fn a_transparent_trampoline_at_the_anchor_admits_only_under_the_shell_program() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(11, &[]),
+            corridor_link(10, "/bin/sh", &["sh", "-c", "exec claude"]),
+        ];
+        let emitter = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            None,
+            &[],
+        )
+        .expect("a transparent trampoline anchor must be admitted");
+        assert_eq!(emitter.pid, 11);
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("the same anchor under a native launch must be refused");
+        assert!(
+            refusal.contains("a shell carrying a command survives above"),
+            "{refusal}"
+        );
+    }
+
+    /// A bare-shell anchor whose stdin left the session terminal
+    /// refuses under every program: a wrapper installed as `claude`
+    /// that redirects its own stdin to a script and execs `/bin/sh`
+    /// with argv `["sh"]` reports its background child through exactly
+    /// this chain — hook, one native runtime, the exec'd shell as pane
+    /// anchor, no interior links — and basename plus argc cannot tell
+    /// it from the framework's own pane shell. Only fd 0 can: the
+    /// walk captures what it points at, and the corridor requires
+    /// byte equality with the session terminal tmux reports.
+    ///
+    /// Why this test matters: it is the refix-2 P0. The comparison is
+    /// equality, not "is a character device": `/dev/null` is one
+    /// (a wrapper that spawns its child first, then parks a bare
+    /// shell on `/dev/null` as the anchor), and a pty the wrapper
+    /// made itself is another — only the session's own terminal
+    /// admits. Unreadable stdin refuses the same way, and both
+    /// programs refuse alike: the anchor proof does not depend on
+    /// how the session was launched.
+    #[farhelm_testtrace::test]
+    fn a_stdin_fed_shell_anchor_above_the_claude_runtime_is_refused() {
+        for program in [
+            crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+        ] {
+            for fd0 in [
+                Some(b"/tmp/wrapper-script.sh".as_slice()),
+                Some(b"/dev/null".as_slice()),
+                Some(b"pipe:[12345]".as_slice()),
+                Some(b"socket:[12345]".as_slice()),
+                Some(b"/dev/pts/9".as_slice()),
+                None,
+            ] {
+                let chain = vec![
+                    corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                    claude_runtime_link(11, &[]),
+                    corridor_link_fd0(10, "/bin/sh", &["sh"], fd0),
+                ];
+                let refusal =
+                    claude_corridor(&chain, &program, Some(b"/dev/pts/3".as_slice()), &[])
+                        .expect_err(&format!("stdin {fd0:?} must be refused"));
+                assert!(
+                    refusal.contains("stdin is not the session terminal"),
+                    "{fd0:?}: {refusal}"
+                );
+            }
+        }
+    }
+
+    /// Without session-terminal evidence a bare-shell anchor refuses,
+    /// even with a matching record: fd-0 targets are unobservable on
+    /// macOS (no `/proc`, no fd-path API in the pinned libc), so the
+    /// caller passes no terminal there and the branch fails closed
+    /// rather than admitting on the argv shape. The refusal names the
+    /// missing leg, not the record — the record is not even consulted.
+    /// Direct runtimes need no terminal leg, so macOS direct launches
+    /// keep admitting through
+    /// `a_pane_execd_into_the_claude_runtime_is_still_the_emitter`.
+    ///
+    /// Why this test matters: it pins the conservative macOS
+    /// contract. Without it a future change could silently reopen an
+    /// argv-only admission for the whole bare-shell branch.
+    #[farhelm_testtrace::test]
+    fn a_bare_pane_shell_without_terminal_evidence_is_refused() {
+        for program in [
+            crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(11, &[]),
+                corridor_link_fd0(10, "/bin/bash", &["-bash"], None),
+            ];
+            let refusal = claude_corridor(&chain, &program, None, &launched(&["-bash"]))
+                .expect_err("a bare shell without terminal evidence must be refused");
+            assert!(
+                refusal.contains("session terminal is not observable"),
+                "{refusal}"
+            );
+        }
+    }
+
+    /// A bare shell with a missing launch record refuses even when
+    /// its stdin is the session terminal: an empty record means the
+    /// stored invocation no longer parses, so nothing proves the
+    /// shell is this launch's. Missing evidence fails closed.
+    ///
+    /// Why this test matters: it pins the record leg's fail-closed
+    /// default, so a caller that cannot parse the invocation cannot
+    /// silently fall back to the fd-only shape the P0 defeated.
+    #[farhelm_testtrace::test]
+    fn a_bare_pane_shell_without_a_launch_record_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(11, &[]),
+            corridor_link_fd0(10, "/bin/sh", &["/bin/sh"], Some(b"/dev/pts/7")),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            Some(b"/dev/pts/7".as_slice()),
+            &[],
+        )
+        .expect_err("a bare shell without a launch record must be refused");
+        assert!(
+            refusal.contains("does not match this session's recorded launch"),
+            "{refusal}"
+        );
+    }
+
+    /// A shell trampoline exec'ing another program is not this
+    /// launch's transparency: only `exec claude` names the runtime the
+    /// provenance describes.
+    #[farhelm_testtrace::test]
+    fn a_claude_shell_trampoline_execing_another_program_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(12, &[]),
+            corridor_link(11, "/bin/sh", &["sh", "-c", "exec codex exec"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Shell,
+            None,
+            &[],
+        )
+        .expect_err("a foreign exec target must be refused");
+        assert!(refusal.contains("unclassified process"), "{refusal}");
+    }
+
+    /// The narrow hook trampoline below the runtime admits: a `sh -c`
+    /// that kept its link instead of exec'ing the reporter away. A
+    /// non-trampoline process in the same position refuses.
+    #[farhelm_testtrace::test]
+    fn a_hook_trampoline_below_the_claude_runtime_is_admitted() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            corridor_link(
+                12,
+                "/bin/sh",
+                &["sh", "-c", "farhelm internal hook --vendor claude"],
+            ),
+            claude_runtime_link(11, &[]),
+        ];
+        let emitter = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect("the hook trampoline must be admitted");
+        assert_eq!(emitter.pid, 11);
+
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            corridor_link(12, "/usr/bin/sleep", &["sleep", "25"]),
+            claude_runtime_link(11, &[]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("a non-trampoline below the runtime must be refused");
+        assert!(refusal.contains("not the hook trampoline"), "{refusal}");
+    }
+
+    /// Two live `claude` images refuse: a nested session passes its own
+    /// checks on its own context, so only the duplicate-emitter rule
+    /// can refuse it — this is the central regression the corridor
+    /// pins.
+    #[farhelm_testtrace::test]
+    fn a_nested_claude_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(12, &[]),
+            claude_runtime_link(11, &[]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("nested claude must be refused");
+        assert!(refusal.contains("two live Claude runtimes"), "{refusal}");
+    }
+
+    /// One versioned-install `claude` link running a foreground session,
+    /// with `tail` appended after the program word. The argv[0] keeps
+    /// the launcher spelling (the symlink the user invokes, whose
+    /// basename is `claude`) while the exe is the kernel-resolved
+    /// versioned file — exactly the split a real launch presents.
+    fn versioned_claude_runtime_link(pid: u32, tail: &[&str]) -> ChainLink {
+        let mut argv = vec!["/home/test/.local/bin/claude"];
+        argv.extend(tail.iter().copied());
+        corridor_link(
+            pid,
+            "/home/test/.local/share/claude/versions/2.1.278",
+            &argv,
+        )
+    }
+
+    /// The version-token grammar admits the probed install's tokens and
+    /// ordinary prereleases while refusing channel names, bare numbers,
+    /// and malformed numerics.
+    ///
+    /// Why this test matters: the versioned layout is recognized by path
+    /// shape, and the token is the only component that says "version"
+    /// rather than "some directory" — a loose token would admit a
+    /// `.../claude/versions/latest` symlink farm or a build directory as
+    /// the vendor install.
+    #[farhelm_testtrace::test]
+    fn claude_version_token_grammar_admits_versions_only() {
+        for token in [
+            "2.1.278",
+            "2.1.274",
+            "2.1.275",
+            "2.1",
+            "10.0.0",
+            "2.1.278-rc.1",
+            "2.1.278-rc-1",
+        ] {
+            assert!(
+                is_claude_version_token(token.as_bytes()),
+                "{token} must be a version token"
+            );
+        }
+        for token in [
+            "",
+            "278",
+            "latest",
+            "stable",
+            "current",
+            "v2.1.278",
+            "2.1.",
+            ".1.2",
+            "1..2",
+            "2.x.1",
+            "2.1.278-",
+            "2.1.278-..",
+            "2.1.278+build",
+            "-rc.1",
+            "2.1.278-rc!",
+        ] {
+            assert!(
+                !is_claude_version_token(token.as_bytes()),
+                "{token} must not be a version token"
+            );
+        }
+    }
+
+    /// Only the tight `.../claude/versions/<version>` layout matches:
+    /// the probed install path admits under any install root, while
+    /// wrong directory names, non-version basenames, and deeper or
+    /// shallower nestings refuse.
+    ///
+    /// Why this test matters: the layout match is an allowlist for the
+    /// one standard install shape, not a substring search — each
+    /// rejected near-miss is a distinct way a foreign tree could
+    /// otherwise borrow the vendor's identity.
+    #[farhelm_testtrace::test]
+    fn versioned_claude_layout_matches_only_the_tight_shape() {
+        for exe in [
+            "/home/test/.local/share/claude/versions/2.1.278",
+            "/home/test/.local/share/claude/versions/2.1.274",
+            "/opt/other-root/claude/versions/10.0.0",
+            "/opt/other-root/claude/versions/2.1.278-rc.1",
+            "/home/test/.local/share/claude/versions/2.1.278 (deleted)",
+        ] {
+            assert!(is_versioned_claude_exe(exe.as_bytes()), "{exe} must match");
+            assert!(
+                is_claude_runtime_exe(exe.as_bytes()),
+                "{exe} must count as a runtime"
+            );
+        }
+        for exe in [
+            "/usr/local/bin/claude",
+            "/opt/versions/2.1.278",
+            "/opt/notclaude/versions/2.1.278",
+            "/opt/claude/notversions/2.1.278",
+            "/opt/claude/versions/latest",
+            "/opt/claude/versions/278",
+            "/opt/claude/versions/2.1.278/extra",
+            "/opt/claude/versions/extra/2.1.278",
+            "/opt/claude/2.1.278",
+            "claude/versions/2.1.278/",
+        ] {
+            assert!(
+                !is_versioned_claude_exe(exe.as_bytes()),
+                "{exe} must not match"
+            );
+        }
+        assert!(
+            is_claude_runtime_exe(b"/usr/local/bin/claude"),
+            "the basename shape still counts as a runtime"
+        );
+        assert!(
+            !is_claude_runtime_exe(b"/usr/bin/sleep"),
+            "an unrelated image is no runtime in either shape"
+        );
+    }
+
+    /// The shared nested-runtime matcher names a versioned `claude` as
+    /// another session-hosting runtime — the SAME recognition the
+    /// corridor applies — so no corridor can skip one as an
+    /// unclassified link.
+    ///
+    /// Why this test matters: the emitter scan and the above-emitter
+    /// loop consult different matchers, and only this test pins that
+    /// both agree a versioned image is a runtime.
+    #[farhelm_testtrace::test]
+    fn other_session_runtime_names_a_versioned_claude() {
+        assert!(is_other_session_runtime(b"/usr/local/bin/claude"));
+        assert!(is_other_session_runtime(
+            b"/home/test/.local/share/claude/versions/2.1.278"
+        ));
+        assert!(!is_other_session_runtime(b"/opt/claude/versions/latest"));
+        assert!(!is_other_session_runtime(b"/usr/bin/sleep"));
+    }
+
+    /// A versioned-install `claude` with a surviving bare shell above
+    /// it refuses under the native program: the install layout changes
+    /// which image counts as a runtime, not what a native launch's
+    /// pane root looks like — the shim execs the agent argv directly,
+    /// so a surviving shell is not this launch whatever the runtime
+    /// image resolves to. The honest record (the versioned invocation
+    /// itself) does not spell the anchor, so the refusal names the
+    /// record. The versioned layout's supported shape is the runtime
+    /// AS the anchor; the live proof test pins that admission end to
+    /// end.
+    ///
+    /// Why this test matters: the versioned layout is the shape every
+    /// real launch presents, so the record refusal must hold for it
+    /// too — a layout-scoped exemption would reopen the P0 for the
+    /// most common install.
+    #[farhelm_testtrace::test]
+    fn a_versioned_claude_runtime_below_a_surviving_shell_is_refused() {
+        for tail in [
+            vec![],
+            vec!["--print", "say hi", "--settings", "{}"],
+            vec!["--agent", "general-purpose", "-p", "do the thing"],
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                versioned_claude_runtime_link(11, &tail),
+                corridor_link_fd0(10, "/bin/bash", &["-bash"], Some(b"/dev/pts/7")),
+            ];
+            let mut record = vec!["/home/test/.local/bin/claude"];
+            record.extend(tail.iter().copied());
+            let refusal = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                Some(b"/dev/pts/7".as_slice()),
+                &launched(&record),
+            )
+            .expect_err(&format!("{tail:?} must refuse"));
+            assert!(
+                refusal.contains("does not match this session's recorded launch"),
+                "{tail:?}: {refusal}"
+            );
+        }
+    }
+
+    /// Two live `claude` images refuse when either or both use the
+    /// versioned layout: a nested versioned install is nesting, never
+    /// a link to skip past on the way to the outer runtime.
+    ///
+    /// Why this test matters: the duplicate-emitter scan is what stops
+    /// a background copy's report from borrowing the parent's pane —
+    /// and that stop must hold for the layout real installs use, not
+    /// only the basename shape.
+    #[farhelm_testtrace::test]
+    fn a_nested_versioned_claude_runtime_is_refused() {
+        let inner_versioned = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            versioned_claude_runtime_link(12, &[]),
+            claude_runtime_link(11, &[]),
+        ];
+        let outer_versioned = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(12, &[]),
+            versioned_claude_runtime_link(11, &[]),
+        ];
+        let both_versioned = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            versioned_claude_runtime_link(12, &[]),
+            versioned_claude_runtime_link(11, &[]),
+        ];
+        for (name, chain) in [
+            ("inner versioned", inner_versioned),
+            ("outer versioned", outer_versioned),
+            ("both versioned", both_versioned),
+        ] {
+            let refusal = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                None,
+                &[],
+            )
+            .expect_err(&format!("{name} nesting must be refused"));
+            assert!(
+                refusal.contains("two live Claude runtimes"),
+                "{name}: {refusal}"
+            );
+        }
+    }
+
+    /// A mixed-harness runtime above the emitter refuses with the
+    /// session-hosting diagnostic rather than a generic intermediary:
+    /// the shape is recognized, and recognized as another session.
+    #[farhelm_testtrace::test]
+    fn a_mixed_harness_above_the_claude_runtime_is_refused() {
+        for (exe, argv) in [
+            ("/opt/test/bin/omp", vec!["omp", "--resume", "conv.jsonl"]),
+            ("/usr/local/bin/pi", vec!["pi", "--model", "x"]),
+            (
+                "/usr/local/bin/goose",
+                vec!["goose", "session", "--resume", "--session-id", "x"],
+            ),
+        ] {
+            let chain = vec![
+                corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(12, &[]),
+                corridor_link(11, exe, &argv),
+                corridor_link(10, "/bin/bash", &["-bash"]),
+            ];
+            let refusal = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                None,
+                &[],
+            )
+            .expect_err(&format!("{exe} above the emitter must be refused"));
+            assert!(
+                refusal.contains("another session-hosting runtime"),
+                "{exe}: {refusal}"
+            );
+        }
+    }
+
+    /// An unclassified process above the emitter refuses: anything
+    /// that is neither this launch's transparent shell nor a
+    /// recognized runtime voids the chain.
+    #[farhelm_testtrace::test]
+    fn an_unclassified_process_above_the_claude_runtime_is_refused() {
+        let chain = vec![
+            corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            claude_runtime_link(12, &[]),
+            corridor_link(11, "/usr/bin/sleep", &["sleep", "25"]),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("an unclassified intermediary must be refused");
+        assert!(refusal.contains("unclassified process"), "{refusal}");
+    }
+
+    /// Package and unknown launch programs refuse before any link is
+    /// examined: the chains below would otherwise admit, which is what
+    /// proves the refusal is upfront rather than shape-driven. The
+    /// package program classifies honestly but has no verified
+    /// layout on the pinned install, so it never reaches evidence.
+    #[farhelm_testtrace::test]
+    fn package_and_unknown_claude_launch_programs_are_refused_upfront() {
+        for program in [
+            crate::agent_kind::claude::ClaudeLaunchProgram::Package,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Unknown,
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                claude_runtime_link(11, &[]),
+            ];
+            let refusal = claude_corridor(&chain, &program, None, &[])
+                .expect_err("a package/unknown launch program must be refused");
+            assert!(refusal.contains("not a supported runtime"), "{refusal}");
+        }
+    }
+
+    /// A non-hook reporter refuses even with a clean chain behind it:
+    /// the corridor never admits on ancestry shape alone.
+    #[farhelm_testtrace::test]
+    fn a_non_hook_claude_reporter_is_refused() {
+        for argv in [
+            vec!["farhelm", "agent", "instructions"],
+            vec!["farhelm", "internal", "goose-hook"],
+        ] {
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &argv),
+                claude_runtime_link(11, &[]),
+            ];
+            let refusal = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                None,
+                &[],
+            )
+            .expect_err(&format!("{argv:?} must be refused"));
+            assert!(
+                refusal.contains("supported hook invocation"),
+                "{argv:?}: {refusal}"
+            );
+        }
+    }
+
+    /// Missing argv anywhere on the reporter or runtime refuses:
+    /// unreadable evidence is missing evidence, never an admission.
+    #[farhelm_testtrace::test]
+    fn claude_missing_argv_refuses() {
+        let chain = vec![
+            corridor_link_no_argv(12, "/opt/test/bin/farhelm"),
+            claude_runtime_link(11, &[]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("a missing reporter command line must be refused");
+        assert!(refusal.contains("supported hook invocation"), "{refusal}");
+
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            corridor_link_no_argv(11, "/usr/local/bin/claude"),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("a missing runtime command line must be refused");
+        assert!(refusal.contains("could not be read"), "{refusal}");
+    }
+
+    /// Non-UTF-8 runtime argv refuses: the grammar decides over decoded
+    /// words, and undecodable bytes are missing evidence.
+    #[farhelm_testtrace::test]
+    fn non_utf8_claude_runtime_argv_is_refused() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            ChainLink {
+                pid: 11,
+                ppid: 0,
+                start: 11_000,
+                exe: b"/usr/local/bin/claude".to_vec(),
+                argv: Some(vec![b"claude".to_vec(), vec![0xff]]),
+                fd0_target: None,
+            },
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("non-UTF-8 runtime argv must be refused");
+        assert!(refusal.contains("not valid UTF-8"), "{refusal}");
+    }
+
+    /// A runtime that no longer describes a foreground session refuses
+    /// even though its image is still `claude`: the launch-time
+    /// classification says how this session started, not what this
+    /// process is now. Background, hookless, exiting, and utility
+    /// shapes all leave the foreground grammar.
+    #[farhelm_testtrace::test]
+    fn a_claude_runtime_that_left_the_foreground_grammar_is_refused() {
+        for tail in [
+            vec!["--bg"],
+            vec!["--background"],
+            vec!["--bare", "-p", "hi"],
+            vec!["--help"],
+            vec!["agents", "--json"],
+            vec!["attach", "abc123"],
+        ] {
+            let mut argv = vec!["claude"];
+            argv.extend(tail.iter().copied());
+            let chain = vec![
+                corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                corridor_link(11, "/usr/local/bin/claude", &argv),
+            ];
+            let refusal = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                None,
+                &[],
+            )
+            .expect_err(&format!("{argv:?} must be refused"));
+            assert!(
+                refusal.contains("no longer describes a foreground session"),
+                "{argv:?}: {refusal}"
+            );
+        }
+    }
+
+    /// A script named `claude` is not a runtime: its image is the
+    /// interpreter's, and the descriptor matches the image — never
+    /// `argv[0]`, however foreground-shaped the words.
+    #[farhelm_testtrace::test]
+    fn a_script_named_claude_is_not_a_runtime() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            corridor_link(11, "/bin/sh", &["/usr/local/bin/claude", "-p", "hi"]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("a script named claude must be refused");
+        assert!(refusal.contains("no live Claude runtime"), "{refusal}");
+    }
+
+    /// A directly interpreted entry point refuses with its own
+    /// diagnostic: node- or bun-executed Claude has no verified
+    /// mapping, which is a deliberate gap rather than an unrecognized
+    /// chain.
+    #[farhelm_testtrace::test]
+    fn directly_interpreted_claude_execution_is_refused() {
+        for exe in ["/opt/node/bin/node", "/opt/bun/bin/bun"] {
+            let chain = vec![
+                corridor_link(13, "/opt/test/bin/farhelm", &claude_hook_argv()),
+                corridor_link(12, exe, &[exe, "/opt/claude/cli.js"]),
+                claude_runtime_link(11, &[]),
+            ];
+            // The corridor still finds the native runtime below the
+            // interpreter — and refuses on the emitter scan's terms —
+            // so this chain proves the UNRECOGNIZED shape instead: the
+            // interpreter above the emitter is neither this launch's
+            // shell nor a recognized runtime.
+            let refusal = claude_corridor(
+                &chain,
+                &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+                None,
+                &[],
+            )
+            .expect_err("an interpreter above the emitter must be refused");
+            assert!(refusal.contains("unclassified process"), "{exe}: {refusal}");
+        }
+        // With no native runtime anywhere, the interpreter names the
+        // gap directly.
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            corridor_link(11, "/opt/node/bin/node", &["node", "/opt/claude/cli.js"]),
+        ];
+        let refusal = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect_err("interpreter-only execution must be refused");
+        assert!(refusal.contains("no verified mapping"), "{refusal}");
+    }
+
+    /// A `claude` image carrying the ` (deleted)` suffix still matches:
+    /// a binary replaced while running keeps its identity for the
+    /// walk's purposes.
+    #[farhelm_testtrace::test]
+    fn a_replaced_while_running_claude_image_still_matches() {
+        let chain = vec![
+            corridor_link(12, "/opt/test/bin/farhelm", &claude_hook_argv()),
+            corridor_link(11, "/usr/local/bin/claude (deleted)", &["claude"]),
+        ];
+        let emitter = claude_corridor(
+            &chain,
+            &crate::agent_kind::claude::ClaudeLaunchProgram::Claude,
+            None,
+            &[],
+        )
+        .expect("a replaced image must still match");
+        assert_eq!(emitter.pid, 11);
     }
 
     /// A chained trampoline mentioning the runtime refuses: the `;`

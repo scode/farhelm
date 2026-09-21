@@ -1562,6 +1562,75 @@ async fn wait_for_after_inner<S: TermSource>(
     .await;
 }
 
+/// Like [`wait_for_after`], but the second half is a COMPLETE marker:
+/// `prefix` followed by a nonempty value run AND the whitespace that
+/// terminates it, strictly after `first`'s position.
+///
+/// Terminal output arrives chunked, so a frame can end at the prefix
+/// (`RECORD-WRITTEN:`) or halfway through the id. [`wait_for_after`]
+/// returns on that prefix, and the value read off the buffer is then
+/// empty or truncated — different from the previous run's id, so an
+/// `assert_ne!` passes, and the file read after it fails on a
+/// half-written name. This waits until the whole `prefix value`
+/// line is in hand; pair it with
+/// [`crate::conversation_identity_capture::first_complete_marker_value_after`],
+/// which extracts exactly the marker this waited for.
+pub(crate) async fn wait_for_complete_marker_after(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    first: &str,
+    prefix: &str,
+    secs: u64,
+) {
+    wait_for_complete_marker_after_inner(rx, seen, first, prefix, secs).await;
+}
+
+/// The first complete `prefix value` marker after `first`: the value
+/// run past the prefix must be nonempty AND its terminator already
+/// in the buffer. A prefix at the very end of the buffer, or a value
+/// run cut by a chunk boundary, is not complete — the rest may still
+/// be in flight — so the scan skips it and keeps looking for a later
+/// complete one.
+///
+/// One predicate serves both the wait and the read: [`wait_for_complete_marker_after`]
+/// ends the wait on it, and
+/// [`crate::conversation_identity_capture::first_complete_marker_value_after`]
+/// extracts it. A single boundary in one place, so a fix to what
+/// "complete" means cannot reach one and miss the other.
+pub(crate) fn find_complete_marker_after(text: &str, first: &str, prefix: &str) -> Option<String> {
+    let anchor = text.find(first)?;
+    let mut rest = &text[anchor + first.len()..];
+    while let Some(idx) = rest.find(prefix) {
+        let after = &rest[idx + prefix.len()..];
+        let id: String = after.chars().take_while(|c| !c.is_whitespace()).collect();
+        if !id.is_empty() && after.len() > id.len() {
+            return Some(id);
+        }
+        rest = &rest[idx + prefix.len()..];
+    }
+    None
+}
+
+/// Generic implementation for [`wait_for_complete_marker_after`],
+/// kept separate so the boundary predicate and diagnostics can be
+/// tested with a scripted source.
+async fn wait_for_complete_marker_after_inner<S: TermSource>(
+    rx: &mut S,
+    seen: &mut Vec<u8>,
+    first: &str,
+    prefix: &str,
+    secs: u64,
+) {
+    wait_until(
+        rx,
+        seen,
+        secs,
+        &format!("complete {prefix:?} after {first:?}"),
+        |seen| find_complete_marker_after(&String::from_utf8_lossy(seen), first, prefix).is_some(),
+    )
+    .await;
+}
+
 const REPLAY_COMPLETE_RULE: &str = "this must be the first wait on a fresh attachment, because wait_for and wait_for_after consume the marker";
 
 /// Return the byte offset where this attachment's live stream begins.
@@ -2675,6 +2744,72 @@ mod tests {
         let mut source = ScriptedSource::pending();
         let mut seen = Vec::new();
         wait_for_after_inner(&mut source, &mut seen, "first", "then", 0).await;
+    }
+
+    /// A complete-marker wait must not return on the prefix alone or
+    /// on a value run cut by a chunk boundary — the exact defect that
+    /// handed a truncated resumed-run id to the file read. Only the
+    /// terminator in hand ends the wait.
+    #[farhelm_testtrace::test]
+    async fn wait_for_complete_marker_after_waits_past_chunk_boundaries() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"prompt-after-resume\r\nRECORD-WRITTEN:".to_vec()),
+            TermEvent::Data(b"abc".to_vec()),
+            TermEvent::Data(b"def\r\n".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_complete_marker_after_inner(
+            &mut source,
+            &mut seen,
+            "prompt-after-resume",
+            "RECORD-WRITTEN:",
+            1,
+        )
+        .await;
+        assert_eq!(seen, b"prompt-after-resume\r\nRECORD-WRITTEN:abcdef\r\n");
+    }
+
+    /// A complete old marker before the anchor does not satisfy the
+    /// wait: the anchor is what separates the replayed run from the
+    /// new one, and only a complete marker after it counts.
+    #[farhelm_testtrace::test]
+    async fn wait_for_complete_marker_after_ignores_replay_before_the_anchor() {
+        let mut source = ScriptedSource::new([
+            TermEvent::Data(b"RECORD-WRITTEN:oldid\r\nprompt-after-resume\r\n".to_vec()),
+            TermEvent::Data(b"RECORD-WRITTEN:newid\r\n".to_vec()),
+        ]);
+        let mut seen = Vec::new();
+        wait_for_complete_marker_after_inner(
+            &mut source,
+            &mut seen,
+            "prompt-after-resume",
+            "RECORD-WRITTEN:",
+            1,
+        )
+        .await;
+        assert!(String::from_utf8_lossy(&seen).contains("RECORD-WRITTEN:newid"));
+    }
+
+    /// A complete-marker wait timeout must name the prefix and the
+    /// anchor so the missing boundary is identifiable — a bare prefix
+    /// with no terminator in hand is still a timeout, not a match.
+    #[farhelm_testtrace::test]
+    #[should_panic(
+        expected = "timed out waiting for complete \"RECORD-WRITTEN:\" after \"prompt-after-resume\""
+    )]
+    async fn wait_for_complete_marker_after_timeout_names_markers() {
+        let mut source = ScriptedSource::then_pending([TermEvent::Data(
+            b"prompt-after-resume\r\nRECORD-WRITTEN:half-an-id".to_vec(),
+        )]);
+        let mut seen = Vec::new();
+        wait_for_complete_marker_after_inner(
+            &mut source,
+            &mut seen,
+            "prompt-after-resume",
+            "RECORD-WRITTEN:",
+            0,
+        )
+        .await;
     }
 
     /// The normalized wait must match a needle that exists ONLY after

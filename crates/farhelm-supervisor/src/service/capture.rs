@@ -230,9 +230,27 @@ pub(crate) enum CaptureState {
     /// same provenance gate to the in-memory promise as the row-derived
     /// paths apply to the stored one, without a second lookup. A refresh
     /// that reloads the row carries the row's version, never a cached one.
+    ///
+    /// `record` is the durable `captured_record` the same write saved
+    /// beside the identity, for the same reason: kinds whose offer consults
+    /// the verification hint (Claude's saved transcript path) need it on
+    /// every surface, not only where the row is at hand. Kinds whose offer
+    /// ignores it carry it anyway — the mirror states what the row holds —
+    /// and a refresh that reloads the row carries the row's record, never
+    /// a cached one. `None` for rows that saved nothing.
+    ///
+    /// `record_ready` is the durable `claude_transcript_ready` the same
+    /// write saved beside the hint, for the same reason: only Claude's
+    /// offer consults it, but every surface needs the same answer the
+    /// row would give, without a second lookup. A refresh that reloads
+    /// the row carries the row's bit, never a cached one. `true` for
+    /// every non-Claude admission (no transcript constraint applies to
+    /// them) — their offers ignore the value either way.
     Reported {
         conversation: String,
         ownership_version: i64,
+        record: Option<String>,
+        record_ready: bool,
     },
 }
 
@@ -272,6 +290,42 @@ impl CaptureState {
             } => Some(*ownership_version),
             CaptureState::Captured { .. } => Some(0),
             _ => None,
+        }
+    }
+
+    /// The verification hint the committed identity was mirrored with, if
+    /// any.
+    ///
+    /// Paired with [`committed_conversation`](Self::committed_conversation)
+    /// the way the version is: offer surfaces pass it to the kind's resume
+    /// builder so the in-memory promise cannot offer what the durable gate
+    /// would refuse. `None` exactly when there is no committed identity
+    /// carrying one — and with no hint the Claude offer stays silent, so
+    /// callers pass it straight through without a fallback.
+    pub(crate) fn committed_record(&self) -> Option<&str> {
+        match self {
+            CaptureState::Reported { record, .. } => record.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Whether the verification hint the committed identity was mirrored
+    /// with has itself verified, if the kind consults it.
+    ///
+    /// Paired with [`committed_record`](Self::committed_record) the way
+    /// the version is: offer surfaces pass it to the kind's resume
+    /// builder so the in-memory promise cannot offer what the durable
+    /// gate would refuse. Only Claude's offer reads it — a reported
+    /// transcript path that has not (or no longer) verified offers
+    /// nothing, while the identity and its locator stand for the next
+    /// attributed report or refresh. `false` exactly when there is no
+    /// committed identity or its hint is unverified — with no verified
+    /// hint the Claude offer stays silent, so callers pass it straight
+    /// through without a fallback.
+    pub(crate) fn committed_record_ready(&self) -> bool {
+        match self {
+            CaptureState::Reported { record_ready, .. } => *record_ready,
+            _ => false,
         }
     }
 
@@ -825,6 +879,28 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
                 continue;
             }
         }
+        // Claude rows admitted under the ownership proof re-verify their
+        // saved transcript here — gated on kind AND version, so history
+        // is never blessed and bindings never switch. The check is a
+        // single direct open of the SAVED path with a bounded prefix and
+        // a sessionId match: no listing, no search. Either verdict moves
+        // only the readiness bit (same binding, same locator, version
+        // untouched): a failed re-verification withdraws the offer while
+        // keeping the path for the next check, and a passed one promotes
+        // it — so a transcript that lands after admission offers through
+        // refresh alone. The mirror below carries the SAME binding's
+        // locator and readiness. Rows with nothing saved have nothing to
+        // re-verify — only a later attributed report can promote those.
+        if row.agent_kind == farhelm_proto::AgentKind::Claude {
+            match sup.refresh_claude_capture_claimed(&mut row).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => {
+                    warn!(session = %entry.info.id, %error, "could not refresh the exact Claude capture");
+                    continue;
+                }
+            }
+        }
         let Some(conversation) = row.captured_conversation else {
             continue;
         };
@@ -832,11 +908,15 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             continue;
         }
         let ownership_version = row.capture_ownership_version;
+        let record = row.captured_record.clone();
+        let record_ready = row.claude_transcript_ready;
         let mut state = entry.capture.lock().expect("capture mutex poisoned");
         if state.committed_conversation() == before.as_deref() {
             state.advance(CaptureState::Reported {
                 conversation,
                 ownership_version,
+                record,
+                record_ready,
             });
         }
     }
@@ -1795,6 +1875,11 @@ mod tests {
     /// identity selection. Otherwise every later poll reads the same record
     /// again, despite the stamp's role as the cheap re-read gate.
     #[farhelm_testtrace::test]
+    /// Re-verification renews a `Captured` record's stamp when the file
+    /// still names the claimed conversation. It runs through Pi's
+    /// exact-file parser: reverify is kind-agnostic, and Pi's header
+    /// read is the live one — report-only kinds re-read their exact
+    /// files while scan parsers no longer bless anything.
     async fn matching_reverification_refreshes_a_captured_records_stamp() {
         let home = tempfile::tempdir().expect("agent home");
         let work = tempfile::tempdir().expect("workdir");
@@ -1803,23 +1888,18 @@ mod tests {
             .to_string_lossy()
             .to_string();
         let conversation = "captured-conversation";
-        plant_claude_record(
-            home.path(),
-            &cwd,
-            conversation,
-            crate::agent_kind::now_unix(),
-        );
-        let record = home
-            .path()
-            .join(".claude")
-            .join("projects")
-            .join(crate::agent_kind::munge_cwd(&cwd))
-            .join(format!("{conversation}.jsonl"));
+        let record = home.path().join("session.jsonl");
+        std::fs::write(
+            &record,
+            format!("{{\"type\":\"session\",\"id\":\"{conversation}\"}}\n"),
+        )
+        .expect("plant the session file");
         let stale = RecordStamp {
             len: 0,
             mtime_unix: None,
         };
-        let entry = claude_entry(
+        let entry = entry_of_kind(
+            AgentKind::Pi,
             "captured-session",
             &cwd,
             None,
@@ -1832,7 +1912,7 @@ mod tests {
         let integration = entry
             .snapshot
             .integration()
-            .expect("Claude has a capture integration");
+            .expect("Pi has a capture integration");
         let expected = crate::agent_kind::stamp_of(&record)
             .await
             .expect("stat record")
@@ -1848,6 +1928,117 @@ mod tests {
                 stamp,
             } if captured == conversation && captured_record == &record && *stamp == expected
         ));
+    }
+
+    /// PRE-FIX REPRODUCTION (goal `foreground-capture`, PR-4): before the
+    /// scan-fallback cutover, a hookless child's root-level transcript in
+    /// the parent's working directory won the parent's identity through
+    /// cwd/time correlation — no report, no proof, just a file in the
+    /// window. This test failed on the pre-cutover tree with the child's
+    /// id durably captured; with the cutover, Claude schedules no scan
+    /// roots at all, so the pass leaves the session uncaptured
+    /// (`FreshOnly`) and the old correlation cannot win.
+    ///
+    /// Why this test matters: it is the hole the cutover closes, kept as
+    /// the regression that reopens it if Claude ever regains a scan
+    /// identity. The mechanism is pinned, not just the outcome: the
+    /// fixture plants a VALID in-window child record (so a pass cannot be
+    /// explained by file invalidity) past the horizon (so a complete scan
+    /// would commit), and asserts memory, durable binding, and the public
+    /// offer together.
+    #[farhelm_testtrace::test]
+    async fn a_hookless_child_transcript_cannot_win_a_claude_identity() {
+        let state = StateDir::new();
+        let home = tempfile::tempdir().expect("agent home");
+        let work = tempfile::tempdir().expect("workdir");
+        let cwd = std::fs::canonicalize(work.path())
+            .expect("canonicalize")
+            .to_string_lossy()
+            .to_string();
+        let now = crate::agent_kind::now_unix();
+        // Past the fast horizon (after + grace = 2 s) and squarely
+        // inside the first-input window, so a scanning pass would have
+        // everything it needs to commit.
+        let at = now - 10;
+        plant_claude_record(home.path(), &cwd, "conv-child", at);
+        let sup = supervisor_over(&state, home.path(), None).await;
+        sup.store
+            .insert_session(
+                crate::store::StoredSession {
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    goose_launch_program: None,
+                    claude_launch_program: None,
+                    id: "cutover-session".to_string(),
+                    parent: None,
+                    archived: false,
+                    title: "cutover".to_string(),
+                    created_at: now,
+                    last_activity_at: now,
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "claude".to_string(),
+                    launch: None,
+                    tmux_name: "fh-cutover-session".to_string(),
+                    pane: String::new(),
+                    outcome: crate::store::LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: AgentKind::Claude,
+                    resume_template: Some(vec![
+                        "claude".to_string(),
+                        "--resume".to_string(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+                    ]),
+                    canonical_cwd: Some(cwd.clone()),
+                    captured_conversation: None,
+                    captured_record: None,
+                    claude_transcript_ready: false,
+                    capture_ambiguous: false,
+                    first_input_at: Some(at),
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("seed the session row");
+        let entry = claude_entry("cutover-session", &cwd, Some(at), CaptureState::Unclaimed);
+
+        capture_pass(&sup, &[Arc::clone(&entry)], true).await;
+
+        assert!(
+            matches!(
+                &*entry.capture.lock().expect("capture mutex poisoned"),
+                CaptureState::Unclaimed
+            ),
+            "without a report no scan may claim the identity"
+        );
+        let row = sup
+            .store
+            .session("cutover-session")
+            .await
+            .expect("read the row")
+            .expect("the row still exists");
+        assert_eq!(
+            (row.captured_conversation, row.capture_ownership_version),
+            (None, 0),
+            "the refused correlation establishes nothing durable"
+        );
+        assert_eq!(
+            sup.session_snapshot("cutover-session")
+                .await
+                .expect("snapshot the session")
+                .expect("the session still exists")
+                .restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "an unscanned session offers no resume"
+        );
     }
 
     /// A supervisor pointed at `home` for agent records, with the fast
@@ -1878,6 +2069,10 @@ mod tests {
             // The ladder tests below assert rank and replaceability, not
             // provenance: a legacy 0 keeps them on the pre-contract path.
             ownership_version: 0,
+            // ...and no verification hint: the ladder never exercises a
+            // kind whose offer consults one — hence no readiness either.
+            record: None,
+            record_ready: false,
         }
     }
 
@@ -2068,20 +2263,21 @@ mod tests {
     }
 
     /// The same gating, reached the way production reaches it: through a
-    /// whole `capture_pass` whose verdict loop computes an ambiguity for a
-    /// session that became `Reported` after the pass had already committed
-    /// to scanning for it.
+    /// whole `capture_pass` whose overlap bail computes an ambiguity for
+    /// a session that became `Reported` after the pass had already
+    /// decided to judge it.
     ///
     /// Worth having ALONGSIDE the direct-call test above, not instead of
     /// it. The direct test pins `declare_ambiguous`'s own contract; this one
     /// pins that a real pass can still arrive at that call with a
     /// `Reported` entry in hand. That is not obvious from the code — the
-    /// scanning set is built by skipping every settled state, so a reader
-    /// could reasonably conclude a reported session never reaches a verdict
-    /// at all and delete the guard as dead weight. It reaches one because
-    /// the set is decided BEFORE the scans, and the report handler is not
-    /// serialized against passes: the session was un-`Reported` when the
-    /// pass chose it and `Reported` by the time the verdict landed.
+    /// bail loop skips every settled state, so a reader could reasonably
+    /// conclude a reported session never reaches a verdict at all and
+    /// delete the guard as dead weight. It reaches one because the
+    /// verdict is computed per entry in pass order, and the report
+    /// handler is not serialized against passes: the session was
+    /// un-`Reported` when its turn came and `Reported` by the time the
+    /// write was attempted.
     ///
     /// The interleaving is produced through the store-fault seam rather
     /// than by racing threads, so the test is deterministic. The seam fires
@@ -2090,11 +2286,11 @@ mod tests {
     /// callback flips the second session's state there.
     ///
     /// Two sessions are needed because the flip has to happen after the
-    /// scanning set is built and before the second verdict is reached, and
-    /// the first session's durable write is the only hook this pass offers
-    /// in that gap. Their windows deliberately do NOT overlap, so the
-    /// window-overlap bail is out of the picture and each ambiguity comes
-    /// from its own pair of in-window records.
+    /// first verdict is reached and before the second one is, and the
+    /// first session's durable write is the only hook this pass offers
+    /// in that gap. Both anchor at the same instant, so their windows
+    /// overlap by construction and the ambiguity comes from the overlap
+    /// bail — no vendor record is planted or read anywhere in this test.
     #[farhelm_testtrace::test]
     async fn a_pass_skips_the_ambiguity_write_for_a_session_reported_mid_pass() {
         let state = StateDir::new();
@@ -2106,18 +2302,17 @@ mod tests {
             .to_string();
 
         let now = crate::agent_kind::now_unix();
-        // Ten seconds apart against a one-second window half-width, so the
-        // two windows cannot touch; both sit past their horizons.
-        let a_at = now - 20;
-        let b_at = now - 10;
-        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
+        // One shared anchor past the horizon, so both windows coincide
+        // and each session bails on the other.
+        let at = now - 10;
+        let b = claude_entry("session-b", &cwd, Some(at), CaptureState::Unclaimed);
 
         let attempts: Arc<StdMutex<Vec<(CaptureWrite, String)>>> =
             Arc::new(StdMutex::new(Vec::new()));
         let seen = Arc::clone(&attempts);
         let flip = Arc::clone(&b);
-        // Stands in for a report landing between the pass choosing to scan
-        // for B and the pass reaching B's verdict. Written straight into
+        // Stands in for a report landing between the pass reaching B's
+        // verdict and the pass attempting B's write. Written straight into
         // the cell rather than through `advance` because the point under
         // test is what a pass does when it FINDS `Reported`, not how a
         // state gets there. Every write is recorded and then failed, so an
@@ -2133,13 +2328,7 @@ mod tests {
         });
         let sup = supervisor_over(&state, home.path(), Some(fault)).await;
 
-        let a = claude_entry("session-a", &cwd, Some(a_at), CaptureState::Unclaimed);
-        // Two records inside each session's window: the pair is what makes
-        // each verdict `Ambiguous` on its own evidence.
-        plant_claude_record(home.path(), &cwd, "conv-a1", a_at);
-        plant_claude_record(home.path(), &cwd, "conv-a2", a_at);
-        plant_claude_record(home.path(), &cwd, "conv-b1", b_at);
-        plant_claude_record(home.path(), &cwd, "conv-b2", b_at);
+        let a = claude_entry("session-a", &cwd, Some(at), CaptureState::Unclaimed);
 
         capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], true).await;
 
@@ -2156,84 +2345,6 @@ mod tests {
                 CaptureState::Reported { conversation, .. } if conversation == "conv-hook-b"
             ),
             "and the pass must leave the reported identity exactly as the report left it"
-        );
-    }
-
-    /// A record another session has been TOLD is its own is not a candidate
-    /// for anybody else in the same (kind, cwd) group.
-    ///
-    /// The scenario is the `/clear` case seen from the outside: session A
-    /// has been running in this directory long enough that its capture
-    /// window closed hours ago, then clears its conversation and reports
-    /// the fresh id — whose record file is written NOW, inside the window
-    /// of session B, which has just started in the same directory. The
-    /// window-overlap bail cannot help B here, because the windows do not
-    /// overlap; without this exclusion A's brand-new record is B's lone
-    /// candidate and B durably commits A's conversation. That is the
-    /// wrong-conversation claim the whole design exists to prevent, and it
-    /// would survive every later pass, since a committed identity is never
-    /// replaced.
-    ///
-    /// The second half is what keeps the exclusion from being merely
-    /// conservative: with B's own record present too, the filter turns what
-    /// would otherwise be a two-candidate bail into the correct single
-    /// match. A report is strictly more evidence for the rivals, never
-    /// less.
-    #[farhelm_testtrace::test]
-    async fn a_rival_never_claims_a_conversation_another_session_reported() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = std::fs::canonicalize(work.path())
-            .expect("canonicalize")
-            .to_string_lossy()
-            .to_string();
-        let sup = supervisor_over(&state, home.path(), None).await;
-
-        // B sits past its horizon (`after` + `grace` = 2s under
-        // `fast_bounds`) so the pass is allowed to conclude for it, while
-        // A's window closed an hour ago — which is what takes the
-        // window-overlap bail out of the picture and leaves the candidate
-        // filter as the only thing standing between B and A's record.
-        let now = crate::agent_kind::now_unix();
-        let b_at = now - 10;
-        let a = claude_entry("session-a", &cwd, Some(now - 3600), reported("conv-a"));
-        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
-        plant_claude_record(home.path(), &cwd, "conv-a", b_at);
-
-        // `may_write` is false throughout: these entries were never
-        // inserted, so a durable write could only fail, and the verdict is
-        // fully observable in the in-memory state one step earlier.
-        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
-        assert!(
-            matches!(verdict, CaptureState::UncapturedFinal),
-            "B must end its window with no identity rather than claiming the record A \
-             reported as its own: {verdict:?}"
-        );
-
-        // Now B's own record appears. The same filter that produced the
-        // bail above must now produce a match rather than an ambiguity, so
-        // B gets a fresh entry — the one above is terminally
-        // `UncapturedFinal` by design.
-        let b2 = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
-        plant_claude_record(home.path(), &cwd, "conv-b", b_at);
-        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b2)], false).await;
-        let verdict = b2.capture.lock().expect("capture mutex poisoned").clone();
-        assert!(
-            matches!(
-                &verdict,
-                CaptureState::PendingCommit { conversation, .. } if conversation == "conv-b"
-            ),
-            "with the reported record excluded, B's own is the single honest match rather \
-             than one of two colliding candidates: {verdict:?}"
-        );
-        assert!(
-            matches!(
-                &*a.capture.lock().expect("capture mutex poisoned"),
-                CaptureState::Reported { conversation, .. } if conversation == "conv-a"
-            ),
-            "and nothing in the pass may disturb A's reported identity"
         );
     }
 
@@ -2341,40 +2452,6 @@ mod tests {
         );
     }
 
-    /// A reported id is spoken for even when its own session has never
-    /// taken input.
-    ///
-    /// This is the ordinary Claude shape, not a corner: Claude's hook fires
-    /// at process startup, so a session normally holds `Reported` before
-    /// this supervisor has confirmed a single keystroke for it. Such a
-    /// session occupies NO capture window — the window is anchored on first
-    /// input — so the overlap bail cannot protect anybody from it, and the
-    /// id filter is the only thing standing between a rival and a record
-    /// that is already accounted for. A collection that gathered reported
-    /// ids only from sessions with an anchor would leave exactly the common
-    /// case unprotected.
-    #[farhelm_testtrace::test]
-    async fn a_report_from_a_session_with_no_first_input_still_excludes_its_record() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = canonical(work.path());
-        let sup = supervisor_over(&state, home.path(), None).await;
-
-        let now = crate::agent_kind::now_unix();
-        let b_at = now - 10;
-        let a = claude_entry("session-a", &cwd, None, reported("conv-a"));
-        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
-        plant_claude_record(home.path(), &cwd, "conv-a", b_at);
-
-        capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
-        assert!(
-            matches!(verdict, CaptureState::UncapturedFinal),
-            "an anchorless reported session's id must still be excluded: {verdict:?}"
-        );
-    }
-
     /// A settled `Reported` session still OCCUPIES its capture window, so a
     /// rival overlapping it bails ambiguous.
     ///
@@ -2409,97 +2486,6 @@ mod tests {
             matches!(verdict, CaptureState::Ambiguous { .. }),
             "a rival overlapping a reported session's window must refuse rather than claim \
              the only record it can see: {verdict:?}"
-        );
-    }
-
-    /// Every reported id in a group is excluded, not merely the first one
-    /// found.
-    ///
-    /// Two agents reporting in one directory is the ordinary busy case, and
-    /// a collection that overwrote rather than accumulated per group — a
-    /// `HashMap<_, String>` where this uses a set — would pass every
-    /// single-report test above while silently leaving one of the two
-    /// records claimable.
-    #[farhelm_testtrace::test]
-    async fn every_reported_id_in_a_group_is_excluded() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let work = tempfile::tempdir().expect("workdir");
-        let cwd = canonical(work.path());
-        let sup = supervisor_over(&state, home.path(), None).await;
-
-        // Neither reporter has an anchor, so neither occupies a window and
-        // the overlap bail cannot stand in for the filter under test.
-        let now = crate::agent_kind::now_unix();
-        let c_at = now - 10;
-        let a = claude_entry("session-a", &cwd, None, reported("conv-a"));
-        let b = claude_entry("session-b", &cwd, None, reported("conv-b"));
-        let c = claude_entry("session-c", &cwd, Some(c_at), CaptureState::Unclaimed);
-        plant_claude_record(home.path(), &cwd, "conv-a", c_at);
-        plant_claude_record(home.path(), &cwd, "conv-b", c_at);
-
-        capture_pass(
-            &sup,
-            &[Arc::clone(&a), Arc::clone(&b), Arc::clone(&c)],
-            false,
-        )
-        .await;
-        let verdict = c.capture.lock().expect("capture mutex poisoned").clone();
-        assert!(
-            matches!(verdict, CaptureState::UncapturedFinal),
-            "with both in-window records spoken for, C has no candidate left rather than a \
-             choice between two: {verdict:?}"
-        );
-    }
-
-    /// The exclusion is scoped to both halves of its correlation group. A
-    /// report in another directory or from another kind hides nothing from
-    /// an otherwise matching record.
-    ///
-    /// The negative matters as much as the positive. An exclusion keyed too
-    /// broadly — on the id alone, say — would silently suppress honest
-    /// captures across the whole host, and the symptom would be sessions
-    /// that mysteriously never offer a resume rather than anything that
-    /// looks like a bug in this filter.
-    #[farhelm_testtrace::test]
-    async fn a_report_outside_the_group_hides_nothing() {
-        let state = StateDir::new();
-        let home = tempfile::tempdir().expect("agent home");
-        let elsewhere = tempfile::tempdir().expect("other workdir");
-        let work = tempfile::tempdir().expect("workdir");
-        let other_cwd = canonical(elsewhere.path());
-        let cwd = canonical(work.path());
-        let sup = supervisor_over(&state, home.path(), None).await;
-
-        let now = crate::agent_kind::now_unix();
-        let b_at = now - 10;
-        // One report has the same conversation id but another directory. The
-        // other is a valid Goose report in B's directory. Neither shares
-        // Claude's complete group, so neither can take B's record away.
-        let far = claude_entry("session-far", &other_cwd, None, reported("conv-b"));
-        let goose = entry_of_kind(
-            AgentKind::Goose,
-            "session-goose",
-            &cwd,
-            None,
-            reported("conv-b"),
-        );
-        let b = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
-        plant_claude_record(home.path(), &cwd, "conv-b", b_at);
-
-        capture_pass(
-            &sup,
-            &[Arc::clone(&far), Arc::clone(&goose), Arc::clone(&b)],
-            false,
-        )
-        .await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
-        assert!(
-            matches!(
-                &verdict,
-                CaptureState::PendingCommit { conversation, .. } if conversation == "conv-b"
-            ),
-            "reports from other groups must not suppress an honest capture: {verdict:?}"
         );
     }
 

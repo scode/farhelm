@@ -8,17 +8,19 @@
 //! kernel `flock` on the directory while they are up). Farhelm could
 //! already launch such a thing, but only with the directory baked into
 //! the invocation string — one profile per directory, and a profile whose
-//! baked directory disagreed with the session's own cwd silently lost the
-//! RECORD-SCAN capture path, because the agent's records then report the
-//! wrapper's directory while that scan correlates on the session's. Not
-//! every wrapper session loses its identity that way: one whose kind is
-//! declared and whose wrapper forwards the injected hook flags is told its
-//! conversation id outright, and the hook correlates on nothing. The loss
-//! is silent precisely because it only bites the sessions that fall back
-//! to the scan — which is the shape these tests run in, since the
-//! `claude-record` fixture writes records and never reports through a
-//! hook. `{cwd}` is the whole-element placeholder that fixes it, and
-//! `Supervisor::spawn_agent` is the one place it is substituted.
+//! baked directory disagreed with the session's own cwd silently put the
+//! agent somewhere its records do not belong to the session. Past the scan
+//! cutover no record attributes itself anyway: only a hook report
+//! establishes an identity, and the report names its transcript outright,
+//! correlating on nothing. So the directory's job is narrower now — put
+//! the agent in the right place to be reported about later — and the shape
+//! these tests run in covers both halves: most tests run the
+//! `claude-record` fixture, which writes records and never reports, pinning
+//! that an unreported session stays unclaimed; the resume test runs the
+//! `hook-report` fixture and types `report` at it, pinning that a reported
+//! wrapper session resumes through the wrapper. `{cwd}` is the
+//! whole-element placeholder that fixes it, and `Supervisor::spawn_agent`
+//! is the one place it is substituted.
 //!
 //! `sh -c` stands in for the real wrapper, and it is the closest honest
 //! stand-in available: it takes the directory as a positional argument,
@@ -67,9 +69,10 @@
 //! `FallbackTemplate` in
 //! [`a_generic_wrapper_with_a_template_falls_back_through_the_wrapper`].
 
+use crate::boot_id_durable_outcome::listed;
 use crate::conversation_identity_capture::{
-    CaptureFixtures, capture_harness, marker_value, provoke_record, settle_past_horizon,
-    snapshot_of, wait_for_capture,
+    CaptureFixtures, capture_harness, first_complete_marker_value_after, marker_value,
+    provoke_record, settle_past_horizon, snapshot_of, wait_for_capture,
 };
 use crate::harness::*;
 
@@ -95,6 +98,24 @@ use crate::harness::*;
 /// A directory spliced into the script would be re-parsed by the shell,
 /// and this feature's whole rule is that it never is.
 const WRAPPER_SCRIPT: &str = r#"cd "$1" && shift && "$@"; exit $?"#;
+
+/// The transparent twin of [`WRAPPER_SCRIPT`]: the same slot convention
+/// (`$1` is the directory, `"$@"` the agent), but the shell REPLACES
+/// itself with the agent instead of staying resident as its parent.
+///
+/// Only the Claude report profile uses it, and only because foreground
+/// proof requires it: a resident shell surviving above the emitter is a
+/// shape ancestry alone cannot separate from an attacker's background
+/// twin (P0 — a background child reports through the identical chain),
+/// so the corridor fails every command-carrying shell anchor closed and
+/// a resident wrapper's agent can no longer be admitted. An exec'd
+/// wrapper leaves no anchor above the emitter — the pane root IS the
+/// agent — so the report attributes exactly as a direct launch does,
+/// while everything this file pins about the wrapper (the `{cwd}` slot,
+/// the template fill, the trailing hook flags) travels unchanged. The
+/// resident shape stays covered by every other test in this file, which
+/// is where it belongs: generic profiles never enter the corridor.
+const EXEC_WRAPPER_SCRIPT: &str = r#"cd "$1" && shift && exec "$@""#;
 
 /// A flag that appears in the fallback resume template and NOWHERE else,
 /// so a relaunch through that template is distinguishable from a replay of
@@ -129,10 +150,18 @@ const CWD_SLOT: usize = 4;
 /// (the fixture binary, the record home) grows a space or a quote for the
 /// split to have to undo correctly.
 fn wrapper_argv(agent: &std::path::Path, agent_tail: &[&str]) -> Vec<String> {
+    wrapper_argv_with(WRAPPER_SCRIPT, agent, agent_tail)
+}
+
+/// [`wrapper_argv`] with the shell program made explicit, so the one
+/// profile that must exec (see [`EXEC_WRAPPER_SCRIPT`]) can share the
+/// slot layout without forking it. Every vector this file builds keeps
+/// the same positions either way — `{cwd}` stays in [`CWD_SLOT`].
+fn wrapper_argv_with(script: &str, agent: &std::path::Path, agent_tail: &[&str]) -> Vec<String> {
     let mut argv = vec![
         "sh".to_string(),
         "-c".to_string(),
-        WRAPPER_SCRIPT.to_string(),
+        script.to_string(),
         "wrapper".to_string(),
         farhelm_supervisor::agent_kind::CWD_PLACEHOLDER.to_string(),
         agent.to_string_lossy().into_owned(),
@@ -158,6 +187,12 @@ fn wrapper_argv(agent: &std::path::Path, agent_tail: &[&str]) -> Vec<String> {
 /// rule.
 fn wrapper_invocation(agent: &std::path::Path, agent_tail: &[&str]) -> String {
     shell_words::join(wrapper_argv(agent, agent_tail))
+}
+
+/// [`wrapper_invocation`] with the shell program made explicit, for the
+/// one profile that must exec (see [`EXEC_WRAPPER_SCRIPT`]).
+fn exec_wrapper_invocation(agent: &std::path::Path, agent_tail: &[&str]) -> String {
+    shell_words::join(wrapper_argv_with(EXEC_WRAPPER_SCRIPT, agent, agent_tail))
 }
 
 /// The record-writing fixture's own flags, as the wrapper's trailing
@@ -199,6 +234,46 @@ fn wrapper_profile(fixtures: &CaptureFixtures) -> (String, Vec<String>) {
     resume_tail.push("--resume");
     resume_tail.push(farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER);
     let template = wrapper_argv(&agent, &resume_tail);
+
+    (invocation, template)
+}
+
+/// [`wrapper_profile`] around the `hook-report` script instead of
+/// `claude-record`: the same record-writing fixture with the one extra
+/// input form, `report <id>`, that spawns a REAL hook child over the REAL
+/// socket.
+///
+/// Past the scan cutover this is the only way a wrapper session can hold
+/// an identity to resume: the record it writes attributes nothing by
+/// itself, so the resume-path test establishes `Reported` the way a hooked
+/// vendor would — by typing `report` at the fixture. The transcript the
+/// report names is the record the fixture genuinely wrote, not a planted
+/// file, so the admission still verifies a real artifact.
+///
+/// Built on the transparent wrapper ([`EXEC_WRAPPER_SCRIPT`]), not the
+/// resident one: foreground proof fails every command-carrying shell
+/// anchor closed — a resident wrapper's agent reports through the same
+/// chain as an attacker's background twin, and ancestry alone cannot
+/// separate them — so only an exec'd wrapper's agent can be admitted.
+/// The resume machinery under test is identical either way: the same
+/// `{cwd}` slot, the same template fill, the same trailing hook flags.
+fn wrapper_report_profile(fixtures: &CaptureFixtures) -> (String, Vec<String>) {
+    let agent = fixtures.bin().join("claude");
+    let home = fixtures.home().to_string_lossy().into_owned();
+    let tail_refs = [
+        "internal",
+        "fake-agent",
+        "--script",
+        "hook-report",
+        "--record-home",
+        home.as_str(),
+    ];
+    let invocation = exec_wrapper_invocation(&agent, &tail_refs);
+
+    let mut resume_tail = tail_refs.to_vec();
+    resume_tail.push("--resume");
+    resume_tail.push(farhelm_supervisor::agent_kind::CONVERSATION_PLACEHOLDER);
+    let template = wrapper_argv_with(EXEC_WRAPPER_SCRIPT, &agent, &resume_tail);
 
     (invocation, template)
 }
@@ -339,11 +414,12 @@ async fn wait_for_settled_argv(rx: &mut TermStream, seen: &mut Vec<u8>, secs: u6
 /// argv line these tests assert on (and the attach itself RESIZES the
 /// pane, so reading the marker before calling it would not help).
 ///
-/// Returns the conversation id the fixture reported, like the shared
-/// helper, so a test can assert the supervisor captured THAT id. The
-/// transcript includes initial replay and the fixture's readiness and record
-/// witnesses; the returned stream has already consumed those setup reads and
-/// the replay marker. Callers must not wait for that marker again.
+/// Returns the conversation id the fixture wrote, like the shared
+/// helper, so a test can report THAT id and assert the supervisor admitted
+/// it. The transcript includes initial replay and the fixture's readiness
+/// and record witnesses; the returned stream has already consumed those
+/// setup reads and the replay marker. Callers must not wait for that marker
+/// again.
 async fn provoke_wide_record(
     h: &Harness,
     session: &SessionInfo,
@@ -388,8 +464,9 @@ fn comm_and_ppid(pid: u32) -> (String, u32) {
 // Tests
 // ---------------------------------------------------------------------
 
-/// A wrapper profile is handed the session's own working directory, and
-/// the session it launches still captures its conversation.
+/// A wrapper profile is handed the session's own working directory — and,
+/// past the scan cutover, the session it launches still captures nothing
+/// without a report.
 ///
 /// This is the feature in one test. The directory contains a SPACE
 /// deliberately: substitution is into the argv slot, never into a command
@@ -398,13 +475,13 @@ fn comm_and_ppid(pid: u32) -> (String, u32) {
 /// would never exec, and this test would time out rather than quietly
 /// pass.
 ///
-/// Capture succeeding IS the correlation property, which is why nothing
-/// here reads the record file back: the record's `cwd` field is the
-/// FIXTURE's `current_dir()`, and the supervisor matches it against the
-/// session's canonical cwd. A wrapper handed the wrong directory writes
-/// its records under that other directory, correlates against nothing,
-/// and leaves the session with no captured identity and no resume offer —
-/// the exact silent failure `{cwd}` exists to prevent.
+/// Staying uncaptured IS the cutover property, which is why the record the
+/// fixture wrote is asserted present on disk AND unclaimed: a wrapper
+/// handed the wrong directory would write its records under that other
+/// directory, and the interesting observation is no longer "which record
+/// correlates" but that no record correlates on its own at all. The
+/// directory reaching the right slot is still what puts the agent in the
+/// right place to be reported about later.
 #[farhelm_testtrace::test]
 async fn a_wrapper_profile_receives_the_sessions_directory() {
     let (h, fixtures) = capture_harness().await;
@@ -429,7 +506,7 @@ async fn a_wrapper_profile_receives_the_sessions_directory() {
         .await
         .expect("create a wrapper session in a directory whose path contains a space");
 
-    let (_chan, _rx, seen, reported) = provoke_wide_record(&h, &session).await;
+    let (_chan, _rx, seen, _reported) = provoke_wide_record(&h, &session).await;
 
     assert_wrapper_got(&session.id, &work);
     let argv = argv_marker(&seen);
@@ -438,21 +515,37 @@ async fn a_wrapper_profile_receives_the_sessions_directory() {
         "no placeholder may reach the agent through the wrapper: {argv}"
     );
 
-    let captured = wait_for_capture(&h, &session.id, 30).await;
+    settle_past_horizon(&h).await;
+    let snapshot = snapshot_of(&h, &session.id).await;
     assert_eq!(
-        captured, reported,
-        "the wrapper's session must capture the conversation the fixture actually wrote"
+        snapshot.captured_conversation, None,
+        "the wrapper's session claims nothing on the strength of the record the fixture wrote"
     );
     assert_eq!(
-        snapshot_of(&h, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::Resume,
-        "a wrapper profile with an explicit kind and a template offers a resume like any other"
+        snapshot.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "a wrapper profile with an explicit kind and a template still offers only a fresh launch until a report arrives"
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
     );
 }
 
 /// Resuming a wrapper session runs the TEMPLATE through the wrapper, with
 /// the directory filled again and the hook flags still appended after the
 /// agent's own argv.
+///
+/// The resumed identity is REPORTED, not scanned: the session runs the
+/// `hook-report` fixture under the wrapper, writes its record, and the
+/// test types `report` at it, so a real hook child carries the id to the
+/// real socket. That is the only establishment path the scan cutover
+/// leaves, and it exercises the trampoline corridor the spec's non-goals
+/// call out (a manually-driven reporter under a transparent wrapper):
+/// the report profile execs the agent ([`EXEC_WRAPPER_SCRIPT`]) because
+/// a resident shell above the emitter fails closed under foreground
+/// proof — ancestry alone cannot separate its foreground agent from an
+/// attacker's background twin.
 ///
 /// Two things could break independently here, which is why both are
 /// asserted. The fill itself is `spawn_agent`'s and is shared by every
@@ -470,9 +563,14 @@ async fn a_wrapper_profile_receives_the_sessions_directory() {
 #[farhelm_testtrace::test]
 async fn a_wrapper_session_resumes_through_the_wrapper() {
     let (h, fixtures) = capture_harness().await;
+    // The supervisor must be genuinely listening: the identity below is
+    // established by a REAL hook child dialling the REAL socket, and a
+    // session created against an unbound socket would leave the report
+    // nowhere to land.
+    let serving = crate::hook_identity::ServeTask::spawn(&h.sup, h.state.path()).await;
     let parent = farhelm_teststate::tempdir().expect("workdir parent");
     let work = dir_with_a_space(parent.path());
-    let (invocation, template) = wrapper_profile(&fixtures);
+    let (invocation, template) = wrapper_report_profile(&fixtures);
 
     let session = h
         .client
@@ -491,15 +589,35 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
         .await
         .expect("create a wrapper session");
 
-    let (_chan, _rx, _seen, _reported) = provoke_wide_record(&h, &session).await;
+    // Past the scan cutover the record alone establishes nothing, so the
+    // identity is reported the way a hooked vendor reports it: the fixture
+    // writes its record first (the transcript the admission will verify is
+    // genuine), then `report` spawns the real hook child with that id.
+    let (chan, mut rx, mut seen, written) = provoke_wide_record(&h, &session).await;
+    h.client
+        .send_input(chan, format!("report {written}\r").into_bytes())
+        .await;
+    wait_for(&mut rx, &mut seen, "HOOK-REPORTED:", 30).await;
+    assert!(
+        !String::from_utf8_lossy(&seen).contains("HOOK-STDOUT-DIRTY"),
+        "the hook wrote to a descriptor the vendor surfaces"
+    );
+    assert!(
+        !String::from_utf8_lossy(&seen).contains("HOOK-EXIT:"),
+        "the hook exited non-zero, which Claude shows the user as a hook error"
+    );
     let captured = wait_for_capture(&h, &session.id, 30).await;
+    assert_eq!(
+        captured, written,
+        "the reported identity must be the conversation the fixture actually wrote"
+    );
 
     h.client
         .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
         .await
         .expect("resume the running wrapper session");
 
-    let (_chan, mut seen, mut rx) = h
+    let (chan, mut seen, mut rx) = h
         .client
         .attach_live(&session.id, WIDE_COLS, ROWS)
         .await
@@ -519,12 +637,70 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
     // [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`].
     // Asking for the canonical form keeps this honest on a host where the
     // temp directory sits behind a symlink.
+    //
+    // The directory itself is proven through the relaunched agent's own
+    // record, not through the wrapper's argv: the transparent wrapper
+    // execs the agent away, so no live wrapper process remains to
+    // observe (contrast [`assert_wrapper_got`], which needs the resident
+    // shape). The fixture writes its record under its own `current_dir()`,
+    // so a record for the relaunched run under the munged verified
+    // directory proves the wrapper `cd`'d where the fill told it to.
     let verified = std::fs::canonicalize(&work).expect("resolve the working directory");
-    assert_wrapper_got(&session.id, &verified);
+    // The prompt below is fresh to this run, and the marker is read as
+    // the first COMPLETE one after it: the reattach replays the
+    // previous generation's output, so its `RECORD-WRITTEN:` line is
+    // already in this buffer before the relaunched fixture has printed
+    // a byte. Waiting on the marker itself would return on the OLD
+    // one, and reading the FIRST occurrence would open the previous
+    // run's record — passing without the relaunched process writing
+    // anything at all. Anchoring on the fresh prompt's echo proves a
+    // new marker arrived after the resumed process's settled startup,
+    // and the `assert_ne` below proves it is not the replayed one.
+    // The wait and the read both require the full `prefix value`
+    // line: terminal output arrives chunked, and a frame cut at the
+    // prefix or mid-id would otherwise hand back a truncated id that
+    // still passes `assert_ne` and then fails the file read.
+    h.client
+        .send_input(chan, b"prompt-after-resume\r".to_vec())
+        .await;
+    wait_for_complete_marker_after(
+        &mut rx,
+        &mut seen,
+        "prompt-after-resume",
+        "RECORD-WRITTEN:",
+        30,
+    )
+    .await;
+    let relaunched =
+        first_complete_marker_value_after(&seen, "prompt-after-resume", "RECORD-WRITTEN:");
+    assert_ne!(
+        relaunched, captured,
+        "the relaunched agent wrote a genuinely new conversation, not a replay of the \
+         pre-restart run's"
+    );
+    let record = fixtures
+        .home()
+        .join(".claude")
+        .join("projects")
+        .join(farhelm_supervisor::agent_kind::munge_cwd(
+            &verified.to_string_lossy(),
+        ))
+        .join(format!("{relaunched}.jsonl"));
+    let line = std::fs::read_to_string(&record).unwrap_or_else(|error| {
+        panic!(
+            "the relaunched agent must have written its record under the verified directory: \
+             {}: {error}",
+            record.display()
+        )
+    });
+    assert!(
+        line.contains(&relaunched),
+        "the relaunched run's record must name its own conversation: {line}"
+    );
     let argv = argv_marker(&seen);
     assert!(
         argv.contains(&format!("--resume {captured}")),
-        "the resumed launch must carry the captured conversation: {argv}"
+        "the resumed launch must carry the reported conversation: {argv}"
     );
     assert!(
         !argv.contains(farhelm_supervisor::agent_kind::CWD_PLACEHOLDER),
@@ -540,6 +716,7 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
         settings > resume,
         "the injected hook flags must land after the agent's own argv, not inside it: {argv}"
     );
+    serving.stop().await;
 }
 
 /// A fresh restart of a wrapper session lands in the same directory it
@@ -556,13 +733,15 @@ async fn a_wrapper_session_resumes_through_the_wrapper() {
 /// session that has not written a record yet is exactly the state a user
 /// restarts out of when the first launch went wrong.
 ///
-/// The proof that the relaunch is in the right directory is the capture
-/// that follows it, for the same reason as
-/// [`a_wrapper_profile_receives_the_sessions_directory`]: a record only
-/// correlates when the fixture's own `current_dir()` matches the
-/// session's canonical cwd. The argv marker is asserted too, but it can
-/// only say the agent was launched cleanly — the wrapper's own argv is
-/// where the substituted value is visible.
+/// The proof that the relaunch is in the right directory is the record the
+/// relaunched run writes, for the same reason as
+/// [`a_wrapper_profile_receives_the_sessions_directory`]: the fixture
+/// writes its record under its own `current_dir()`, so `RECORD-WRITTEN:`
+/// after the restart proves the wrapper `cd`'d where it should — even
+/// though the record itself attributes nothing without a report. The argv
+/// marker is asserted too, but it can only say the agent was launched
+/// cleanly — the wrapper's own argv is where the substituted value is
+/// visible.
 ///
 /// The directory asserted after the restart is the created spelling, which
 /// works here only because a tempdir under `/tmp` already IS its own
@@ -649,15 +828,22 @@ async fn a_wrapper_session_fresh_restarts_into_the_same_directory() {
     );
 
     // The record is written only on first input, and no earlier run wrote
-    // one, so `RECORD-WRITTEN:` is unambiguous evidence of THIS launch.
+    // one, so `RECORD-WRITTEN:` is unambiguous evidence of THIS launch —
+    // and of the directory it launched in, since the fixture writes under
+    // its own `current_dir()`.
     h.client.send_input(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 30).await;
-    let reported = marker_value(&seen, "RECORD-WRITTEN:");
-    let captured = wait_for_capture(&h, &session.id, 30).await;
+    let _reported = marker_value(&seen, "RECORD-WRITTEN:");
+    settle_past_horizon(&h).await;
+    let snapshot = snapshot_of(&h, &session.id).await;
     assert_eq!(
-        captured, reported,
-        "the relaunched run's record must correlate to this session, which it can only do from \
-         the session's own directory"
+        snapshot.captured_conversation, None,
+        "the relaunched run's record attributes nothing without a report"
+    );
+    assert_eq!(
+        snapshot.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "a fresh-restarted wrapper session offers only a fresh launch until a report arrives"
     );
 }
 

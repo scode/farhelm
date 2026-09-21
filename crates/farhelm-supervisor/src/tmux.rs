@@ -1460,6 +1460,7 @@ pub enum PaneProbe {
     /// killed out from under us, or no server at all. Callers read this
     /// as "nothing is running", the same as a positively dead pane.
     Gone,
+
     /// The pane exists but `#{session_name}` is `owner`, not the name it
     /// was recorded under. `owner` is the COMPLETE name including any
     /// spaces, because callers compare it against their own session names
@@ -1468,6 +1469,29 @@ pub enum PaneProbe {
     /// deliberately not carried, because no caller has any business using
     /// it.
     ForeignOwner { owner: String },
+}
+
+/// What [`TmuxDriver::pane_terminal_for_pid`] observed for one pane
+/// pid: either the listed terminal, or the fact that no row names
+/// one.
+///
+/// An enum rather than an `Option` so the two absences this query can
+/// produce stay distinct from the caller's own lack of evidence: a
+/// missing observation (the pane died or respawned between the pane
+/// probe and this query, or its tty field is empty) is a failed
+/// read the caller refuses on, while a platform with no fd evidence
+/// at all never queries and passes nothing — and the corridor
+/// refuses that too, for its own stated reason. Collapsing both into
+/// `None` is what once let the first absence take the second one's
+/// admission path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneTerminal {
+    /// Exactly one listed pane roots at the pid and names this
+    /// terminal (`#{pane_tty}`).
+    Present(String),
+    /// No listed pane roots at the pid, or its terminal field is
+    /// empty. A failed observation, never a license to admit.
+    Absent,
 }
 
 /// One read-buffer's worth of bytes pulled per `read` call while
@@ -2983,6 +3007,71 @@ impl TmuxDriver {
         Ok(PaneProbe::Owned(PaneProcess { pid, dead }))
     }
 
+    /// The terminal device (`#{pane_tty}`) of the pane whose root
+    /// process is `pid`, as an explicit answer rather than an
+    /// `Option`: [`PaneTerminal::Absent`] names a missing observation
+    /// (no listed pane has that pid, or its tty field is empty), so
+    /// the caller cannot mistake it for "no terminal needed" the way
+    /// a bare `None` invites.
+    ///
+    /// Exists for one caller: the Claude bare-shell anchor proof,
+    /// which compares the anchor's stdin against the session's own
+    /// terminal. One `list-panes` snapshot carries every pane's pid
+    /// and tty, so the match is client-side in
+    /// [`parse_pane_tty_for_pid`]: the pid came from the pane probe a
+    /// moment earlier, and a pane that died or respawned in between
+    /// simply has no row — [`PaneTerminal::Absent`], which the caller
+    /// refuses rather than treating as a tty. A recycled pid naming
+    /// a stranger's pane can only mismatch the anchor's stdin and
+    /// refuse; it cannot admit.
+    ///
+    /// Bounded by `timeout`, which the caller derives from its own
+    /// deadline: the query runs while admission holds the capture
+    /// claim, so an unbounded await would hold the claim past the
+    /// budget. Expiry kills the query process (`kill_on_drop`, the
+    /// same bounded shape as [`Self::list_client_pids_and_flags`])
+    /// and reports it, and the caller releases the claim through its
+    /// ordinary error path. `Err` otherwise only when tmux itself
+    /// could not answer; the caller maps that the way it maps every
+    /// other pane-inspection failure.
+    pub async fn pane_terminal_for_pid(
+        &self,
+        pid: u32,
+        timeout: std::time::Duration,
+    ) -> anyhow::Result<PaneTerminal> {
+        let mut query = self.command();
+        query
+            .args(["list-panes", "-a", "-F", "#{pane_pid} #{pane_tty}"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let out = tokio::time::timeout(timeout, query.output())
+            .await
+            .context("timed out waiting for the pane-terminal query")?
+            .context("spawning tmux for the pane-terminal query")?;
+        if !out.status.success() {
+            let (rendered_args, secrets) =
+                redacted_tmux_args(&["list-panes", "-a", "-F", "#{pane_pid} #{pane_tty}"]);
+            let stderr = scrub_secrets(&String::from_utf8_lossy(&out.stderr), &secrets);
+            let context = format!(
+                "tmux {rendered_args} failed ({}): {}",
+                out.status,
+                stderr.trim()
+            );
+            return Err(anyhow::Error::new(TmuxCommandFailure::new(
+                out.stderr, &secrets,
+            )))
+            .context(context);
+        }
+        Ok(
+            match parse_pane_tty_for_pid(&String::from_utf8_lossy(&out.stdout), pid) {
+                Some(tty) => PaneTerminal::Present(tty),
+                None => PaneTerminal::Absent,
+            },
+        )
+    }
+
     /// The last thing `pane` printed, as plain text, bounded to
     /// `max_bytes`.
     ///
@@ -3631,6 +3720,29 @@ fn is_tolerated_list_panes_diagnostic(stderr: &str, socket: &Path) -> bool {
             )
 }
 
+/// The client-side half of [`TmuxDriver::pane_terminal_for_pid`]: the
+/// tty on the row whose pid parses to `pid`. A row with no tty (dead
+/// pane), an unparsable pid, or a line without two fields matches
+/// nothing — a row the query cannot read is a row that cannot name a
+/// terminal, never a guess. An empty snapshot is `None`, not an
+/// error; the caller reports it as [`PaneTerminal::Absent`].
+fn parse_pane_tty_for_pid(out: &str, pid: u32) -> Option<String> {
+    for line in out.lines() {
+        let mut fields = line.splitn(2, ' ');
+        let (Some(pid_field), Some(tty_field)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        let Ok(row_pid) = pid_field.parse::<u32>() else {
+            continue;
+        };
+        let tty = tty_field.trim();
+        if row_pid == pid && !tty.is_empty() {
+            return Some(tty.to_string());
+        }
+    }
+    None
+}
+
 /// Turn raw `capture-pane` output into replayable terminal content.
 ///
 /// Two transforms, both load-bearing (a past live bug — see lore/):
@@ -3669,6 +3781,31 @@ fn strip_line_ending(line: &[u8]) -> &[u8] {
 mod tests {
     use super::test_support::{ScratchServer, tail_containing};
     use super::*;
+
+    /// The tty match hands back the exact terminal and nothing else:
+    /// the wrong pid is `None`, a row with an empty tty (dead pane)
+    /// or an unparsable pid is skipped rather than matched, and a
+    /// malformed row never hides a good one below it.
+    ///
+    /// Why this test matters: the Claude anchor proof compares byte
+    /// equality against this value, so a parser that guessed, trimmed
+    /// wrong, or stopped at the first bad row would turn into an
+    /// admission or a refusal the evidence did not support.
+    #[farhelm_testtrace::test]
+    fn parse_pane_tty_for_pid_matches_only_the_live_terminal() {
+        let out = "1234 /dev/pts/3\n5678 /dev/pts/9\n9012 \nnope /dev/pts/4\n3456\n";
+        assert_eq!(
+            parse_pane_tty_for_pid(out, 1234),
+            Some("/dev/pts/3".to_string())
+        );
+        assert_eq!(
+            parse_pane_tty_for_pid(out, 5678),
+            Some("/dev/pts/9".to_string())
+        );
+        assert_eq!(parse_pane_tty_for_pid(out, 9012), None);
+        assert_eq!(parse_pane_tty_for_pid(out, 1111), None);
+        assert_eq!(parse_pane_tty_for_pid("", 1234), None);
+    }
 
     /// ScratchServer must retain its private directory until shared diagnostics
     /// and shutdown run. A removed socket would make the diagnostic owner refuse

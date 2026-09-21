@@ -834,17 +834,20 @@ the command line for one launch is allowed because it writes nothing the vendor 
 conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
 absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
 Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
-example — hooks written into the agent's configuration — still stands. Claude retains scanning as its fallback when no
-report has been accepted. Codex, Pi, and OMP are report-only integrations: Farhelm never selects their conversation by
-scanning vendor state. Goose is report-driven with an exact-record exception: the report names the conversation, and
-Farhelm validates that one record's root metadata in Goose's store before accepting it — a point lookup addressed by the
-reported id, not a scan, and not permission to claim there are no vendor-state reads. A reporting credential alone does
-not establish which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with
-the conversation and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every
-launch. A Pi report without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the
-bounded first record of that exact file without following symlinks and requires its session ID to match. A failed check
-changes the durable offer to fresh and rejects the stale Resume request so the user can refresh; it never silently
-launches fresh under that request.
+example — hooks written into the agent's configuration — still stands. Claude, Codex, Pi, and OMP are report-only
+integrations: Farhelm never selects their conversation by scanning vendor state. Goose is report-driven with an
+exact-record exception: the report names the conversation, and Farhelm validates that one record's root metadata in
+Goose's store before accepting it — a point lookup addressed by the reported id, not a scan, and not permission to claim
+there are no vendor-state reads. Claude is report-driven with an exact-transcript exception: the report names the
+conversation and carries its transcript path, and Farhelm opens that one file's bounded prefix and requires its session
+ID to match — a point open addressed by the reported locator, not a scan, and not permission to claim there are no
+vendor-state reads. A reporting credential alone does not establish which conversation is in the foreground, for any
+agent kind: sharing the launch's process tree, or descending from its runtime, is not ownership of its foreground
+session. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads a
+private static extension from Farhelm's state directory on every launch. A Pi report without a session file withdraws
+the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without following
+symlinks and requires its session ID to match. A failed check changes the durable offer to fresh and rejects the stale
+Resume request so the user can refresh; it never silently launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
@@ -878,6 +881,39 @@ honored, nothing discovered — and opens read-only without creating, migrating,
 malformed, or unsupported store refuses the report. A legitimate fork is a new `user` row admitted as a new binding,
 never lineage to accept. Goose captures admitted under the proof carry version 1 like Codex and OMP, with no historical
 exception: every older Goose row offers fresh-only until its first proven report.
+
+Claude reports must come from the foreground native `claude` runtime under the session's owned pane — image matched by
+resolved executable basename so a script named `claude` never qualifies — whose live argv still describes a foreground
+session through the same CLI grammar launch classification shares. Only an attributed `SessionStart` is accepted, with
+one of the five subscribed sources (`startup`, `resume`, `clear`, `compact`, `fork`); subagent lifecycle events and any
+other source refuse, a present subagent `agent_id` refuses on every report, and a top-level `agent_type` without one is
+accepted. Below the runtime only the narrow hook trampoline may appear; above it only the launch's own transparent
+shell. A second `claude`, any other session-hosting runtime, an unclassified intermediary, or a node/bun-interpreted
+execution refuses — directly interpreted layouts have no verified mapping, and unproven npm/npx/bun/shell layouts fail
+closed without ever reaching attribution. The reported transcript path is opened directly — bounded prefix, no symlinks,
+no directory listing — and its first session line must name the reported id; a transcript that does not exist yet still
+admits, at version 1 with readiness withheld, until a later attributed report or the exact refresh check proves it. A
+missing or mismatched transcript at refresh withholds readiness without demoting — the saved path stays saved beside the
+binding for the next check; at pre-resume it demotes the version and refuses. A legitimate fork is a new id admitted
+through both proofs; a background copy's fork report fails foreground attribution, so the parent binding stands. Claude
+captures admitted under the proof carry version 1 like Codex, OMP, and Goose, with no historical exception: every older
+Claude row offers fresh-only until its first proven report. The reporter must be the injected SessionStart hook running
+as a child of the runtime it names, which proves the report came from a helper process the runtime launched — not which
+conversation inside that runtime is foreground. Two conversations hosted in one runtime that both cause the same helper
+to be launched are indistinguishable on the current evidence: transcript validation proves the reported id and the file
+agree with each other, not which in-process conversation owns the foreground, so same-runtime delegated reports are an
+unsupported, unproven residual rather than a rejected shape. Every link above the runtime is still classified against
+indirection: a second `claude` in either layout, any other session-hosting runtime, and every unclassified wrapper
+refuse, as does any surviving anchor that is not the session's own launched shell or this launch's own transparent shell
+— a shell carrying a command of its own, a bare shell whose stdin is no longer the session terminal, a bare shell that
+no longer spells the recorded launch (a wrapper can redirect its own stdin to a script, exec a bare shell over its own
+pane PID, and then restore the terminal fd, so neither basename plus argc nor fd equality is provenance: the anchor's
+argv must still spell the launch the supervisor recorded, and its stdin must still be the session's terminal), or any
+non-shell process whatever its argv; those shapes are unsupported, not protected. Both legs need evidence the supervisor
+can only fully observe on Linux; on macOS bare-shell ancestry refuses for the missing fd leg, while a runtime that is
+itself the pane anchor needs no such leg and still admits. The record names the launched shell, not a runtime hand-typed
+into it: two runtimes run by hand under one genuine shell are indistinguishable here, an accepted interactive residual
+in the same family as the same-runtime one above.
 
 Every conversation-identity report carries a closed vendor discriminator naming the adapter that produced it — the
 injected hook command, the Goose helper, or a shipped asset — and a report addressed to a session of another kind is

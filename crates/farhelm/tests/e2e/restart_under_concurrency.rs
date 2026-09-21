@@ -5,11 +5,11 @@ use crate::harness::*;
 
 use crate::boot_id_durable_outcome::{listed, wait_for_dead_pane};
 use crate::conversation_identity_capture::{
-    capture_harness, last_marker_value, provoke_record, record_session, settle_past_horizon,
-    snapshot_of,
+    assert_windows_overlap, capture_harness, first_complete_marker_value_after, provoke_record,
+    settle_past_horizon, snapshot_of, wait_for_capture, wait_for_first_input,
 };
 use crate::create_idempotency::handoff_to_new_supervisor;
-use crate::restart_with_resume::pane_capture;
+use crate::restart_with_resume::{pane_capture, report_conversation, report_session};
 
 /// Observe the first restart's dying pane while its original generation is stopping.
 ///
@@ -358,19 +358,33 @@ async fn a_repointed_working_directory_refuses_the_restart() {
 /// verdict and first-input anchor are per-LAUNCH state, and carrying them
 /// forward would deny the new run any capture at all.
 ///
-/// Two fixture sessions in one directory make the first run's correlation
-/// ambiguous — the durable refusal SPEC.md's no-wrong-conversation rule
-/// depends on. Restarting one of them fresh must then let it capture its
-/// OWN conversation on the new run, which is only possible if the verdict
-/// and the anchor were both cleared.
+/// Two hook-reporting fixture sessions in one directory make the first run's
+/// correlation ambiguous — the durable refusal SPEC.md's
+/// no-wrong-conversation rule depends on. Restarting one of them fresh must
+/// then let it establish its OWN conversation on the new run, which is only
+/// possible if the verdict and the anchor were both cleared.
+///
+/// Past the scan cutover that establishment is report-driven: the new run's
+/// record on disk attributes nothing until its SessionStart report lands.
+/// The test therefore provokes the new run's record, reports it through a
+/// REAL hook child over the REAL socket, and asserts the supervisor captured
+/// THAT conversation — a fresh id the pre-restart run never saw — with a
+/// Resume offer. The report landing, not a scan, is what the final
+/// assertions observe.
 #[farhelm_testtrace::test]
 async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
     let (h, fixtures) = capture_harness().await;
+    // The supervisor must be genuinely listening: the identities below are
+    // established by REAL hook children dialling the REAL socket.
+    let accepting = crate::hook_identity::ServeTask::spawn(&h.sup, h.state.path()).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let first = record_session(&h, &fixtures, work.path(), "claude").await;
-    let second = record_session(&h, &fixtures, work.path(), "claude").await;
-    let (_c1, _r1, _s1, _id1) = provoke_record(&h, &first).await;
+    let first = report_session(&h, &fixtures, work.path()).await;
+    let second = report_session(&h, &fixtures, work.path()).await;
+    let (_c1, _r1, _s1, id1) = provoke_record(&h, &first).await;
     let (_c2, _r2, _s2, _id2) = provoke_record(&h, &second).await;
+    let at_first = wait_for_first_input(&h, &first.id, 20).await;
+    let at_second = wait_for_first_input(&h, &second.id, 20).await;
+    assert_windows_overlap(at_first, at_second);
     settle_past_horizon(&h).await;
     let ambiguous = snapshot_of(&h, &first.id).await;
     assert!(ambiguous.capture_ambiguous, "the setup must be ambiguous");
@@ -399,9 +413,13 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
         after.first_input_at, None,
         "and its first-input anchor points at a window that closed long ago"
     );
+    assert_eq!(
+        after.captured_conversation, None,
+        "and the restart carries no identity forward: the new run must establish its own"
+    );
 
-    // The new run captures its own conversation, which an inherited
-    // ambiguity would have made impossible forever.
+    // The new run establishes its own conversation by report, which an
+    // inherited ambiguity would have made impossible forever.
     let (chan, initial_replay, mut rx) = h
         .client
         .attach_live(&first.id, 80, 24)
@@ -417,11 +435,15 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
     h.client
         .send_input(chan, b"prompt-after-restart\r".to_vec())
         .await;
-    // Anchored on the typed line's own echo, and read as the LAST marker:
-    // this attachment replays the reused terminal's scrollback, so both an
-    // earlier `RECORD-WRITTEN:` and an earlier `echo:` are already in the
-    // transcript before the new run has produced anything at all.
-    wait_for_after(
+    // Anchored on the typed line's own echo, and read as the first
+    // COMPLETE marker after it: this attachment replays the reused
+    // terminal's scrollback, so both an earlier `RECORD-WRITTEN:` and
+    // an earlier `echo:` are already in the transcript before the new
+    // run has produced anything at all. The wait and the read both
+    // require the full `prefix value` line — a frame cut at the
+    // prefix or mid-id would otherwise hand back a truncated id that
+    // still passes the `assert_ne!` below and then fails the report.
+    wait_for_complete_marker_after(
         &mut rx,
         &mut seen,
         "prompt-after-restart",
@@ -429,8 +451,19 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
         20,
     )
     .await;
-    let conversation = last_marker_value(&seen, "RECORD-WRITTEN:");
-    settle_past_horizon(&h).await;
+    let conversation =
+        first_complete_marker_value_after(&seen, "prompt-after-restart", "RECORD-WRITTEN:");
+    assert_ne!(
+        conversation, id1,
+        "the relaunched agent wrote a genuinely new conversation, not a replay of \
+         the pre-restart run's"
+    );
+    report_conversation(&h.client, chan, &mut rx, &mut seen, &conversation).await;
+    assert_eq!(
+        wait_for_capture(&h, &first.id, 30).await,
+        conversation,
+        "the fresh window establishes the new run's reported conversation"
+    );
     let captured = snapshot_of(&h, &first.id).await;
     assert_eq!(
         captured.captured_conversation.as_deref(),
@@ -438,6 +471,7 @@ async fn a_fresh_relaunch_opens_a_new_capture_window_after_an_ambiguity() {
         "the fresh window captured the new run's own conversation"
     );
     assert_eq!(captured.restart_offer, farhelm_proto::RestartOffer::Resume);
+    accepting.stop().await;
 }
 
 /// Pane ids are assigned by a server-wide counter that restarts at `%0`

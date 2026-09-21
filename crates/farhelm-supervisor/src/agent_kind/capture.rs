@@ -825,7 +825,8 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_kind::{ClaudeIntegration, RECORD_PREFIX_LINES};
+    use crate::agent_kind::claude::transcript_session_matches;
+    use crate::agent_kind::{RECORD_PREFIX_LINES, correlators_from};
 
     /// Window arithmetic is where the no-guessing rule becomes mechanical,
     /// so all three parts are pinned: membership decides whether a record
@@ -1045,19 +1046,66 @@ mod tests {
         assert!(a.differs(&unknown));
     }
 
-    /// Two working directories that munge identically share one Claude
-    /// project directory, so a scan that trusted the directory would hand
-    /// one session the other's conversation. The scan itself deliberately
-    /// does NOT filter by cwd, so both records must carry the distinguishing
-    /// field for the caller to bucket on.
+    /// A test-only integration that still scans. No vendor uses the scan
+    /// machinery for identity anymore — every proof-carrying kind cut
+    /// over to report-driven identity — so the generic traversal,
+    /// budget, floor, and file-type discipline below is pinned through
+    /// this double rather than through any vendor's parser. Its record
+    /// shape is deliberately the old top-level sessionId/cwd/timestamp
+    /// JSON the fixtures already speak; its ONLY contract is
+    /// determinism (a first fully-carrying line parses, anything else
+    /// fails the file), never vendor behavior. If the scan machinery
+    /// itself is ever removed, this double and its tests go with it.
+    struct ScanProbe;
+    impl AgentIntegration for ScanProbe {
+        fn default_resume_template(&self, _original_argv: &[String]) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+            None
+        }
+
+        fn record_depth(&self) -> usize {
+            0
+        }
+
+        fn is_record_file(&self, name: &str) -> bool {
+            name.ends_with(".jsonl")
+        }
+
+        fn parse_record(&self, text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+            for line in text.lines().take(RECORD_PREFIX_LINES) {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                let Some(object) = value.as_object() else {
+                    continue;
+                };
+                let (Some(conversation), Some(cwd), Some(timestamp)) = (
+                    object.get("sessionId").and_then(|v| v.as_str()),
+                    object.get("cwd").and_then(|v| v.as_str()),
+                    object.get("timestamp").and_then(|v| v.as_str()),
+                ) else {
+                    continue;
+                };
+                return Ok(Some(correlators_from(conversation, cwd, timestamp)?));
+            }
+            anyhow::bail!("no line in the examined prefix carries session correlators")
+        }
+    }
+
+    /// Two records sharing one directory both surface with their
+    /// distinguishing fields intact: the scan itself deliberately does
+    /// NOT filter by cwd, so each record must carry the fields its
+    /// caller buckets on. (This fixture used to pin Claude's
+    /// munged-directory correlation; the vendor mapping is gone with
+    /// the scan fallback, and what stays is the machinery property —
+    /// one directory, two records, both found with their fields.)
     #[farhelm_testtrace::test]
-    async fn a_munged_cwd_collision_is_separated_by_the_recorded_cwd_field() {
+    async fn two_records_sharing_one_directory_both_surface_with_their_fields() {
         let home = tempfile::tempdir().unwrap();
-        let dir = home
-            .path()
-            .join(".claude")
-            .join("projects")
-            .join("-tmp-a-b");
+        let dir = home.path().join("records");
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let stamp = format_rfc3339(now_unix());
         tokio::fs::write(
@@ -1077,36 +1125,31 @@ mod tests {
         .await
         .unwrap();
 
-        for cwd in ["/tmp/a.b", "/tmp/a-b"] {
-            let root = ClaudeIntegration
-                .record_root(home.path(), cwd)
-                .expect("Claude has a record root");
-            let outcome = scan_records(&ClaudeIntegration, &root, 0).await;
-            assert!(outcome.complete);
-            assert_eq!(
-                outcome.candidates.len(),
-                2,
-                "both cwds resolve to one shared directory ({cwd})"
-            );
-            let mut found: Vec<(String, String)> = outcome
-                .candidates
-                .iter()
-                .map(|c| {
-                    (
-                        c.correlators.cwd.clone(),
-                        c.correlators.conversation.clone(),
-                    )
-                })
-                .collect();
-            found.sort();
-            assert_eq!(
-                found,
-                vec![
-                    ("/tmp/a-b".to_string(), "dashed".to_string()),
-                    ("/tmp/a.b".to_string(), "dotted".to_string()),
-                ]
-            );
-        }
+        let outcome = scan_records(&ScanProbe, &dir, 0).await;
+        assert!(outcome.complete);
+        assert_eq!(
+            outcome.candidates.len(),
+            2,
+            "one shared directory surfaces both records"
+        );
+        let mut found: Vec<(String, String)> = outcome
+            .candidates
+            .iter()
+            .map(|c| {
+                (
+                    c.correlators.cwd.clone(),
+                    c.correlators.conversation.clone(),
+                )
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("/tmp/a-b".to_string(), "dashed".to_string()),
+                ("/tmp/a.b".to_string(), "dotted".to_string()),
+            ]
+        );
     }
 
     /// The mtime lower bound is what bounds a rescan's cost, and it is
@@ -1124,14 +1167,14 @@ mod tests {
             .unwrap();
 
         let above_everything = now_unix() + 3_600;
-        let skipped = scan_records(&ClaudeIntegration, &dir, above_everything).await;
+        let skipped = scan_records(&ScanProbe, &dir, above_everything).await;
         assert!(skipped.candidates.is_empty());
         assert!(
             skipped.complete,
             "a file the floor excluded must never have been opened, let alone parsed"
         );
 
-        let read = scan_records(&ClaudeIntegration, &dir, 0).await;
+        let read = scan_records(&ScanProbe, &dir, 0).await;
         assert!(
             !read.complete,
             "the same file, once actually read, fails to parse and marks the scan incomplete"
@@ -1170,12 +1213,10 @@ mod tests {
         // tempdir.
         assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
 
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(10),
-            scan_records(&ClaudeIntegration, &dir, 0),
-        )
-        .await
-        .expect("a FIFO named like a record must never park the scan");
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(10), scan_records(&ScanProbe, &dir, 0))
+                .await
+                .expect("a FIFO named like a record must never park the scan");
         assert!(
             outcome.complete,
             "recognizing a FIFO is a decision, not a failure to read"
@@ -1220,7 +1261,7 @@ mod tests {
         .unwrap();
         std::os::unix::fs::symlink(elsewhere.path(), dir.join("linked-dir")).unwrap();
 
-        let outcome = scan_records(&ClaudeIntegration, &dir, 0).await;
+        let outcome = scan_records(&ScanProbe, &dir, 0).await;
         assert!(
             outcome.candidates.is_empty(),
             "a symlinked record is skipped"
@@ -1232,49 +1273,32 @@ mod tests {
     }
 
     /// The 64 KiB / 64-line prefix is a real boundary, so both sides of it
-    /// are pinned: correlators just inside are found, and correlators
-    /// pushed just outside make the file unparseable (an error, marking
-    /// the scan incomplete) rather than silently absent.
+    /// are pinned at the file level: a session line just inside the byte
+    /// bound verifies, and one pushed past it never reaches the check —
+    /// the bounded open refuses to bless what it cannot read, rather
+    /// than silently absenting it. (The line bound itself is pinned in
+    /// `agent_kind::claude`'s transcript tests; what stays here is the
+    /// byte half of the same boundary, over real files.)
     #[farhelm_testtrace::test]
     async fn the_record_prefix_bounds_are_exact() {
         let home = tempfile::tempdir().unwrap();
-        let dir = home.path().join(".claude").join("projects").join("-work");
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        let stamp = format_rfc3339(now_unix());
+        let file = home.path().join("transcript.jsonl");
         let correlators =
-            format!("{{\"sessionId\":\"deep\",\"cwd\":\"/work\",\"timestamp\":\"{stamp}\"}}\n");
-        let filler = "{\"type\":\"filler\"}\n";
+            "{\"sessionId\":\"deep\",\"cwd\":\"/work\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n";
 
-        // Line 64 — the last one examined — still counts.
-        tokio::fs::write(
-            dir.join("inside.jsonl"),
-            filler.repeat(RECORD_PREFIX_LINES - 1) + &correlators,
-        )
-        .await
-        .unwrap();
-        let outcome = scan_records(&ClaudeIntegration, &dir, 0).await;
-        assert!(outcome.complete);
-        assert_eq!(outcome.candidates.len(), 1);
-
-        // Line 65 does not.
-        tokio::fs::remove_file(dir.join("inside.jsonl"))
+        // Inside the byte bound: the prefix carries the session line.
+        tokio::fs::write(&file, correlators).await.unwrap();
+        let prefix = read_prefix(&file)
             .await
-            .unwrap();
-        tokio::fs::write(
-            dir.join("outside.jsonl"),
-            filler.repeat(RECORD_PREFIX_LINES) + &correlators,
-        )
-        .await
-        .unwrap();
-        assert!(!scan_records(&ClaudeIntegration, &dir, 0).await.complete);
+            .expect("a small regular file reads")
+            .expect("a small regular file is non-empty");
+        assert!(transcript_session_matches(&prefix, "deep"));
 
         // And the byte bound, independent of the line bound: one huge
-        // first line pushes the correlators past 64 KiB.
-        tokio::fs::remove_file(dir.join("outside.jsonl"))
-            .await
-            .unwrap();
+        // first line pushes the session line past 64 KiB, so the prefix
+        // the check sees never contains it.
         tokio::fs::write(
-            dir.join("huge.jsonl"),
+            &file,
             format!(
                 "{{\"pad\":\"{}\"}}\n{correlators}",
                 "x".repeat(RECORD_PREFIX_BYTES)
@@ -1282,7 +1306,14 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!scan_records(&ClaudeIntegration, &dir, 0).await.complete);
+        let prefix = read_prefix(&file)
+            .await
+            .expect("a huge regular file still reads its prefix")
+            .expect("the prefix itself is non-empty");
+        assert!(
+            !transcript_session_matches(&prefix, "deep"),
+            "a session line past the byte bound verifies nothing"
+        );
     }
 
     /// The entry budget counts EVERY visited entry, not just the ones that
@@ -1302,7 +1333,7 @@ mod tests {
                 .unwrap();
         }
         assert!(
-            !scan_records(&ClaudeIntegration, &dir, 0).await.complete,
+            !scan_records(&ScanProbe, &dir, 0).await.complete,
             "a scan that ran out of entry budget saw only part of the directory"
         );
     }

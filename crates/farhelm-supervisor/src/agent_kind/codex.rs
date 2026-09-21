@@ -275,7 +275,7 @@ mod tests {
         )
         .expect("Codex integration");
         assert_eq!(
-            snapshot.restart_offer(Some(&stored), 0),
+            snapshot.restart_offer(Some(&stored), 0, None, true),
             RestartOffer::Resume
         );
         assert_eq!(
@@ -313,27 +313,27 @@ mod tests {
         // persistent thread, and the resumable bit verification sets.
         let stored = "codex:{\"version\":1,\"runtime_session_id\":\"0194fdc4-8c7c-7a1c-9f2e-abcdef012345\",\"session_file\":\"/tmp/rollout-17.jsonl\",\"thread_id\":\"thread-17\",\"resumable\":true}";
         assert_eq!(
-            snapshot.restart_offer(Some(stored), 1),
+            snapshot.restart_offer(Some(stored), 1, None, true),
             RestartOffer::Resume,
             "a binding admitted under the contract offers Resume"
         );
         assert_eq!(
-            snapshot.restart_offer(Some(stored), 0),
+            snapshot.restart_offer(Some(stored), 0, None, true),
             RestartOffer::Resume,
             "a valid v1 token predating the version column stays resumable"
         );
         assert_eq!(
-            snapshot.restart_offer(Some(stored), 2),
+            snapshot.restart_offer(Some(stored), 2, None, true),
             RestartOffer::FreshOnly,
             "an unknown provenance version refuses exact Resume"
         );
         assert_eq!(
-            snapshot.restart_offer(Some(stored), -1),
+            snapshot.restart_offer(Some(stored), -1, None, true),
             RestartOffer::FreshOnly,
             "a negative provenance version refuses exact Resume"
         );
         assert_eq!(
-            snapshot.restart_offer(Some("historical-thread"), 1),
+            snapshot.restart_offer(Some("historical-thread"), 1, None, true),
             RestartOffer::FreshOnly,
             "version 1 never blesses a bare id the verifier rejects"
         );
@@ -347,7 +347,7 @@ mod tests {
         let snapshot = IntegrationSnapshot::resolve(&["codex".to_string()], None, None)
             .expect("Codex integration");
         assert_eq!(
-            snapshot.restart_offer(Some("historical-thread"), 0),
+            snapshot.restart_offer(Some("historical-thread"), 0, None, true),
             RestartOffer::FreshOnly
         );
         assert_eq!(snapshot.filled_resume_argv("historical-thread"), None);

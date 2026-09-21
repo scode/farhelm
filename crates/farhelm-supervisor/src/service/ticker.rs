@@ -1481,7 +1481,7 @@ mod tests {
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
     use super::*;
-    use crate::agent_kind::{CaptureWindowBounds, IntegrationSnapshot};
+    use crate::agent_kind::IntegrationSnapshot;
     use crate::store::{LastOutcome, StoredSession, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
     use std::collections::HashMap;
@@ -1641,6 +1641,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -1660,6 +1661,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -2513,10 +2515,17 @@ mod tests {
     ///
     /// This test never calls `ListSessions`, `list_all`, or `capture_now`
     /// — the three carriers capture used to ride — so a passing run is
-    /// positive evidence that the ticker is what claimed the identity. It
-    /// runs against a real planted record rather than a stubbed pass
-    /// because the regression worth catching is a ticker that fires on
-    /// schedule and does nothing.
+    /// Positive evidence that the ticker is what advances capture: two
+    /// sessions whose first-input windows overlap must come out
+    /// ambiguous with no list, no poll, and no manual pass anywhere.
+    /// It runs against real overlapping launches rather than a stubbed
+    /// pass because the regression worth catching is a ticker that
+    /// fires on schedule and does nothing.
+    ///
+    /// Overlap, not records: no vendor tree is scanned for identity
+    /// anymore, so a planted record can no longer move capture — the
+    /// window-overlap bail is the capture verdict a ticker can still
+    /// reach on its own.
     #[farhelm_testtrace::test]
     async fn capture_advances_on_the_ticker_with_nobody_polling() {
         let state = StateDir::new();
@@ -2527,115 +2536,91 @@ mod tests {
             &state,
             SupervisorSeams {
                 agent_home: Some(home.path().to_path_buf()),
-                // A horizon a couple of seconds out: no claim is durable
-                // until the capture window has closed, so this is the
-                // floor on how long this test can possibly take.
-                capture_window: CaptureWindowBounds::new(
-                    Duration::from_secs(1),
-                    Duration::from_secs(1),
-                    Duration::from_secs(1),
-                ),
                 ..SupervisorSeams::default()
             },
         )
         .await;
 
-        // A Claude-kind session — derived from the invocation's basename —
-        // whose launch is expected to fail: capture correlates a RECORD
-        // tree against a first-input anchor, and neither needs a living
-        // agent.
-        let created = sup
-            .create_session(
-                CreateInputs {
-                    github_checkout: None,
-                    cwd: &cwd,
-                    parent: None,
-                    mode: CreateMode::Raw {
-                        invocation: "/opt/bin/claude".to_string(),
-                        agent_kind: None,
-                        resume_template: None,
-                        source_profile: None,
-                        launch: None,
+        // Two Claude-kind sessions — kind derived from the invocation's
+        // basename — in the same directory, whose launches are expected
+        // to fail: the overlap bail reads first-input anchors, and
+        // neither needs a living agent.
+        let mut ids = Vec::new();
+        for title in ["ticker-a", "ticker-b"] {
+            let created = sup
+                .create_session(
+                    CreateInputs {
+                        github_checkout: None,
+                        cwd: &cwd,
+                        parent: None,
+                        mode: CreateMode::Raw {
+                            invocation: "/opt/bin/claude".to_string(),
+                            agent_kind: None,
+                            resume_template: None,
+                            source_profile: None,
+                            launch: None,
+                        },
+                        title: Some(title.to_string()),
+                        cols: 80,
+                        rows: 24,
                     },
-                    title: Some("ticker".to_string()),
-                    cols: 80,
-                    rows: 24,
-                },
-                None,
-            )
-            .await
-            .expect("the create reaches a launch");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("the created session is in the map");
-        note_first_input(&sup, &entry);
-        let at = wait_for_first_input(&sup, &created.id).await;
-
-        // The record the agent would have written, planted directly: the
-        // subject here is the ticker, not the agent.
-        let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
-        let canonical = canonical.to_string_lossy().to_string();
-        let project = home
-            .path()
-            .join(".claude")
-            .join("projects")
-            .join(crate::agent_kind::munge_cwd(&canonical));
-        std::fs::create_dir_all(&project).expect("record directory");
-        let line = serde_json::json!({
-            "type": "user",
-            "sessionId": "ticker-captured-conversation",
-            "cwd": canonical,
-            "timestamp": crate::agent_kind::format_rfc3339(at),
-        });
-        std::fs::write(project.join("ticker.jsonl"), format!("{line}\n"))
-            .expect("plant the record");
-        assert_eq!(
-            sup.session_snapshot(&created.id)
+                    None,
+                )
                 .await
-                .expect("snapshot")
-                .expect("present")
-                .captured_conversation,
-            None,
-            "premise: nothing has captured this yet, so the ticker below is the only candidate"
-        );
+                .expect("the create reaches a launch");
+            let entry = sup
+                .sessions
+                .lock()
+                .await
+                .get(&created.id)
+                .cloned()
+                .expect("the created session is in the map");
+            note_first_input(&sup, &entry);
+            wait_for_first_input(&sup, &created.id).await;
+            ids.push(created.id);
+        }
+        for id in &ids {
+            assert!(
+                !sup.store
+                    .session(id)
+                    .await
+                    .expect("read the row")
+                    .expect("the session exists")
+                    .capture_ambiguous,
+                "premise: nothing is ambiguous yet, so the ticker below is the only candidate"
+            );
+        }
 
+        // The store row directly, never a list or snapshot read: those
+        // would run their own refresh passes and blur who decided.
         let ticker = start_ticker(&sup);
-        let captured = wait_for_captured_conversation(&sup, &created.id).await;
-        ticker.shutdown().await;
-        assert_eq!(
-            captured.as_deref(),
-            Some("ticker-captured-conversation"),
-            "no list, no poll, no manual pass — the ticker is what captured this"
-        );
-    }
-
-    /// Observe ticker-driven conversation capture without making a list
-    /// request that could itself advance capture.
-    ///
-    /// `None` means the original deadline elapsed. Callers still shut down
-    /// their ticker before asserting that result, because leaving it alive
-    /// would let a late pass race the final observation and leak into the
-    /// next test's fixture cleanup.
-    async fn wait_for_captured_conversation(sup: &Arc<Supervisor>, id: &str) -> Option<String> {
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        while tokio::time::Instant::now() < deadline {
-            let captured = sup
-                .session_snapshot(id)
-                .await
-                .expect("snapshot")
-                .expect("present")
-                .captured_conversation;
-            if captured.is_some() {
-                return captured;
+        let ambiguous = loop {
+            let mut rows = Vec::new();
+            for id in &ids {
+                rows.push(
+                    sup.store
+                        .session(id)
+                        .await
+                        .expect("read the row")
+                        .expect("the session exists")
+                        .capture_ambiguous,
+                );
+            }
+            if rows.iter().all(|ambiguous| *ambiguous) {
+                break true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break rows.iter().all(|ambiguous| *ambiguous);
             }
             // sleep-ok: wait for ticker-owned capture at the original bounded tmux observation cadence.
             tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        }
-        None
+        };
+        ticker.shutdown().await;
+        assert!(
+            ambiguous,
+            "no list, no poll, no manual pass — the ticker is what judged the overlap"
+        );
     }
 
     /// Poll until the first-input anchor has reached the database, which
@@ -3235,6 +3220,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -3254,6 +3240,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -4305,6 +4292,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -4324,6 +4312,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,

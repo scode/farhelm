@@ -38,7 +38,7 @@ use crate::boot_id_durable_outcome::listed;
 use crate::conversation_identity_capture::{
     CaptureFixtures, assert_windows_disjoint, assert_windows_overlap, capture_harness,
     capture_harness_with_seams, marker_value, settle_past_horizon, snapshot_of,
-    test_capture_bounds, wait_for_first_input, wait_until_window_disjoint_from,
+    test_capture_bounds, wait_for_capture, wait_for_first_input, wait_until_window_disjoint_from,
 };
 use crate::harness::*;
 use farhelm_teststate::thread::FixtureThread;
@@ -132,9 +132,9 @@ impl Drop for ServeTask {
     }
 }
 
-/// An invocation string running `script` through the kind-named symlink, so
-/// the supervisor derives the integration (and therefore hooks it) exactly
-/// as it would for a real `claude` on the user's PATH.
+/// An invocation string running `script` through the kind-named native
+/// image, so the supervisor derives the integration (and therefore hooks
+/// it) exactly as it would for a real `claude` on the user's PATH.
 fn fixture_invocation(fixtures: &CaptureFixtures, kind: &str, script: &str) -> String {
     format!(
         "{} internal fake-agent --script {script} --record-home {}",
@@ -662,6 +662,1157 @@ async fn a_repeated_report_of_one_id_is_two_hook_runs() {
     serving.stop().await;
 }
 
+/// A background child reporting through a surviving non-shell wrapper
+/// anchor is refused — first when nothing is stored (establishment),
+/// then again after the foreground parent reports too — without
+/// changing the durable target or the public offer.
+///
+/// The shape this pins is a script installed as `claude` that spawns a
+/// background native Claude with the injected hook arguments and then
+/// runs the foreground one. The background report's chain is hook →
+/// native claude → the interpreter at the pane anchor, with no interior
+/// link for the corridor to catch. "Not one of three shells" used to
+/// exempt that anchor from classification, so the background child
+/// could establish the binding first or replace an accepted sibling's.
+/// The corridor now classifies every surviving anchor, and only the
+/// framework's bare pane shell or this launch's own transparent shell
+/// admits.
+///
+/// Child-first, with both generations driven for real: the wrapper (a
+/// Python script under a `claude` basename, so kind derivation and
+/// launch classification select native-Claude provenance from the
+/// spelling) starts a background hook-reporting fixture on pipes, has
+/// it write a genuine record and report that id, and only then spawns
+/// the foreground fixture on the pane. The background report therefore
+/// lands before the parent has said anything, and the parent's own
+/// report follows. Both are refused; the stored conversation stays
+/// `None` and the offer stays `FreshOnly` after each.
+///
+/// A strict "replace an existing binding" order is unreachable in one
+/// session by construction — any report through a surviving non-shell
+/// anchor refuses, so no binding can ever exist to replace — and the
+/// refusal precedes the store CAS, so a refused report can neither
+/// establish nor replace. The unit test
+/// `a_nonshell_wrapper_anchor_above_the_claude_runtime_is_refused` pins
+/// that stateless refusal; this test pins that the live path reaches it
+/// and nothing else changes.
+///
+/// Each half distinguishes the mechanism it rules out: the stored
+/// launch provenance reads `claude` (native), so the refusal is
+/// provably the anchor rule rather than the unknown/package program
+/// bail; the background transcript genuinely exists under the session's
+/// directory and names the reported id, so transcript validation would
+/// have passed and only attribution refuses (an admitted report would
+/// offer `Resume`, which is what makes `FreshOnly` load-bearing); the
+/// hook log holds exactly the refused lines and no `acked` one — the
+/// hook waits for the supervisor's reply before exiting, so a logged
+/// refusal means each decision is durable, not merely sent.
+#[farhelm_testtrace::test]
+async fn a_background_child_behind_a_nonshell_wrapper_anchor_is_refused() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let rendezvous = farhelm_teststate::tempdir().expect("rendezvous");
+    let wrapper_dir = farhelm_teststate::tempdir().expect("wrapper dir");
+    let wrapper = install_nonshell_claude_wrapper(wrapper_dir.path());
+    let invocation = format!(
+        "{} {} {} {}",
+        shell_words::quote(&wrapper.to_string_lossy()),
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy()),
+        shell_words::quote(&rendezvous.path().to_string_lossy()),
+    );
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            &invocation,
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras {
+                agent_kind: Some(farhelm_proto::AgentKind::Claude),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create a wrapper session");
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.kind,
+        farhelm_proto::AgentKind::Claude,
+        "the `claude` basename must derive the Claude kind; {}",
+        hook_log(&h, &session.id)
+    );
+
+    // The foreground fixture's readiness proves the wrapper is up — and
+    // the wrapper drives the background twin to its refused report
+    // BEFORE spawning the foreground, so readiness also proves the
+    // background report has been answered. The background twin runs on
+    // pipes, so none of its markers can leak into this transcript.
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let background =
+        std::fs::read_to_string(rendezvous.path().join("bg-reported")).unwrap_or_else(|error| {
+            panic!(
+                "the wrapper must report its background twin before the foreground is ready: \
+                 {error}; pane transcript:\n{}\nbackground log:\n{}",
+                String::from_utf8_lossy(&seen),
+                background_transcript_log(rendezvous.path()),
+            )
+        });
+    // The transcript the background report names genuinely exists and
+    // names the reported id: transcript validation would have passed,
+    // so only attribution refuses.
+    assert!(
+        background_record(&fixtures, work.path(), &background).contains(&background),
+        "the background twin's record must name its own conversation"
+    );
+    assert_eq!(
+        stored_row(&h, &session.id).await.claude_launch_program,
+        Some("claude".to_string()),
+        "native provenance from the `claude` spelling is what puts this report on the anchor rule"
+    );
+    // Child-first establishment refused: nothing stored, nothing offered.
+    assert_eq!(
+        stored_row(&h, &session.id).await.captured_conversation,
+        None,
+        "the background child's report must establish nothing; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "no binding means no resume; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        hook_log_lines(&h, &session.id).len(),
+        1,
+        "exactly the background run has been answered so far: {:?}",
+        hook_log_lines(&h, &session.id)
+    );
+
+    // Then the foreground parent reports its own conversation — also
+    // refused through the same anchor, replacing nothing.
+    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 30).await;
+    let foreground = marker_value(&seen, "RECORD-WRITTEN:");
+    assert_ne!(
+        foreground, background,
+        "the foreground parent reports its own conversation, not a replay of the twin's"
+    );
+    report(&h, chan, &mut rx, &mut seen, &foreground).await;
+    assert_eq!(
+        stored_row(&h, &session.id).await.captured_conversation,
+        None,
+        "the parent's report through the wrapper anchor must replace nothing; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "still no binding, still no resume; {}",
+        hook_log(&h, &session.id)
+    );
+    let log = hook_log_lines(&h, &session.id);
+    assert_eq!(
+        log.len(),
+        2,
+        "both hook runs dialled the supervisor and were answered: {log:?}"
+    );
+    assert!(
+        log.iter()
+            .all(|line| line.split_whitespace().nth(1) == Some("refused")),
+        "both reports are refused, none admitted: {log:?}"
+    );
+    serving.stop().await;
+}
+
+/// Install an executable Python script under the basename `claude` that
+/// plays the review's concrete wrapper: it starts a background
+/// hook-reporting fixture on pipes, has it write a genuine record and
+/// report that id (the child-first background report), records the
+/// reported id for the test, and only then spawns the foreground
+/// fixture on the pane's own stdio.
+///
+/// The `claude` basename is the whole attack: kind derivation and
+/// launch classification select native-Claude provenance from the
+/// spelling, while the kernel resolves the pane anchor's image to the
+/// interpreter. The background report's chain is therefore hook →
+/// native claude → python anchor. Python (stdlib only) is what lets one
+/// process drive a background twin's prompt/response turn-taking — a
+/// shell cannot hold both ends of those pipes — and the script fails
+/// loudly (pane-visible traceback, no rendezvous file) on any deviation:
+/// a twin that never becomes ready, never writes its record, or whose
+/// hook is not silent.
+fn install_nonshell_claude_wrapper(dir: &std::path::Path) -> std::path::PathBuf {
+    const WRAPPER: &str = r#"#!/usr/bin/env python3
+"""Background-then-foreground Claude twin behind a non-shell anchor."""
+import os
+import re
+import select
+import subprocess
+import sys
+import time
+
+DEADLINE = 60.0
+
+
+def fail(log, message):
+    log.write(("WRAPPER-FAIL: " + message + "\n").encode())
+    log.flush()
+    print("WRAPPER-FAIL: " + message, file=sys.stderr)
+    sys.exit(1)
+
+
+class TwinStream:
+    """The background twin's piped stdout with a persistent buffer.
+
+    Reads arrive in arbitrary chunks: one `os.read` can hold the tail
+    of one marker and the whole of the next (the hook's
+    `HOOK-REPORTED:` and `HOOK-STDOUT-EMPTY` lines routinely land
+    together). A fresh buffer per wait would discard the already-read
+    head of the next marker and stall forever on bytes that already
+    arrived, so every wait shares this one.
+    """
+
+    def __init__(self, proc, log):
+        self.fd = proc.stdout.fileno()
+        self.proc = proc
+        self.log = log
+        self.buf = b""
+
+    def fill(self, what):
+        timeout = self.end - time.monotonic()
+        if timeout <= 0:
+            fail(self.log, "timed out waiting for %s" % what)
+        ready, _, _ = select.select([self.fd], [], [], timeout)
+        if not ready:
+            fail(self.log, "timed out waiting for %s" % what)
+        chunk = os.read(self.fd, 65536)
+        if not chunk:
+            fail(self.log, "fixture exited while waiting for %s" % what)
+        self.log.write(chunk)
+        self.buf += chunk
+
+    def wait_for(self, needle):
+        self.end = time.monotonic() + DEADLINE
+        while needle not in self.buf:
+            self.fill(repr(needle.decode()))
+
+    def wait_for_marker(self):
+        # The id is parsed only once its marker line is COMPLETE: the
+        # stream is chunked, and splitting a bare `RECORD-WRITTEN:`
+        # prefix would report a truncated id — refused for transcript
+        # reasons, which would exercise the wrong rule.
+        self.end = time.monotonic() + DEADLINE
+        while True:
+            match = re.search(rb"RECORD-WRITTEN:(\S+)\s", self.buf)
+            if match:
+                return match.group(1).decode()
+            self.fill("a complete record marker")
+
+
+def main():
+    bin_claude, record_home, rendezvous = sys.argv[1], sys.argv[2], sys.argv[3]
+    os.makedirs(rendezvous, exist_ok=True)
+    log = open(os.path.join(rendezvous, "bg-transcript.log"), "wb")
+    argv = [
+        bin_claude, "internal", "fake-agent",
+        "--script", "hook-report", "--record-home", record_home,
+    ]
+    bg = subprocess.Popen(
+        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    twin = TwinStream(bg, log)
+    twin.wait_for(b"FAKE-AGENT READY")
+    bg.stdin.write(b"first prompt\n")
+    bg.stdin.flush()
+    conversation = twin.wait_for_marker()
+    bg.stdin.write(b"report " + conversation.encode() + b"\n")
+    bg.stdin.flush()
+    twin.wait_for(b"HOOK-REPORTED:")
+    # Silence is the hook's contract: a noisy or failed hook is a
+    # broken premise, not a refused report, so fail instead of
+    # recording a rendezvous the test would misread.
+    twin.wait_for(b"HOOK-STDOUT-EMPTY")
+    with open(os.path.join(rendezvous, "bg-reported"), "w") as handle:
+        handle.write(conversation)
+    log.close()
+    # The foreground twin inherits the pane stdio; the test drives it
+    # from there. The background twin stays alive above it — its chain
+    # keeps the interpreter anchor the corridor must refuse.
+    fg = subprocess.Popen(argv)
+    sys.exit(fg.wait())
+
+
+main()
+"#;
+    let path = dir.join("claude");
+    std::fs::write(&path, WRAPPER).expect("write the wrapper script");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("make the wrapper executable");
+    path
+}
+
+/// Install an executable Python script under the basename `claude` that
+/// plays the review's concrete stdin-fed wrapper: it drives a
+/// background hook-reporting fixture on pipes to a genuine
+/// prompt-driven record, reaps it, then writes a script that replays
+/// that record's report through a heredoc and runs the foreground
+/// twin, redirects its OWN stdin to that script, and execs `/bin/sh`
+/// with argv `["sh"]` — keeping the pane PID with a bare shell argv
+/// while its stdin reads the script.
+///
+/// The pane anchor both reports arrive through is therefore a shell
+/// image with a single argv whose stdin is a regular file, the shape
+/// basename-plus-argc cannot distinguish from the framework's own
+/// pane shell — and both reports land after the exec, which is what
+/// makes the background one child-first. The foreground fixture
+/// reopens `/dev/tty` for its own input (its stdin would otherwise
+/// be the script), so the test drives it from the pane exactly like
+/// the non-shell twin test. The trailing `sleep` keeps the pane root
+/// alive after the script runs out; the stdin evidence it carries is
+/// a file either way.
+fn install_stdin_fed_claude_wrapper(dir: &std::path::Path) -> std::path::PathBuf {
+    const WRAPPER: &str = r#"#!/usr/bin/env python3
+"""Background-then-foreground Claude twin behind a stdin-fed shell anchor."""
+import os
+import re
+import select
+import shlex
+import subprocess
+import sys
+import time
+
+DEADLINE = 60.0
+
+
+def fail(log, message):
+    log.write(("WRAPPER-FAIL: " + message + "\n").encode())
+    log.flush()
+    print("WRAPPER-FAIL: " + message, file=sys.stderr)
+    sys.exit(1)
+
+
+class TwinStream:
+    """The background twin's piped stdout with a persistent buffer.
+
+    Reads arrive in arbitrary chunks: one `os.read` can hold the tail
+    of one marker and the whole of the next (the hook's
+    `HOOK-REPORTED:` and `HOOK-STDOUT-EMPTY` lines routinely land
+    together). A fresh buffer per wait would discard the already-read
+    head of the next marker and stall forever on bytes that already
+    arrived, so every wait shares this one.
+    """
+
+    def __init__(self, proc, log):
+        self.fd = proc.stdout.fileno()
+        self.proc = proc
+        self.log = log
+        self.buf = b""
+
+    def fill(self, what):
+        timeout = self.end - time.monotonic()
+        if timeout <= 0:
+            fail(self.log, "timed out waiting for %s" % what)
+        ready, _, _ = select.select([self.fd], [], [], timeout)
+        if not ready:
+            fail(self.log, "timed out waiting for %s" % what)
+        chunk = os.read(self.fd, 65536)
+        if not chunk:
+            fail(self.log, "fixture exited while waiting for %s" % what)
+        self.log.write(chunk)
+        self.buf += chunk
+
+    def wait_for(self, needle):
+        self.end = time.monotonic() + DEADLINE
+        while needle not in self.buf:
+            self.fill(repr(needle.decode()))
+
+    def wait_for_marker(self):
+        # The id is parsed only once its marker line is COMPLETE: the
+        # stream is chunked, and splitting a bare `RECORD-WRITTEN:`
+        # prefix would report a truncated id — refused for transcript
+        # reasons, which would exercise the wrong rule.
+        self.end = time.monotonic() + DEADLINE
+        while True:
+            match = re.search(rb"RECORD-WRITTEN:(\S+)\s", self.buf)
+            if match:
+                return match.group(1).decode()
+            self.fill("a complete record marker")
+
+
+def main():
+    bin_claude, record_home, rendezvous = sys.argv[1], sys.argv[2], sys.argv[3]
+    os.makedirs(rendezvous, exist_ok=True)
+    log = open(os.path.join(rendezvous, "bg-transcript.log"), "wb")
+    argv = [
+        bin_claude, "internal", "fake-agent",
+        "--script", "hook-report", "--record-home", record_home,
+    ]
+    bg = subprocess.Popen(
+        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    twin = TwinStream(bg, log)
+    twin.wait_for(b"FAKE-AGENT READY")
+    # A genuine prompt-driven record for the background report to
+    # name: the report below must carry a verifying transcript, so
+    # only attribution — never transcript validation — can refuse it.
+    bg.stdin.write(b"first prompt\n")
+    bg.stdin.flush()
+    conversation = twin.wait_for_marker()
+    # Reaped before the exec, deterministically: the post-exec script
+    # replays `report <id>` through a heredoc against this same
+    # record home, so this driver holding the pipes past the exec
+    # would only leave a stray twin behind.
+    bg.stdin.write(b"quit\n")
+    bg.stdin.flush()
+    try:
+        bg.wait(timeout=DEADLINE)
+    except subprocess.TimeoutExpired:
+        bg.kill()
+        fail(log, "the background twin did not exit on quit")
+    with open(os.path.join(rendezvous, "bg-reported"), "w") as handle:
+        handle.write(conversation)
+    log.close()
+    # The review's concrete shape: a script holding both twins, our
+    # own stdin redirected to it, then a bare shell over our own pane
+    # PID. The background twin reports its genuine record through a
+    # heredoc — its report lands after the exec, through the
+    # stdin-fed anchor, which is the child-first ordering the test
+    # asserts on. The foreground twin reopens the terminal for its
+    # own input — its inherited stdin is this script — so the test
+    # drives it from the pane. The trailing `sleep` keeps the pane
+    # root alive after the script runs out; the stdin evidence it
+    # carries is a file either way.
+    script = os.path.join(rendezvous, "fg-script.sh")
+    twin_argv = "%s internal fake-agent --script hook-report --record-home %s" % (
+        shlex.quote(bin_claude), shlex.quote(record_home))
+    with open(script, "w") as handle:
+        handle.write("%s <<EOF\nreport %s\nEOF\n" % (twin_argv, conversation))
+        handle.write("%s < /dev/tty\n" % twin_argv)
+        handle.write("sleep 300\n")
+    script_fd = os.open(script, os.O_RDONLY)
+    os.dup2(script_fd, 0)
+    if script_fd != 0:
+        os.close(script_fd)
+    os.execv("/bin/sh", ["sh"])
+
+
+main()
+"#;
+    let path = dir.join("claude");
+    std::fs::write(&path, WRAPPER).expect("write the wrapper script");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("make the wrapper executable");
+    path
+}
+
+/// Install an executable Python script under the basename `claude` that
+/// plays the review's concrete fd-restore wrapper: it saves its own fd
+/// 0 to fd 3, redirects stdin to a script, and execs `/bin/sh` with
+/// argv `["sh"]` — keeping the pane PID with a bare shell argv — and
+/// the script's first act is `exec 0<&3`, restoring the terminal fd
+/// before spawning the background and foreground native runtimes.
+///
+/// The pane anchor both reports arrive through is therefore
+/// observationally identical to the framework's own pane shell: the
+/// same image, the same single argv, the same pane, and — unlike the
+/// stdin-fed shape above — the same fd-0 target. Only the
+/// supervisor's spawn record tells them apart (the anchor spells
+/// `sh`; the launch was this wrapper plus its injected arguments),
+/// which is why every refusal below is asserted on the record
+/// diagnostic, not the stdin one.
+///
+/// The background twin is raised the same honest way as above — a
+/// genuine prompt-driven record on pipes, reaped before the exec —
+/// and its report is replayed through a heredoc after the restore,
+/// which is the child-first ordering the test asserts on. The
+/// foreground twin inherits the restored terminal stdin directly (no
+/// `/dev/tty` reopen needed), so the test drives it from the pane.
+/// The trailing `sleep` keeps the pane root alive after the script
+/// runs out.
+fn install_fd_restore_claude_wrapper(dir: &std::path::Path) -> std::path::PathBuf {
+    const WRAPPER: &str = r#"#!/usr/bin/env python3
+"""Background-then-foreground Claude twin behind an fd-restored shell anchor."""
+import os
+import re
+import select
+import shlex
+import subprocess
+import sys
+import time
+
+DEADLINE = 60.0
+
+
+def fail(log, message):
+    log.write(("WRAPPER-FAIL: " + message + "\n").encode())
+    log.flush()
+    print("WRAPPER-FAIL: " + message, file=sys.stderr)
+    sys.exit(1)
+
+
+class TwinStream:
+    """The background twin's piped stdout with a persistent buffer.
+
+    Reads arrive in arbitrary chunks: one `os.read` can hold the tail
+    of one marker and the whole of the next (the hook's
+    `HOOK-REPORTED:` and `HOOK-STDOUT-EMPTY` lines routinely land
+    together). A fresh buffer per wait would discard the already-read
+    head of the next marker and stall forever on bytes that already
+    arrived, so every wait shares this one.
+    """
+
+    def __init__(self, proc, log):
+        self.fd = proc.stdout.fileno()
+        self.proc = proc
+        self.log = log
+        self.buf = b""
+
+    def fill(self, what):
+        timeout = self.end - time.monotonic()
+        if timeout <= 0:
+            fail(self.log, "timed out waiting for %s" % what)
+        ready, _, _ = select.select([self.fd], [], [], timeout)
+        if not ready:
+            fail(self.log, "timed out waiting for %s" % what)
+        chunk = os.read(self.fd, 65536)
+        if not chunk:
+            fail(self.log, "fixture exited while waiting for %s" % what)
+        self.log.write(chunk)
+        self.buf += chunk
+
+    def wait_for(self, needle):
+        self.end = time.monotonic() + DEADLINE
+        while needle not in self.buf:
+            self.fill(repr(needle.decode()))
+
+    def wait_for_marker(self):
+        # The id is parsed only once its marker line is COMPLETE: the
+        # stream is chunked, and splitting a bare `RECORD-WRITTEN:`
+        # prefix would report a truncated id — refused for transcript
+        # reasons, which would exercise the wrong rule.
+        self.end = time.monotonic() + DEADLINE
+        while True:
+            match = re.search(rb"RECORD-WRITTEN:(\S+)\s", self.buf)
+            if match:
+                return match.group(1).decode()
+            self.fill("a complete record marker")
+
+
+def main():
+    bin_claude, record_home, rendezvous = sys.argv[1], sys.argv[2], sys.argv[3]
+    os.makedirs(rendezvous, exist_ok=True)
+    log = open(os.path.join(rendezvous, "bg-transcript.log"), "wb")
+    argv = [
+        bin_claude, "internal", "fake-agent",
+        "--script", "hook-report", "--record-home", record_home,
+    ]
+    bg = subprocess.Popen(
+        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    twin = TwinStream(bg, log)
+    twin.wait_for(b"FAKE-AGENT READY")
+    # A genuine prompt-driven record for the background report to
+    # name: the report below must carry a verifying transcript, so
+    # only attribution — never transcript validation — can refuse it.
+    bg.stdin.write(b"first prompt\n")
+    bg.stdin.flush()
+    conversation = twin.wait_for_marker()
+    # Reaped before the exec, deterministically: the post-exec script
+    # replays `report <id>` through a heredoc against this same
+    # record home, so this driver holding the pipes past the exec
+    # would only leave a stray twin behind.
+    bg.stdin.write(b"quit\n")
+    bg.stdin.flush()
+    try:
+        bg.wait(timeout=DEADLINE)
+    except subprocess.TimeoutExpired:
+        bg.kill()
+        fail(log, "the background twin did not exit on quit")
+    with open(os.path.join(rendezvous, "bg-reported"), "w") as handle:
+        handle.write(conversation)
+    log.close()
+    # The review's concrete shape: the script restores the saved
+    # terminal fd BEFORE spawning either twin, so both reports walk
+    # an anchor whose image, argv, and fd 0 all match the launched
+    # shell. The background twin is fed its `report` line through a
+    # printf pipe in the background — never a heredoc, which would
+    # park a pipe on the shell's own fd 0 while the child runs and
+    # fail the fd leg for the wrong reason — and its report lands
+    # after the exec and the restore, through the restored anchor,
+    # which is the child-first ordering the test asserts on. The
+    # foreground twin inherits the restored terminal stdin, so the
+    # test drives it from the pane. The trailing `wait` reaps the
+    # background twin and the `sleep` keeps the pane root alive after
+    # the script runs out.
+    script = os.path.join(rendezvous, "fg-script.sh")
+    twin_argv = "%s internal fake-agent --script hook-report --record-home %s" % (
+        shlex.quote(bin_claude), shlex.quote(record_home))
+    with open(script, "w") as handle:
+        handle.write("exec 0<&3\n")
+        handle.write("exec 3<&-\n")
+        handle.write("printf 'report %s\\n' %s | %s &\n" % (conversation, conversation, twin_argv))
+        handle.write("%s\n" % twin_argv)
+        handle.write("wait\n")
+        handle.write("sleep 300\n")
+        handle.write("%s\n" % twin_argv)
+        handle.write("sleep 300\n")
+    # A dup'd descriptor does not survive the exec below unless it
+    # is marked inheritable (PEP 446): without this the shell's
+    # `exec 0<&3` fails with "Bad file descriptor" and the pane dies
+    # before either twin runs.
+    saved = os.dup(0)
+    if saved != 3:
+        os.dup2(saved, 3)
+        os.close(saved)
+    os.set_inheritable(3, True)
+    script_fd = os.open(script, os.O_RDONLY)
+    os.dup2(script_fd, 0)
+    if script_fd != 0:
+        os.close(script_fd)
+    os.execv("/bin/sh", ["sh"])
+
+
+main()
+"#;
+    let path = dir.join("claude");
+    std::fs::write(&path, WRAPPER).expect("write the wrapper script");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+        .expect("make the wrapper executable");
+    path
+}
+
+/// A background child reporting through a stdin-fed shell anchor is
+/// refused — first when nothing is stored (establishment), then again
+/// after the foreground sibling reports too — without changing the
+/// durable target or the public offer.
+///
+/// The shape this pins is the review's concrete wrapper: a script
+/// installed as `claude` that prepares a shell script holding a
+/// background and a foreground native Claude invocation, redirects
+/// its own stdin to that script, and execs `/bin/sh` with argv
+/// `["sh"]`. `exec` preserves the pane PID, so the background
+/// report's chain is hook → native claude → `sh` anchor with a bare
+/// argv — the shape basename-plus-argc cannot tell from the
+/// framework's own pane shell. Only the anchor's stdin tells them
+/// apart (a regular file here, the session terminal there), which is
+/// why every refusal below is asserted on the stdin diagnostic, not
+/// merely on "refused": transcript validation would have passed and
+/// the program reads native `claude`, so only the stdin proof stands
+/// between this report and admission.
+///
+/// Child-first, with both generations driven for real, mirroring
+/// [`a_background_child_behind_a_nonshell_wrapper_anchor_is_refused`]:
+/// the wrapper raises a genuine background record on pipes, reaps
+/// that driver, then execs the bare shell over itself; the script the
+/// shell reads replays the background report through a heredoc
+/// (child-first) and runs the foreground twin on the pane
+/// (reopening `/dev/tty` for its own input, since its inherited
+/// stdin is the script), which reports second. Both refusals precede
+/// the store CAS, so neither report can establish nor replace the
+/// binding.
+///
+/// Linux-only: fd-0 targets are unobservable on macOS, where the
+/// corridor refuses bare-shell ancestry for the missing leg before
+/// ever reaching the stdin comparison — still a refusal, but on a
+/// different diagnostic than the one this pins. That platform gap is
+/// named here rather than left for a reader to rediscover from a red
+/// run.
+#[farhelm_testtrace::test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS refuses bare-shell ancestry for the missing fd leg before the stdin comparison; the stdin diagnostic this pins is Linux-only"
+)]
+async fn a_background_child_behind_a_stdin_fed_shell_anchor_is_refused() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let rendezvous = farhelm_teststate::tempdir().expect("rendezvous");
+    let wrapper_dir = farhelm_teststate::tempdir().expect("wrapper dir");
+    let wrapper = install_stdin_fed_claude_wrapper(wrapper_dir.path());
+    let invocation = format!(
+        "{} {} {} {}",
+        shell_words::quote(&wrapper.to_string_lossy()),
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy()),
+        shell_words::quote(&rendezvous.path().to_string_lossy()),
+    );
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            &invocation,
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras {
+                agent_kind: Some(farhelm_proto::AgentKind::Claude),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create a wrapper session");
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.kind,
+        farhelm_proto::AgentKind::Claude,
+        "the `claude` basename must derive the Claude kind; {}",
+        hook_log(&h, &session.id)
+    );
+
+    // A fixture's readiness proves the exec happened — only the exec'd
+    // shell runs the script that starts the twins (either twin's; both
+    // print it). The background twin's report then lands through the
+    // stdin-fed anchor, and its `HOOK-REPORTED:<id>` on the pane
+    // proves the supervisor answered it — that answer is the
+    // child-first report, refused before anything is stored.
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let background =
+        std::fs::read_to_string(rendezvous.path().join("bg-reported")).unwrap_or_else(|error| {
+            panic!(
+                "the wrapper must record its background id before the exec: {error}; pane \
+                 transcript:\n{}\nbackground log:\n{}",
+                String::from_utf8_lossy(&seen),
+                background_transcript_log(rendezvous.path()),
+            )
+        });
+    wait_for(
+        &mut rx,
+        &mut seen,
+        &format!("HOOK-REPORTED:{background}"),
+        30,
+    )
+    .await;
+    // The transcript the background report names genuinely exists and
+    // names the reported id: transcript validation would have passed,
+    // so only attribution refuses.
+    assert!(
+        background_record(&fixtures, work.path(), &background).contains(&background),
+        "the background twin's record must name its own conversation"
+    );
+    assert_eq!(
+        stored_row(&h, &session.id).await.claude_launch_program,
+        Some("claude".to_string()),
+        "native provenance from the `claude` spelling is what puts this report on the anchor rule"
+    );
+    // Child-first establishment refused: nothing stored, nothing offered.
+    assert_eq!(
+        stored_row(&h, &session.id).await.captured_conversation,
+        None,
+        "the background child's report must establish nothing; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "no binding means no resume; {}",
+        hook_log(&h, &session.id)
+    );
+    let log = hook_log_lines(&h, &session.id);
+    assert_eq!(
+        log.len(),
+        1,
+        "exactly the background run has been answered so far: {log:?}"
+    );
+    assert!(
+        log.iter()
+            .all(|line| line.split_whitespace().nth(1) == Some("refused")
+                && line.contains("stdin is not the session terminal")),
+        "the background report must be refused on the stdin proof, not another rule: {log:?}"
+    );
+
+    // Then the foreground sibling reports its own conversation —
+    // also refused through the same anchor, replacing nothing.
+    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 30).await;
+    let foreground = marker_value(&seen, "RECORD-WRITTEN:");
+    assert_ne!(
+        foreground, background,
+        "the foreground sibling reports its own conversation, not a replay of the twin's"
+    );
+    report(&h, chan, &mut rx, &mut seen, &foreground).await;
+    assert_eq!(
+        stored_row(&h, &session.id).await.captured_conversation,
+        None,
+        "the sibling's report through the stdin-fed anchor must replace nothing; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "still no binding, still no resume; {}",
+        hook_log(&h, &session.id)
+    );
+    let log = hook_log_lines(&h, &session.id);
+    assert_eq!(
+        log.len(),
+        2,
+        "both hook runs dialled the supervisor and were answered: {log:?}"
+    );
+    assert!(
+        log.iter()
+            .all(|line| line.split_whitespace().nth(1) == Some("refused")
+                && line.contains("stdin is not the session terminal")),
+        "both reports are refused on the stdin proof, none admitted: {log:?}"
+    );
+    serving.stop().await;
+}
+
+/// A background child reporting through an fd-restored shell anchor
+/// is refused — first when nothing is stored (establishment), then
+/// again after the foreground sibling reports too — without changing
+/// the durable target or the public offer.
+///
+/// The shape this pins is the review's concrete wrapper: a script
+/// installed as `claude` that saves fd 0 to fd 3, redirects its own
+/// stdin to a script, and execs `/bin/sh` with argv `["sh"]`, and the
+/// script restores the terminal fd (`exec 0<&3`) before spawning the
+/// background and foreground native Claude invocations. `exec`
+/// preserves the pane PID, so the background report's chain is hook
+/// → native claude → `sh` anchor with a bare argv — and this time
+/// the anchor's stdin IS the session terminal, so the fd proof passes
+/// and only the spawn record refuses: the anchor spells `sh` while
+/// the session was launched as this wrapper plus its injected
+/// arguments.
+///
+/// Child-first, with both generations driven for real, mirroring
+/// [`a_background_child_behind_a_stdin_fed_shell_anchor_is_refused`]:
+/// the wrapper raises a genuine background record on pipes, reaps
+/// that driver, then execs the bare shell over itself; the script the
+/// shell reads restores the terminal fd, replays the background
+/// report through a backgrounded printf pipe (child-first), and runs
+/// the foreground twin on the restored terminal stdin, which reports
+/// second. Both refusals precede the store CAS, so neither report can
+/// establish nor replace the binding. Every refusal below is asserted
+/// on the record diagnostic — a breakage that refused on stdin
+/// instead would mean the restore never happened and the test would
+/// be proving the weaker shape.
+///
+/// Linux-only like its stdin-fed sibling: on macOS the corridor has
+/// no fd evidence either way and refuses bare-shell ancestry for the
+/// missing leg, so the record diagnostic this pins is unreachable
+/// there.
+#[farhelm_testtrace::test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "the record diagnostic needs the fd leg to pass first, which macOS cannot observe; the macOS refusal is pinned by the genuine-shell test's macOS arm"
+)]
+async fn a_background_child_behind_an_fd_restored_shell_anchor_is_refused() {
+    let (h, fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let rendezvous = farhelm_teststate::tempdir().expect("rendezvous");
+    let wrapper_dir = farhelm_teststate::tempdir().expect("wrapper dir");
+    let wrapper = install_fd_restore_claude_wrapper(wrapper_dir.path());
+    let invocation = format!(
+        "{} {} {} {}",
+        shell_words::quote(&wrapper.to_string_lossy()),
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy()),
+        shell_words::quote(&rendezvous.path().to_string_lossy()),
+    );
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            &invocation,
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras {
+                agent_kind: Some(farhelm_proto::AgentKind::Claude),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create a wrapper session");
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.kind,
+        farhelm_proto::AgentKind::Claude,
+        "the `claude` basename must derive the Claude kind; {}",
+        hook_log(&h, &session.id)
+    );
+
+    // A fixture's readiness proves the exec happened — only the exec'd
+    // shell runs the script that starts the twins (either twin's; both
+    // print it). The background twin's report then lands through the
+    // restored anchor, and its `HOOK-REPORTED:<id>` on the pane
+    // proves the supervisor answered it — that answer is the
+    // child-first report, refused before anything is stored.
+    let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    let background =
+        std::fs::read_to_string(rendezvous.path().join("bg-reported")).unwrap_or_else(|error| {
+            panic!(
+                "the wrapper must record its background id before the exec: {error}; pane \
+                 transcript:\n{}\nbackground log:\n{}",
+                String::from_utf8_lossy(&seen),
+                background_transcript_log(rendezvous.path()),
+            )
+        });
+    wait_for(
+        &mut rx,
+        &mut seen,
+        &format!("HOOK-REPORTED:{background}"),
+        30,
+    )
+    .await;
+    // The transcript the background report names genuinely exists and
+    // names the reported id: transcript validation would have passed,
+    // so only attribution refuses.
+    assert!(
+        background_record(&fixtures, work.path(), &background).contains(&background),
+        "the background twin's record must name its own conversation"
+    );
+    assert_eq!(
+        stored_row(&h, &session.id).await.claude_launch_program,
+        Some("claude".to_string()),
+        "native provenance from the `claude` spelling is what puts this report on the anchor rule"
+    );
+    // Child-first establishment refused: nothing stored, nothing offered.
+    assert_eq!(
+        stored_row(&h, &session.id).await.captured_conversation,
+        None,
+        "the background child's report must establish nothing; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "no binding means no resume; {}",
+        hook_log(&h, &session.id)
+    );
+    let log = hook_log_lines(&h, &session.id);
+    assert_eq!(
+        log.len(),
+        1,
+        "exactly the background run has been answered so far: {log:?}"
+    );
+    assert!(
+        log.iter()
+            .all(|line| line.split_whitespace().nth(1) == Some("refused")
+                && line.contains("does not match this session's recorded launch")),
+        "the background report must be refused on the record, not the stdin proof: {log:?}"
+    );
+
+    // Then the foreground sibling reports its own conversation —
+    // also refused through the same anchor, replacing nothing.
+    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 30).await;
+    let foreground = marker_value(&seen, "RECORD-WRITTEN:");
+    assert_ne!(
+        foreground, background,
+        "the foreground sibling reports its own conversation, not a replay of the twin's"
+    );
+    report(&h, chan, &mut rx, &mut seen, &foreground).await;
+    assert_eq!(
+        stored_row(&h, &session.id).await.captured_conversation,
+        None,
+        "the sibling's report through the restored anchor must replace nothing; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly,
+        "still no binding, still no resume; {}",
+        hook_log(&h, &session.id)
+    );
+    let log = hook_log_lines(&h, &session.id);
+    assert_eq!(
+        log.len(),
+        2,
+        "both hook runs dialled the supervisor and were answered: {log:?}"
+    );
+    assert!(
+        log.iter()
+            .all(|line| line.split_whitespace().nth(1) == Some("refused")
+                && line.contains("does not match this session's recorded launch")),
+        "both reports are refused on the record, none admitted: {log:?}"
+    );
+    serving.stop().await;
+}
+
+/// A genuine bare pane shell above the runtime still admits on
+/// Linux: the anchor proof must refuse the wrapper's replacement
+/// without costing the launched shell its reports. On macOS the same
+/// report refuses for the missing fd leg — the conservative contract
+/// — so the test asserts admission there and refusal here, live on
+/// both platforms instead of ignored on one.
+///
+/// The shape this pins is a Claude-kind session whose pane root is a
+/// real bare shell — `/bin/sh` with a single argv, stdin on the pane
+/// terminal — under which the hook-reporting fixture runs as a child,
+/// the way a runtime launched by hand from a pane shell does. Hook
+/// injection is off for this harness (appending `--settings` to the
+/// shell's argv would leave no bare shell to prove anything with),
+/// and the fixture needs none: its `report` command spawns the hook
+/// itself. The stored program reads `shell` and the stored invocation
+/// reads `/bin/sh`, so Linux admission can only have ridden the
+/// bare-shell anchor branch on both legs — a trampoline anchor needs
+/// a `-c` command the anchor does not have, and every other anchor
+/// shape refuses.
+///
+/// The pane root prints no readiness of its own, so the test
+/// establishes it the only honest way: an `echo` round trip proving
+/// the shell reads the terminal, then the fixture's own `FAKE-AGENT
+/// READY` before anything is typed at it.
+#[farhelm_testtrace::test]
+async fn a_genuine_bare_pane_shell_direct_launch_still_admits() {
+    let (h, fixtures) = capture_harness_with_seams(|seams| {
+        seams.agent_hooks = farhelm_supervisor::agent_kind::AgentHooks::None;
+    })
+    .await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            "/bin/sh",
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras {
+                agent_kind: Some(farhelm_proto::AgentKind::Claude),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create a bare-shell session");
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.kind,
+        farhelm_proto::AgentKind::Claude,
+        "the kind override must hold; {}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(
+        stored_row(&h, &session.id).await.claude_launch_program,
+        Some("shell".to_string()),
+        "a bare `sh` invocation classifies as the shell program"
+    );
+
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach to the bare shell");
+    // No fixture is running yet, so no marker can witness the shell:
+    // the echo round trip proves the pane root reads the terminal.
+    h.client
+        .send_input(chan, b"echo SHELL-READY\r".to_vec())
+        .await;
+    wait_for(&mut rx, &mut seen, "SHELL-READY", 20).await;
+    // The runtime as the shell's child, typed by hand the way the
+    // legitimate shape arises. Quoted, since the harness paths are
+    // data, not shell syntax.
+    let fixture = format!(
+        "{} internal fake-agent --script hook-report --record-home {}",
+        shell_words::quote(&fixtures.bin().join("claude").to_string_lossy()),
+        shell_words::quote(&fixtures.home().to_string_lossy()),
+    );
+    h.client
+        .send_input(chan, format!("{fixture}\r").into_bytes())
+        .await;
+    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
+    h.client.send_input(chan, b"first prompt\r".to_vec()).await;
+    wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 30).await;
+    let conversation = marker_value(&seen, "RECORD-WRITTEN:");
+    report(&h, chan, &mut rx, &mut seen, &conversation).await;
+
+    // The verdict is platform-shaped: Linux admits on the record plus
+    // the terminal leg, while macOS refuses bare-shell ancestry for
+    // the missing fd leg — the conservative contract, pinned live
+    // here rather than left as an ignored test.
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            stored_row(&h, &session.id).await.captured_conversation,
+            None,
+            "on macOS the genuine shell's report establishes nothing; {}",
+            hook_log(&h, &session.id)
+        );
+        assert_eq!(
+            listed(&h.client, &session.id).await.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "no binding means no resume; {}",
+            hook_log(&h, &session.id)
+        );
+        let log = hook_log_lines(&h, &session.id);
+        assert_eq!(log.len(), 1, "exactly the one report ran: {log:?}");
+        assert!(
+            log.iter()
+                .all(|line| line.split_whitespace().nth(1) == Some("refused")
+                    && line.contains("session terminal is not observable")),
+            "the macOS refusal must name the missing leg: {log:?}"
+        );
+    } else {
+        assert_eq!(
+            wait_for_capture(&h, &session.id, 30).await,
+            conversation,
+            "the reported identity must be captured; {}",
+            hook_log(&h, &session.id)
+        );
+        assert_eq!(
+            stored_row(&h, &session.id)
+                .await
+                .captured_conversation
+                .as_deref(),
+            Some(conversation.as_str()),
+            "the binding must name the reported conversation; {}",
+            hook_log(&h, &session.id)
+        );
+        assert_eq!(
+            listed(&h.client, &session.id).await.restart_offer,
+            farhelm_proto::RestartOffer::Resume,
+            "an admitted binding offers resume; {}",
+            hook_log(&h, &session.id)
+        );
+        let log = hook_log_lines(&h, &session.id);
+        assert_eq!(log.len(), 1, "exactly the one report ran: {log:?}");
+        assert!(
+            log.iter()
+                .all(|line| line.split_whitespace().nth(1) == Some("acked")),
+            "the report through the genuine bare shell is admitted, not refused: {log:?}"
+        );
+    }
+    serving.stop().await;
+}
+
+/// The background twin's piped transcript, for premise-failure messages.
+///
+/// The twin runs off-pane, so when its rendezvous never arrives the pane
+/// transcript alone says nothing — this log is the only evidence of how
+/// far the twin got.
+fn background_transcript_log(rendezvous: &std::path::Path) -> String {
+    match std::fs::read(rendezvous.join("bg-transcript.log")) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(error) => format!("<no background log: {error}>"),
+    }
+}
+
+/// The record file the background twin's report names: resolved the way
+/// the admission resolves it, under the session's own directory, so the
+/// test proves the transcript validation would have passed.
+fn background_record(
+    fixtures: &CaptureFixtures,
+    cwd: &std::path::Path,
+    conversation: &str,
+) -> String {
+    let canonical = std::fs::canonicalize(cwd).expect("canonicalize the working directory");
+    let path = fixtures
+        .home()
+        .join(".claude")
+        .join("projects")
+        .join(farhelm_supervisor::agent_kind::munge_cwd(
+            &canonical.to_string_lossy(),
+        ))
+        .join(format!("{conversation}.jsonl"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("the background twin must have written its record: {error}"))
+}
+
 /// A record on disk cannot overwrite what the agent said about itself.
 ///
 /// The scan is evidence ABOUT which conversation is ours; a report IS the
@@ -808,34 +1959,34 @@ async fn a_report_before_the_scan_lands_is_not_clobbered() {
     serving.stop().await;
 }
 
-/// A record another session has been TOLD is its own drops out of this
-/// session's candidate list — which is the one thing a report buys a rival.
+/// A reported identity sticks to its session and never leaks to a rival —
+/// not to the rival's binding, and not through the rival's own record
+/// either.
 ///
 /// The scenario is the realistic one and not a contrivance: session A takes
 /// its first input, later runs `/clear` (the fixture's `fork`, which mints a
 /// new conversation record with a CURRENT timestamp), and reports the new
 /// id. That fresh record lands squarely inside a much later session B's
-/// capture window even though A's own window closed long ago. Without the
-/// exclusion B sees two in-window candidates and bails; with it, B is left
-/// with exactly the one record still unspoken for.
+/// capture window even though A's own window closed long ago. With no
+/// integration scanning vendor state anymore, neither session can capture
+/// a record by correlation — so the pins are what the report path alone
+/// guarantees: A holds exactly what it reported, and B stays uncaptured
+/// whether or not it has a record of its own.
 ///
 /// Both variants matter, and they fail differently:
 ///
-/// - B has its own record: the exclusion turns a needless bail into an
-///   honest capture. Losing it costs a resume offer.
-/// - B has no record yet: the exclusion is what stops B from claiming A's
-///   post-`/clear` conversation as its own. Losing it costs CORRECTNESS —
-///   a session resuming somebody else's history, the exact failure the
-///   whole capture design exists to exclude.
+/// - B has its own record: it must stay unclaimed. Losing this pin would
+///   let a scan-shaped regression silently re-bless record correlation.
+/// - B has no record yet: it must not claim A's post-`/clear`
+///   conversation as its own. Losing it costs CORRECTNESS — a session
+///   resuming somebody else's history, the exact failure the whole
+///   capture design exists to exclude.
 ///
 /// ## Why the windows are disjoint rather than overlapping
 ///
-/// The candidate exclusion can only be observed with disjoint windows.
-/// Sessions holding `Reported` deliberately stay in the pass's `occupied`
-/// grouping (plan §2.5), and that grouping's overlap bail runs BEFORE any
-/// scan — so an overlapping rival is declared ambiguous without its
-/// candidate list ever being built. Disjoint windows plus a record minted
-/// late is the only shape in which the filter decides anything.
+/// Disjoint windows keep the overlap bail out of the picture, so what is
+/// observed here is the report path alone: the reporter holds its binding
+/// while the rival — reported past, recorded or not — stays uncaptured.
 #[farhelm_testtrace::test]
 async fn a_reported_id_is_excluded_from_a_rivals_candidates() {
     let (h, fixtures, serving) = hook_harness().await;
@@ -878,7 +2029,11 @@ async fn a_reported_id_is_excluded_from_a_rivals_candidates() {
         h.client
             .send_input(chan_b, b"first prompt\r".to_vec())
             .await;
-        let rival_conversation = if rival_writes_a_record {
+        // Bound but unread: both waits are readiness gates (the record
+        // must exist before the report races it), while the id itself
+        // no longer decides anything — nothing captures by
+        // correlation, recorded or not.
+        let _rival_conversation = if rival_writes_a_record {
             wait_for(&mut rx_b, &mut seen_b, "RECORD-WRITTEN:", 20).await;
             Some(marker_value(&seen_b, "RECORD-WRITTEN:"))
         } else {
@@ -922,24 +2077,18 @@ async fn a_reported_id_is_excluded_from_a_rivals_candidates() {
             Some(cleared.as_str()),
             "a rival may never claim a conversation another session was told is its own"
         );
-        match rival_conversation {
-            Some(own) => assert_eq!(
-                rival_snapshot.captured_conversation.as_deref(),
-                Some(own.as_str()),
-                "with the spoken-for record filtered out the rival's own is the lone \
-                 candidate, so it must capture rather than bail"
-            ),
-            None => {
-                assert_eq!(
-                    rival_snapshot.captured_conversation, None,
-                    "a rival with no record of its own must stay uncaptured"
-                );
-                assert_eq!(
-                    listed(&h.client, &rival.id).await.restart_offer,
-                    farhelm_proto::RestartOffer::FreshOnly
-                );
-            }
-        }
+        // No integration scans, so no record — the rival's own or
+        // anyone else's — can be captured by correlation. Both
+        // variants pin the same uncaptured outcome for the reason
+        // each exists to exclude.
+        assert_eq!(
+            rival_snapshot.captured_conversation, None,
+            "the rival must stay uncaptured whether or not it holds a record of its own"
+        );
+        assert_eq!(
+            listed(&h.client, &rival.id).await.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly
+        );
     }
     serving.stop().await;
 }
@@ -1263,7 +2412,7 @@ async fn generic_sessions_get_no_hook_flags() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     // Launched under the binary's OWN name rather than through a
-    // kind-named symlink, which is exactly what makes derivation call it
+    // kind-named image, which is exactly what makes derivation call it
     // generic.
     let requested = [
         farhelm_bin().to_string(),

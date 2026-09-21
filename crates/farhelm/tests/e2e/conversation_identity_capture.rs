@@ -54,17 +54,21 @@ pub(crate) fn test_capture_bounds() -> CaptureWindowBounds {
 
 /// Everything a capture test needs beyond the harness itself: the private
 /// agent home the supervisor observes and the fixture writes into, and a
-/// directory of kind-named symlinks to the farhelm binary.
+/// directory of kind-named COPIES of the farhelm binary.
 ///
-/// The symlinks are what let these tests exercise DERIVATION rather than
-/// routing around it. A session launched as `farhelm internal fake-agent
-/// ...` has basename `farhelm` and correctly classifies as generic, so
-/// running the fixture through `<bin>/claude` is the only way to reach the
-/// integrated path the way a real user does — and it simultaneously pins
-/// PLAN_M3.md item 7's other promise, that the default resume template is
-/// built from the ORIGINAL first token (this absolute path) rather than
-/// from a bare command name. The binary is multi-call by SUBCOMMAND, not
-/// by argv0, so it behaves identically under either name.
+/// The kind-named entry points are what let these tests exercise
+/// DERIVATION rather than routing around it. A session launched as
+/// `farhelm internal fake-agent ...` has basename `farhelm` and
+/// correctly classifies as generic, so running the fixture through
+/// `<bin>/claude` is the only way to reach the integrated path the
+/// way a real user does — and it simultaneously pins PLAN_M3.md item
+/// 7's other promise, that the default resume template is built from
+/// the ORIGINAL first token (this absolute path) rather than from a
+/// bare command name. The binary is multi-call by SUBCOMMAND, not by
+/// argv0, so it behaves identically under either name. Copies, not
+/// symlinks: foreground attribution compares the RESOLVED executable
+/// basename from `/proc`, through which a symlink still reads
+/// `farhelm` — only a real file named `claude` walks as one.
 pub(crate) struct CaptureFixtures {
     home: farhelm_teststate::TestDir,
     bin: farhelm_teststate::TestDir,
@@ -86,6 +90,30 @@ impl CaptureFixtures {
 /// short capture window above.
 pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
     capture_harness_with_seams(|_| {}).await
+}
+
+/// A native agent image under its own basename: hard link first, copy
+/// on filesystems that cannot link. Either shape gives the kernel
+/// executable a real agent basename — a symlink would resolve back to
+/// `farhelm` and fail the premise production attribution validates, which
+/// refuses the report with a `conflict` instead of admitting it.
+/// Same rule as `codex_identity`'s image helper. Shared with the restart
+/// suite, whose reboot helpers launch the same kind-named agents outside
+/// this module's harness.
+pub(crate) fn native_agent_image(dir: &std::path::Path, kind: &str) -> std::path::PathBuf {
+    let image = dir.join(kind);
+    match std::fs::hard_link(farhelm_bin(), &image) {
+        Ok(()) => image,
+        Err(link_error) => {
+            std::fs::copy(farhelm_bin(), &image).unwrap_or_else(|copy_error| {
+                panic!(
+                    "could not create the native {kind} image: hard link failed: {link_error}; \
+                     copy fallback failed: {copy_error}"
+                )
+            });
+            image
+        }
+    }
 }
 
 /// [`capture_harness`] with a durable-write fault injected, for the
@@ -119,8 +147,7 @@ pub(crate) async fn capture_harness_with_seams(
     let home = farhelm_teststate::tempdir().expect("agent home");
     let bin = farhelm_teststate::tempdir().expect("agent bin");
     for kind in ["claude", "codex"] {
-        std::os::unix::fs::symlink(farhelm_bin(), bin.path().join(kind))
-            .expect("symlink the farhelm binary under an agent's own name");
+        native_agent_image(bin.path(), kind);
     }
     let mut seams = SupervisorSeams {
         scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
@@ -134,7 +161,7 @@ pub(crate) async fn capture_harness_with_seams(
 }
 
 /// Create a session running the record-writing fake agent for `kind`
-/// (`claude` or `codex`) in `cwd`, launched through the kind-named symlink
+/// (`claude` or `codex`) in `cwd`, launched through the kind-named image
 /// so the supervisor derives the integration itself.
 pub(crate) async fn record_session(
     h: &Harness,
@@ -198,20 +225,26 @@ pub(crate) fn marker_value(transcript: &[u8], marker: &str) -> String {
         .collect()
 }
 
-/// The value after the LAST occurrence of `marker`, for transcripts that
-/// span a restart: a reattached client's replay carries the previous run's
-/// markers too, so "the first one" is the wrong run's answer whenever a
-/// terminal was reused.
-pub(crate) fn last_marker_value(transcript: &[u8], marker: &str) -> String {
+/// The value of the FIRST complete `prefix value` marker after
+/// `anchor`: the value run past the prefix must be nonempty AND
+/// whitespace-terminated within the transcript.
+///
+/// The counterpart to
+/// [`crate::harness::wait_for_complete_marker_after`], which waits
+/// until such a marker is in hand — reading a bare prefix instead can
+/// land on a LATER marker whose value is still in flight
+/// (a second frame cut mid-id), returning a truncated id that passes
+/// an `assert_ne!` against the previous run and then fails the file
+/// read. `anchor` scopes the search past replayed output: only the
+/// first complete marker after it is the new run's.
+pub(crate) fn first_complete_marker_value_after(
+    transcript: &[u8],
+    anchor: &str,
+    prefix: &str,
+) -> String {
     let text = String::from_utf8_lossy(transcript);
-    let start = text
-        .rfind(marker)
-        .unwrap_or_else(|| panic!("no {marker} in transcript:\n{text}"))
-        + marker.len();
-    text[start..]
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect()
+    find_complete_marker_after(&text, anchor, prefix)
+        .unwrap_or_else(|| panic!("no complete {prefix} after {anchor} in transcript:\n{text}"))
 }
 
 /// This session's durable snapshot, as the supervisor would answer a
@@ -382,7 +415,7 @@ pub(crate) async fn settle_past_horizon(h: &Harness) {
         + Duration::from_secs(2);
     while tokio::time::Instant::now() < deadline {
         h.client.list_sessions().await.expect("list drives capture");
-        // sleep-ok: negative capture evidence must span the configured horizon and publication grace while scans continue to run.
+        // sleep-ok: negative capture evidence must span the configured horizon and publication grace while observation passes continue to run.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     // Keep driving after the observation window, giving a final scan
@@ -390,24 +423,25 @@ pub(crate) async fn settle_past_horizon(h: &Harness) {
     drive_capture_observation_passes(&h.client, 3, Duration::from_millis(50)).await;
 }
 
-/// SPEC.md's per-session resume promise, at its hardest: two sessions in
-/// ONE working directory each capture their OWN conversation, and each
-/// resumes exactly that one.
+/// The scan-fallback cutover's core promise at its hardest: two sessions in
+/// ONE working directory, each with its own record, and NEITHER is
+/// captured — the old correlation cannot win, even in the easy case.
 ///
-/// This is the case the whole correlation design exists for — "even when
+/// This is the case the whole correlation design existed for — "even when
 /// several sessions share a working directory" is SPEC.md's own wording —
-/// and it is where a naive implementation (take the newest record in the
-/// project directory) silently hands both sessions the same conversation.
-/// The inputs are spaced past the capture window so the two windows are
-/// disjoint, and that premise is ASSERTED from the durable first-input
-/// times rather than assumed from how long the test slept.
+/// and it is where a naive cutover check (one session, no rival) would
+/// pass while a lingering per-directory scan still handed both sessions a
+/// record. The inputs are spaced past the capture window so the two
+/// windows are disjoint, and that premise is ASSERTED from the durable
+/// first-input times rather than assumed from how long the test slept:
+/// disjoint windows are what once made this the EASY case, and the point
+/// is that even the easy case stays uncaptured without a report.
 ///
-/// The filled resume argv is asserted, not just the id: SPEC.md's promise
-/// is that restart resumes that conversation, and an id captured into a
-/// template that never gets filled would satisfy the letter of a weaker
-/// test while failing the actual promise.
+/// Only a hook report establishes an identity now; the resume-argv half of
+/// the old promise lives on in the hook-identity suite, which drives real
+/// reports over real sockets.
 #[farhelm_testtrace::test]
-async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversation() {
+async fn two_claude_sessions_in_one_directory_stay_uncaptured_without_reports() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
 
@@ -423,31 +457,36 @@ async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversatio
     assert_ne!(id_a, id_b, "the fixture must mint distinct conversations");
     assert_windows_disjoint(at_a, at_b);
 
-    assert_eq!(wait_for_capture(&h, &first.id, 30).await, id_a);
-    assert_eq!(wait_for_capture(&h, &second.id, 30).await, id_b);
-
-    for (session, conversation) in [(&first, &id_a), (&second, &id_b)] {
+    settle_past_horizon(&h).await;
+    for session in [&first, &second] {
         let snapshot = snapshot_of(&h, &session.id).await;
-        assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
         assert_eq!(
-            snapshot.resume_argv.as_deref().unwrap().last().unwrap(),
-            conversation,
-            "the resume template must be filled with THIS session's conversation"
+            snapshot.captured_conversation, None,
+            "a record in the directory is not an attribution"
+        );
+        assert!(
+            !snapshot.capture_ambiguous,
+            "disjoint windows bail nothing; the session is merely unclaimed"
+        );
+        assert_eq!(snapshot.resume_argv, None);
+        assert_eq!(
+            snapshot.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly
         );
         assert_eq!(
             listed(&h.client, &session.id).await.restart_offer,
-            farhelm_proto::RestartOffer::Resume,
-            "the offer must reach the wire, not only the store"
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the fallback must reach the wire, not only the store"
         );
     }
 }
 
-/// The audited constraint that shapes the entire correlator: the record
-/// appears at first PROMPT submission, not at launch, and the gap between
-/// them is unbounded. So a session left sitting well past every window
-/// constant in the code must still capture the moment its user finally
-/// types — there is no deadline running from creation, and this test fails
-/// loudly if one is ever introduced.
+/// The cutover keeps the old no-deadline shape and drops the old reward: a
+/// session left sitting well past every window constant still anchors its
+/// correlator clock the moment its user finally types — there is no
+/// deadline running from creation, and this test fails loudly if one is
+/// ever introduced — but the anchored window no longer captures anything
+/// by itself. Only a hook report establishes an identity.
 ///
 /// The idle period is longer than the window AND the publication grace
 /// together, which is the whole span any timeout-shaped implementation
@@ -455,7 +494,7 @@ async fn two_claude_sessions_in_one_directory_each_capture_their_own_conversatio
 /// implementation would have settled the session `UncapturedFinal` before
 /// the prompt ever arrived.
 #[farhelm_testtrace::test]
-async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
+async fn a_first_prompt_delayed_past_every_window_constant_never_captures_without_a_report() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
@@ -472,22 +511,34 @@ async fn a_first_prompt_delayed_past_every_window_constant_still_captures() {
         "and no correlator clock may have started either"
     );
 
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
-    assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
+    let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
+    assert!(
+        wait_for_first_input(&h, &session.id, 20).await > 0,
+        "the late prompt still anchors the window it would once have captured in"
+    );
+    settle_past_horizon(&h).await;
+    let snapshot = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        snapshot.captured_conversation, None,
+        "the anchored window attributes nothing without a report"
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
+    );
 }
 
 /// The munged-cwd collision, end to end through two real sessions.
 ///
 /// `a.b` and `a-b` munge to the SAME Claude project directory, so both
-/// sessions' records land side by side in one place. Only the recorded
-/// `cwd` FIELD can tell them apart, which is exactly why SPEC_impl.md
-/// records the munging as non-injective. Their first inputs are close
-/// together on purpose: if directory membership were doing the work, the
-/// two would look like a shared-directory collision and BOTH would bail —
-/// so a passing test proves the field filter ran before the ambiguity rule
-/// ever had anything to complain about.
+/// sessions' records land side by side in one place. Past the cutover the
+/// recorded-`cwd` field no longer separates them INTO captures — nothing
+/// captures without a report — but the collision premise still matters:
+/// the two live in different canonical directories, so neither poisons the
+/// other into ambiguity either. Both stay plain unclaimed, which is what
+/// distinguishes "no scan ran" from "a scan ran and bailed".
 #[farhelm_testtrace::test]
-async fn two_directories_that_munge_alike_are_separated_by_the_recorded_cwd() {
+async fn two_directories_that_munge_alike_stay_uncaptured_without_reports() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir");
     let dotted = parent.path().join("a.b");
@@ -506,22 +557,38 @@ async fn two_directories_that_munge_alike_are_separated_by_the_recorded_cwd() {
 
     let one = record_session(&h, &fixtures, &dotted, "claude").await;
     let two = record_session(&h, &fixtures, &dashed, "claude").await;
-    let (_c1, _r1, _s1, id_one) = provoke_record(&h, &one).await;
-    let (_c2, _r2, _s2, id_two) = provoke_record(&h, &two).await;
+    let (_c1, _r1, _s1, _id_one) = provoke_record(&h, &one).await;
+    let (_c2, _r2, _s2, _id_two) = provoke_record(&h, &two).await;
 
-    assert_eq!(wait_for_capture(&h, &one.id, 30).await, id_one);
-    assert_eq!(wait_for_capture(&h, &two.id, 30).await, id_two);
+    settle_past_horizon(&h).await;
+    for session in [&one, &two] {
+        let snapshot = snapshot_of(&h, &session.id).await;
+        assert_eq!(
+            snapshot.captured_conversation, None,
+            "side-by-side records attribute nothing without a report"
+        );
+        assert!(
+            !snapshot.capture_ambiguous,
+            "different canonical directories bail nothing"
+        );
+        assert_eq!(
+            listed(&h.client, &session.id).await.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly
+        );
+    }
 }
 
-/// Correlation uses the CANONICAL working directory, not the spelling the
-/// caller sent, because the agent records its own `getcwd()` — which the
-/// kernel has already resolved. A session created through a symlink, or
-/// with a dot component, or with a trailing slash, must therefore still
-/// find its own records; without the resolution its munged directory name
-/// and its recorded-cwd comparison would both miss, and capture would
-/// simply never happen for anyone whose path was not already canonical.
+/// Session identity still keys on the CANONICAL working directory, not the
+/// spelling the caller sent, because the agent records its own `getcwd()`
+/// — which the kernel has already resolved. A session created through a
+/// symlink, or with a dot component, or with a trailing slash, must
+/// therefore still resolve to the directory its records would land in;
+/// without the resolution the munged directory name would miss, and the
+/// session would not even be a candidate for the report that alone can now
+/// claim it. The resolution plumbing is asserted here; the capture that
+/// once followed it no longer happens without a report.
 #[farhelm_testtrace::test]
-async fn a_symlinked_or_dotted_working_directory_still_correlates() {
+async fn a_symlinked_or_dotted_working_directory_resolves_canonically_but_stays_uncaptured() {
     let (h, fixtures) = capture_harness().await;
     let parent = farhelm_teststate::tempdir().expect("workdir");
     let real = parent.path().join("real");
@@ -568,37 +635,49 @@ async fn a_symlinked_or_dotted_working_directory_still_correlates() {
         "the resolved spelling is what correlation must use"
     );
 
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
-    assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
+    let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
+    settle_past_horizon(&h).await;
+    let snapshot = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        snapshot.captured_conversation, None,
+        "canonical resolution feeds attribution; it is not an attribution"
+    );
+    assert_eq!(
+        crate::boot_id_durable_outcome::listed(&h.client, &session.id)
+            .await
+            .restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
+    );
 }
 
-/// The claim discipline's central rule: nothing is made durable while the
-/// window is still open, so a rival record arriving LATE inside the window
-/// flips a provisional match to ambiguous instead of finding an identity
-/// already committed.
+/// The cutover, end to end: a rival record arriving LATE inside the window
+/// decides nothing — no provisional claim to flip, no ambiguity to record
+/// — because no scan reads it. Claude schedules no scan roots at all; only
+/// a hook report establishes an identity.
 ///
-/// The rival is planted directly rather than launched as a second session,
-/// which is the sharper test: a second session would ALSO be caught by the
-/// overlapping-windows rule, so this would pass even with the record-level
-/// rule removed. A bare file in the same project directory, carrying the
-/// same recorded cwd and a timestamp inside the window, can only be caught
-/// by re-deriving the verdict from scratch on every pass — which is
-/// exactly what the provisional state exists to make happen.
+/// The rival is still planted directly rather than launched as a second
+/// session, which keeps this the sharper test: a second session WOULD trip
+/// the overlapping-windows bail (see
+/// [`two_near_simultaneous_sessions_in_one_directory_stay_uncaptured`]),
+/// so only a bare file proves the record-level correlation is gone rather
+/// than merely outvoted. A pass that still read records would find two
+/// in-window candidates and bail; the session staying plain unclaimed is
+/// what proves it never looked.
 #[farhelm_testtrace::test]
-async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() {
+async fn a_rival_record_arriving_late_in_the_window_decides_nothing() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
     let at = wait_for_first_input(&h, &session.id, 20).await;
 
-    // One pass with only the real record present: the match exists, but it
-    // is provisional, so nothing may be stored yet.
+    // One pass with only the real record present: nothing is stored, and —
+    // past the cutover — nothing is even provisional.
     h.client.list_sessions().await.expect("list drives capture");
     assert_eq!(
         snapshot_of(&h, &session.id).await.captured_conversation,
         None,
-        "a match inside an open window must not be committed"
+        "a record inside an open window is not a claim"
     );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
@@ -628,11 +707,11 @@ async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() 
     let snapshot = snapshot_of(&h, &session.id).await;
     assert_eq!(
         snapshot.captured_conversation, None,
-        "the late rival makes the correlation ambiguous, so nothing is claimed"
+        "an unread rival cannot flip a claim that was never made"
     );
     assert!(
-        snapshot.capture_ambiguous,
-        "and the refusal is recorded durably, not merely inferred each pass"
+        !snapshot.capture_ambiguous,
+        "a file is not a session: with no overlapping window there is nothing to bail on"
     );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
@@ -640,25 +719,30 @@ async fn a_rival_record_arriving_late_in_the_window_flips_a_provisional_claim() 
     );
 }
 
-/// A plain resume APPENDS to the existing record under the same id
-/// (audited), so the watcher must treat an append as a confirmation rather
-/// than as a new conversation — and an explicit fork, which writes a NEW
-/// id, must not displace the identity already claimed.
+/// Appends and forks change files, not attributions: without a scan there
+/// is no re-verification pass to confirm an identity and no committed
+/// identity for a fork to displace. The fixture mechanics still run — the
+/// append must genuinely grow the record, the fork must mint a genuinely
+/// different id — so a future re-verification has real shapes to read; but
+/// the session stays unclaimed throughout, which is what proves the file
+/// events alone establish nothing.
 ///
-/// Both halves are in one test because the second is only meaningful after
-/// the first: the fork is written into the same directory the append just
-/// touched, so a rescan that re-derived identity from "whatever is in this
-/// directory now" would find two records and either bail or switch. The
-/// captured identity must simply stay put — and the stored STAMP must
-/// advance, which is what proves the re-verification actually re-read the
-/// file rather than skipping it.
+/// Both halves stay in one test because the pair is the interesting shape:
+/// an append under the session's own id followed by a new id in the same
+/// directory is exactly what a rescan would once have re-derived an
+/// identity from, and neither may do so now.
 #[farhelm_testtrace::test]
-async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
+async fn an_append_and_a_fork_establish_nothing_without_a_report() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
     let (chan, mut rx, mut seen, id) = provoke_record(&h, &session).await;
-    assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
+    settle_past_horizon(&h).await;
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.captured_conversation,
+        None,
+        "the session's own record, settled past the horizon, still claims nothing"
+    );
 
     let canonical = std::fs::canonicalize(work.path()).expect("canonicalize");
     let record = fixtures
@@ -686,8 +770,8 @@ async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
     drive_capture_observation_passes(&h.client, 3, Duration::from_millis(50)).await;
     assert_eq!(
         snapshot_of(&h, &session.id).await.captured_conversation,
-        Some(id.clone()),
-        "an append confirms the identity; it must not duplicate or replace it"
+        None,
+        "an append grows the record; it does not attribute it"
     );
 
     h.client.send_input(chan, b"fork\r".to_vec()).await;
@@ -697,13 +781,13 @@ async fn an_append_re_verifies_the_identity_and_a_fork_never_displaces_it() {
     settle_past_horizon(&h).await;
     let snapshot = snapshot_of(&h, &session.id).await;
     assert_eq!(
-        snapshot.captured_conversation.as_deref(),
-        Some(id.as_str()),
-        "the ORIGINAL conversation is this session's; the fork belongs to another"
+        snapshot.captured_conversation, None,
+        "a second id in the same directory attributes nothing either"
     );
+    assert_eq!(snapshot.resume_argv, None);
     assert_eq!(
-        snapshot.resume_argv.as_deref().unwrap().last().unwrap(),
-        &id
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
     );
 }
 
@@ -771,25 +855,25 @@ async fn two_near_simultaneous_sessions_in_one_directory_stay_uncaptured() {
     );
 }
 
-/// The snapshot is immutable and the captured identity is durable, both
-/// across a supervisor restart — which is the only reason capture is worth
-/// doing at all, since SPEC.md's resume offer exists precisely for the
-/// sessions that outlived their supervisor.
+/// The record written while the supervisor was down stays unclaimed after
+/// it: the successor's reload pass runs the same report-only logic as
+/// every other pass, and a file is not a report.
 ///
-/// The capture is deliberately provoked at RELOAD rather than by a list
-/// before the shutdown: nothing calls `list_sessions` on the first
-/// supervisor, so the identity this test finds afterwards can only have
-/// been claimed by the successor's own reload pass. That is the path a
-/// real restart takes — a session whose agent wrote its record while the
-/// supervisor was down — and it is the one a list-driven test would never
-/// exercise. Only the DURABLE first-input time is polled for, because that
-/// is the fact the successor needs to correlate at all.
+/// The shape is kept deliberately: nothing calls `list_sessions` on the
+/// first supervisor, so whatever the successor reports afterwards can only
+/// come from its own reload path — the path a real restart takes. Only
+/// the DURABLE first-input time is polled for, because that is the fact
+/// the successor must still have learned; what it must NOT have done is
+/// turn that anchor into an attribution. The restart discipline itself
+/// (ownership handoff, `_tmux`-last drops) is unchanged, because a test
+/// that skipped it would exercise a path production never takes (see
+/// `Supervisor::owns_state_dir`).
 #[farhelm_testtrace::test]
-async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
+async fn a_record_written_while_the_supervisor_was_down_stays_uncaptured_on_reload() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
+    let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
     let at = wait_for_first_input(&h, &session.id, 20).await;
 
     // Past the horizon, so the successor's very first pass is allowed to
@@ -845,16 +929,14 @@ async fn a_capture_missed_while_the_supervisor_was_down_lands_on_reload() {
         .expect("snapshot")
         .expect("present");
     assert_eq!(
-        after.captured_conversation.as_deref(),
-        Some(id.as_str()),
-        "the successor's own reload pass is what captured this"
+        after.captured_conversation, None,
+        "the successor's own reload pass attributes nothing without a report"
     );
-    assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(after.restart_offer, farhelm_proto::RestartOffer::FreshOnly);
     assert_eq!(after.kind, farhelm_proto::AgentKind::Claude);
     assert_eq!(
-        after.resume_argv.as_deref().unwrap().last().unwrap(),
-        &id,
-        "and the snapshot it fills is the immutable one from create"
+        after.resume_argv, None,
+        "and no template is filled for an identity that was never claimed"
     );
     drop(_slot);
 }
@@ -935,12 +1017,15 @@ async fn an_ambiguity_survives_a_restart_even_when_its_evidence_does_not() {
 /// `Resume`: the offer promises a stored identity a restart can fill in,
 /// and there is none. The retry then has to ride the polling cadence, not
 /// the input path — so clearing the fault and polling again is what lands
-/// the claim.
+/// the write.
 ///
-/// The same shape covers the first-input write, whose failure is quieter
-/// and worse: correlation still works for this process, but a restart
-/// would lose the anchor entirely, so the retry is the only thing that
-/// makes capture survivable across the restart it exists for.
+/// Past the cutover the retried write is the FIRST-INPUT anchor, not a
+/// capture claim: the retry proves the polling cadence still heals durable
+/// state, while the session stays unclaimed because no report ever
+/// arrived. The same shape covers the old capture write, whose failure was
+/// quieter and worse: a restart would have lost the anchor entirely, so
+/// the retry is the only thing that keeps the anchor survivable across the
+/// restart the offer exists for.
 #[farhelm_testtrace::test]
 async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
     let failing = Arc::new(AtomicBool::new(true));
@@ -954,7 +1039,7 @@ async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
     let (h, fixtures) = capture_harness_with_fault(Some(fault)).await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &session).await;
+    let (_chan, _rx, _seen, _id) = provoke_record(&h, &session).await;
 
     settle_past_horizon(&h).await;
     let snapshot = snapshot_of(&h, &session.id).await;
@@ -973,15 +1058,38 @@ async fn a_failed_durable_write_never_advertises_resume_and_is_retried() {
     );
 
     // The retry rides the poll, not the input path: nothing more is typed.
+    // Each iteration drives a pass, which is what performs the retry —
+    // polling the snapshot alone would wait on a write nothing was asked
+    // to perform.
     failing.store(false, Ordering::SeqCst);
-    assert_eq!(wait_for_capture(&h, &session.id, 30).await, id);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        h.client.list_sessions().await.expect("list drives capture");
+        if let Some(at) = snapshot_of(&h, &session.id).await.first_input_at {
+            assert!(at > 0, "the retried anchor is a real timestamp");
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the first-input write was never retried to durability"
+        );
+        // sleep-ok: the retry happens on the pass cadence, not the input path; drive passes until the healed anchor is durable.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    settle_past_horizon(&h).await;
+    let healed = snapshot_of(&h, &session.id).await;
     assert!(
-        snapshot_of(&h, &session.id).await.first_input_at.is_some(),
-        "the first-input write is retried on the same cadence"
+        healed.first_input_at.is_some(),
+        "the healed anchor is durable"
+    );
+    assert_eq!(
+        healed.captured_conversation, None,
+        "a healed anchor is not an attribution"
     );
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::Resume
+        farhelm_proto::RestartOffer::FreshOnly,
+        "and the session still offers no resume it cannot fill in"
     );
 }
 
@@ -1077,6 +1185,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     archived: false,
                     id: format!("extra-{i}"),
                     parent: None,
@@ -1109,6 +1218,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     canonical_cwd: rival.then(|| canonical.clone()),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: rival.then_some(at),
                     generation: 0,
@@ -1195,18 +1305,21 @@ async fn wait_for_ambiguous_capture(
 }
 
 /// A session whose kind basename recognition would miss (`env claude`, a
-/// wrapper) still captures once the caller says what it is — the reason
-/// PLAN_M3.md item 7 carries explicit overrides at all. And a
-/// placeholder-free template on a NON-integrated kind is the fallback shape
-/// SPEC.md describes, which must reach the wire as `FallbackTemplate`
-/// rather than being flattened into a fresh launch.
+/// wrapper) is still treated as what the caller says it is — the reason
+/// PLAN_M3.md item 7 carries explicit overrides at all. Past the cutover
+/// that means the session runs the Claude hooks, injection, and
+/// report-only logic rather than the generic path; it does NOT mean the
+/// override conjures a capture. And a placeholder-free template on a
+/// NON-integrated kind is the fallback shape SPEC.md describes, which must
+/// reach the wire as `FallbackTemplate` rather than being flattened into a
+/// fresh launch.
 ///
 /// All three are asserted here because they are the same override slot, and
 /// because none has a UI caller — the API and these tests are the only
 /// consumers until M6.75's profiles, so an untested override is an unexercised
 /// one.
 #[farhelm_testtrace::test]
-async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered() {
+async fn an_overridden_kind_stays_uncaptured_and_a_generic_fallback_template_is_offered() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
 
@@ -1236,15 +1349,22 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
         )
         .await
         .expect("create with overrides");
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &overridden).await;
-    assert_eq!(wait_for_capture(&h, &overridden.id, 30).await, id);
+    let (_chan, _rx, _seen, _id) = provoke_record(&h, &overridden).await;
+    settle_past_horizon(&h).await;
+    let snapshot = snapshot_of(&h, &overridden.id).await;
     assert_eq!(
-        snapshot_of(&h, &overridden.id)
-            .await
-            .resume_argv
-            .as_deref()
-            .unwrap(),
-        ["my-wrapper", "--resume", &id]
+        snapshot.kind,
+        farhelm_proto::AgentKind::Claude,
+        "the override is what makes this session Claude, not its basename"
+    );
+    assert_eq!(
+        snapshot.captured_conversation, None,
+        "the override assigns the kind; it does not attribute a conversation"
+    );
+    assert_eq!(snapshot.resume_argv, None);
+    assert_eq!(
+        listed(&h.client, &overridden.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
     );
 
     // A generic session with a verbatim, placeholder-free resume
@@ -1299,14 +1419,14 @@ async fn an_overridden_kind_captures_and_a_generic_fallback_template_is_offered(
     );
 }
 
-/// A keyed create REPLAYED after its session captured must report the
-/// capture, not the create-time placeholder: the replay is "the same
-/// answer to the same request", and the honest answer to "what would
-/// restart do for this session" changes the moment an identity is claimed.
-/// A replay frozen at create time would tell a retrying client `FreshOnly`
-/// for a session that can in fact resume.
+/// A keyed create REPLAYED after observation still reports `FreshOnly`:
+/// the replay is "the same answer to the same request", and the honest
+/// answer to "what would restart do for this session" is unchanged when no
+/// report ever arrived. A replay that upgraded to `Resume` on the strength
+/// of the fixture's record alone would be the scan correlation wearing a
+/// different hat.
 #[farhelm_testtrace::test]
-async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
+async fn a_keyed_replay_without_a_report_still_reports_the_fresh_offer() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let invocation = format!(
@@ -1331,8 +1451,13 @@ async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
         farhelm_proto::RestartOffer::FreshOnly
     );
 
-    let (_chan, _rx, _seen, id) = provoke_record(&h, &created).await;
-    assert_eq!(wait_for_capture(&h, &created.id, 30).await, id);
+    let (_chan, _rx, _seen, _id) = provoke_record(&h, &created).await;
+    settle_past_horizon(&h).await;
+    assert_eq!(
+        snapshot_of(&h, &created.id).await.captured_conversation,
+        None,
+        "the record the fixture wrote attributes nothing on its own"
+    );
 
     let replayed = h
         .client
@@ -1349,8 +1474,8 @@ async fn a_keyed_replay_after_capture_reports_the_resume_offer() {
     assert_eq!(replayed.id, created.id, "still one session for one intent");
     assert_eq!(
         replayed.restart_offer,
-        farhelm_proto::RestartOffer::Resume,
-        "the replay reports what restart would do NOW, not at create time"
+        farhelm_proto::RestartOffer::FreshOnly,
+        "the replay reports what restart would do NOW — still a fresh launch"
     );
 }
 
@@ -1639,6 +1764,524 @@ async fn a_real_goose_session_captures_its_conversation_through_the_proof() {
     );
 
     accepting.stop().await;
+}
+
+// ---------------------------------------------------------------------
+// Native Claude foreground proof
+//
+// The supervisor-level `ClaudeAdmission` tests pin the proof's logic
+// against a faithful fixture runtime; what is here is the one thing
+// no fixture can show — that the VENDOR's own binary, hook spawn, and
+// transcript layout satisfy the proof end to end. Unlike the
+// `#[ignore]`-marked audits in `real_agent_capture`, this test needs
+// no credentials and no network: `--print` with a dummy key fails the
+// API call AFTER `SessionStart` fires, and the hook's report lands
+// while the runtime is still alive — so it runs wherever a `claude`
+// binary exists and skips honestly where none does.
+// ---------------------------------------------------------------------
+
+/// The vendor `claude` binary when this host has one, by the same
+/// `PATH` lookup a login shell would do. `None` is the honest skip,
+/// not a failure: CI has no Claude, and a failure there would be
+/// about the substrate rather than the proof.
+fn native_claude_binary() -> Option<std::path::PathBuf> {
+    let claude = std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join("claude"))
+            .find(|candidate| candidate.is_file())
+    })?;
+    // A bare `claude --version` that answers also establishes the
+    // binary executes on this host rather than merely existing.
+    let version = std::process::Command::new(&claude)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !version.status.success() {
+        return None;
+    }
+    println!(
+        "native claude under test: {}",
+        String::from_utf8_lossy(&version.stdout).trim()
+    );
+    Some(claude)
+}
+
+/// A real Claude session captures its own conversation through the
+/// shipped proof: the vendor binary under a real tmux pane, the
+/// injected `--settings` hook, the real `internal hook` helper over
+/// the real socket, a real vendor-written transcript, and kernel
+/// pane attribution — asserting the exact durable binding, ownership
+/// version 1, and the public resume offer.
+///
+/// An owned stand-in for the vendor's API: a loopback HTTP fixture
+/// that answers every request with a 401 shaped like the real
+/// authentication failure, counts what arrived, and remembers the
+/// credential the first request carried.
+///
+/// Why this fixture matters: the live proof must run the real vendor
+/// without letting it reach the real network or an ambient credential.
+/// Pointing it at this endpoint is only half of that — the other half
+/// is PROVING it went here, which the hit count and the captured key
+/// do. The port is random per run and known only to the wrapper's
+/// environment, so traffic arriving at all means the vendor used OUR
+/// endpoint, and the key proves it used OUR credential. A vendor that
+/// ignored the endpoint (or authenticated some other way) fails the
+/// test loudly at the end instead of passing off someone else's
+/// network.
+struct ClaudeApiFixture {
+    port: u16,
+    hits: Arc<std::sync::atomic::AtomicUsize>,
+    presented_key: Arc<std::sync::Mutex<Option<String>>>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ClaudeApiFixture {
+    /// Bind the loopback fixture and start serving 401s. The accept
+    /// thread serves one request per connection and closes it; the
+    /// vendor opens a fresh connection per attempt, so retries are
+    /// just more hits.
+    fn start() -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind the fixture endpoint");
+        let port = listener.local_addr().expect("fixture port").port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let presented_key = Arc::new(std::sync::Mutex::new(None));
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let hits = Arc::clone(&hits);
+            let presented_key = Arc::clone(&presented_key);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let Ok(stream) = stream else {
+                        continue;
+                    };
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                    let mut reader = std::io::BufReader::new(&stream);
+                    let mut head = Vec::new();
+                    loop {
+                        let mut line = Vec::new();
+                        match std::io::BufRead::read_until(&mut reader, b'\n', &mut line) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                head.extend_from_slice(&line);
+                                if head.len() > 65536 || head.ends_with(b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&head);
+                    for line in head.lines().skip(1) {
+                        if let Some(value) = line.strip_prefix("x-api-key:") {
+                            let mut guard = presented_key.lock().expect("key mutex poisoned");
+                            if guard.is_none() {
+                                *guard = Some(value.trim().to_string());
+                            }
+                            break;
+                        }
+                    }
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    let body = r#"{"type":"error","error":{"type":"authentication_error","message":"fixture says no"}}"#;
+                    let _ = std::io::Write::write_all(
+                        &mut &stream,
+                        format!(
+                            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
+                }
+            })
+        };
+        Self {
+            port,
+            hits,
+            presented_key,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// Wait for the vendor's first API call to land on the fixture.
+    /// Bounded: the vendor places it on its own startup schedule, and
+    /// a vendor that never calls is a failed isolation premise, not a
+    /// slow one.
+    async fn wait_for_hit(&self, session_id: &str) {
+        use std::sync::atomic::Ordering;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        while self.hits.load(Ordering::SeqCst) == 0 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the live vendor never called the fixture endpoint for {session_id}; \
+                 its traffic went elsewhere"
+            );
+            // sleep-ok: the vendor places its first API call on its own startup schedule, after session start; the hit count is the oracle.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    fn presented_key(&self) -> Option<String> {
+        self.presented_key
+            .lock()
+            .expect("key mutex poisoned")
+            .clone()
+    }
+
+    /// Stop serving. A self-connection unblocks the accept loop without
+    /// any polling sleep: the woken accept sees the flag and breaks.
+    fn stop(mut self) {
+        use std::sync::atomic::Ordering;
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", self.port));
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// One session's capture binding and saved transcript locator as the
+/// DATABASE holds them, read through a second store handle on the same
+/// file: the conversation first, the locator second, because admission
+/// commits both atomically.
+///
+/// Read-only and pass-free — no list, no snapshot — so observing the
+/// admission cannot move the readiness the proof then waits on.
+async fn stored_claude_locator(
+    state: &std::path::Path,
+    session_id: &str,
+) -> (Option<String>, Option<String>) {
+    let store = farhelm_supervisor::store::SessionStore::open(&state.join("supervisor.db"), false)
+        .await
+        .expect("open the database a second time");
+    let row = store
+        .session(session_id)
+        .await
+        .expect("read the session row")
+        .unwrap_or_else(|| panic!("session {session_id} has no durable row"));
+    (row.captured_conversation, row.captured_record)
+}
+
+/// Whether the transcript file at the saved locator already names the
+/// conversation: the publication boundary the proof waits for before it
+/// requests the snapshot whose refresh performs the EXACT check
+/// admission repeats (a bounded prefix with a sessionId match). The
+/// byte scan here is the wait, not the verdict — the refresh decides.
+fn transcript_names_conversation(path: &str, conversation: &str) -> bool {
+    std::fs::read(path)
+        .map(|bytes| {
+            bytes
+                .windows(conversation.len())
+                .any(|window| window == conversation.as_bytes())
+        })
+        .unwrap_or(false)
+}
+
+/// A real Claude session captures its own conversation through the
+/// shipped proof: the vendor binary under a real tmux pane, the
+/// injected `--settings` hook, the real `internal hook` helper over
+/// the real socket, a real vendor-written transcript, and kernel
+/// pane attribution — asserting the exact durable binding, ownership
+/// version 1, and the public resume offer.
+///
+/// What is real and what stands in: the `claude` image, its hook
+/// spawn of the reporter, the helper, the socket report, the
+/// `/proc` walk, the transcript read, and the durable write are all
+/// genuine. Stood in are the launch environment (a `claude`-named
+/// wrapper script running the vendor under a scrubbed child
+/// environment — see below) and the tmux→pane mapping's own server
+/// (private socket, like every e2e test). The wrapper execs the vendor
+/// binary, leaving no link of its own in the walked chain — the
+/// corridor sees reporter, runtime, and pane only. The `--print`
+/// prompt is fixed text, so the vendor fails its API call after
+/// reporting; the report reaches the socket while the runtime is
+/// alive, and the corridor's answer to it is what this test pins.
+/// (The vendor retries the fixture's 401 rather than exiting; the
+/// harness teardown reaps the pane, so the test never waits for an
+/// exit.)
+///
+/// Why this test matters: the supervisor suite proves the proof
+/// accepts the DESCRIBED vendor shapes, but only the vendor can say
+/// whether those descriptions are the shapes it actually produces —
+/// the hook payload's session id, transcript path, event, and
+/// source words, the transcript file it writes at startup, and the
+/// `--settings` position injection appends. A version bump changing
+/// any of them fails here, loudly, instead of silently stopping
+/// capture.
+///
+/// The vendor is hermetic by construction, not by assumption: the
+/// wrapper runs it under `env -i` with an explicit allowlist — the
+/// scratch home (the transcript lands under it), a minimal `PATH`,
+/// the locale, the three hook credentials the pane provides, and the
+/// controlled vendor credential plus the fixture endpoint. Every
+/// ambient variable — vendor authentication, vendor configuration
+/// overrides, proxies — is dropped, so there is no ambient credential
+/// to spend and no ambient endpoint to reach. The test then asserts
+/// the fixture endpoint is the one the vendor used (a hit on its
+/// random-per-run port, carrying the controlled key) instead of
+/// asserting the absence of traffic it never watched.
+///
+/// Live against the standard native install: the vendor binary is
+/// invoked through the `~/.local/bin/claude` symlink, so the walked
+/// exe is the kernel-resolved versioned single file
+/// (`.../claude/versions/<version>` — 2.1.278 at the time of writing),
+/// while argv[0] keeps the `claude` launcher spelling the CLI grammar
+/// requires. The corridor admits that split: the versioned layout is a
+/// runtime, not a refusal. Where the vendor has no binary on `PATH`
+/// the test skips honestly (see [`native_claude_binary`]).
+#[farhelm_testtrace::test]
+async fn a_real_claude_session_captures_its_conversation_through_the_proof() {
+    let Some(claude) = native_claude_binary() else {
+        println!(
+            "SKIPPED a_real_claude_session_captures_its_conversation_through_the_proof: \
+             no working claude on PATH"
+        );
+        return;
+    };
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let home = farhelm_teststate::tempdir().expect("agent home");
+    let bin = farhelm_teststate::tempdir().expect("wrapper bin");
+
+    // The `claude`-named wrapper: kind derivation and the launch
+    // classifier see the `claude` basename, while the scrubbed child
+    // environment keeps the vendor hermetic. `env -i` drops every
+    // ambient variable — vendor authentication, vendor configuration
+    // overrides, proxies — and the allowlist re-adds exactly what the
+    // proof needs: the scratch home (the transcript path resolves
+    // under it — without it the vendor would inherit this process's
+    // home), a minimal `PATH`, the locale, the three hook credentials
+    // the pane provides, and the controlled vendor credential plus the
+    // fixture endpoint below. `--print` comes before the injected
+    // `--settings` (appended at the end of the argv), an order the
+    // vendor accepts.
+    let api = ClaudeApiFixture::start();
+    let wrapper = bin.path().join("claude");
+    std::fs::write(
+        &wrapper,
+        "#!/bin/sh\n\
+         scratch_home=\"$1\"\n\
+         vendor=\"$2\"\n\
+         port=\"$3\"\n\
+         shift 3\n\
+         exec env -i \
+         \"HOME=$scratch_home\" \
+         PATH=/usr/bin:/bin \
+         LANG=C.UTF-8 \
+         \"FARHELM_SESSION_ID=$FARHELM_SESSION_ID\" \
+         \"FARHELM_SESSION_TOKEN=$FARHELM_SESSION_TOKEN\" \
+         \"FARHELM_SUPERVISOR_SOCK=$FARHELM_SUPERVISOR_SOCK\" \
+         ANTHROPIC_API_KEY=farhelm-live-proof-dummy-key \
+         \"ANTHROPIC_BASE_URL=http://127.0.0.1:$port\" \
+         \"$vendor\" --print \"say hi\" \"$@\"\n",
+    )
+    .expect("write the wrapper");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
+            .expect("the wrapper is executable");
+    }
+
+    // The real socket, not only the in-process pipe: the reporter is
+    // a genuine child process, so only an accepting supervisor can
+    // receive it.
+    let (sup, client, accepting) =
+        crate::real_agent_capture::serving_supervisor(state.path(), home.path().to_path_buf())
+            .await;
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+
+    // The wrapper's three arguments ride the session invocation behind
+    // it — scratch home, vendor binary, fixture port — so the pane
+    // carries everything the scrubbed environment needs. Injection
+    // appends the `--settings` hook behind those, an order the vendor
+    // accepts.
+    let invocation = format!(
+        "{} {} {} {}",
+        shell_words::quote(&wrapper.to_string_lossy()),
+        shell_words::quote(&home.path().to_string_lossy()),
+        shell_words::quote(&claude.to_string_lossy()),
+        api.port,
+    );
+    let session = client
+        .create_session(&work.path().to_string_lossy(), &invocation, None, 100, 30)
+        .await
+        .unwrap_or_else(|error| panic!("launching the real claude: {error:#}"));
+
+    // The vendor reports on its own startup schedule: observe the
+    // admitted binding and its saved locator through the read-only
+    // store handle — no list, no snapshot — so the observation cannot
+    // move the readiness the proof then waits on.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+    let (conversation, saved) = loop {
+        let (conversation, saved) = stored_claude_locator(state.path(), &session.id).await;
+        if let (Some(conversation), Some(saved)) = (conversation, saved) {
+            break (conversation, saved);
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the real claude never captured; pane so far:\n{}\n{}",
+            pane_text(state.path(), &session.id).await,
+            std::fs::read_to_string(
+                state
+                    .path()
+                    .join("hook-log")
+                    .join(format!("{}.log", session.id))
+            )
+            .map(|log| format!("hook log:\n{log}"))
+            .unwrap_or_else(|error| format!("no hook log: {error}"))
+        );
+        // sleep-ok: poll the durable row for the vendor-scheduled startup report; the read-only handle observes without moving readiness.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    };
+
+    // The vendor fires `SessionStart` BEFORE it writes the transcript
+    // file (probed: the hook lands ~0.4 s ahead of the file), so the
+    // binding above routinely lands under the not-yet-appeared rule —
+    // version 1 with readiness withheld — and the Resume offer appears
+    // only when the exact refresh observes the vendor-written file.
+    // Wait for THAT saved path (not a same-directory scan) to name the
+    // conversation, and only then request the snapshot: asserting
+    // through the public offer path any earlier would race the
+    // vendor's own write schedule.
+    loop {
+        if transcript_names_conversation(&saved, &conversation) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the real claude never published its transcript for {conversation}; \
+             the scratch home holds {} vendor transcript files",
+            vendor_transcript_count(home.path()),
+        );
+        // sleep-ok: wait for the admitted locator's exact file to satisfy the publication boundary before requesting the snapshot whose refresh verifies it.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let snapshot = sup
+        .session_snapshot(&session.id)
+        .await
+        .expect("snapshot")
+        .expect("present");
+    assert_eq!(
+        snapshot.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "the exact refresh of the vendor-written transcript promotes the binding; \
+         version is {}",
+        snapshot.capture_ownership_version,
+    );
+
+    assert_eq!(
+        snapshot.kind,
+        farhelm_proto::AgentKind::Claude,
+        "the session derives as the integrated kind"
+    );
+    assert_eq!(
+        snapshot.capture_ownership_version, 1,
+        "the vendor report proves ownership, not merely arrival"
+    );
+    let resume = snapshot
+        .resume_argv
+        .expect("a Resume offer has a filled argv");
+    assert!(
+        resume.iter().any(|element| element == &conversation),
+        "the captured identity's resumable target must land in the resume argv: {resume:?}"
+    );
+    assert!(
+        !resume.iter().any(|element| element == "{conversation}"),
+        "no placeholder may survive substitution: {resume:?}"
+    );
+
+    // The helper's own log acknowledges the conversation it was
+    // answered for: only a real reporter child reaching the real
+    // socket could have put that line there.
+    let hook_log = state
+        .path()
+        .join("hook-log")
+        .join(format!("{}.log", session.id));
+    let log = std::fs::read_to_string(&hook_log)
+        .unwrap_or_else(|error| panic!("no owned hook log at {}: {error}", hook_log.display()));
+    assert!(
+        log.lines()
+            .any(|line| line.ends_with(&format!(" acked {conversation} startup"))),
+        "the helper must have been acked for the captured conversation, not merely connected:\n{log}"
+    );
+
+    // The transcript the proof read is the vendor's own file under
+    // the scratch home — the binding above proves it verified, this
+    // proves it is a file the vendor wrote, not a fixture.
+    let mut transcripts = Vec::new();
+    let projects = home.path().join(".claude").join("projects");
+    if projects.is_dir() {
+        let mut dirs = vec![projects];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read the vendor tree") {
+                let entry = entry.expect("read a vendor entry");
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                    transcripts.push(path);
+                }
+            }
+        }
+    }
+    assert!(
+        transcripts.iter().any(|path| {
+            std::fs::read(path)
+                .map(|bytes| {
+                    bytes
+                        .windows(conversation.len())
+                        .any(|window| window == conversation.as_bytes())
+                })
+                .unwrap_or(false)
+        }),
+        "a vendor-written transcript under the scratch home must name the captured conversation"
+    );
+
+    // The isolation premise, asserted rather than assumed: the vendor
+    // must have used OUR endpoint with OUR credential. The fixture's
+    // port is random per run and known only to the wrapper's scrubbed
+    // environment, so a hit means the vendor's traffic went here — and
+    // the presented key pins the controlled credential, ruling out an
+    // ambient one the scrub should have dropped.
+    api.wait_for_hit(&session.id).await;
+    assert_eq!(
+        api.presented_key().as_deref(),
+        Some("farhelm-live-proof-dummy-key"),
+        "the live vendor must authenticate with the controlled credential"
+    );
+    api.stop();
+
+    accepting.stop().await;
+}
+
+/// How many vendor-written transcript files the scratch home holds, for
+/// a timeout diagnosis that distinguishes "the vendor never wrote one"
+/// from "the refresh never promoted one". Bounded like the transcript
+/// walk below: a small count answering a small readiness question.
+fn vendor_transcript_count(home: &std::path::Path) -> usize {
+    let projects = home.join(".claude").join("projects");
+    let mut count = 0;
+    let mut dirs = vec![projects];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// The pane's current text for a timeout diagnosis, bounded so a

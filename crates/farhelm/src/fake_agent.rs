@@ -938,7 +938,32 @@ fn record_agent(
             // fixtures' contract with their tests must not shift because a
             // sibling script grew a command.
             (line, _) if hook_reports && line.starts_with(REPORT_COMMAND) => {
-                hook_report(shape, line[REPORT_COMMAND.len()..].trim(), &mut out)?;
+                let reported = line[REPORT_COMMAND.len()..].trim();
+                // The proof admits only an attributed report naming a
+                // verifying transcript: ensure the reported id has a
+                // record file and send its path, the way a real agent's
+                // transcript exists when its hook fires. Codex keeps
+                // the old locator-less payload — its proof derives
+                // the rollout rather than requiring it named.
+                let transcript = if shape == RecordShape::Claude {
+                    let path = record_path(shape, &home, &cwd, reported);
+                    if !path.exists() {
+                        if let Some(parent) = path.parent() {
+                            std::fs::create_dir_all(parent)
+                                .context("creating the reported conversation's record directory")?;
+                        }
+                        std::fs::write(&path, format!("{}\n", record_line(shape, reported, &cwd)))
+                            .context("writing the reported conversation's record")?;
+                        // Deliberately no RECORD-WRITTEN marker: that
+                        // marker is the prompt-driven record's witness,
+                        // and this file exists for the hook's payload,
+                        // witnessed by HOOK-REPORTED below.
+                    }
+                    Some(path)
+                } else {
+                    None
+                };
+                hook_report(shape, reported, transcript.as_deref(), &mut out)?;
             }
             _ => {
                 if current.is_none() {
@@ -1063,14 +1088,27 @@ fn wait_bounded(
 /// child's output to this fixture's own pty, where it would be
 /// indistinguishable from the fixture's markers and would silently satisfy
 /// a naive transcript scan.
-fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> anyhow::Result<()> {
+fn hook_report(
+    shape: RecordShape,
+    conversation: &str,
+    transcript: Option<&std::path::Path>,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("locating this fixture's own executable")?;
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "session_id": conversation,
         "hook_event_name": "SessionStart",
         "source": "startup",
-    })
-    .to_string();
+    });
+    if let Some(transcript) = transcript {
+        payload["transcript_path"] = serde_json::Value::String(
+            transcript
+                .to_str()
+                .context("the reported transcript path is UTF-8")?
+                .to_string(),
+        );
+    }
+    let payload = payload.to_string();
     // The discriminator comes from the shape under test — the entry point
     // a real injection would have installed — never from the payload.
     let vendor = match shape {

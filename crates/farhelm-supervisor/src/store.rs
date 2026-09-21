@@ -120,7 +120,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 22;
+const SCHEMA_VERSION: i64 = 24;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1333,7 +1333,38 @@ pub struct StoredSession {
     /// so the CAS compares the id alone. Pre-resume verification
     /// re-opens this locator through the same read-only reader and
     /// requires the saved id to still read as a foreground root.
+    ///
+    /// Claude rows admitted under the ownership proof carry the same
+    /// shape with a different locator: the exact transcript path the
+    /// accepted report arrived with. It is a verification hint, not
+    /// identity — the reported conversation id is the binding, and
+    /// every admission re-validates the arrival path and re-checks a
+    /// bounded prefix for the reported session id, so the CAS compares
+    /// the id alone and legitimate transcript moves cannot wedge the
+    /// binding. The locator PERSISTS while unverified: a transcript
+    /// that does not exist yet (or moved) keeps its saved path beside
+    /// the binding, and only the readiness bit below moves. Pre-resume
+    /// verification re-opens this locator and requires the saved id to
+    /// still match, demoting the version on any failure.
     pub captured_record: Option<String>,
+    /// Whether the Claude transcript locator above has itself verified:
+    /// the readiness behind the resume offer, stored SEPARATELY from
+    /// the locator so an admitted-but-unverified binding can keep its
+    /// path (for the exact-file check a later refresh or report runs)
+    /// while offering nothing.
+    ///
+    /// `true` means the saved path opened and named the bound id the
+    /// last time anything checked — the admitting read, or a later
+    /// refresh — and `false` means it has not (or no longer does).
+    /// Only Claude's offer consults it; every other kind writes `true`
+    /// at admission (no transcript constraint applies) and never reads
+    /// it. Only the authoritative admission transaction establishes
+    /// `true` for a new binding; exact-transcript refresh may move it
+    /// either way for the SAME binding but never blesses history or
+    /// switches bindings. A `false` beside a version-1 binding is
+    /// suppression, not demotion: the offer is withheld but the
+    /// identity stands. Only Claude uses this column today.
+    pub claude_transcript_ready: bool,
     /// Whether correlation for this session was found AMBIGUOUS, which bars
     /// any SCAN-DERIVED claim for the rest of this launch (PLAN_M3.md item
     /// 8). It does not bar an identity outright: an authoritative report
@@ -1502,6 +1533,22 @@ pub struct StoredSession {
     /// `Unknown` and fails closed at the corridor. Only Goose uses
     /// this column today.
     pub goose_launch_program: Option<String>,
+    /// The launch PROGRAM this session's CURRENT launch started — the
+    /// installation descriptor the Claude corridor must find live — or
+    /// `None` when unknown (every pre-proof launch, every launch whose
+    /// provenance write never landed).
+    ///
+    /// The value is
+    /// [`ClaudeLaunchProgram`](crate::agent_kind::claude::ClaudeLaunchProgram)'s
+    /// column spelling, classified from the argv this generation
+    /// actually started and written pre-spawn by the same fenced
+    /// provenance write OMP's pair and Goose's use. Admission refuses
+    /// `None`, stale, `"unknown"`, and `"package"` (no package layout
+    /// is proved) before any process is inspected. Decoded leniently
+    /// like OMP's and Goose's: anything unrecognized is `Unknown` and
+    /// fails closed at the corridor. Only Claude uses this column
+    /// today.
+    pub claude_launch_program: Option<String>,
     /// Which profile this session was CREATED from, or `None` for a
     /// raw-created session (PLAN_M6_75.md item 4).
     ///
@@ -1727,7 +1774,9 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  capture_ownership_version INTEGER NOT NULL DEFAULT 0,
                  omp_reporter_asset TEXT,
                  omp_launch_program TEXT,
-                 goose_launch_program TEXT
+                 goose_launch_program TEXT,
+                 claude_launch_program TEXT,
+                 claude_transcript_ready INTEGER NOT NULL DEFAULT 0
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1771,7 +1820,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 22;
+             PRAGMA user_version = 24;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2331,6 +2380,46 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 21 to 22")?;
         version = 22;
     }
+    if version == 22 {
+        // The launch PROGRAM for the Claude ownership proof: the
+        // classification of the argv this generation actually started,
+        // retained so admission binds the live chain to the current
+        // launch. Every pre-23 row adopts NULL — launched before any
+        // binary recorded this — so old launches fail closed. The
+        // column is nullable `TEXT`, repeated in the fresh-database
+        // DDL above so a migrated and a freshly created database have
+        // identical schemas.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN claude_launch_program TEXT;
+             PRAGMA user_version = 23;
+             COMMIT;",
+        )
+        .context("migrating schema from version 22 to 23")?;
+        version = 23;
+    }
+    if version == 23 {
+        // Transcript readiness beside the saved Claude locator: which
+        // bindings may offer exact Resume. Every pre-24 row adopts 0 —
+        // the old schema stored no such bit, and a locator saved under
+        // it may have been admitted against a missing file — so history
+        // offers fresh-only until its next refresh or attributed report
+        // re-proves it. That is the conservative direction the
+        // crash-ordering rule demands: claiming readiness for a binding
+        // whose transcript was never verified would advertise a resume
+        // the pre-resume check then refuses. The column is
+        // `INTEGER NOT NULL DEFAULT 0`, repeated in the fresh-database
+        // DDL above so a migrated and a freshly created database have
+        // identical schemas.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN claude_transcript_ready INTEGER NOT NULL DEFAULT 0;
+             PRAGMA user_version = 24;
+             COMMIT;",
+        )
+        .context("migrating schema from version 23 to 24")?;
+        version = 24;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2469,10 +2558,10 @@ fn insert_session_row(
           source_profile_id, source_profile_name, parent, session_token, archived, \
           last_activity_at, last_work_started_at, conversation_source, launch, \
           capture_ownership_version, omp_reporter_asset, omp_launch_program, \
-          goose_launch_program) \
+          goose_launch_program, claude_launch_program, claude_transcript_ready) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
                  ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, \
-                 ?33, ?34)",
+                 ?33, ?34, ?35, ?36)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2515,6 +2604,8 @@ fn insert_session_row(
             row.omp_reporter_asset,
             row.omp_launch_program,
             row.goose_launch_program,
+            row.claude_launch_program,
+            i64::from(row.claude_transcript_ready),
         ],
     )
     .context("inserting session row")?;
@@ -2546,7 +2637,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
                                archived, last_activity_at, last_work_started_at, conversation_source, launch, \
                                capture_ownership_version, omp_reporter_asset, omp_launch_program, \
-                               goose_launch_program";
+                               goose_launch_program, claude_launch_program, claude_transcript_ready";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2605,6 +2696,8 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             omp_reporter_asset: r.get(30)?,
             omp_launch_program: r.get(31)?,
             goose_launch_program: r.get(32)?,
+            claude_launch_program: r.get(33)?,
+            claude_transcript_ready: r.get::<_, i64>(34)? != 0,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -3837,6 +3930,7 @@ impl SessionStore {
                 omp_reporter_asset: None,
                 omp_launch_program: None,
                 goose_launch_program: None,
+                claude_launch_program: None,
                 created_at: preserved_created_at,
                 // Carried for `created_at`'s reason and with the same
                 // reach: the replaced row provably never launched (an
@@ -3938,7 +4032,8 @@ impl SessionStore {
     /// - the pane is emptied, because the relaunch has not confirmed one
     ///   yet.
     /// - `reset_capture` additionally clears `first_input_at`, the captured
-    ///   identity, its record locator, its `conversation_source`, its
+    ///   identity, its record locator, its transcript readiness (back to
+    ///   0, unverified), its `conversation_source`, its
     ///   `capture_ownership_version` (back to 0, unproven), and the
     ///   ambiguity verdict. Those are PER-LAUNCH correlation state: a fresh
     ///   (or fallback-template) run starts a conversation of its own, and
@@ -3976,7 +4071,9 @@ impl SessionStore {
     ///   write fails, the columns stay unknown and admission fails closed
     ///   instead of reading stale authority. `goose_launch_program` clears
     ///   for the same reason: it is the Goose launch's program, republished
-    ///   pre-spawn for the new generation.
+    ///   pre-spawn for the new generation. `claude_launch_program` clears
+    ///   for the same reason: it is the Claude launch's program,
+    ///   republished pre-spawn for the new generation.
     /// - `launch_scoped` is re-decided from `scope_available`, because the
     ///   selection belongs to a launch and not to a session (PLAN_M3.md item
     ///   10): a host that lost its user manager between two launches must
@@ -4055,20 +4152,21 @@ impl SessionStore {
             // One statement rather than two near-identical ones: the capture
             // columns are cleared by an expression that is a no-op when the
             // relaunch is resuming, so the SQL cannot drift between the two
-            // cases the way two copies of it could. The OMP and Goose
-            // launch-provenance columns beside them clear unconditionally —
-            // they describe the launch, not the conversation, so even a
-            // Resume must not inherit them.
+            // cases the way two copies of it could. The OMP, Goose, and
+            // Claude launch-provenance columns beside them clear
+            // unconditionally — they describe the launch, not the
+            // conversation, so even a Resume must not inherit them.
             tx.execute(
                 "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
                  archived = 0, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, \
-                 goose_launch_program = NULL, \
+                 goose_launch_program = NULL, claude_launch_program = NULL, \
                  first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
                  captured_record = CASE WHEN ?8 THEN NULL ELSE captured_record END, \
+                 claude_transcript_ready = CASE WHEN ?8 THEN 0 ELSE claude_transcript_ready END, \
                  capture_ambiguous = CASE WHEN ?8 THEN 0 ELSE capture_ambiguous END, \
                  conversation_source = \
                      CASE WHEN ?8 THEN NULL ELSE conversation_source END, \
@@ -5075,6 +5173,13 @@ impl SessionStore {
     /// the store is re-resolved from live runtime env at every
     /// admission, so comparing it would turn legitimate store moves
     /// into stuck bindings), while Codex and OMP pass `None`.
+    ///
+    /// `ready` is whether that hint itself verified during admission:
+    /// Claude passes the admitting transcript read (a missing file
+    /// admits with its path saved but readiness withheld), every other
+    /// kind passes `true` (no transcript constraint applies to them).
+    /// The offer consults the bit, never the locator alone.
+    #[allow(clippy::too_many_arguments)]
     pub async fn admit_ownership_proven_conversation(
         &self,
         id: &str,
@@ -5083,6 +5188,7 @@ impl SessionStore {
         expected_version: i64,
         replacement: &str,
         record: Option<&str>,
+        ready: bool,
     ) -> anyhow::Result<bool> {
         let conn = Arc::clone(&self.conn);
         let id = id.to_string();
@@ -5094,6 +5200,7 @@ impl SessionStore {
             let changed = conn
                 .execute(
                     "UPDATE sessions SET captured_conversation = ?5, captured_record = ?6, \
+                     claude_transcript_ready = ?7, \
                      conversation_source = 'hook', capture_ambiguous = 0, \
                      capture_ownership_version = 1 \
                      WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
@@ -5104,7 +5211,8 @@ impl SessionStore {
                         expected_conversation,
                         expected_version,
                         replacement,
-                        record
+                        record,
+                        i64::from(ready)
                     ],
                 )
                 .context("admitting an ownership-proven conversation identity")?;
@@ -5241,6 +5349,141 @@ impl SessionStore {
         })
         .await
         .context("Goose demotion task panicked")?
+    }
+
+    /// Record one Claude launch's provenance: which program its argv
+    /// started. The write is fenced on the launch generation, so a
+    /// slow spawn records against the run it actually launched rather
+    /// than one a relaunch has since replaced.
+    ///
+    /// Called pre-spawn — after the launch spec publishes, before tmux
+    /// can start anything — by the one place that decides injection,
+    /// for every Claude launch that gets that far. Publishing before the
+    /// first process can exist is what closes the startup-report race:
+    /// a report requires a live agent, which requires the tmux start
+    /// this write precedes. Only a spec-publish failure records
+    /// nothing, and that failure provably started nothing. A tmux
+    /// failure records the decided value: the argv was fixed, so an
+    /// ambiguous survivor runs exactly what the row describes. Only
+    /// Claude writes here today.
+    ///
+    /// `program` is the launch classification's column spelling, not
+    /// the enum: the store keeps plain strings at its boundary the
+    /// way it does for OMP's pair and Goose's, and the caller owns the
+    /// mapping.
+    pub async fn record_claude_launch_provenance(
+        &self,
+        id: &str,
+        generation: i64,
+        program: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let program = program.to_owned();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute(
+                "UPDATE sessions SET claude_launch_program = ?3 \
+                 WHERE id = ?1 AND generation = ?2",
+                rusqlite::params![id, generation, program],
+            )
+            .context("recording the launch's Claude provenance")?;
+            Ok(())
+        })
+        .await
+        .context("Claude provenance record task panicked")?
+    }
+
+    /// Withdraw a Claude resume offer whose saved proof no longer
+    /// verifies: compare-replace version 1 → 0 under CAS, keeping the
+    /// id and the generation.
+    ///
+    /// The Claude analog of Goose's demotion (and of Pi/OMP fileless
+    /// demotion): the id is kept, the offer is withdrawn, and a later
+    /// attributed report re-proves under the usual CAS. The fence
+    /// compares the conversation the verifier read alongside the id,
+    /// generation, and version, so a DIFFERENT-id report that landed
+    /// between the read and this write keeps its version instead of
+    /// being demoted for a staleness it never had. What it deliberately
+    /// does NOT cover is a same-ID re-proof: every compared field still
+    /// matches that newer proof, so serializing verification with
+    /// admission is the CALLER's job — `verify_claude_resume` holds the
+    /// session's capture claim from its reload through this write.
+    /// `false` is that invalidation, never a malfunction.
+    pub async fn demote_claude_resume_provenance(
+        &self,
+        id: &str,
+        generation: i64,
+        expected_conversation: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let expected_conversation = expected_conversation.map(str::to_owned);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET capture_ownership_version = 0 \
+                     WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
+                     AND capture_ownership_version = 1",
+                    rusqlite::params![id, generation, expected_conversation],
+                )
+                .context("withdrawing an unverifiable Claude resume offer")?;
+            Ok(changed > 0)
+        })
+        .await
+        .context("Claude demotion task panicked")?
+    }
+
+    /// Move a Claude binding's transcript readiness WITHOUT touching the
+    /// saved locator or demoting the proof: compare-replace the
+    /// readiness bit under CAS, keeping the id, the path, the
+    /// generation, and version 1.
+    ///
+    /// The refresh path's readiness write (not the pre-resume backstop):
+    /// the transcript is a readiness hint, and a moved or not-yet-
+    /// written file means "not ready", not "unproven" — the binding
+    /// stands, WITH its saved path, for the next attributed report or
+    /// the next refresh, either of which re-proves under the usual CAS.
+    /// Keeping the locator is what lets a transcript that lands after
+    /// admission promote through refresh alone, with no second report.
+    /// The fence compares the conversation, the version, AND the path
+    /// the refresh verified, so a re-proof that landed between the read
+    /// and this write (same or different id) keeps its readiness
+    /// instead of being moved for a staleness it never had. `false` is
+    /// that invalidation, never a malfunction.
+    pub async fn set_claude_transcript_ready(
+        &self,
+        id: &str,
+        generation: i64,
+        expected_conversation: Option<&str>,
+        expected_record: Option<&str>,
+        ready: bool,
+    ) -> anyhow::Result<bool> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let expected_conversation = expected_conversation.map(str::to_owned);
+        let expected_record = expected_record.map(str::to_owned);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET claude_transcript_ready = ?5 \
+                     WHERE id = ?1 AND generation = ?2 AND captured_conversation IS ?3 \
+                     AND capture_ownership_version = 1 AND captured_record IS ?4",
+                    rusqlite::params![
+                        id,
+                        generation,
+                        expected_conversation,
+                        expected_record,
+                        i64::from(ready)
+                    ],
+                )
+                .context("recording a Claude binding's transcript readiness")?;
+            Ok(changed > 0)
+        })
+        .await
+        .context("Claude readiness task panicked")?
     }
 
     /// Record durably that this session's correlation was AMBIGUOUS, so no
@@ -5931,6 +6174,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -5950,6 +6194,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -6787,6 +7032,8 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  ALTER TABLE sessions DROP COLUMN goose_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
                  PRAGMA user_version = 18;",
             )
             .expect("downgrade the fixture to the pre-provenance schema");
@@ -6871,6 +7118,8 @@ mod tests {
             let conn = Connection::open(&db_path).expect("open raw v21 fixture");
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN goose_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
                  PRAGMA user_version = 21;",
             )
             .expect("downgrade the fixture to the pre-Goose-provenance schema");
@@ -6915,6 +7164,171 @@ mod tests {
         );
     }
 
+    /// Migration 23 lands the Claude launch-program column as NULL for
+    /// every old row and preserves the rest of the binding
+    /// byte-for-byte: a populated pre-23 database gains no launch
+    /// authority it never recorded.
+    ///
+    /// Why this test matters: `migrated_and_fresh_schemas_agree` proves
+    /// the migrated schema matches a fresh one, but a migration that
+    /// backfilled a program spelling (or dropped a column's data)
+    /// would still pass that comparison. Starting from a populated
+    /// row is what makes the NULL adoption and the preservation both
+    /// observable.
+    #[farhelm_testtrace::test]
+    async fn migration_23_lands_claude_program_as_null_for_old_rows() {
+        let (dir, store) = fresh_store().await;
+        let db_path = dir.path().join("supervisor.db");
+        let mut row = launching_row("old-claude");
+        row.agent_kind = farhelm_proto::AgentKind::Claude;
+        row.resume_template = Some(vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "{conversation}".to_string(),
+        ]);
+        row.captured_conversation = Some("claude-old".to_string());
+        row.conversation_source = Some("hook".to_string());
+        row.goose_launch_program = Some("goose".to_string());
+        store
+            .insert_session(row, None)
+            .await
+            .expect("insert migration fixture");
+        drop(store);
+        {
+            let conn = Connection::open(&db_path).expect("open raw v22 fixture");
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN claude_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
+                 PRAGMA user_version = 22;",
+            )
+            .expect("downgrade the fixture to the pre-Claude-provenance schema");
+            let downgraded: i64 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("read downgraded version");
+            assert_eq!(
+                downgraded, 22,
+                "the fixture premise: a genuine pre-23 database"
+            );
+        }
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v22");
+        let row = migrated
+            .session("old-claude")
+            .await
+            .expect("read migrated row")
+            .expect("row survives");
+        assert_eq!(
+            row.claude_launch_program, None,
+            "a pre-23 launch adopts NULL, so its reports fail closed"
+        );
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("claude-old"),
+            "the identity migrates byte-preserved"
+        );
+        assert_eq!(
+            row.goose_launch_program.as_deref(),
+            Some("goose"),
+            "the neighboring provenance migrates byte-preserved"
+        );
+        let version: i64 = Connection::open(&db_path)
+            .expect("open raw")
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read user version");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "the migration replays the whole ladder to the current version"
+        );
+    }
+
+    /// Migration 24 lands transcript readiness as withheld (0) for every
+    /// old row and preserves the rest of the binding byte-for-byte: a
+    /// populated pre-24 database gains no resume offer its transcripts
+    /// never verified.
+    ///
+    /// Why this test matters: `migrated_and_fresh_schemas_agree` proves
+    /// the migrated schema matches a fresh one, but a migration that
+    /// backfilled readiness (or dropped a column's data) would still
+    /// pass that comparison. Starting from a populated row — one whose
+    /// locator the old schema may have admitted against a missing file
+    /// — is what makes the fail-closed adoption and the preservation
+    /// both observable.
+    #[farhelm_testtrace::test]
+    async fn migration_24_lands_transcript_readiness_withheld_for_old_rows() {
+        let (dir, store) = fresh_store().await;
+        let db_path = dir.path().join("supervisor.db");
+        let mut row = launching_row("old-claude-ready");
+        row.agent_kind = farhelm_proto::AgentKind::Claude;
+        row.resume_template = Some(vec![
+            "claude".to_string(),
+            "--resume".to_string(),
+            "{conversation}".to_string(),
+        ]);
+        row.captured_conversation = Some("claude-old".to_string());
+        row.conversation_source = Some("hook".to_string());
+        row.capture_ownership_version = 1;
+        row.captured_record = Some("/tmp/old-transcript.jsonl".to_string());
+        row.claude_launch_program = Some("claude".to_string());
+        store
+            .insert_session(row, None)
+            .await
+            .expect("insert migration fixture");
+        drop(store);
+        {
+            let conn = Connection::open(&db_path).expect("open raw v23 fixture");
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
+                 PRAGMA user_version = 23;",
+            )
+            .expect("downgrade the fixture to the pre-readiness schema");
+            let downgraded: i64 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("read downgraded version");
+            assert_eq!(
+                downgraded, 23,
+                "the fixture premise: a genuine pre-24 database"
+            );
+        }
+
+        let migrated = SessionStore::open(&db_path, true)
+            .await
+            .expect("migrate v23");
+        let row = migrated
+            .session("old-claude-ready")
+            .await
+            .expect("read migrated row")
+            .expect("row survives");
+        assert!(
+            !row.claude_transcript_ready,
+            "a pre-24 binding adopts withheld readiness, so history offers fresh-only \
+             until its next refresh or attributed report"
+        );
+        assert_eq!(
+            row.captured_record.as_deref(),
+            Some("/tmp/old-transcript.jsonl"),
+            "the locator migrates byte-preserved"
+        );
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("claude-old"),
+            "the identity migrates byte-preserved"
+        );
+        assert_eq!(
+            row.capture_ownership_version, 1,
+            "the version migrates byte-preserved"
+        );
+        let version: i64 = Connection::open(&db_path)
+            .expect("open raw")
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read user version");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "the migration replays the whole ladder to the current version"
+        );
+    }
+
     /// Only the authoritative admission writer establishes version 1,
     /// and its CAS compares the complete prior binding — generation,
     /// exact locator, AND proof version.
@@ -6934,7 +7348,7 @@ mod tests {
 
         assert!(
             store
-                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-new", None)
+                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-new", None, true)
                 .await
                 .expect("admit"),
             "the first admission against the pristine binding must commit"
@@ -6970,7 +7384,7 @@ mod tests {
         // A stale locator no longer matches the binding verification saw.
         assert!(
             !store
-                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-stale", None)
+                .admit_ownership_proven_conversation("proven", 0, None, 0, "conv-stale", None, true)
                 .await
                 .expect("stale admission"),
             "a superseded locator must not overwrite the committed binding"
@@ -6984,7 +7398,8 @@ mod tests {
                     Some("conv-new"),
                     0,
                     "conv-new",
-                    None
+                    None,
+                    true
                 )
                 .await
                 .expect("stale version"),
@@ -7003,6 +7418,10 @@ mod tests {
         assert_eq!(
             row.capture_ownership_version, 1,
             "both stale attempts leave the committed version alone"
+        );
+        assert!(
+            row.claude_transcript_ready,
+            "the admitting read's readiness verdict commits with the binding"
         );
     }
 
@@ -7034,6 +7453,7 @@ mod tests {
                     0,
                     "goose-conv",
                     Some("/tmp/goose-home/.local/share/goose/sessions/sessions.db"),
+                    true,
                 )
                 .await
                 .expect("admit"),
@@ -7070,6 +7490,7 @@ mod tests {
                     0,
                     "goose-stale",
                     Some("/tmp/other/sessions.db"),
+                    true,
                 )
                 .await
                 .expect("stale admission"),
@@ -7097,6 +7518,7 @@ mod tests {
                     1,
                     "goose-conv-2",
                     None,
+                    true,
                 )
                 .await
                 .expect("locator-less admission"),
@@ -7185,6 +7607,112 @@ mod tests {
         assert_eq!(
             row.capture_ownership_version, 1,
             "the newer binding keeps its version"
+        );
+    }
+
+    /// A Claude admission persists its transcript-readiness verdict
+    /// beside the locator, atomically with the binding — and the
+    /// readiness write moves ONLY the bit, never the locator, the id,
+    /// or the version. A missing-file admission lands unready with its
+    /// path saved; a later exact check promotes (or re-withholds)
+    /// readiness under the same CAS fence that guards the binding, so
+    /// a re-proof that landed in between keeps its own verdict.
+    ///
+    /// Why this test matters: the public offer follows this bit, never
+    /// the locator alone. If the admission failed to persist it, a
+    /// missing-file binding would offer Resume from the moment it
+    /// landed; if the refresh write moved the locator, a transcript
+    /// that lands after admission could never promote without a second
+    /// report.
+    #[farhelm_testtrace::test]
+    async fn claude_transcript_readiness_persists_beside_the_locator() {
+        let (_dir, store) = fresh_store().await;
+        store
+            .insert_session(launching_row("claude-ready"), None)
+            .await
+            .expect("insert admission fixture");
+
+        // The missing-file admission: locator saved, readiness withheld.
+        assert!(
+            store
+                .admit_ownership_proven_conversation(
+                    "claude-ready",
+                    0,
+                    None,
+                    0,
+                    "conv-pending",
+                    Some("/tmp/pending.jsonl"),
+                    false,
+                )
+                .await
+                .expect("admit"),
+            "the first admission against the pristine binding must commit"
+        );
+        let row = store
+            .session("claude-ready")
+            .await
+            .expect("reread admitted row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_record.as_deref(),
+            Some("/tmp/pending.jsonl"),
+            "the unverified locator persists for the later exact check"
+        );
+        assert!(
+            !row.claude_transcript_ready,
+            "the admitting read's verdict persists with the binding"
+        );
+
+        // The later exact check promotes readiness without moving
+        // anything else.
+        assert!(
+            store
+                .set_claude_transcript_ready(
+                    "claude-ready",
+                    0,
+                    Some("conv-pending"),
+                    Some("/tmp/pending.jsonl"),
+                    true,
+                )
+                .await
+                .expect("promote"),
+            "the readiness move against the binding the check read must commit"
+        );
+        let row = store
+            .session("claude-ready")
+            .await
+            .expect("reread promoted row")
+            .expect("row survives");
+        assert!(row.claude_transcript_ready, "the promotion lands durably");
+        assert_eq!(
+            row.captured_record.as_deref(),
+            Some("/tmp/pending.jsonl"),
+            "the promotion moves only the bit, never the locator"
+        );
+        assert_eq!(row.capture_ownership_version, 1, "and never the version");
+
+        // A readiness move fenced on a superseded binding lands nothing.
+        assert!(
+            !store
+                .set_claude_transcript_ready(
+                    "claude-ready",
+                    0,
+                    Some("conv-older"),
+                    Some("/tmp/pending.jsonl"),
+                    false,
+                )
+                .await
+                .expect("stale readiness move"),
+            "a readiness move fenced on a superseded id must land nothing"
+        );
+        let row = store
+            .session("claude-ready")
+            .await
+            .expect("reread fenced row")
+            .expect("row survives");
+        assert!(
+            row.claude_transcript_ready,
+            "the newer binding keeps its readiness"
         );
     }
 
@@ -7564,6 +8092,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -7583,6 +8112,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -7621,6 +8151,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
@@ -7640,6 +8171,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -8232,6 +8764,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
                     archived: false,
@@ -8251,6 +8784,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -8300,6 +8834,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -8323,6 +8858,7 @@ mod tests {
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: Some("conversation-7".to_string()),
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -8367,6 +8903,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s-omp".to_string(),
                     parent: None,
                     archived: false,
@@ -8398,6 +8935,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -8469,6 +9007,8 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  ALTER TABLE sessions DROP COLUMN goose_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
                  PRAGMA user_version = 17;",
             )
             .expect("restore pre-checkout schema");
@@ -8790,6 +9330,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -8809,6 +9350,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -8855,8 +9397,10 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             goose_launch_program: None,
+            claude_launch_program: None,
             canonical_cwd: None,
             captured_record: None,
+            claude_transcript_ready: false,
             capture_ambiguous: false,
             id: id.to_string(),
             parent: None,
@@ -9850,6 +10394,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -9873,6 +10418,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -9930,6 +10476,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     created_at: CREATED,
                     last_activity_at: CREATED,
                     last_work_started_at: 0,
@@ -10051,6 +10598,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -10070,6 +10618,7 @@ mod tests {
                     canonical_cwd: Some("/tmp/work".to_string()),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -10667,6 +11216,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -10686,6 +11236,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -10994,6 +11545,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
              ALTER TABLE sessions DROP COLUMN goose_launch_program;
+             ALTER TABLE sessions DROP COLUMN claude_launch_program;
+             ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              PRAGMA user_version = 11;",
@@ -11126,6 +11679,8 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
                  ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  ALTER TABLE sessions DROP COLUMN goose_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_launch_program;
+                 ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
                  DROP TABLE working_copies;
                  DROP TABLE working_copy_members;
                  PRAGMA user_version = 16;",
@@ -11209,6 +11764,7 @@ mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         goose_launch_program: None,
+                        claude_launch_program: None,
                         created_at: *created_at,
                         last_activity_at: *created_at,
                         last_work_started_at: 0,
@@ -11237,6 +11793,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
              ALTER TABLE sessions DROP COLUMN goose_launch_program;
+             ALTER TABLE sessions DROP COLUMN claude_launch_program;
+             ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              PRAGMA user_version = 12;",
@@ -11324,6 +11882,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
              ALTER TABLE sessions DROP COLUMN omp_launch_program;
              ALTER TABLE sessions DROP COLUMN goose_launch_program;
+             ALTER TABLE sessions DROP COLUMN claude_launch_program;
+             ALTER TABLE sessions DROP COLUMN claude_transcript_ready;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              PRAGMA user_version = 13;",
@@ -11978,6 +12538,7 @@ mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -11997,6 +12558,7 @@ mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -12191,6 +12753,7 @@ mod tests {
             omp_reporter_asset: None,
             omp_launch_program: None,
             goose_launch_program: None,
+            claude_launch_program: None,
             id: "s1".to_string(),
             parent: None,
             archived: false,
@@ -12210,6 +12773,7 @@ mod tests {
             canonical_cwd: None,
             captured_conversation: None,
             captured_record: None,
+            claude_transcript_ready: false,
             capture_ambiguous: false,
             first_input_at: None,
             generation: 0,

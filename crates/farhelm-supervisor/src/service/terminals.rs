@@ -486,6 +486,8 @@ async fn resolve_terminal_inner(
         let offer = entry.snapshot.restart_offer(
             capture.committed_conversation(),
             capture.committed_ownership_version().unwrap_or(0),
+            capture.committed_record(),
+            capture.committed_record_ready(),
         );
         RequestError::new(
             ErrorKind::NotFound,

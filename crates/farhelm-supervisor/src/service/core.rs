@@ -816,6 +816,16 @@ pub struct SupervisorSeams {
     /// same-ID re-proof in that window and require the newer proof
     /// to survive. `None` in production.
     pub goose_verify_gate: Option<CaptureGate>,
+    /// Pause a Claude report after its transcript evidence is validated
+    /// but before the closing process attribution. Tests change the live
+    /// process identity in that window and require the report to
+    /// refuse without recording. `None` in production.
+    pub claude_evidence_gate: Option<CaptureGate>,
+    /// Pause a Claude resume verification after its transcript read fails
+    /// but before it demotes the binding. Tests interleave a
+    /// same-ID re-proof in that window and require the newer proof
+    /// to survive. `None` in production.
+    pub claude_verify_gate: Option<CaptureGate>,
     /// See [`SinkReservationGate`]. `None` in production.
     pub sink_reservation_gate: Option<SinkReservationGate>,
     /// See [`SinkLookupGate`]. `None` in production.
@@ -989,6 +999,8 @@ impl Default for SupervisorSeams {
             codex_report_gate: None,
             goose_evidence_gate: None,
             goose_verify_gate: None,
+            claude_evidence_gate: None,
+            claude_verify_gate: None,
             sink_reservation_gate: None,
             sink_lookup_gate: None,
             sink_candidate_wait_gate: None,
@@ -5785,6 +5797,8 @@ impl Supervisor {
                     (Some(conversation), Some("hook")) => CaptureState::Reported {
                         conversation,
                         ownership_version,
+                        record: row.captured_record.clone(),
+                        record_ready: row.claude_transcript_ready,
                     },
                     (Some(conversation), _) => CaptureState::Captured {
                         conversation,
@@ -5800,6 +5814,8 @@ impl Supervisor {
             let restart_offer = snapshot.restart_offer(
                 capture.committed_conversation(),
                 capture.committed_ownership_version().unwrap_or(0),
+                capture.committed_record(),
+                capture.committed_record_ready(),
             );
             // Derived before `row.id` is moved into the entry's `info`.
             let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
@@ -6029,13 +6045,23 @@ impl Supervisor {
                 "the Codex conversation changed while its restart offer was being verified; refresh the session",
             ).into());
         }
+        if !self.refresh_claude_capture(&mut row).await? {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Claude conversation changed while its restart offer was being verified; refresh the session",
+            ).into());
+        }
         let snapshot = IntegrationSnapshot {
             kind: row.agent_kind,
             resume_template: row.resume_template,
         };
         let captured = row.captured_conversation;
-        let restart_offer =
-            snapshot.restart_offer(captured.as_deref(), row.capture_ownership_version);
+        let restart_offer = snapshot.restart_offer(
+            captured.as_deref(),
+            row.capture_ownership_version,
+            row.captured_record.as_deref(),
+            row.claude_transcript_ready,
+        );
         // The filled argv is data the offer promises: it exists exactly
         // when the offer is Resume, so a gated-out binding cannot leave a
         // resume command behind for a manual request to pick up. The
@@ -6158,6 +6184,115 @@ impl Supervisor {
             return Ok(false);
         }
         row.captured_conversation = Some(replacement);
+        Ok(true)
+    }
+
+    /// Refresh readiness without searching for another transcript. The
+    /// durable comparison prevents a slow verification of A from
+    /// suppressing a new B.
+    pub(super) async fn refresh_claude_capture(
+        &self,
+        row: &mut StoredSession,
+    ) -> anyhow::Result<bool> {
+        if row.agent_kind != AgentKind::Claude {
+            return Ok(true);
+        }
+        // The claim is taken HERE rather than by the caller: `session_snapshot`
+        // and the restart replay read through the store with no other
+        // serialization, and the row must be reloaded under the claim because
+        // a report may have replaced it since the caller read it. Callers
+        // that already hold this session's capture claim (the refresh pass)
+        // use `refresh_claude_capture_claimed` instead: the per-key mutex is
+        // not reentrant, so claiming a held key parks the holder against
+        // itself and the pass never completes.
+        let _capture_claim = self.capture_locks.claim(&row.id).await;
+        self.refresh_claude_capture_claimed(row).await
+    }
+
+    /// `refresh_claude_capture` for a caller already holding this session's
+    /// capture claim (see above for why the claim cannot be taken twice).
+    /// The reload below is still correct under the caller's claim — it
+    /// re-reads the row the claim serializes, so a report that landed
+    /// between the caller's read and this one is observed, not overwritten.
+    pub(super) async fn refresh_claude_capture_claimed(
+        &self,
+        row: &mut StoredSession,
+    ) -> anyhow::Result<bool> {
+        if row.agent_kind != AgentKind::Claude {
+            return Ok(true);
+        }
+        // The caller may have loaded its row before a report took the claim.
+        // Verify the current binding, not an earlier conversation whose
+        // transcript is still valid after a clear. A new launch requires
+        // the caller to retry.
+        let Some(current) = self.store.session(&row.id).await? else {
+            return Ok(false);
+        };
+        if current.generation != row.generation || current.agent_kind != AgentKind::Claude {
+            return Ok(false);
+        }
+        *row = current;
+        // Only version-1 bindings verify: history is never blessed (the
+        // offer gate independently serves those rows FreshOnly), and
+        // unknown versions are preserved byte for byte without promotion.
+        // File/header validity cannot upgrade a version.
+        if row.capture_ownership_version != 1 {
+            return Ok(true);
+        }
+        // A binding with nothing saved has nothing to re-verify: the
+        // saved path is what this opens, and only a later attributed
+        // report can promote such a row.
+        let (Some(stored), Some(saved)) = (
+            row.captured_conversation.as_deref(),
+            row.captured_record.as_deref(),
+        ) else {
+            return Ok(true);
+        };
+        let verified =
+            match crate::agent_kind::read_bounded_regular_file(std::path::Path::new(saved)).await {
+                Ok(Some(prefix)) => {
+                    crate::agent_kind::claude::transcript_session_matches(&prefix, stored)
+                }
+                Ok(None) | Err(_) => false,
+            };
+        // Readiness, not the locator, is what moves — either way. A
+        // moved or not-yet-written file means "not ready", not
+        // "unproven": the version stays 1, the identity stands, and the
+        // SAVED path stays saved, so a transcript that lands after
+        // admission promotes through refresh alone with no second
+        // report. A verdict that changes nothing writes nothing.
+        if verified == row.claude_transcript_ready {
+            return Ok(true);
+        }
+        if verified {
+            info!(
+                session = %row.id,
+                "the saved Claude transcript now verifies; offering its resume"
+            );
+        } else {
+            warn!(session = %row.id, "the saved Claude transcript no longer verifies; withdrawing its resume offer");
+        }
+        if !self.may_record() {
+            // Refusing an unavailable target is safe without a write.
+            // Publishing a readiness move still requires a durable
+            // commitment.
+            row.claude_transcript_ready = verified;
+            return Ok(true);
+        }
+        if !self
+            .store
+            .set_claude_transcript_ready(
+                &row.id,
+                row.generation,
+                Some(stored),
+                Some(saved),
+                verified,
+            )
+            .await?
+        {
+            return Ok(false);
+        }
+        row.claude_transcript_ready = verified;
         Ok(true)
     }
 
@@ -6349,6 +6484,133 @@ impl Supervisor {
         Err(RequestError::new(
             ErrorKind::Conflict,
             "this Goose session's saved conversation no longer verifies as a foreground root; \
+             nothing was relaunched and the resume offer was withdrawn — refresh the session \
+             and re-present the offer",
+        )
+        .into())
+    }
+
+    /// Re-verify a Claude resume offer against the saved transcript
+    /// before relaunching into it: re-open the SAVED transcript path
+    /// through the same no-symlink bounded reader admission uses, and
+    /// require the saved id to still match the transcript's first
+    /// session line.
+    ///
+    /// The verifier owns its read — it reloads the row and fences on
+    /// the session's current generation plus kind plus captured id, so
+    /// no snapshot-struct change carries a locator nobody else needs.
+    /// Anything unverifiable refuses with `Conflict` and NOTHING is
+    /// relaunched; the failure then compare-replaces version 1 → 0
+    /// under CAS (same id, same generation) — the Claude analog of
+    /// Goose's demotion and Pi/OMP fileless demotion: the id is kept,
+    /// the offer is withdrawn, and a later attributed report re-proves
+    /// under the usual CAS. A binding that moved under the snapshot
+    /// refuses WITHOUT demoting: the newer binding is not this
+    /// verifier's to withdraw. Never demand the old PID.
+    ///
+    /// The whole verdict runs under this session's shared capture
+    /// claim — taken BEFORE the authoritative reload and held
+    /// through any demotion — so a same-ID re-proof that lands
+    /// mid-verification commits either fully before this verdict or
+    /// fully after it, never underneath a demotion aimed at the
+    /// older binding (every CAS field would still match that newer
+    /// proof, which the demotion does not compare). Bounded
+    /// acquisition: a contended claim refuses without mutating rather
+    /// than parking the restart. Transient failures demote too —
+    /// consistent with Goose/Pi/OMP, recoverable by the next report.
+    async fn verify_claude_resume(
+        &self,
+        session_id: &str,
+        snapshot: &SessionSnapshot,
+    ) -> anyhow::Result<()> {
+        let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "this Claude session's restart offer changed while the restart was being prepared; \
+                 nothing was relaunched — refresh the session and re-present the offer",
+            )
+        })?;
+        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(session_id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this Claude session's capture is being updated; \
+                     nothing was relaunched — refresh the session and re-present the offer",
+                )
+            })?;
+        let row = self
+            .store
+            .session(session_id)
+            .await
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this Claude session's saved conversation could not be verified; \
+                     nothing was relaunched",
+                )
+            })?
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this Claude session's restart offer changed while the restart was being prepared; \
+                     nothing was relaunched — refresh the session and re-present the offer",
+                )
+            })?;
+        if row.agent_kind != AgentKind::Claude
+            || row.generation != snapshot.generation
+            || row.captured_conversation.as_deref() != Some(stored)
+            || row.capture_ownership_version != 1
+        {
+            // The binding moved under the snapshot (or never verified
+            // at all): refuse, and leave the newer binding alone.
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this Claude session's restart offer changed while the restart was being prepared; \
+                 nothing was relaunched — refresh the session and re-present the offer",
+            )
+            .into());
+        }
+        let verified = match row.captured_record.as_deref() {
+            Some(locator) => {
+                match crate::agent_kind::read_bounded_regular_file(std::path::Path::new(locator))
+                    .await
+                {
+                    Ok(Some(prefix)) => {
+                        crate::agent_kind::claude::transcript_session_matches(&prefix, stored)
+                    }
+                    Ok(None) | Err(_) => false,
+                }
+            }
+            None => false,
+        };
+        if verified {
+            return Ok(());
+        }
+        // Still under the claim: the seam below is the test hook for
+        // the window where a same-ID re-proof used to land between
+        // the failed read above and the demotion below.
+        if let Some(gate) = &self.seams.claude_verify_gate {
+            gate().await;
+        }
+        if let Err(error) = self
+            .store
+            .demote_claude_resume_provenance(session_id, snapshot.generation, Some(stored))
+            .await
+        {
+            warn!(
+                session = %session_id,
+                error = %format!("{error:#}"),
+                "could not withdraw an unverifiable Claude resume offer; \
+                 the restart is still refused"
+            );
+        }
+        Err(RequestError::new(
+            ErrorKind::Conflict,
+            "this Claude session's saved conversation no longer verifies against its transcript; \
              nothing was relaunched and the resume offer was withdrawn — refresh the session \
              and re-present the offer",
         )
@@ -8142,6 +8404,13 @@ impl Supervisor {
                     )
                     .into());
                 }
+                if !self.refresh_claude_capture(&mut row).await? {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        "the Claude restart offer changed; refresh the session",
+                    )
+                    .into());
+                }
                 let snapshot = IntegrationSnapshot {
                     kind: row.agent_kind,
                     resume_template: row.resume_template,
@@ -8162,6 +8431,8 @@ impl Supervisor {
                     restart_offer: snapshot.restart_offer(
                         row.captured_conversation.as_deref(),
                         row.capture_ownership_version,
+                        row.captured_record.as_deref(),
+                        row.claude_transcript_ready,
                     ),
                     id: row.id,
                     title: row.title,
@@ -8580,6 +8851,7 @@ impl Supervisor {
                 omp_reporter_asset: None,
                 omp_launch_program: None,
                 goose_launch_program: None,
+                claude_launch_program: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 archived: false,
@@ -8605,6 +8877,7 @@ impl Supervisor {
                 canonical_cwd: canonical_cwd.clone(),
                 captured_conversation: None,
                 captured_record: None,
+                claude_transcript_ready: false,
                 capture_ambiguous: false,
                 first_input_at: None,
                 // Fallback for the invariant-breaking no-row case. A row
@@ -8726,6 +8999,7 @@ impl Supervisor {
                 omp_reporter_asset: None,
                 omp_launch_program: None,
                 goose_launch_program: None,
+                claude_launch_program: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 archived: false,
@@ -8760,6 +9034,7 @@ impl Supervisor {
                 // attempted, let alone found ambiguous.
                 captured_conversation: None,
                 captured_record: None,
+                claude_transcript_ready: false,
                 capture_ambiguous: false,
                 first_input_at: None,
                 generation: 0,
@@ -9113,7 +9388,7 @@ impl Supervisor {
             // explicit placeholder-free template already has a real
             // fallback to offer, and reporting `FreshOnly` for it would
             // understate what restart could do from the very first reply.
-            restart_offer: snapshot.restart_offer(None, 0),
+            restart_offer: snapshot.restart_offer(None, 0, None, false),
             // A brand-new session has no tabs; real tab creation lands in
             // PLAN_M4.md step 4.
             tabs: Vec::new(),
@@ -9907,6 +10182,22 @@ impl Supervisor {
                 "this Codex conversation has no verified foreground resume target: its legacy identity is unattributed, \
                  or its exact record is unavailable; nothing was relaunched and no other transcript was selected",
             ).into());
+        }
+        // Claude verifies BEFORE the argv validation below, unlike every
+        // other kind: the snapshot's offer is built from a suppressible
+        // readiness hint, so a `FreshOnly` snapshot can still carry a
+        // version-1 proof that only the verifier withdraws. Validating
+        // the mode against that offer first would refuse with `Conflict`
+        // and leave the stale proof standing — every later refresh
+        // would keep suppressing a hint for a proof nothing withdrew,
+        // and the row would offer `FreshOnly` forever on a version-1
+        // binding. The verifier re-reads the row under the capture
+        // claim, so it decides on current state rather than on the
+        // snapshot's offer; the argv validation below still decides on
+        // the snapshot, so a proof that landed in between refuses with
+        // `Conflict` instead of relaunching from a stale command.
+        if mode == RestartMode::Resume && snapshot.kind == AgentKind::Claude {
+            self.verify_claude_resume(session_id, &snapshot).await?;
         }
         let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
         if mode == RestartMode::Resume && matches!(snapshot.kind, AgentKind::Pi | AgentKind::Omp) {
@@ -10837,12 +11128,14 @@ impl Supervisor {
             // reported the moment the relaunch clears it. The reset also
             // cleared the provenance column back to 0, so 0 is the honest
             // version here, not a placeholder.
-            entry.snapshot.restart_offer(None, 0)
+            entry.snapshot.restart_offer(None, 0, None, false)
         } else {
             let capture = entry.capture.lock().expect("capture mutex poisoned");
             entry.snapshot.restart_offer(
                 capture.committed_conversation(),
                 capture.committed_ownership_version().unwrap_or(0),
+                capture.committed_record(),
+                capture.committed_record_ready(),
             )
         };
         let info = SessionInfo {
@@ -12393,6 +12686,30 @@ impl Supervisor {
                 );
             }
         }
+        // Launch provenance for the Claude ownership proof, recorded for
+        // EVERY Claude launch beside Goose's: the classification of the
+        // argv this generation actually starts, published pre-spawn for
+        // the same ordering reason — no report of this generation can
+        // arrive ahead of its program. Best-effort and
+        // generation-fenced like Goose's; a failed write leaves the
+        // column unknown (the relaunch cleared it when it opened this
+        // generation) and admission fails closed rather than stale.
+        if snapshot.kind == AgentKind::Claude {
+            let program =
+                crate::agent_kind::claude::classify_claude_launch(&spec.argv).column_value();
+            if let Err(error) = self
+                .store
+                .record_claude_launch_provenance(id, generation, program)
+                .await
+            {
+                warn!(
+                    session = %id,
+                    error = %format!("{error:#}"),
+                    "could not record this launch's Claude provenance; \
+                     the session stays runnable without capture"
+                );
+            }
+        }
 
         let shell = self.launch_shell().await;
         // The scope wrapper, or nothing at all. Note the asymmetry with the
@@ -12686,6 +13003,8 @@ impl Supervisor {
             restart_offer: snapshot.restart_offer(
                 row.captured_conversation.as_deref(),
                 row.capture_ownership_version,
+                row.captured_record.as_deref(),
+                row.claude_transcript_ready,
             ),
             github_repo: None,
             working_copy: None,
@@ -12700,6 +13019,8 @@ impl Supervisor {
                 (Some(conversation), Some("hook")) => CaptureState::Reported {
                     conversation: conversation.to_string(),
                     ownership_version: row.capture_ownership_version,
+                    record: row.captured_record.clone(),
+                    record_ready: row.claude_transcript_ready,
                 },
                 (Some(conversation), _) => CaptureState::Captured {
                     conversation: conversation.to_string(),
@@ -13151,6 +13472,10 @@ impl Supervisor {
                 self.report_goose_conversation(id, report, kind, generation, entry)
                     .await
             }
+            AgentKind::Claude => {
+                self.report_claude_conversation(id, report, kind, generation, entry)
+                    .await
+            }
             _ => Err(RequestError::new(
                 ErrorKind::Conflict,
                 "no foreground ownership proof is implemented for this session's agent kind",
@@ -13301,11 +13626,22 @@ impl Supervisor {
                         row.capture_ownership_version,
                         &conversation,
                         None,
+                        true,
                     )
                     .await
             }
         };
-        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        Self::finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            1,
+            None,
+            true,
+        )
     }
 
     /// OMP admission: launch provenance plus foreground process attribution,
@@ -13477,11 +13813,22 @@ impl Supervisor {
                         row.capture_ownership_version,
                         &conversation,
                         None,
+                        true,
                     )
                     .await
             }
         };
-        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        Self::finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            1,
+            None,
+            true,
+        )
     }
 
     /// Goose admission: launch provenance plus foreground process
@@ -13694,11 +14041,281 @@ impl Supervisor {
                         row.capture_ownership_version,
                         &conversation,
                         Some(&store_path),
+                        true,
                     )
                     .await
             }
         };
-        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        Self::finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            1,
+            None,
+            true,
+        )
+    }
+
+    /// Claude admission: launch provenance plus foreground process
+    /// attribution, then exact transcript-locator validation of the
+    /// reported id in the transcript the typed event names — wired
+    /// through the shared claim, CAS, and mirror discipline rather
+    /// than its own.
+    ///
+    /// Both proofs are required within the same 1 s admission budget
+    /// from branch entry — the claim wait, the process checks, and the
+    /// transcript read all count against it, and the budget is
+    /// re-enforced before the commit. The transcript is read exactly
+    /// once, BRACKETED by two attributions that must name the same
+    /// emitter: the second covers the process evidence only and never
+    /// re-reads vendor state, and it runs AFTER the transcript read so
+    /// a PID reuse or exec between the evidence and the recheck refuses
+    /// instead of authorizing the wrong process's transcript.
+    ///
+    /// The transcript path persists as a verification hint, not
+    /// identity: a report whose file does not exist yet still admits at
+    /// version 1 (readiness suppressed — no Resume offer until the
+    /// saved path verifies through refresh or a later report), while a
+    /// file that exists must name the reported id in its first session
+    /// line or the report refuses. Rejection at any pre-write step is a
+    /// no-op everywhere (durable, memory, ambiguity, pending, offers) —
+    /// a rejected child never triggers readiness withdrawal, clears
+    /// ambiguity, resets parent pending state, or withdraws the
+    /// parent's target. Ambiguous-root failures (including "no
+    /// attributable Claude executable" and any ambiguous-runtime
+    /// error) return `Conflict` here: that return IS the specified
+    /// refusal point for the out-of-scope daemon ownership transfer —
+    /// no transfer code, no silent adoption.
+    async fn report_claude_conversation(
+        &self,
+        id: &str,
+        report: ReportedConversation,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        let branch_entry = tokio::time::Instant::now();
+        let admission_deadline = branch_entry + Duration::from_secs(1);
+        let ReportedConversation {
+            vendor: _,
+            conversation,
+            source,
+            transcript_path,
+            hook_event_name,
+            peer,
+        } = report;
+        // The doorway already refused anything but an exact
+        // `SessionStart` with a subscribed source; admission re-checks
+        // both against the same predicates, on the raw values.
+        let foreground_event = matches!(&hook_event_name, Some(value) if value.as_str().is_some_and(crate::agent_kind::claude::is_claude_foreground_event));
+        if !foreground_event {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Claude reported an unsupported foreground transition",
+            ));
+        }
+        if !crate::agent_kind::claude::is_claude_foreground_source(&source) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Claude reported an unsupported foreground transition",
+            ));
+        }
+        // Step 1 tail: the cheap shape gates before any process or
+        // vendor I/O — a bare id, exactly as the legacy path checks,
+        // and a present absolute bounded transcript locator. Claude
+        // has no fileless report shape: a missing or malformed locator
+        // refuses here rather than coercing into one.
+        if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the reported conversation identity does not match this session's agent kind",
+            ));
+        }
+        let transcript_path = transcript_path
+            .as_ref()
+            .and_then(crate::agent_kind::claude::transcript_path_hint)
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::InvalidRequest,
+                    "the Claude report carries no usable transcript locator",
+                )
+            })?
+            .to_string();
+        // Step 2: the bounded capture claim — capped by the admission
+        // budget, so a contended claim consumes the budget instead of
+        // borrowing past it — then the authoritative reload and
+        // kind/generation comparison.
+        let claim_deadline = std::cmp::min(
+            tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT,
+            admission_deadline,
+        );
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's capture is being updated; the report was not recorded",
+                )
+            })?;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| {
+                RequestError::new(ErrorKind::Internal, "could not verify the Claude launch")
+            })?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the Claude session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
+        }
+        let peer = peer.ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "the Claude report has no kernel-attributed local process",
+            )
+        })?;
+        // Step 3a: launch provenance. The row must name a supported
+        // program for the CURRENT launch — NULL (pre-proof, or a
+        // publish that never landed), stale (a superseded generation,
+        // fenced above), `unknown`, and `package` (no package layout is
+        // proved) all refuse BEFORE any process is inspected. The
+        // resume template is a future resume's command and is never
+        // consulted here: a supported direct launch with an independent
+        // resume override still proves what it runs.
+        let program = crate::agent_kind::claude::ClaudeLaunchProgram::from_column_value(
+            row.claude_launch_program.as_deref(),
+        );
+        if !matches!(
+            program,
+            crate::agent_kind::claude::ClaudeLaunchProgram::Claude
+                | crate::agent_kind::claude::ClaudeLaunchProgram::Shell
+        ) {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session's launch has no supported Claude runtime recorded; \
+                 the report was not recorded",
+            ));
+        }
+        // Step 3b: the live runtime proof — the FIRST of two
+        // attributions bracketing the vendor evidence. The second
+        // (step 3d) covers the process evidence only and never
+        // re-reads vendor state; both must name the same emitter.
+        let emitter = self
+            .claude_foreground(&row, peer, program, admission_deadline)
+            .await?;
+        // Step 3c: exact transcript-locator validation of the path the
+        // typed event carried — a single direct open of the SAVED path,
+        // no listing, no search. A file that does not exist yet admits
+        // (version 1 with readiness suppressed); a file that exists
+        // must name the reported id in its first session line.
+        let prefix =
+            crate::agent_kind::read_bounded_regular_file(std::path::Path::new(&transcript_path))
+                .await
+                .map_err(|refusal| {
+                    RequestError::new(
+                        ErrorKind::Conflict,
+                        format!("the Claude transcript refused the report: {refusal:#}"),
+                    )
+                })?;
+        // Readiness IS this read: a missing file admits with its path
+        // saved but readiness withheld, while a present file must name
+        // the reported id. Computed before the match below moves the
+        // prefix into the mismatch arm.
+        let transcript_ready = prefix.is_some();
+        if let Some(prefix) = prefix
+            && !crate::agent_kind::claude::transcript_session_matches(&prefix, &conversation)
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the reported Claude session is not the transcript's session; \
+                 the report was not recorded",
+            ));
+        }
+        // Step 3d: the bracket closes — the runtime must still
+        // attribute to the SAME emitter after the evidence was read.
+        // A PID reuse or exec between step 3b and now names a
+        // different process (or no live runtime at all). The seam
+        // below is the test hook for exactly that window.
+        if let Some(gate) = &self.seams.claude_evidence_gate {
+            gate().await;
+        }
+        if self
+            .claude_foreground(&row, peer, program, admission_deadline)
+            .await?
+            != emitter
+        {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Claude foreground changed during verification",
+            ));
+        }
+        info!(
+            session = %id, generation, emitter_pid = emitter.pid,
+            conversation = %conversation, source = %source,
+            "attributed a Claude foreground conversation report"
+        );
+        // The budget is re-enforced before the commit: evidence
+        // gathered past the deadline blesses nothing, however valid
+        // it was when read.
+        if tokio::time::Instant::now() >= admission_deadline {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Claude report overran its admission budget; \
+                 the report was not recorded",
+            ));
+        }
+        // Step 4: the atomic CAS over the COMPLETE prior binding,
+        // committing identity, the proven transcript locator, provenance
+        // 1, source, readiness, and ambiguity reset. The locator rides
+        // the commit as a verification hint; the CAS compares the id
+        // alone, so a legitimate transcript move cannot wedge the
+        // binding.
+        //
+        // The injected failure STANDS IN for the store call rather than
+        // preceding it, so a test can exercise this function's own failure
+        // path without a store that is genuinely broken.
+        let injected = self
+            .seams
+            .capture_store_fault
+            .as_ref()
+            .map(|fault| fault(super::capture::CaptureWrite::Report, id));
+        let written = match injected {
+            Some(Err(e)) => Err(e),
+            _ => {
+                self.store
+                    .admit_ownership_proven_conversation(
+                        id,
+                        generation,
+                        row.captured_conversation.as_deref(),
+                        row.capture_ownership_version,
+                        &conversation,
+                        Some(&transcript_path),
+                        transcript_ready,
+                    )
+                    .await
+            }
+        };
+        Self::finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            1,
+            Some(&transcript_path),
+            transcript_ready,
+        )
     }
 
     /// Legacy admission for kinds whose ownership proof is not yet
@@ -13786,6 +14403,8 @@ impl Supervisor {
             generation,
             entry,
             row.capture_ownership_version,
+            None,
+            true,
         )
     }
 
@@ -13795,6 +14414,7 @@ impl Supervisor {
     /// changes neither durable nor in-memory capture: the `Ok(false)` arm
     /// is a concurrent relaunch or binding change invalidating the
     /// evidence, not a malfunction.
+    #[allow(clippy::too_many_arguments)]
     fn finish_reported_admission(
         id: &str,
         written: anyhow::Result<bool>,
@@ -13803,6 +14423,8 @@ impl Supervisor {
         generation: i64,
         entry: Option<Arc<SessionEntry>>,
         ownership_version: i64,
+        record: Option<&str>,
+        record_ready: bool,
     ) -> Result<(), RequestError> {
         match written {
             Ok(true) => {}
@@ -13857,10 +14479,15 @@ impl Supervisor {
             // Step 5: mirror ONLY the committed result, into the matching
             // current-generation entry, under the same capture claim —
             // carrying the provenance the write committed so offers read
-            // one binding, not two disagreeing halves.
+            // one binding, not two disagreeing halves. The verification
+            // hint rides along for kinds whose offer consults it
+            // (Claude's transcript path, with its readiness verdict);
+            // other kinds mirror nothing they consult.
             state.advance(CaptureState::Reported {
                 conversation: conversation.to_string(),
                 ownership_version,
+                record: record.map(str::to_string),
+                record_ready,
             });
             previous.filter(|was| was != conversation)
         };
@@ -13996,6 +14623,94 @@ impl Supervisor {
             RequestError::new(
                 ErrorKind::Internal,
                 "Goose process attribution could not complete",
+            )
+        })?
+        .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
+    }
+
+    /// Attribute a Claude report to the one live `claude` runtime under
+    /// the session's owned pane that the launch installed. The pane
+    /// reads are async (they may shell out to tmux); the walk itself
+    /// runs on a blocking worker, like every other foreground
+    /// attribution, for the same reason as
+    /// [`Supervisor::codex_foreground`].
+    ///
+    /// The terminal read feeds the bare-shell anchor proof: a bare
+    /// pane shell admits only with its stdin still on this terminal
+    /// and its argv still spelling the recorded launch (see
+    /// `crate::procs::bare_pane_shell_provenance`). It runs on every
+    /// report rather than only when the anchor needs it, because the
+    /// corridor cannot ask for it mid-walk. The query is bounded by
+    /// the admission's remaining budget — it runs while the report
+    /// holds the capture claim, so a wedged tmux server must cost
+    /// the report, not the claim: expiry kills the query process and
+    /// refuses, releasing the claim through the ordinary error path.
+    /// A pane that names no listed terminal
+    /// ([`crate::tmux::PaneTerminal::Absent`]) refuses the same way a
+    /// query failure does: the second observation disagreeing with
+    /// the first is a failed read, never a license to skip the leg.
+    /// On macOS there is no fd-0 evidence to compare against, so no
+    /// terminal is fetched and the corridor refuses bare-shell
+    /// ancestry there; direct runtimes need no terminal leg and admit
+    /// on both platforms.
+    async fn claude_foreground(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+        program: crate::agent_kind::claude::ClaudeLaunchProgram,
+        // Underscore-named: the macOS branch below passes no terminal
+        // and never consults the deadline, and the name must not warn
+        // there (see `read_fd0_target(_pid)` for the same precedent).
+        _admission_deadline: tokio::time::Instant,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        let pid = self.owned_pane_pid(row, "Claude").await?;
+        #[cfg(target_os = "macos")]
+        let pane_tty: Option<Vec<u8>> = None;
+        #[cfg(not(target_os = "macos"))]
+        let pane_tty: Option<Vec<u8>> = {
+            let remaining =
+                _admission_deadline.saturating_duration_since(tokio::time::Instant::now());
+            match self.tmux.pane_terminal_for_pid(pid, remaining).await {
+                Ok(crate::tmux::PaneTerminal::Present(tty)) => Some(tty.into_bytes()),
+                Ok(crate::tmux::PaneTerminal::Absent) => {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        "the Claude foreground pane names no listed terminal; the report was not \
+                         recorded",
+                    ));
+                }
+                Err(error) => {
+                    return Err(RequestError::new(
+                        ErrorKind::Conflict,
+                        format!(
+                            "the Claude foreground pane's terminal could not be inspected: \
+                             {error:#}"
+                        ),
+                    ));
+                }
+            }
+        };
+        // The supervisor's own spawn record: the `shell_words` parse of
+        // the stored invocation, the same parse the create used. The
+        // bare-shell branch compares the anchor's walked argv against
+        // exactly this — a pane wrapper cannot rewrite the store from
+        // inside the pane, so an exec'd replacement mismatches even
+        // when image, argc, and fds all agree. An invocation that no
+        // longer parses yields no record, which refuses in that branch
+        // rather than falling back to the fd-only shape.
+        let launched: Vec<Vec<u8>> = shell_words::split(&row.invocation)
+            .unwrap_or_default()
+            .iter()
+            .map(|word| word.as_bytes().to_vec())
+            .collect();
+        tokio::task::spawn_blocking(move || {
+            crate::procs::foreground_claude_emitter(peer, pid, &program, pane_tty, launched)
+        })
+        .await
+        .map_err(|_| {
+            RequestError::new(
+                ErrorKind::Internal,
+                "Claude process attribution could not complete",
             )
         })?
         .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
@@ -14140,7 +14855,7 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 pub(crate) mod tests {
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::handlers::handle_control;
-    use super::super::status::session_status;
+    use super::super::status::{entry_info, session_status};
     use super::super::uploads::UploadRoute;
     use super::*;
     use farhelm_proto::{ControlMsg, Frame};
@@ -15307,6 +16022,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: entry.info.id.clone(),
                     parent: None,
                     archived: false,
@@ -15326,6 +16042,7 @@ pub(crate) mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -15708,6 +16425,8 @@ pub(crate) mod tests {
             CaptureState::Reported {
                 conversation: "conv-reported".to_string(),
                 ownership_version: 1,
+                record: None,
+                record_ready: false,
             },
         ] {
             let old = entry_with(Some(a_terminal()), LastOutcome::Running);
@@ -15758,6 +16477,8 @@ pub(crate) mod tests {
         *old.capture.lock().unwrap() = CaptureState::Reported {
             conversation: "conv-reported".to_string(),
             ownership_version: 1,
+            record: None,
+            record_ready: false,
         };
 
         let relaunched = relaunched_entry(
@@ -15971,6 +16692,7 @@ pub(crate) mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         goose_launch_program: None,
+                        claude_launch_program: None,
                         id: id.to_string(),
                         parent: None,
                         archived: false,
@@ -15990,6 +16712,7 @@ pub(crate) mod tests {
                         canonical_cwd: None,
                         captured_conversation: None,
                         captured_record: None,
+                        claude_transcript_ready: false,
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
@@ -16124,6 +16847,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -16145,6 +16869,7 @@ pub(crate) mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -16285,6 +17010,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: scoped_id.clone(),
                     parent: None,
                     archived: false,
@@ -16304,6 +17030,7 @@ pub(crate) mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -16375,6 +17102,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -16397,6 +17125,7 @@ pub(crate) mod tests {
                     canonical_cwd: None,
                     captured_conversation: captured.map(str::to_string),
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -16738,6 +17467,7 @@ pub(crate) mod tests {
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         goose_launch_program: None,
+                        claude_launch_program: None,
                         id: id.clone(),
                         parent: None,
                         archived: false,
@@ -16768,6 +17498,7 @@ pub(crate) mod tests {
                         canonical_cwd: Some("/tmp".to_string()),
                         captured_conversation: Some(format!("conv-{id}")),
                         captured_record: None,
+                        claude_transcript_ready: false,
                         capture_ambiguous: false,
                         first_input_at: Some(now_unix()),
                         generation: 0,
@@ -16869,6 +17600,7 @@ pub(crate) mod tests {
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -16879,6 +17611,7 @@ pub(crate) mod tests {
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                 },
                 None,
             )
@@ -17408,6 +18141,7 @@ exit 0
                         canonical_cwd: None,
                         captured_conversation: None,
                         captured_record: None,
+                        claude_transcript_ready: false,
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
@@ -17418,6 +18152,7 @@ exit 0
                         omp_reporter_asset: marker.map(str::to_string),
                         omp_launch_program: program.map(str::to_string),
                         goose_launch_program: None,
+                        claude_launch_program: None,
                     },
                     None,
                 )
@@ -18657,6 +19392,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -18667,6 +19403,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                 },
                 None,
             )
@@ -19243,6 +19980,7 @@ exit 0
                         canonical_cwd: None,
                         captured_conversation: None,
                         captured_record: None,
+                        claude_transcript_ready: false,
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
@@ -19253,6 +19991,7 @@ exit 0
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         goose_launch_program: program.map(str::to_string),
+                        claude_launch_program: None,
                     },
                     None,
                 )
@@ -19600,6 +20339,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -19610,6 +20350,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                 },
                 None,
             )
@@ -20831,6 +21572,3122 @@ exit 0
         );
     }
 
+    struct ClaudeAdmission {
+        state: StateDir,
+        scratch: farhelm_teststate::TestDir,
+        sup: Option<Arc<Supervisor>>,
+        runtimes: Vec<OwnedRuntime>,
+        kills: KillRegistry,
+    }
+
+    impl ClaudeAdmission {
+        /// The whole fixture: state dir, scratch `bin/` with the
+        /// `claude` image and its two scripts, a fake tmux prelude,
+        /// and a real supervisor behind it.
+        async fn launch() -> Self {
+            Self::launch_with(|_, _| {}).await
+        }
+
+        /// [`launch`](Self::launch) with seam access: `adjust` runs
+        /// after the fake tmux is written and before the supervisor
+        /// is constructed, so a test can install gates that observe
+        /// the registry — which exists by then — without rebuilding
+        /// the fixture around them.
+        async fn launch_with(adjust: impl FnOnce(&KillRegistry, &mut SupervisorSeams)) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let state = StateDir::new();
+            let scratch = farhelm_teststate::tempdir().expect("scratch dir");
+            let bin = scratch.path().join("bin");
+            std::fs::create_dir(&bin).expect("bin dir");
+            // The runtime image: whatever `sh` resolves to, copied
+            // under the `claude` name. A copy, never a symlink: the
+            // kernel reports the copy's own path (and basename) as
+            // the image, exactly what the descriptor matches.
+            let shell = Self::find_shell();
+            let image = bin.join("claude");
+            std::fs::copy(&shell, &image).expect("copy the shell to the claude image");
+            std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755))
+                .expect("the image is executable");
+            let magic = std::fs::read(&image).expect("the image reads");
+            assert!(
+                magic.starts_with(b"\x7fELF")
+                    || magic.starts_with(b"\xfe\xed\xfa\xce")
+                    || magic.starts_with(b"\xfe\xed\xfa\xcf")
+                    || magic.starts_with(b"\xce\xfa\xed\xfe")
+                    || magic.starts_with(b"\xcf\xfa\xed\xfe")
+                    || magic.starts_with(b"\xca\xfe\xba\xbe"),
+                "the runtime image ({}) is a real executable, never a script",
+                shell.display(),
+            );
+            // The `run` script: what the image interprets when spawned
+            // with foreground-shaped argv. The word `run` is prompt
+            // text under BOTH readings — the interpreter's script name
+            // and the CLI grammar's prompt word — so the fixture's argv
+            // is session-shaped without a subcommand the vendor never
+            // sends. The script spawns the hook-shaped reporter beneath
+            // itself, publishes the reporter's pid, then idles WITHOUT
+            // exec — so this process keeps its foreground-shaped argv
+            // and `claude` image for the walk to find.
+            std::fs::write(
+                bin.join("run"),
+                format!(
+                    "#!/bin/sh\n\
+                     PATH=\"{bin}:/usr/bin:/bin\"\n\
+                     sh internal hook --vendor claude &\n\
+                     echo $! > \"{bin}/reporter.pid\"\n\
+                     sleep 25\n",
+                    bin = bin.display(),
+                ),
+            )
+            .expect("run script");
+            std::fs::write(bin.join("internal"), "#!/bin/sh\nsleep 25\n").expect("sleeper");
+            for path in [bin.join("run"), bin.join("internal")] {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("fixture executable");
+            }
+            let fake_tmux = scratch.path().join("fake-tmux");
+            std::fs::write(
+                &fake_tmux,
+                r#"#!/bin/sh
+# Fake tmux for the Claude admission tests. Version probes answer with the
+# pinned shape; pane queries answer from files beside this script, written
+# per test with the fixture's own live pids; everything else succeeds.
+# A `stall_tty` file beside this script holds the pane-terminal query
+# open (for the bounded-query regression) while every other query
+# answers promptly.
+here=$(dirname "$0")
+# The driver prefixes every invocation with `-S <socket> -f <config>`,
+# so the command word is found by scanning, never positionally.
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    -V) echo "tmux 3.7c"; exit 0;;
+    *version*) echo "3.7c"; exit 0;;
+    list-panes|display-message) cmd="$arg";;
+  esac
+done
+if [ "$cmd" = "list-panes" ]; then
+  if [ -e "$here/stall_tty" ]; then exec sleep 30; fi
+  for arg in "$@"; do
+    case "$arg" in
+      *pane_tty*) cat "$here/tty_answer"; exit 0;;
+    esac
+  done
+  cat "$here/panes_answer"; exit 0
+fi
+if [ "$cmd" = "display-message" ]; then cat "$here/pane_answer"; exit 0; fi
+exit 0
+"#,
+            )
+            .expect("fake tmux");
+            std::fs::set_permissions(&fake_tmux, std::fs::Permissions::from_mode(0o755))
+                .expect("fake tmux executable");
+            let kills: KillRegistry = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut seams = SupervisorSeams {
+                tmux_program: fake_tmux,
+                ..SupervisorSeams::default()
+            };
+            adjust(&kills, &mut seams);
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                seams,
+            )
+            .await
+            .expect("supervisor");
+            Self {
+                state,
+                scratch,
+                sup: Some(sup),
+                runtimes: Vec::new(),
+                kills,
+            }
+        }
+
+        /// Whatever `sh` resolves to on this machine, for the runtime
+        /// image copy. `sh` is guaranteed on every Unix under test;
+        /// a missing shell is a broken substrate, and panicking names
+        /// it rather than skipping the whole proof.
+        fn find_shell() -> std::path::PathBuf {
+            std::env::var_os("PATH")
+                .and_then(|paths| {
+                    std::env::split_paths(&paths)
+                        .map(|dir| dir.join("sh"))
+                        .find(|candidate| candidate.is_file())
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from("/bin/sh"))
+        }
+
+        /// Point the fake pane answer at one live pid under one session.
+        fn write_pane_answer(&self, pid: u32, tmux_name: &str) {
+            std::fs::write(
+                self.scratch.path().join("pane_answer"),
+                format!("{pid} 0 {tmux_name}\n"),
+            )
+            .expect("pane answer");
+        }
+
+        /// Answer a `list-panes` sweep with one live pane for the
+        /// publication-gap path, which recovers the pane from tmux.
+        fn write_panes_list(&self, tmux_name: &str) {
+            std::fs::write(
+                self.scratch.path().join("panes_answer"),
+                format!("%0 @0 0 0 s {tmux_name}\n"),
+            )
+            .expect("panes answer");
+        }
+
+        /// Point the fake pane-terminal answer at one live pid: the
+        /// row the tty query parses for that pid, served from its own
+        /// file (the fake answers the `pane_tty`-shaped `list-panes`
+        /// from `tty_answer` and every other sweep from
+        /// `panes_answer`, so a terminal row can never leak into the
+        /// pane-state recovery the gap test exercises). Every fixture
+        /// process spawns with its stdin nulled, so its real fd-0
+        /// target is `/dev/null` — the value the spawn paths record
+        /// here is that truth, not a convenient fiction (the
+        /// wrapper-anchor test depends on the fd leg genuinely
+        /// passing so the record is what refuses). Overwrites any
+        /// earlier row: each fixture test owns one pane pid.
+        fn write_tty_answer(&self, pid: u32, tty: &str) {
+            std::fs::write(
+                self.scratch.path().join("tty_answer"),
+                format!("{pid} {tty}\n"),
+            )
+            .expect("tty answer");
+        }
+
+        /// Spawn the session-shaped runtime and wait for its
+        /// hook-shaped reporter, returning the reporter's
+        /// kernel-attributed identity. The pane answer names the
+        /// runtime under `id`'s session. `home` is the runtime's
+        /// `HOME` (the transcript locator is absolute and never
+        /// derived from it — the Claude proof reads no vendor home).
+        async fn spawn_runtime(
+            &mut self,
+            id: &str,
+            home: &std::path::Path,
+        ) -> crate::procs::ProcessIdentity {
+            let peer = self.spawn_one(home).await;
+            let runtime_pid = self.runtimes.last().expect("runtime child").child.id();
+            self.write_pane_answer(runtime_pid, &format!("fh-{id}"));
+            // The admission always runs the pane-terminal query, even
+            // for this direct chain that never consults it: without a
+            // listed row the query reports `Absent` and the report
+            // refuses before the walk.
+            self.write_tty_answer(runtime_pid, "/dev/null");
+            peer
+        }
+
+        /// A second live chain for the same fixture — a separately
+        /// launched runtime whose reporter passes the shape gate but
+        /// must fail process attribution. Both chains stay owned: the
+        /// sibling's runtime is appended beside the parent's, so
+        /// teardown reaps every tree it started and the parent remains
+        /// owned and live while the sibling's rejection is measured.
+        /// The pane answer is left naming the first runtime: this
+        /// chain's ancestry can never reach it — and even with its own
+        /// transcript the sibling's report names a second live
+        /// `claude` image, which the corridor refuses as nesting.
+        async fn spawn_sibling(&mut self, home: &std::path::Path) -> crate::procs::ProcessIdentity {
+            let pid_file = self.scratch.path().join("bin/reporter.pid");
+            std::fs::remove_file(&pid_file).ok();
+            self.spawn_one(home).await
+        }
+
+        /// A surviving-shell wrapper with a background runtime and a
+        /// foreground sibling beneath it: the wrapper backgrounds one
+        /// session-shaped runtime, staggers, backgrounds a second, and
+        /// then idles WITHOUT exec — so the wrapper shell itself
+        /// survives as the pane anchor above both children. The pane
+        /// answer names the wrapper: that is the chain a background
+        /// child's report walks — reporter, one native runtime, the
+        /// wrapper anchor, no interior links.
+        ///
+        /// Returns the wrapper pid and both reporters' kernel-attributed
+        /// identities, background first. Both reporters are
+        /// premise-asserted before anything measures them: each must be
+        /// alive and parented under a DISTINCT live runtime parented
+        /// under the live wrapper, or the test would refuse for the
+        /// wrong reason. The stagger is a startup stimulus, not a poll:
+        /// each reporter is awaited on its own pid file, so either
+        /// sibling can be reported first.
+        async fn spawn_wrapper_with_siblings(
+            &mut self,
+            home: &std::path::Path,
+        ) -> (
+            u32,
+            crate::procs::ProcessIdentity,
+            crate::procs::ProcessIdentity,
+        ) {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = self.scratch.path().join("bin");
+            // The foreground sibling's entry script: the same shape as
+            // `run`, publishing to its own pid file so the two awaits
+            // cannot satisfy each other with a stale pid.
+            std::fs::write(
+                bin.join("run-fg"),
+                format!(
+                    "#!/bin/sh\n\
+                     PATH=\"{bin}:/usr/bin:/bin\"\n\
+                     sh internal hook --vendor claude &\n\
+                     echo $! > \"{bin}/reporter-fg.pid\"\n\
+                     sleep 25\n",
+                    bin = bin.display(),
+                ),
+            )
+            .expect("run-fg script");
+            // The wrapper: backgrounds the `run` runtime, staggers,
+            // backgrounds the `run-fg` runtime, then idles — surviving
+            // as the shell anchor above both.
+            std::fs::write(
+                bin.join("wrap"),
+                format!(
+                    "#!/bin/sh\n\
+                     \"{bin}/claude\" run &\n\
+                     sleep 2\n\
+                     \"{bin}/claude\" run-fg &\n\
+                     sleep 25\n",
+                    bin = bin.display(),
+                ),
+            )
+            .expect("wrap script");
+            for path in [bin.join("run-fg"), bin.join("wrap")] {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("fixture executable");
+            }
+            for pid_file in ["reporter.pid", "reporter-fg.pid"] {
+                std::fs::remove_file(bin.join(pid_file)).ok();
+            }
+            let mut command = std::process::Command::new(bin.join("wrap"));
+            command
+                // The runtimes interpret their entry scripts relative to
+                // the cwd (see `start_runtime`): the wrapper runs rooted
+                // at `bin/` so both children resolve theirs.
+                .current_dir(&bin)
+                .env_clear()
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("HOME", home)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                command.process_group(0);
+            }
+            let child = command.spawn().expect("spawn the wrapper shell");
+            let wrapper_pid = child.id();
+            self.runtimes.push(OwnedRuntime {
+                child,
+                group: wrapper_pid,
+            });
+            self.kills
+                .lock()
+                .expect("kill registry poisoned")
+                .push(wrapper_pid);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let await_reporter = async |pid_file: &std::path::Path| {
+                let Some(reporter_pid) = OmpAdmission::await_reporter(pid_file, deadline).await
+                else {
+                    panic!(
+                        "the wrapper's runtime never published {}",
+                        pid_file.display()
+                    );
+                };
+                let (ppid, _, liveness) = crate::procs::read_process(reporter_pid)
+                    .expect("read the wrapper reporter")
+                    .expect("the wrapper reporter is alive");
+                assert_eq!(
+                    liveness,
+                    crate::procs::ProcessState::Running,
+                    "the wrapper reporter must be running when the report is measured"
+                );
+                (reporter_pid, ppid)
+            };
+            let (bg_reporter, bg_runtime) = await_reporter(&bin.join("reporter.pid")).await;
+            let (fg_reporter, fg_runtime) = await_reporter(&bin.join("reporter-fg.pid")).await;
+            assert_ne!(
+                bg_runtime, fg_runtime,
+                "the siblings must run as distinct runtimes under one wrapper"
+            );
+            for (name, runtime) in [("background", bg_runtime), ("foreground", fg_runtime)] {
+                let (ppid, _, liveness) = crate::procs::read_process(runtime)
+                    .expect("read the wrapper runtime")
+                    .expect("the wrapper runtime is alive");
+                assert_eq!(
+                    liveness,
+                    crate::procs::ProcessState::Running,
+                    "the {name} runtime must be running when the report is measured"
+                );
+                assert_eq!(
+                    ppid, wrapper_pid,
+                    "the {name} runtime must be parented under the wrapper shell, \
+                     or the walked chain holds no surviving anchor"
+                );
+            }
+            let (_, _, wrapper_liveness) = crate::procs::read_process(wrapper_pid)
+                .expect("read the wrapper shell")
+                .expect("the wrapper shell is alive");
+            assert_eq!(
+                wrapper_liveness,
+                crate::procs::ProcessState::Running,
+                "the wrapper shell must survive as the pane anchor when the reports are measured"
+            );
+            (
+                wrapper_pid,
+                crate::procs::ProcessIdentity::read(bg_reporter)
+                    .expect("the background reporter must have a kernel-attributed identity"),
+                crate::procs::ProcessIdentity::read(fg_reporter)
+                    .expect("the foreground reporter must have a kernel-attributed identity"),
+            )
+        }
+
+        /// Point the fake pane answer at the wrapper shell: the pane
+        /// anchor a background child's report walks to.
+        fn write_wrapper_pane_answer(&self, wrapper_pid: u32, id: &str) {
+            self.write_pane_answer(wrapper_pid, &format!("fh-{id}"));
+        }
+
+        /// Install the standard native install's versioned layout under
+        /// its own root — `<scratch>/versioned/claude/versions/2.1.278`,
+        /// a copy of the same shell bytes as the basename-`claude` image
+        /// (so it is a real executable, never a script) — plus the
+        /// `nested-run` entry script a nested launch interprets from the
+        /// runtime cwd. Its own root because `bin/claude` is already the
+        /// parent image file; the corridor matches the layout, never the
+        /// prefix, so the separate root changes nothing under test.
+        /// Returns the versioned image path the nested runtime is
+        /// spawned from, for premise assertions.
+        ///
+        /// The version token is arbitrary fixture text — the corridor
+        /// matches the layout and the token grammar, not this exact
+        /// number — while the directory names are the contract: parent
+        /// exactly `versions`, grandparent exactly `claude`.
+        fn install_versioned_nested_image(&self) -> std::path::PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = self.scratch.path().join("bin");
+            let versions = self
+                .scratch
+                .path()
+                .join("versioned")
+                .join("claude")
+                .join("versions");
+            std::fs::create_dir_all(&versions).expect("versions dir");
+            let image = versions.join("2.1.278");
+            std::fs::copy(bin.join("claude"), &image)
+                .expect("copy the shell to the versioned image");
+            std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755))
+                .expect("the versioned image is executable");
+            let magic = std::fs::read(&image).expect("the versioned image reads");
+            assert!(
+                magic.starts_with(b"\x7fELF")
+                    || magic.starts_with(b"\xfe\xed\xfa\xce")
+                    || magic.starts_with(b"\xfe\xed\xfa\xcf")
+                    || magic.starts_with(b"\xce\xfa\xed\xfe")
+                    || magic.starts_with(b"\xcf\xfa\xed\xfe")
+                    || magic.starts_with(b"\xca\xfe\xba\xbe"),
+                "the versioned image is a real executable, never a script",
+            );
+            // The nested entry script: spawns the hook-shaped reporter
+            // beneath itself, publishes the reporter's pid, then idles
+            // WITHOUT exec — so the versioned image keeps its layout
+            // path and foreground-shaped argv for the walk to find.
+            std::fs::write(
+                bin.join("nested-run"),
+                format!(
+                    "#!/bin/sh\n\
+                     PATH=\"{bin}:/usr/bin:/bin\"\n\
+                     sh internal hook --vendor claude &\n\
+                     echo $! > \"{bin}/nested-reporter.pid\"\n\
+                     sleep 25\n",
+                    bin = bin.display(),
+                ),
+            )
+            .expect("nested-run script");
+            std::fs::set_permissions(
+                bin.join("nested-run"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .expect("nested-run executable");
+            image
+        }
+
+        /// Replace the `run` entry script with a variant that first nests
+        /// the versioned-layout `image` as a live child of the parent
+        /// runtime, then spawns the parent's own hook-shaped reporter.
+        /// The nested tree inherits the parent's process group, so the
+        /// fixture's group teardown still owns every process this
+        /// starts. Call before [`spawn_runtime`](Self::spawn_runtime).
+        fn run_spawns_a_nested_versioned_runtime(&self, image: &std::path::Path) {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = self.scratch.path().join("bin");
+            for pid_file in ["reporter.pid", "nested-reporter.pid", "nested.pid"] {
+                std::fs::remove_file(bin.join(pid_file)).ok();
+            }
+            std::fs::write(
+                bin.join("run"),
+                format!(
+                    "#!/bin/sh\n\
+                     PATH=\"{bin}:/usr/bin:/bin\"\n\
+                     \"{image}\" nested-run &\n\
+                     echo $! > \"{bin}/nested.pid\"\n\
+                     sh internal hook --vendor claude &\n\
+                     echo $! > \"{bin}/reporter.pid\"\n\
+                     sleep 25\n",
+                    bin = bin.display(),
+                    image = image.display(),
+                ),
+            )
+            .expect("nested-spawning run script");
+            std::fs::set_permissions(bin.join("run"), std::fs::Permissions::from_mode(0o755))
+                .expect("run executable");
+        }
+
+        /// Await the nested versioned runtime's reporter and
+        /// premise-assert the chain the corridor must walk: the reporter
+        /// is alive AND parented under a live process whose argv[0] is
+        /// the versioned image path, which is itself parented under the
+        /// parent runtime — a genuinely nested runtime, not a second
+        /// reporter beside the parent. Returns the reporter's
+        /// kernel-attributed identity for the refused report.
+        async fn await_nested_reporter(
+            &self,
+            image: &std::path::Path,
+            parent_pid: u32,
+        ) -> crate::procs::ProcessIdentity {
+            let bin = self.scratch.path().join("bin");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let Some(nested_pid) =
+                OmpAdmission::await_reporter(&bin.join("nested-reporter.pid"), deadline).await
+            else {
+                let nested = std::fs::read_to_string(bin.join("nested.pid"))
+                    .unwrap_or_else(|_| "<no nested pid published>".to_string());
+                panic!(
+                    "the nested runtime never published its reporter; nested pid file says: {}",
+                    nested.trim()
+                );
+            };
+            let (ppid, _, liveness) = crate::procs::read_process(nested_pid)
+                .expect("read the nested reporter")
+                .expect("the nested reporter is alive");
+            assert_eq!(
+                liveness,
+                crate::procs::ProcessState::Running,
+                "the nested reporter must be running when the report is measured"
+            );
+            let (parent_ppid, _, parent_liveness) = crate::procs::read_process(ppid)
+                .expect("read the nested runtime")
+                .expect("the nested runtime is alive");
+            assert_eq!(
+                parent_liveness,
+                crate::procs::ProcessState::Running,
+                "the nested runtime must be running when the report is measured"
+            );
+            let argv =
+                crate::procs::read_process_argv(ppid).expect("the nested runtime exposes argv");
+            assert!(
+                argv.first()
+                    .is_some_and(|word| word.as_slice() == image.as_os_str().as_encoded_bytes()),
+                "the nested reporter must be parented under the versioned image ({}), not pid {ppid} with argv {argv:?}",
+                image.display(),
+            );
+            assert_eq!(
+                parent_ppid, parent_pid,
+                "the versioned runtime must be nested under the parent runtime, or the walked chain holds no nesting"
+            );
+            crate::procs::ProcessIdentity::read(nested_pid)
+                .expect("the nested reporter must have a kernel-attributed identity")
+        }
+
+        /// Spawn one runtime, premise-assert its reporter's parentage,
+        /// and return the reporter's kernel-attributed identity. The
+        /// runtime's process group is owned from spawn — before the
+        /// readiness wait and the premise assertions — so a timeout, a
+        /// failed assertion, or a cancelled wait still leaves every
+        /// started process owned, including reporters whose pid was
+        /// never published. The premise comes before any measurement
+        /// that depends on it: the reporter must be alive AND parented
+        /// under the runtime, or the chain the walk must find does not
+        /// exist and the test would refuse for the wrong reason.
+        async fn spawn_one(&mut self, home: &std::path::Path) -> crate::procs::ProcessIdentity {
+            // A previous runtime's pid file would satisfy the wait
+            // below with a STALE reporter — alive, but parented under
+            // the older runtime, so the premise would fail for the
+            // wrong reason. Same removal `spawn_sibling` performs.
+            std::fs::remove_file(self.scratch.path().join("bin/reporter.pid")).ok();
+            let (runtime_pid, pid_file) = self.start_runtime(home);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let Some(reporter_pid) = OmpAdmission::await_reporter(&pid_file, deadline).await else {
+                let runtime = self.runtimes.last_mut().expect("the owned runtime");
+                panic!("{}", reporter_timeout_diagnostic(&mut runtime.child));
+            };
+            let (ppid, _, liveness) = crate::procs::read_process(reporter_pid)
+                .expect("read the reporter")
+                .expect("the reporter is alive");
+            assert_eq!(
+                liveness,
+                crate::procs::ProcessState::Running,
+                "the reporter must be running when the report is measured"
+            );
+            assert_eq!(
+                ppid, runtime_pid,
+                "the reporter must be parented under the runtime, or the walked chain does not exist"
+            );
+            crate::procs::ProcessIdentity::read(reporter_pid)
+                .expect("the reporter must have a kernel-attributed identity")
+        }
+
+        /// Spawn the session-shaped `claude` image in its own process
+        /// group and register the guard immediately, before any wait:
+        /// the readiness wait and premise assertions can time out,
+        /// panic, or be cancelled, and an unregistered child would
+        /// leak past teardown on exactly those paths. Returns the
+        /// runtime pid and the pid-file path the caller awaits.
+        ///
+        /// The group is the cleanup boundary, not the pid file: the
+        /// runtime spawns its reporter before the pid file exists, so
+        /// pid registration can never own the pre-publication window —
+        /// the group owned here does.
+        fn start_runtime(&mut self, home: &std::path::Path) -> (u32, std::path::PathBuf) {
+            let bin = self.scratch.path().join("bin");
+            let mut command = std::process::Command::new(bin.join("claude"));
+            command
+                .arg("run")
+                // The image interprets its `run` script from ITS cwd:
+                // `sh script` opens the script relative to the cwd, never
+                // via `PATH`, so the child runs rooted at `bin/`. A
+                // fixture-only concern — the vendor binary is exec'd by
+                // path and needs no cwd trick — and invisible to the
+                // proof, which reads image, argv, and environ only.
+                .current_dir(&bin)
+                .env_clear()
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("HOME", home)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            // Its OWN process group. That is what makes teardown own the
+            // reporter before its pid is published: the runtime spawns the
+            // reporter first and publishes second, and every descendant
+            // inherits the group — one kill reaches the whole tree no
+            // matter where in that window the wait stops.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                command.process_group(0);
+            }
+            let child = command.spawn().expect("spawn the claude runtime");
+            let runtime_pid = child.id();
+            // Owned from the first instruction after the spawn.
+            // `process_group(0)` makes the leader's pid the group id.
+            self.runtimes.push(OwnedRuntime {
+                child,
+                group: runtime_pid,
+            });
+            // Published beside the owned child, for the gates: a
+            // gate fires inside the admission while the fixture is
+            // borrowed, so it kills through this list.
+            self.kills
+                .lock()
+                .expect("kill registry poisoned")
+                .push(runtime_pid);
+            (runtime_pid, bin.join("reporter.pid"))
+        }
+
+        /// Kill every owned runtime tree without dropping the
+        /// supervisor: the durable capture must outlive the processes
+        /// that reported it. Idempotent — owned runtimes are drained, so
+        /// a later teardown finds nothing left to kill. Each teardown
+        /// signals the runtime's whole process group — covering
+        /// reporters the fixture never learned the pid of — then kills
+        /// and reaps the direct child.
+        fn kill_owner(&mut self) {
+            for runtime in std::mem::take(&mut self.runtimes) {
+                runtime.teardown();
+            }
+        }
+
+        /// A [`SupervisorSeams::claude_evidence_gate`] that reaps every
+        /// runtime spawned so far and waits for the deaths to land:
+        /// installed for the identity-change window between the
+        /// transcript evidence and the closing attribution, so the
+        /// recheck must refuse. Signal delivery is async, so the gate
+        /// polls the group leaders until they are gone — the recheck
+        /// that follows has to observe the post-kill identity, not a
+        /// still-dying process, or the test would prove nothing on a
+        /// slow scheduler.
+        fn kill_gate(kills: &KillRegistry) -> CaptureGate {
+            let kills = Arc::clone(kills);
+            let gate: CaptureGate = Arc::new(move || {
+                let kills = Arc::clone(&kills);
+                Box::pin(async move {
+                    let groups = kills.lock().expect("kill registry poisoned").clone();
+                    assert!(
+                        !groups.is_empty(),
+                        "the kill gate needs a spawned runtime to reap"
+                    );
+                    for group in &groups {
+                        kill_process_group(*group);
+                    }
+                    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+                    for group in &groups {
+                        loop {
+                            // A SIGKILLed group leader stays a zombie
+                            // until the fixture reaps it at teardown;
+                            // `Zombie` counts as gone here (as it does
+                            // for the sweep), because the walk the
+                            // recheck runs only follows `Running`
+                            // edges — a zombie leader can never
+                            // attribute.
+                            let gone = !matches!(
+                                crate::procs::read_process(*group),
+                                Ok(Some((_, _, crate::procs::ProcessState::Running)))
+                            );
+                            if gone {
+                                break;
+                            }
+                            if tokio::time::Instant::now() >= deadline {
+                                panic!("the killed runtime never died");
+                            }
+                            // sleep-ok: the kill is delivered; poll for the reaped/zombie transition the sweep observes before the test proceeds.
+                            tokio::time::sleep(Duration::from_millis(20)).await;
+                        }
+                    }
+                })
+            });
+            gate
+        }
+
+        /// Seed one Claude session row: the pane the fake tmux answers,
+        /// a placeholder-carrying resume template, and the launch
+        /// program under test (`None` for the pre-proof shape).
+        async fn seed_claude_session(
+            &self,
+            id: &str,
+            program: Option<&str>,
+            pane: &str,
+            template: Vec<String>,
+        ) {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .insert_session(
+                    StoredSession {
+                        id: id.to_string(),
+                        parent: None,
+                        archived: false,
+                        title: "Claude".into(),
+                        created_at: now_unix(),
+                        last_activity_at: now_unix(),
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        cwd: self.state.path().to_str().unwrap().into(),
+                        invocation: "claude".into(),
+                        launch: None,
+                        tmux_name: format!("fh-{id}"),
+                        pane: pane.into(),
+                        outcome: LastOutcome::Exited {
+                            exit_code: Some(0),
+                            annotation: None,
+                        },
+                        agent_kind: farhelm_proto::AgentKind::Claude,
+                        resume_template: Some(template),
+                        canonical_cwd: None,
+                        captured_conversation: None,
+                        captured_record: None,
+                        claude_transcript_ready: false,
+                        capture_ambiguous: false,
+                        first_input_at: None,
+                        generation: 0,
+                        launch_scoped: false,
+                        source_profile: None,
+                        conversation_source: None,
+                        capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
+                        goose_launch_program: None,
+                        claude_launch_program: program.map(str::to_string),
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        /// One transcript at the probe's shape — a session line naming
+        /// `id` after a field-less summary line — under the fixture's
+        /// own scratch. Absolute, UTF-8, bounded: exactly what the
+        /// locator gate accepts.
+        fn plant_transcript(&self, id: &str) -> std::path::PathBuf {
+            let dir = self.scratch.path().join("transcripts");
+            std::fs::create_dir_all(&dir).expect("transcripts dir");
+            let path = dir.join(format!("{id}.jsonl"));
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"type\":\"summary\",\"summary\":\"work\"}}\n\
+                     {{\"sessionId\":\"{id}\",\"cwd\":\"/work\",\"timestamp\":\"2026-09-21T00:00:00Z\"}}\n\
+                     {{\"sessionId\":\"{id}\",\"type\":\"user\",\"message\":\"hi\"}}\n"
+                ),
+            )
+            .expect("transcript fixture");
+            path
+        }
+
+        /// One external report down the real admission path, with the
+        /// subscribed event and a transcript locator chosen by the
+        /// caller (`None` for the missing-locator shape).
+        async fn report(
+            &self,
+            id: &str,
+            conversation: &str,
+            source: &str,
+            transcript: Option<&str>,
+            peer: Option<crate::procs::ProcessIdentity>,
+        ) -> Result<(), RequestError> {
+            self.report_event(
+                id,
+                conversation,
+                Some(serde_json::Value::String("SessionStart".to_string())),
+                source,
+                transcript.map(|path| serde_json::Value::String(path.to_string())),
+                peer,
+            )
+            .await
+        }
+
+        /// [`report`](Self::report) with the raw event and locator,
+        /// for the tests that pin the doorway and locator gates.
+        async fn report_event(
+            &self,
+            id: &str,
+            conversation: &str,
+            hook_event_name: Option<serde_json::Value>,
+            source: &str,
+            transcript_path: Option<serde_json::Value>,
+            peer: Option<crate::procs::ProcessIdentity>,
+        ) -> Result<(), RequestError> {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .report_conversation(
+                    id,
+                    ReportedConversation {
+                        vendor: farhelm_proto::ReportVendor::Claude,
+                        conversation: conversation.to_string(),
+                        source: source.to_string(),
+                        transcript_path,
+                        hook_event_name,
+                        peer,
+                    },
+                )
+                .await
+        }
+
+        /// The exact durable binding: conversation plus ownership
+        /// version, asserted together because neither alone is the
+        /// contract.
+        async fn binding(&self, id: &str) -> (Option<String>, i64) {
+            let row = self
+                .sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session(id)
+                .await
+                .unwrap()
+                .unwrap();
+            (row.captured_conversation, row.capture_ownership_version)
+        }
+
+        /// The future resume command — a template, never the launch
+        /// program, which is what the provenance seeds.
+        fn resume_template() -> Vec<String> {
+            vec![
+                "claude".into(),
+                "--resume".into(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+            ]
+        }
+
+        /// The saved transcript locator beside the binding.
+        async fn record(&self, id: &str) -> Option<String> {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .captured_record
+        }
+
+        /// The transcript-readiness bit beside the binding: whether the
+        /// saved locator has itself verified. Asserted together with the
+        /// locator wherever the contract distinguishes "saved" from
+        /// "verified", because neither alone is the offer's input.
+        async fn ready(&self, id: &str) -> bool {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .claude_transcript_ready
+        }
+
+        /// The public restart offer through the real offer path.
+        async fn offer(&self, id: &str) -> farhelm_proto::RestartOffer {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .session_snapshot(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .restart_offer
+        }
+    }
+
+    impl Drop for ClaudeAdmission {
+        /// Reap every owned runtime, including failure paths: each
+        /// direct child is killed and waited on, and its whole process
+        /// group is signaled first — so reporters spawned before their
+        /// pid was ever published, and runtimes whose readiness wait
+        /// timed out or was cancelled, are still covered. Panic and
+        /// cancellation paths land here too, since every runtime is
+        /// registered before any fallible wait. Grandchildren are
+        /// signaled, never waited (this process cannot wait on them),
+        /// under their bounded `sleep 25`, which caps any linger if a
+        /// signal lands late.
+        fn drop(&mut self) {
+            self.kill_owner();
+        }
+    }
+
+    /// A parent report through the owned runtime is accepted: the
+    /// durable binding commits at version 1 beside the saved
+    /// transcript locator, the public offer is exact Resume, and the
+    /// resume command fills the template with the reported id — every
+    /// decided output asserted together, because the reported id, the
+    /// proven locator, the offer, and the command are one contract.
+    #[farhelm_testtrace::test]
+    async fn claude_parent_report_through_the_owned_runtime_is_accepted() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "the proven report binds at version 1"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(transcript.to_str().expect("fixture paths are UTF-8")),
+            "the reported transcript path persists as the verification hint"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "a verified binding offers exact resume"
+        );
+        let argv = fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present")
+            .resume_argv
+            .expect("a Resume offer carries its command");
+        assert_eq!(
+            argv,
+            vec!["claude".to_string(), "--resume".to_string(), conv],
+            "the resume command fills the template with the reported id"
+        );
+    }
+
+    /// A report whose transcript file does not exist yet still admits
+    /// at version 1 — but with readiness withheld: the locator is
+    /// saved, the readiness bit is not set, and no Resume offer goes
+    /// out until the saved path verifies. The offer then appears
+    /// through exactly two paths and no third: the refresh path's
+    /// single direct open (whenever the file lands — admission, an
+    /// earlier suppression, it makes no difference, because the
+    /// locator persists), or a later attributed report for the same
+    /// binding. Never enumeration, never cwd/time correlation.
+    #[farhelm_testtrace::test]
+    async fn claude_not_yet_appeared_transcript_admits_suppressed() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let dir = fixture.scratch.path().join("transcripts");
+        std::fs::create_dir_all(&dir).expect("transcripts dir");
+        let transcript = dir.join(format!("{conv}.jsonl"));
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("a missing transcript still admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "the binding commits at version 1 without the file"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(transcript.to_str().expect("fixture paths are UTF-8")),
+            "the reported path persists for the later check"
+        );
+        assert!(
+            !fixture.ready(&id).await,
+            "admission against a missing file withholds readiness"
+        );
+        // The file lands before any offer read: the snapshot's refresh
+        // opens the saved path, verifies it, and the offer appears —
+        // the refresh path, not a new report.
+        std::fs::write(
+            &transcript,
+            format!("{{\"sessionId\":\"{conv}\",\"cwd\":\"/work\"}}\n"),
+        )
+        .expect("the transcript appears");
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "a verified saved path offers through refresh alone"
+        );
+        assert!(
+            fixture.ready(&id).await,
+            "the promoting refresh durably sets readiness"
+        );
+
+        // The suppression half, on a second session: an offer read
+        // while the file is still missing keeps the binding at version
+        // 1 with its locator saved and readiness withheld — and a file
+        // that lands afterwards promotes through refresh alone, with
+        // no second report, because the locator was never withdrawn.
+        let id2 = uuid::Uuid::new_v4().to_string();
+        let conv2 = uuid::Uuid::new_v4().to_string();
+        let transcript2 = dir.join(format!("{conv2}.jsonl"));
+        fixture
+            .seed_claude_session(
+                &id2,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer2 = fixture.spawn_runtime(&id2, &home).await;
+        fixture
+            .report(
+                &id2,
+                &conv2,
+                "startup",
+                Some(transcript2.to_str().expect("fixture paths are UTF-8")),
+                Some(peer2),
+            )
+            .await
+            .expect("a missing transcript still admits");
+        assert_eq!(
+            fixture.offer(&id2).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "an unverified saved path offers nothing"
+        );
+        assert_eq!(
+            fixture.record(&id2).await.as_deref(),
+            Some(transcript2.to_str().expect("fixture paths are UTF-8")),
+            "the failed re-verification keeps the locator, keeping the binding re-provable"
+        );
+        assert_eq!(
+            fixture.binding(&id2).await,
+            (Some(conv2.clone()), 1),
+            "suppression is not demotion"
+        );
+        assert!(
+            !fixture.ready(&id2).await,
+            "suppression withholds readiness without demoting"
+        );
+        std::fs::write(
+            &transcript2,
+            format!("{{\"sessionId\":\"{conv2}\",\"cwd\":\"/work\"}}\n"),
+        )
+        .expect("the transcript appears after suppression");
+        assert_eq!(
+            fixture.offer(&id2).await,
+            farhelm_proto::RestartOffer::Resume,
+            "a kept locator promotes through refresh alone once its file verifies"
+        );
+        assert!(
+            fixture.ready(&id2).await,
+            "the promoting refresh durably sets readiness"
+        );
+    }
+
+    /// A wrapper shell that backgrounds one `claude` and foregrounds a
+    /// sibling admits NEITHER child's report: each walks reporter, one
+    /// native runtime, and the surviving wrapper as pane anchor — no
+    /// interior links — and the anchor carries the wrapper's command,
+    /// so it is neither the bare pane shell nor this launch's
+    /// transparency. The background child reports FIRST, so a corridor
+    /// that still accepted by position would let it establish the
+    /// binding; the foreground sibling then proves no replacement
+    /// happens either.
+    ///
+    /// Why this test matters: it is the P0 end to end. The corridor
+    /// unit test pins the shape; only this one proves the background
+    /// child cannot make the DURABLE target or the public offer its
+    /// own. Each report plants its own verifying transcript first, so
+    /// the anchor is the sole refusal cause — and the refusal is
+    /// asserted by diagnostic, not merely by kind, so a breakage that
+    /// refuses for another reason fails loudly here instead of passing
+    /// for the wrong one.
+    #[farhelm_testtrace::test]
+    async fn claude_wrapper_siblings_report_through_a_surviving_shell_and_bind_nothing() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let bg = uuid::Uuid::new_v4().to_string();
+        let fg = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let bg_transcript = fixture.plant_transcript(&bg);
+        let fg_transcript = fixture.plant_transcript(&fg);
+        fixture
+            .seed_claude_session(&id, Some("shell"), "%0", ClaudeAdmission::resume_template())
+            .await;
+        let (wrapper, bg_peer, fg_peer) = fixture.spawn_wrapper_with_siblings(&home).await;
+        fixture.write_wrapper_pane_answer(wrapper, &id);
+        // The terminal query runs before the walk, so the pane pid
+        // needs a listed row or the report refuses there instead of
+        // on the anchor. The wrapper's stdin is nulled like every
+        // other fixture process, so `/dev/null` is its true fd-0
+        // target.
+        fixture.write_tty_answer(wrapper, "/dev/null");
+        // Child-first: the background sibling reports into an empty
+        // binding, then the foreground sibling reports after it.
+        for (conversation, transcript, peer) in [
+            (
+                bg.as_str(),
+                bg_transcript.to_str().expect("fixture paths are UTF-8"),
+                bg_peer,
+            ),
+            (
+                fg.as_str(),
+                fg_transcript.to_str().expect("fixture paths are UTF-8"),
+                fg_peer,
+            ),
+        ] {
+            let refusal = fixture
+                .report(&id, conversation, "startup", Some(transcript), Some(peer))
+                .await
+                .expect_err("a report through a surviving wrapper shell must be refused");
+            assert_eq!(
+                refusal.kind,
+                ErrorKind::Conflict,
+                "a process-attribution refusal is a conflict, not a malformed report"
+            );
+            assert!(
+                format!("{refusal:#}").contains("a shell carrying a command survives above"),
+                "the anchor — not the transcript, the CLI, or the program — must be \
+                 what refuses: {refusal:#}"
+            );
+        }
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "neither sibling establishes a durable target"
+        );
+        assert_eq!(
+            fixture.record(&id).await,
+            None,
+            "neither sibling leaves a locator behind"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the public offer never becomes a background child's"
+        );
+    }
+
+    /// A pane that names no listed terminal refuses without touching
+    /// the binding or the offer: the tty query runs after the pane
+    /// probe, and when the second observation disagrees with the
+    /// first — the pane died or respawned between the two queries, or
+    /// its tty field is empty — the report fails closed instead of
+    /// skipping the terminal leg. The direct chain here would admit
+    /// with any terminal row present, so the refusal below can only
+    /// come from the missing observation.
+    ///
+    /// Why this test matters: the query used to answer that shape
+    /// with a bare `None`, which the corridor read as "no terminal
+    /// needed" and admitted. The untouched binding and offer prove
+    /// the refusal landed before the store CAS.
+    #[farhelm_testtrace::test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "the tty query runs on Linux only; on macOS the caller passes no terminal and the corridor refuses for that reason, pinned by the unit tests"
+    )]
+    async fn claude_report_without_a_listed_terminal_refuses_and_binds_nothing() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        // Withdraw the terminal row the spawn wrote: the pane probe
+        // still names the live runtime, but the tty query finds no
+        // row for it. The emptiness is premise-asserted, not assumed —
+        // a row left behind would admit and prove nothing.
+        std::fs::write(fixture.scratch.path().join("tty_answer"), "").expect("empty tty answer");
+        assert_eq!(
+            std::fs::read_to_string(fixture.scratch.path().join("tty_answer"))
+                .expect("tty answer reads back"),
+            "",
+            "test premise: the tty query observes no row"
+        );
+        let refusal = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("a report with no listed terminal must be refused");
+        assert_eq!(
+            refusal.kind,
+            ErrorKind::Conflict,
+            "a failed terminal observation is a conflict, not a malformed report"
+        );
+        assert!(
+            format!("{refusal:#}").contains("names no listed terminal"),
+            "the missing observation — not the transcript, the CLI, or the program — must be \
+             what refuses: {refusal:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+        assert_eq!(
+            fixture.record(&id).await,
+            None,
+            "the refused report leaves no locator behind"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "no binding means no resume"
+        );
+    }
+
+    /// A stalled pane-terminal query costs the report, not the claim:
+    /// the query is bounded by the admission's remaining budget, so a
+    /// tmux server that stops answering refuses the report instead of
+    /// holding the capture claim past the deadline. The report returns
+    /// within budget, and a later report for the same session is fully
+    /// answered — admission, binding, and offer — proving the claim
+    /// was released rather than wedged behind the dead query.
+    ///
+    /// Why this test matters: the query used to await the tmux
+    /// subprocess with no timeout while the report held the claim, so
+    /// a hung server wedged the session's capture indefinitely. The
+    /// elapsed bound below is what distinguishes the fix: without it
+    /// the first report never returns.
+    #[farhelm_testtrace::test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "the tty query runs on Linux only; there is nothing to stall on macOS"
+    )]
+    async fn claude_report_with_a_stalled_terminal_query_returns_and_releases_the_claim() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        // Hold the tty query open; the pane probe still answers, so
+        // the stall is provably inside the bounded query.
+        std::fs::write(fixture.scratch.path().join("stall_tty"), "").expect("stall sentinel");
+        let started = std::time::Instant::now();
+        let refusal = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("a stalled terminal query must refuse");
+        let elapsed = started.elapsed();
+        assert!(
+            format!("{refusal:#}").contains("timed out"),
+            "the refusal must name the overrun, not another rule: {refusal:#}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "the report must return within budget instead of holding the claim: {elapsed:?}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the timed-out report binds nothing"
+        );
+        // Release the query and report again: full admission proves
+        // the first report's claim was released — a wedged claim
+        // would fail this one with "being updated".
+        std::fs::remove_file(fixture.scratch.path().join("stall_tty")).expect("release the query");
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the report after the stall admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "the second report binds at version 1"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the admitted binding offers exact resume"
+        );
+    }
+
+    /// A bare shell whose stdin matches the listed terminal still
+    /// refuses when it no longer spells the recorded launch: the
+    /// anchor is a true bare shell (`/bin/sh` with a single argv, fd
+    /// 0 genuinely on the listed pipe), so the fd leg passes and only
+    /// the supervisor's spawn record stands between the report and
+    /// admission — and the record names the seeded `claude`
+    /// invocation, not this shell. The seed pairs a shell program
+    /// with a native-spelling record deliberately: the record leg
+    /// compares the anchor against the record, and any record that
+    /// does not spell the anchor refuses.
+    ///
+    /// Why this test matters: it is the fd-restore shape through the
+    /// full live path with the descriptors telling the truth. The
+    /// corridor unit test pins the diagnostic without processes; only
+    /// this one proves a matching fd 0 cannot carry a replacement
+    /// anchor past the record.
+    #[farhelm_testtrace::test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "the listed terminal is read from /proc, which macOS lacks; the record refusal itself is pinned cross-platform by the corridor unit tests"
+    )]
+    async fn claude_report_through_a_record_mismatched_shell_anchor_refuses_on_the_record() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let bin = fixture.scratch.path().join("bin");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(&id, Some("shell"), "%0", ClaudeAdmission::resume_template())
+            .await;
+        // The pane root: a bare `/bin/sh` — one argv, the true bare
+        // shape (a shebang script would carry its path as a second
+        // word) — reading commands from a pipe the fixture holds
+        // open, so it idles instead of exiting on EOF.
+        std::fs::remove_file(bin.join("reporter.pid")).ok();
+        let mut shell_command = std::process::Command::new("/bin/sh");
+        shell_command
+            .current_dir(&bin)
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("HOME", &home)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            shell_command.process_group(0);
+        }
+        let mut shell_child = shell_command.spawn().expect("spawn the bare pane shell");
+        let shell_pid = shell_child.id();
+        let mut shell_stdin = shell_child
+            .stdin
+            .take()
+            .expect("the shell's stdin is piped");
+        fixture.runtimes.push(OwnedRuntime {
+            child: shell_child,
+            group: shell_pid,
+        });
+        fixture
+            .kills
+            .lock()
+            .expect("kill registry poisoned")
+            .push(shell_pid);
+        // One background runtime under the shell; the write end stays
+        // open so the shell idles on its next read.
+        std::io::Write::write_all(
+            &mut shell_stdin,
+            format!("'{}' run &\n", bin.join("claude").display()).as_bytes(),
+        )
+        .expect("drive the runtime spawn");
+        std::io::Write::flush(&mut shell_stdin).expect("flush the runtime spawn");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let Some(reporter_pid) =
+            OmpAdmission::await_reporter(&bin.join("reporter.pid"), deadline).await
+        else {
+            panic!("the shell's runtime never published its reporter");
+        };
+        let (reporter_ppid, _, reporter_liveness) = crate::procs::read_process(reporter_pid)
+            .expect("read the reporter")
+            .expect("the reporter is alive");
+        assert_eq!(
+            reporter_liveness,
+            crate::procs::ProcessState::Running,
+            "the reporter must be running when the report is measured"
+        );
+        let (runtime_ppid, _, runtime_liveness) = crate::procs::read_process(reporter_ppid)
+            .expect("read the runtime")
+            .expect("the runtime is alive");
+        assert_eq!(
+            runtime_ppid, shell_pid,
+            "the runtime must be the shell's child, or the walked chain does not exist"
+        );
+        assert_eq!(
+            runtime_liveness,
+            crate::procs::ProcessState::Running,
+            "the runtime must be running when the report is measured"
+        );
+        let (_, _, shell_liveness) = crate::procs::read_process(shell_pid)
+            .expect("read the pane shell")
+            .expect("the pane shell is alive");
+        assert_eq!(
+            shell_liveness,
+            crate::procs::ProcessState::Running,
+            "the pane shell must survive as the anchor when the report is measured"
+        );
+        fixture.write_pane_answer(shell_pid, &format!("fh-{id}"));
+        // The listed terminal is the shell's true fd-0 target, read
+        // from `/proc` the way the walk reads it: the fd leg
+        // genuinely passes here, so only the record can refuse.
+        let shell_fd0 = std::fs::read_link(format!("/proc/{shell_pid}/fd/0"))
+            .expect("read the shell's fd 0")
+            .to_string_lossy()
+            .into_owned();
+        fixture.write_tty_answer(shell_pid, &shell_fd0);
+        assert!(
+            std::fs::read_to_string(&transcript)
+                .expect("the transcript reads")
+                .contains(conv.as_str()),
+            "test premise: the transcript names the reported conversation, so transcript \
+             validation would have passed"
+        );
+        let refusal = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(
+                    crate::procs::ProcessIdentity::read(reporter_pid)
+                        .expect("the reporter must have a kernel-attributed identity"),
+                ),
+            )
+            .await
+            .expect_err("a report through a replacement shell anchor must be refused");
+        assert_eq!(
+            refusal.kind,
+            ErrorKind::Conflict,
+            "a provenance refusal is a conflict, not a malformed report"
+        );
+        assert!(
+            format!("{refusal:#}").contains("does not match this session's recorded launch"),
+            "the record — not the matching stdin, the transcript, or the program — must be what \
+             refuses: {refusal:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+        assert_eq!(
+            fixture.record(&id).await,
+            None,
+            "the refused report leaves no locator behind"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "no binding means no resume"
+        );
+    }
+
+    /// A missing-transcript admission offers `FreshOnly` on the mirror
+    /// path: the admitted-but-unverified binding is mirrored with its
+    /// locator AND its withheld readiness, so a reply built between
+    /// the capture pass and the next refresh — `ListSessions`'
+    /// `entry_info`, which never refreshes — offers `FreshOnly`, not
+    /// the `Resume` the locator alone would imply.
+    ///
+    /// Why this test matters: every other missing-transcript test
+    /// reads its offer through `session_snapshot`, which refreshes
+    /// first and would mask exactly this defect. Only a derivation
+    /// with NO refresh between admission and reply observes the
+    /// window the P1 left open.
+    #[farhelm_testtrace::test]
+    async fn claude_missing_transcript_admission_advertises_fresh_only_on_the_mirror_path() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let dir = fixture.scratch.path().join("transcripts");
+        std::fs::create_dir_all(&dir).expect("transcripts dir");
+        let transcript = dir.join(format!("{conv}.jsonl"));
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        // Publish the entry the way reload would — Unclaimed, so the
+        // admitted report is what mirrors — before the hook ever
+        // reports, which is production order.
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = IntegrationSnapshot::resolve(&["claude".into()], None, None)
+            .expect("a claude argv resolves");
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("a missing transcript still admits");
+        // No snapshot, no list, no refresh between admission and the
+        // reply: the offer is derived straight from the mirror.
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("the entry the report mirrored into");
+        let reply = entry_info(&entry, &HashMap::new(), None);
+        assert_eq!(
+            reply.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "an admitted-but-unverified binding offers nothing on the mirror path"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "the admission still commits its binding at version 1"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(transcript.to_str().expect("fixture paths are UTF-8")),
+            "the admission still saves its locator for the later check"
+        );
+        assert!(
+            !fixture.ready(&id).await,
+            "the admission still withholds readiness"
+        );
+    }
+
+    /// `clear`, `resume`, and `fork` replace the binding in sequence
+    /// under the CAS: each transition re-proves through the live
+    /// runtime with its own transcript, and the last proof wins. The
+    /// offer follows the current binding throughout.
+    #[farhelm_testtrace::test]
+    async fn claude_transitions_replace_the_binding_in_sequence() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        let mut previous = None;
+        for source in ["startup", "clear", "resume", "fork"] {
+            let conv = uuid::Uuid::new_v4().to_string();
+            let transcript = fixture.plant_transcript(&conv);
+            fixture
+                .report(
+                    &id,
+                    &conv,
+                    source,
+                    Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                    Some(peer),
+                )
+                .await
+                .unwrap_or_else(|error| panic!("the {source} report admits: {error:#}"));
+            assert_eq!(
+                fixture.binding(&id).await,
+                (Some(conv.clone()), 1),
+                "the {source} transition replaces the binding"
+            );
+            assert_eq!(
+                fixture.offer(&id).await,
+                farhelm_proto::RestartOffer::Resume,
+                "the current binding offers throughout"
+            );
+            if let Some(previous) = previous {
+                assert_ne!(conv, previous, "test premise: each transition is a new id");
+            }
+            previous = Some(conv);
+        }
+    }
+
+    /// A sibling runtime's report — same binary shape, its OWN
+    /// transcript, a live chain of its own — refuses: the walk from
+    /// its reporter reaches the owned pane through TWO live `claude`
+    /// images, which the corridor refuses as nesting before any
+    /// transcript is read. The parent's binding stands untouched.
+    ///
+    /// Why this test matters: it is the forwarded-settings child made
+    /// visible — the probe watched such a child emit its own
+    /// `SessionStart` with its own session id — and the duplicate
+    /// emitter is the only rule that can refuse it.
+    #[farhelm_testtrace::test]
+    async fn claude_sibling_report_with_its_own_transcript_refuses() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let parent = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let parent_transcript = fixture.plant_transcript(&parent);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &parent,
+                "startup",
+                Some(parent_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+
+        let child = uuid::Uuid::new_v4().to_string();
+        let child_transcript = fixture.plant_transcript(&child);
+        let sibling = fixture.spawn_sibling(&home).await;
+        let error = fixture
+            .report(
+                &id,
+                &child,
+                "startup",
+                Some(child_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(sibling),
+            )
+            .await
+            .expect_err("the sibling's report must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(parent), 1),
+            "the sibling leaves the parent's binding alone"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the parent's offer survives the refused child"
+        );
+    }
+
+    /// A report from a genuinely nested versioned-layout runtime — a live
+    /// `.../claude/versions/<version>` image running as a child of the
+    /// parent runtime, with its own hook-shaped reporter and its own
+    /// valid transcript — refuses as nesting, and the parent's binding
+    /// stands untouched.
+    ///
+    /// Why this test matters: it is the end-to-end proof that the
+    /// versioned layout counts as a runtime rather than an unclassified
+    /// link to skip past. The corridor unit tests pin the same rule
+    /// purely; only this test shows a live walk reaching the owned pane
+    /// THROUGH the versioned image and refusing on the duplicate
+    /// emitter, with the parent's exact saved target, version, and
+    /// offer unchanged.
+    #[farhelm_testtrace::test]
+    async fn claude_nested_versioned_runtime_refuses_and_leaves_the_parent_binding() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let image = fixture.install_versioned_nested_image();
+        fixture.run_spawns_a_nested_versioned_runtime(&image);
+        let id = uuid::Uuid::new_v4().to_string();
+        let parent = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let parent_transcript = fixture.plant_transcript(&parent);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &parent,
+                "startup",
+                Some(parent_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        assert_eq!(
+            fixture.record(&id).await,
+            Some(
+                parent_transcript
+                    .to_str()
+                    .expect("fixture paths are UTF-8")
+                    .to_string()
+            ),
+            "test premise: the parent's saved transcript locator is planted"
+        );
+
+        let parent_pid = fixture.runtimes.last().expect("runtime child").child.id();
+        let nested = fixture.await_nested_reporter(&image, parent_pid).await;
+        let child = uuid::Uuid::new_v4().to_string();
+        let child_transcript = fixture.plant_transcript(&child);
+        let error = fixture
+            .report(
+                &id,
+                &child,
+                "startup",
+                Some(child_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(nested),
+            )
+            .await
+            .expect_err("the nested versioned report must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert!(
+            error.message.contains("two live Claude runtimes"),
+            "the refusal must name nesting, not a walk or transcript failure: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(parent), 1),
+            "the nested child leaves the parent's binding alone"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the parent's offer survives the refused child"
+        );
+    }
+
+    /// An unknown transition refuses with `InvalidRequest` before any
+    /// evidence is consulted: no peer is needed, because the
+    /// vocabulary check precedes the claim, the reload, and every
+    /// process or transcript read. The refusal establishes nothing.
+    #[farhelm_testtrace::test]
+    async fn claude_unknown_transition_is_refused_before_any_evidence() {
+        let fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        for source in ["session_start", "goose", "", "STARTUP"] {
+            let error = fixture
+                .report(&id, &uuid::Uuid::new_v4().to_string(), source, None, None)
+                .await
+                .expect_err("an unknown transition must be refused");
+            assert!(
+                error.kind == ErrorKind::InvalidRequest,
+                "unexpected refusal for {source:?}: {error:#}"
+            );
+        }
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused reports establish nothing"
+        );
+    }
+
+    /// Anything but the subscribed event refuses at admission's own
+    /// re-check — the doorway is not the only reader of the
+    /// vocabulary. A subagent lifecycle event with no peer and no
+    /// transcript refuses exactly like an unknown one.
+    #[farhelm_testtrace::test]
+    async fn claude_non_sessionstart_events_refuse_at_admission() {
+        let fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        for event in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::Value::from(7)),
+            Some(serde_json::Value::String("SubagentStart".to_string())),
+            Some(serde_json::Value::String("SubagentStop".to_string())),
+        ] {
+            let error = fixture
+                .report_event(
+                    &id,
+                    &uuid::Uuid::new_v4().to_string(),
+                    event,
+                    "startup",
+                    None,
+                    None,
+                )
+                .await
+                .expect_err("a non-SessionStart event must be refused");
+            assert!(
+                error.kind == ErrorKind::InvalidRequest,
+                "unexpected refusal: {error:#}"
+            );
+        }
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused reports establish nothing"
+        );
+    }
+
+    /// A report for a launch with no recorded program fails closed
+    /// with `Conflict`: NULL provenance (a pre-proof launch, or a
+    /// publish that never landed) is unknown authority, not a
+    /// default-allow. The offer stays `FreshOnly` — Claude takes no
+    /// historical exception, so version 0 never offers resume no
+    /// matter what the row remembers.
+    ///
+    /// Why this test matters: every pre-upgrade launch lands here,
+    /// and runnable-without-capture is the contract for all of them.
+    #[farhelm_testtrace::test]
+    async fn claude_report_for_a_launch_without_provenance_fails_closed() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(&id, None, "%0", ClaudeAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        let error = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("a program-less launch must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "without provenance there is no resume offer"
+        );
+    }
+
+    /// `unknown` and `package` launch programs refuse: the classifier
+    /// found no supported shape in the launch argv (or a package
+    /// shape with no verified layout), so there is no installation
+    /// descriptor for the corridor to bind the live chain to. Each
+    /// program gets its own report so a failure names the program.
+    #[farhelm_testtrace::test]
+    async fn claude_unsupported_launch_programs_refuse() {
+        for program in ["unknown", "package"] {
+            let mut fixture = ClaudeAdmission::launch().await;
+            let id = uuid::Uuid::new_v4().to_string();
+            let conv = uuid::Uuid::new_v4().to_string();
+            let home = fixture.scratch.path().join("home");
+            let transcript = fixture.plant_transcript(&conv);
+            fixture
+                .seed_claude_session(&id, Some(program), "%0", ClaudeAdmission::resume_template())
+                .await;
+            let peer = fixture.spawn_runtime(&id, &home).await;
+            let error = fixture
+                .report(
+                    &id,
+                    &conv,
+                    "startup",
+                    Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                    Some(peer),
+                )
+                .await
+                .expect_err("an unsupported launch program must be refused");
+            assert!(
+                error.kind == ErrorKind::Conflict,
+                "{program}: unexpected refusal: {error:#}"
+            );
+            assert_eq!(
+                fixture.binding(&id).await,
+                (None, 0),
+                "{program}: the refused report establishes nothing"
+            );
+        }
+    }
+
+    /// A shell-classified launch admits through the same corridor:
+    /// the live chain looks exactly like a direct launch (the wrapper
+    /// exec'd away), and the provenance saying `shell` must not void
+    /// it.
+    #[farhelm_testtrace::test]
+    async fn claude_shell_launch_program_admits() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(&id, Some("shell"), "%0", ClaudeAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the shell-classified report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 1),
+            "the shell launch binds like a direct one"
+        );
+    }
+
+    /// A report with no kernel-attributed peer refuses: without a
+    /// local process there is nothing to walk to the pane, and the
+    /// transcript alone never proves foreground.
+    #[farhelm_testtrace::test]
+    async fn claude_report_without_a_kernel_peer_refuses() {
+        let fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let error = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                None,
+            )
+            .await
+            .expect_err("a peer-less report must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+    }
+
+    /// Malformed transcript locators refuse with `InvalidRequest`
+    /// before any evidence is consulted: Claude has no fileless
+    /// report shape, so a missing, null, mistyped, relative, empty,
+    /// or oversized locator is not a shape this proof knows. Each
+    /// value gets its own report so a failure names the value.
+    #[farhelm_testtrace::test]
+    async fn claude_malformed_transcript_locators_refuse() {
+        for (label, locator) in [
+            ("missing", None),
+            ("null", Some(serde_json::Value::Null)),
+            ("mistyped", Some(serde_json::Value::from(7))),
+            (
+                "relative",
+                Some(serde_json::Value::String("relative/path.jsonl".to_string())),
+            ),
+            ("empty", Some(serde_json::Value::String(String::new()))),
+            // One past the locator bound the admission enforces (the
+            // `transcript_path_hint` gate): length is checked before
+            // the write, so this never reaches a filesystem.
+            (
+                "oversized",
+                Some(serde_json::Value::String(format!("/{}", "p".repeat(4096)))),
+            ),
+        ] {
+            let fixture = ClaudeAdmission::launch().await;
+            let id = uuid::Uuid::new_v4().to_string();
+            fixture
+                .seed_claude_session(
+                    &id,
+                    Some("claude"),
+                    "%0",
+                    ClaudeAdmission::resume_template(),
+                )
+                .await;
+            let error = fixture
+                .report_event(
+                    &id,
+                    &uuid::Uuid::new_v4().to_string(),
+                    Some(serde_json::Value::String("SessionStart".to_string())),
+                    "startup",
+                    locator,
+                    None,
+                )
+                .await
+                .expect_err("a malformed locator must be refused");
+            assert!(
+                error.kind == ErrorKind::InvalidRequest,
+                "{label}: unexpected refusal: {error:#}"
+            );
+            assert_eq!(
+                fixture.binding(&id).await,
+                (None, 0),
+                "{label}: the refused report establishes nothing"
+            );
+        }
+    }
+
+    /// Transcript content rules, each with a live peer and provenance
+    /// so the refusal names the CONTENT rather than a missing
+    /// premise: a file naming another session refuses, an empty file
+    /// refuses (fail closed — a real transcript always opens on its
+    /// session), and a symlink or directory in the locator's place
+    /// refuses through the no-symlink reader. Every refusal leaves
+    /// the binding alone.
+    #[farhelm_testtrace::test]
+    async fn claude_transcript_content_mismatches_refuse() {
+        for (label, plant) in [("another session", "other"), ("empty file", "empty")] {
+            let mut fixture = ClaudeAdmission::launch().await;
+            let id = uuid::Uuid::new_v4().to_string();
+            let conv = uuid::Uuid::new_v4().to_string();
+            let home = fixture.scratch.path().join("home");
+            let dir = fixture.scratch.path().join("transcripts");
+            std::fs::create_dir_all(&dir).expect("transcripts dir");
+            let transcript = dir.join(format!("{conv}.jsonl"));
+            match plant {
+                "other" => {
+                    let other = uuid::Uuid::new_v4().to_string();
+                    std::fs::write(
+                        &transcript,
+                        format!("{{\"sessionId\":\"{other}\"}}\n{{\"sessionId\":\"{conv}\"}}\n"),
+                    )
+                    .expect("a transcript opening on another session");
+                }
+                _ => {
+                    std::fs::write(&transcript, "").expect("an empty transcript");
+                }
+            }
+            fixture
+                .seed_claude_session(
+                    &id,
+                    Some("claude"),
+                    "%0",
+                    ClaudeAdmission::resume_template(),
+                )
+                .await;
+            let peer = fixture.spawn_runtime(&id, &home).await;
+            let error = fixture
+                .report(
+                    &id,
+                    &conv,
+                    "startup",
+                    Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                    Some(peer),
+                )
+                .await
+                .expect_err("an unverifiable transcript must refuse");
+            assert!(
+                error.kind == ErrorKind::Conflict,
+                "{label}: unexpected refusal: {error:#}"
+            );
+            assert_eq!(
+                fixture.binding(&id).await,
+                (None, 0),
+                "{label}: the refused report establishes nothing"
+            );
+        }
+        for label in ["symlink", "directory"] {
+            let mut fixture = ClaudeAdmission::launch().await;
+            let id = uuid::Uuid::new_v4().to_string();
+            let conv = uuid::Uuid::new_v4().to_string();
+            let home = fixture.scratch.path().join("home");
+            let dir = fixture.scratch.path().join("transcripts");
+            std::fs::create_dir_all(&dir).expect("transcripts dir");
+            let transcript = dir.join(format!("{conv}.jsonl"));
+            if label == "symlink" {
+                let planted = fixture.plant_transcript(&conv);
+                let target = dir.join(format!("{conv}-real.jsonl"));
+                std::fs::rename(&planted, &target).expect("move the planted transcript aside");
+                std::os::unix::fs::symlink(&target, &transcript).expect("locate through a link");
+            } else {
+                std::fs::create_dir(&transcript).expect("a directory at the locator");
+            }
+            fixture
+                .seed_claude_session(
+                    &id,
+                    Some("claude"),
+                    "%0",
+                    ClaudeAdmission::resume_template(),
+                )
+                .await;
+            let peer = fixture.spawn_runtime(&id, &home).await;
+            let error = fixture
+                .report(
+                    &id,
+                    &conv,
+                    "startup",
+                    Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                    Some(peer),
+                )
+                .await
+                .expect_err("a non-regular transcript must refuse");
+            assert!(
+                error.kind == ErrorKind::Conflict,
+                "{label}: unexpected refusal: {error:#}"
+            );
+            assert_eq!(
+                fixture.binding(&id).await,
+                (None, 0),
+                "{label}: the refused report establishes nothing"
+            );
+        }
+    }
+
+    /// The identity-change window between the transcript evidence and
+    /// the closing attribution: the gate reaps the whole runtime tree
+    /// there, so the recheck finds no live runtime and refuses —
+    /// without recording anything. The transcript the dead runtime
+    /// left behind cannot bless a report nothing live stands behind.
+    #[farhelm_testtrace::test]
+    async fn claude_identity_change_between_evidence_and_recheck_refuses() {
+        let mut fixture = ClaudeAdmission::launch_with(|kills, seams| {
+            seams.claude_evidence_gate = Some(ClaudeAdmission::kill_gate(kills));
+        })
+        .await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        let error = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("a runtime that dies mid-admission must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the interrupted admission records nothing"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the interrupted admission offers nothing"
+        );
+    }
+
+    /// A report that arrives while the session has no in-memory entry
+    /// still binds from the durable row: the pane is recovered from
+    /// tmux's own sweep, and the entry the admission mirrors into is
+    /// minted on demand. The gap path proves the same binding, not a
+    /// lesser one.
+    #[farhelm_testtrace::test]
+    async fn claude_report_during_the_publication_gap_binds_from_the_row() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        // The row carries no pane, so the sweep is the only source for
+        // it; the direct answer the spawn wrote still serves the
+        // ownership recheck behind the recovered pane.
+        fixture
+            .seed_claude_session(&id, Some("claude"), "", ClaudeAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture.write_panes_list(&format!("fh-{id}"));
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the gap-path parent report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 1),
+            "the gap path binds at version 1"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the gap path offers like the direct one"
+        );
+    }
+
+    /// An accepted capture survives its owner's exit and a supervisor
+    /// reload: the binding, the version, the locator, and the offer
+    /// are all durable, and killing the processes that reported them
+    /// changes none of it.
+    #[farhelm_testtrace::test]
+    async fn claude_accepted_capture_survives_owner_exit_and_reload() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        fixture.kill_owner();
+        fixture.sup = None;
+        let sup = Supervisor::new_with_seams(
+            fixture.state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams::default(),
+        )
+        .await
+        .expect("the supervisor reloads");
+        fixture.sup = Some(sup);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "the binding survives the reload"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(transcript.to_str().expect("fixture paths are UTF-8")),
+            "the locator survives the reload"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the offer survives the reload"
+        );
+    }
+
+    /// Admission re-validates on every report: a transcript replaced
+    /// between two admissions refuses on the second, so a session the
+    /// file no longer names cannot ride an older proof. Nothing is
+    /// cached across admissions — not the row, not the verdict — and
+    /// the refusal invalidates nothing by itself: the binding stands
+    /// until a resume attempt re-verifies it (or a newer report
+    /// replaces it), exactly as the demotion contract says.
+    #[farhelm_testtrace::test]
+    async fn claude_readmissions_see_transcript_mutations() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the first admission commits");
+        // The transcript is replaced out from under the binding: same
+        // path, another session's name on the first line.
+        let other = uuid::Uuid::new_v4().to_string();
+        std::fs::write(
+            &transcript,
+            format!("{{\"sessionId\":\"{other}\"}}\n{{\"sessionId\":\"{conv}\"}}\n"),
+        )
+        .expect("the transcript is replaced");
+        let error = fixture
+            .report(
+                &id,
+                &conv,
+                "resume",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("the mutated transcript refuses on re-report");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 1),
+            "a refused re-report leaves the binding for resume verification to judge"
+        );
+    }
+
+    /// Pre-resume verification passes a still-matching transcript and
+    /// touches nothing: the binding, the version, the locator, and the
+    /// public offer are identical before and after, because a pass has
+    /// no write leg.
+    #[farhelm_testtrace::test]
+    async fn claude_resume_verifies_against_the_live_transcript() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        sup.verify_claude_resume(&id, &snapshot)
+            .await
+            .expect("the live transcript verifies");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "a passing verification writes nothing"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(transcript.to_str().expect("fixture paths are UTF-8")),
+            "a passing verification keeps the hint"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the offer survives verification"
+        );
+    }
+
+    /// A transcript deleted out from under the binding demotes on
+    /// resume verification: the id is kept, the version is withdrawn,
+    /// and the offer reads fresh-only. A restored transcript plus a
+    /// later attributed report re-proves under the usual CAS.
+    #[farhelm_testtrace::test]
+    async fn claude_unverifiable_resume_demotion_withdraws_the_offer() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+
+        std::fs::remove_file(&transcript).expect("the transcript is deleted");
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        let error = sup
+            .verify_claude_resume(&id, &snapshot)
+            .await
+            .expect_err("a deleted transcript must refuse the resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 0),
+            "the id is kept, the version is withdrawn"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the withdrawn offer reads fresh-only"
+        );
+
+        // The transcript comes back and a later report re-proves
+        // under the usual CAS.
+        std::fs::write(
+            &transcript,
+            format!("{{\"sessionId\":\"{conv}\",\"cwd\":\"/work\"}}\n"),
+        )
+        .expect("the transcript is restored");
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the re-proven report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 1),
+            "a later attributed report re-proves"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the re-proven binding offers again"
+        );
+    }
+
+    /// A real `restart_session` Resume refuses an unverifiable
+    /// transcript before relaunching anything: the verifier runs
+    /// inside the public restart path, the generation never advances,
+    /// and the offer withdraws — the refusal names `Conflict`, never
+    /// a relaunch failure.
+    #[farhelm_testtrace::test]
+    async fn claude_restart_refuses_resume_for_an_unverifiable_transcript() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        // The restart path reads its entry from the in-memory map,
+        // which seeding alone does not populate.
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = IntegrationSnapshot::resolve(&["claude".into()], None, None)
+            .expect("a claude argv resolves");
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+
+        std::fs::remove_file(&transcript).expect("the transcript is deleted");
+        let error = sup
+            .restart_session(&id, RestartMode::Resume, true)
+            .await
+            .expect_err("an unverifiable transcript must refuse the restart");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .unwrap()
+            .expect("the row survives");
+        assert_eq!(
+            row.generation, 0,
+            "no relaunch began: the generation never advanced"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 0),
+            "the restart-path refusal demotes like a direct one"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the offer withdraws on the public path"
+        );
+    }
+
+    /// A verification against a moved-on binding refuses WITHOUT
+    /// demoting: the newer binding is not this verifier's to
+    /// withdraw. An old snapshot (the first conversation) no longer
+    /// matches the row (the second), so the verdict is a refusal and
+    /// the current proof stands exactly as committed.
+    #[farhelm_testtrace::test]
+    async fn claude_moved_binding_refuses_resume_without_demoting() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let first = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let first_transcript = fixture.plant_transcript(&first);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &first,
+                "startup",
+                Some(first_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the first report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let stale = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        // The binding moves on under the old snapshot.
+        let second = uuid::Uuid::new_v4().to_string();
+        let second_transcript = fixture.plant_transcript(&second);
+        fixture
+            .report(
+                &id,
+                &second,
+                "clear",
+                Some(second_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the second report replaces");
+        let error = sup
+            .verify_claude_resume(&id, &stale)
+            .await
+            .expect_err("a moved binding must refuse");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(second), 1),
+            "the newer binding is not the stale verifier's to withdraw"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the current proof still offers"
+        );
+    }
+
+    /// A failed resume verification racing a successful same-ID
+    /// re-proof keeps the newer proof: verification holds the
+    /// session's capture claim from its reload through any demotion,
+    /// so the re-proof commits strictly after the verdict instead of
+    /// underneath a demotion aimed at the older binding — every CAS
+    /// field would still match that newer proof.
+    ///
+    /// Why this test matters: without the claim, a transiently
+    /// missing transcript fails verification, the file reappears, a
+    /// re-proof commits version 1, and the stale verifier demotes it
+    /// back to fresh-only. The deleted-then-restored transcript below
+    /// is the deterministic stand-in for the transiently missing
+    /// file.
+    #[farhelm_testtrace::test]
+    async fn claude_failed_verify_then_same_id_reproof_keeps_the_proof() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_notify = Arc::new(tokio::sync::Notify::new());
+        let release_notify = Arc::new(tokio::sync::Notify::new());
+        let mut fixture = ClaudeAdmission::launch_with({
+            let fired = Arc::clone(&fired);
+            let fired_notify = Arc::clone(&fired_notify);
+            let release_notify = Arc::clone(&release_notify);
+            move |_, seams| {
+                let gate: CaptureGate = Arc::new(move || {
+                    let fired = Arc::clone(&fired);
+                    let fired_notify = Arc::clone(&fired_notify);
+                    let release_notify = Arc::clone(&release_notify);
+                    Box::pin(async move {
+                        // Register the release waiter BEFORE
+                        // announcing: `notify_one` without a waiter
+                        // is lost, and the test releases as soon as
+                        // it sees the flag (the same ceremony
+                        // `claims_reached_for_test` documents).
+                        let release = release_notify.notified();
+                        tokio::pin!(release);
+                        release.as_mut().enable();
+                        fired.store(true, Ordering::SeqCst);
+                        fired_notify.notify_one();
+                        release.await;
+                    })
+                });
+                seams.claude_verify_gate = Some(gate);
+            }
+        })
+        .await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proving report admits");
+        // The transient outage: the proven transcript disappears, so
+        // verification is about to fail against a binding that was
+        // valid when it was made.
+        std::fs::remove_file(&transcript).expect("delete the proven transcript");
+        let sup = Arc::clone(fixture.sup.as_ref().expect("supervisor"));
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot reads")
+            .expect("the session survives");
+        let verify = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let id = id.clone();
+            async move { sup.verify_claude_resume(&id, &snapshot).await }
+        });
+        // Parked between the failed read and the demotion: the
+        // loop (not a bare notified) cannot miss the flag even if
+        // the verifier announced before this first poll.
+        loop {
+            let arrived = fired_notify.notified();
+            tokio::pin!(arrived);
+            arrived.as_mut().enable();
+            if fired.load(Ordering::SeqCst) {
+                break;
+            }
+            arrived.await;
+        }
+        assert!(
+            sup.capture_locks.claimed_for_test(&id),
+            "the parked verifier holds the session's capture claim"
+        );
+        // The file recovers before the verdict lands.
+        std::fs::write(
+            &transcript,
+            format!("{{\"sessionId\":\"{conv}\",\"cwd\":\"/work\"}}\n"),
+        )
+        .expect("restore the proven transcript");
+        // The verdict first (it demotes the stale binding), then the
+        // same-ID re-proof: the claim serializes them, so the order
+        // is verdict-then-proof whatever the scheduler does.
+        release_notify.notify_one();
+        let error = verify
+            .await
+            .expect("the verifier joins")
+            .expect_err("the stale verdict still demotes");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 0),
+            "the stale verdict demotes first"
+        );
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the same-ID re-proof commits after the verdict");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 1),
+            "the newer proof survives its own window"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the re-proven binding offers again"
+        );
+    }
+
+    /// A suppressed offer stays suppressed across refresh, and
+    /// refresh never promotes a version: after the transcript goes
+    /// missing the ticker's pass withholds readiness (same binding,
+    /// same locator, version untouched) without demoting, and a
+    /// demoted binding stays demoted no matter how many passes run.
+    /// The ticker never opens another transcript and never blesses
+    /// history; only a fresh attributed report can re-prove a version.
+    #[farhelm_testtrace::test]
+    async fn claude_refresh_suppresses_without_demoting_and_never_promotes() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        // Production order: the launch publishes its entry before its
+        // hook ever reports, so the ticker's pass has a mirror to work
+        // through. The refresh loop is entry-driven by design (Codex,
+        // Pi, and OMP all refresh through the published entry); an
+        // entry-less row is a publication gap, and the gap test above
+        // pins what that means.
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = IntegrationSnapshot::resolve(&["claude".into()], None, None)
+            .expect("a claude argv resolves");
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        std::fs::remove_file(&transcript).expect("the transcript goes missing");
+        sup.capture_now().await;
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 1),
+            "refresh suppresses readiness without demoting the proof"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(transcript.to_str().expect("fixture paths are UTF-8")),
+            "the missing transcript keeps its saved locator for the next check"
+        );
+        assert!(
+            !fixture.ready(&id).await,
+            "the missing transcript withholds readiness"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the offer stays withdrawn across refresh"
+        );
+
+        // Demotion is stickier still: a demoted binding stays
+        // demoted across passes, and refresh promotes nothing.
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        sup.verify_claude_resume(&id, &snapshot)
+            .await
+            .expect_err("the missing transcript demotes");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv.clone()), 0),
+            "the demotion premise holds"
+        );
+        sup.capture_now().await;
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some(conv), 0),
+            "the ticker pass changes no durable state"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "a demoted binding offers nothing across refresh"
+        );
+    }
+
+    /// A report from the previous generation refuses after a
+    /// relaunch: the relaunch opens a new generation with cleared
+    /// provenance, so the surviving old chain's report fails closed
+    /// on the new row and the new generation's binding stays
+    /// untouched. The old runtime is deliberately left ALIVE — a
+    /// dead chain would refuse for the wrong reason.
+    #[farhelm_testtrace::test]
+    async fn claude_old_generation_report_after_relaunch_refuses() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let conv = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let transcript = fixture.plant_transcript(&conv);
+        fixture
+            .seed_claude_session(
+                &id,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home).await;
+        fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let decision = sup
+            .store
+            .begin_relaunch(
+                &id,
+                crate::store::OfferBasis {
+                    captured_conversation: Some(conv.clone()),
+                    capture_ambiguous: false,
+                    capture_ownership_version: 1,
+                },
+                true,
+                false,
+            )
+            .await
+            .expect("the relaunch opens");
+        assert!(
+            matches!(decision, crate::store::RelaunchDecision::Claimed(_)),
+            "the relaunch must claim, not observe a changed offer"
+        );
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .unwrap()
+            .expect("the row survives");
+        assert_eq!(row.generation, 1, "the relaunch opens generation 1");
+        assert_eq!(
+            row.claude_launch_program, None,
+            "the relaunch clears the launch provenance"
+        );
+
+        let error = fixture
+            .report(
+                &id,
+                &conv,
+                "startup",
+                Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("the old generation's report must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the new generation's binding stays untouched"
+        );
+    }
+
+    /// A child report after the owner exited establishes nothing:
+    /// the dead peer cannot attribute, so a bound session keeps its
+    /// binding and an unbound one stays pristine. Process death is
+    /// the ordinary end of a launch, not a capture event.
+    #[farhelm_testtrace::test]
+    async fn claude_child_report_after_owner_exit_establishes_nothing() {
+        let mut fixture = ClaudeAdmission::launch().await;
+        let home = fixture.scratch.path().join("home");
+
+        // Bound first: the parent's binding survives the processes
+        // that reported it, and the late child cannot touch it.
+        let bound = uuid::Uuid::new_v4().to_string();
+        let parent = uuid::Uuid::new_v4().to_string();
+        let parent_transcript = fixture.plant_transcript(&parent);
+        fixture
+            .seed_claude_session(
+                &bound,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&bound, &home).await;
+        fixture
+            .report(
+                &bound,
+                &parent,
+                "startup",
+                Some(parent_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect("the proven parent report admits");
+        fixture.kill_owner();
+        let error = fixture
+            .report(
+                &bound,
+                &uuid::Uuid::new_v4().to_string(),
+                "startup",
+                Some(parent_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("the post-exit child must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&bound).await,
+            (Some(parent), 1),
+            "the post-exit child leaves the parent's binding alone"
+        );
+
+        // Never bound: the child-first report after the owner's exit
+        // establishes nothing, and the session stays pristine.
+        let pristine = uuid::Uuid::new_v4().to_string();
+        let child = uuid::Uuid::new_v4().to_string();
+        let child_transcript = fixture.plant_transcript(&child);
+        fixture
+            .seed_claude_session(
+                &pristine,
+                Some("claude"),
+                "%0",
+                ClaudeAdmission::resume_template(),
+            )
+            .await;
+        // The pid file still names the reaped runtime's reporter;
+        // remove it so the next spawn's readiness wait cannot read
+        // the stale pid and premise-assert against a dead process.
+        std::fs::remove_file(fixture.scratch.path().join("bin/reporter.pid")).ok();
+        let peer = fixture.spawn_runtime(&pristine, &home).await;
+        fixture.kill_owner();
+        let error = fixture
+            .report(
+                &pristine,
+                &child,
+                "startup",
+                Some(child_transcript.to_str().expect("fixture paths are UTF-8")),
+                Some(peer),
+            )
+            .await
+            .expect_err("the post-exit child-first report must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&pristine).await,
+            (None, 0),
+            "the post-exit child-first report establishes nothing"
+        );
+    }
+
     /// Deleting a session removes its conversation-hook trace, at the path
     /// [`hook_log_path`] names — and removes that one only.
     ///
@@ -20872,6 +24729,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: doomed.to_string(),
                     parent: None,
                     archived: false,
@@ -20894,6 +24752,7 @@ exit 0
                     canonical_cwd: Some("/tmp".to_string()),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -20970,6 +24829,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     archived: false,
@@ -20992,6 +24852,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -21054,6 +24915,7 @@ exit 0
                         omp_reporter_asset: None,
                         omp_launch_program: None,
                         goose_launch_program: None,
+                        claude_launch_program: None,
                         id: id.to_string(),
                         parent: None,
                         archived: false,
@@ -21073,6 +24935,7 @@ exit 0
                         canonical_cwd: None,
                         captured_conversation: None,
                         captured_record: None,
+                        claude_transcript_ready: false,
                         capture_ambiguous: false,
                         first_input_at: None,
                         generation: 0,
@@ -21158,6 +25021,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -21177,6 +25041,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -21255,6 +25120,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -21274,6 +25140,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -21349,6 +25216,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     archived: false,
@@ -21368,6 +25236,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -22174,9 +26043,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                22,
-                "the v17 fixture now migrates through the provenance, OMP asset, OMP program, and Goose \
-                 launch-program migrations too"
+                24,
+                "the v17 fixture now migrates through the provenance, OMP asset, OMP program, Goose \
+                 launch-program, Claude launch-program, and Claude transcript-readiness migrations too"
             );
             assert_eq!(
                 conn.query_row(
@@ -22393,6 +26262,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -22412,6 +26282,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -22814,9 +26685,18 @@ exit 0
             assert_eq!(snapshot.captured_conversation, None);
             assert_eq!(snapshot.restart_offer, RestartOffer::FreshOnly);
 
-            // Inject the capture result through its normal durable writer.
-            // Record discovery is outside this regression; no record file is
-            // read by this seam, and the fake path stays in the owned fixture.
+            // Inject the proven binding through its normal durable writer:
+            // scan findings no longer bless a Claude resume, so only a
+            // version-1 admission carries the offer this half pins. The
+            // transcript is planted valid because the snapshot below
+            // re-verifies the saved path exactly (record discovery stays
+            // outside this regression — nothing searches for the file).
+            let transcript = work.path().join("transcript.jsonl");
+            std::fs::write(
+                &transcript,
+                "{\"sessionId\":\"conversation-1\",\"cwd\":\"/work\"}\n",
+            )
+            .expect("plant the saved transcript");
             let generation = sup
                 .store
                 .session(&created.id)
@@ -22824,17 +26704,21 @@ exit 0
                 .expect("read generation")
                 .expect("session exists")
                 .generation;
-            let captured = sup
-                .store
-                .record_captured_conversation(
-                    &created.id,
-                    generation,
-                    "conversation-1",
-                    &work.path().join("record.jsonl"),
-                )
-                .await
-                .expect("persist captured identity");
-            assert_eq!(captured.as_deref(), Some("conversation-1"));
+            assert!(
+                sup.store
+                    .admit_ownership_proven_conversation(
+                        &created.id,
+                        generation,
+                        None,
+                        0,
+                        "conversation-1",
+                        Some(transcript.to_str().expect("fixture paths are UTF-8")),
+                        true,
+                    )
+                    .await
+                    .expect("persist proven identity"),
+                "the first admission against the pristine binding must commit"
+            );
             let snapshot = sup
                 .session_snapshot(&created.id)
                 .await
@@ -23289,6 +27173,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -23308,6 +27193,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -23380,6 +27266,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "ended".to_string(),
                     parent: None,
                     archived: false,
@@ -23399,6 +27286,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -23914,6 +27802,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -23933,6 +27822,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -24014,6 +27904,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -24033,6 +27924,7 @@ exit 0
                     canonical_cwd: None,
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -24444,6 +28336,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -24470,6 +28363,7 @@ exit 0
                     ),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -24558,6 +28452,7 @@ exit 0
             omp_reporter_asset: None,
             omp_launch_program: None,
             goose_launch_program: None,
+            claude_launch_program: None,
             id: "stranded".to_string(),
             parent: None,
             archived: false,
@@ -24577,6 +28472,7 @@ exit 0
             canonical_cwd: Some(cwd.clone()),
             captured_conversation: None,
             captured_record: None,
+            claude_transcript_ready: false,
             capture_ambiguous: false,
             first_input_at: None,
             generation: 7,
@@ -24731,6 +28627,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -24750,6 +28647,7 @@ exit 0
                     canonical_cwd: Some(cwd.clone()),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,
@@ -24958,6 +28856,7 @@ exit 0
                     omp_reporter_asset: None,
                     omp_launch_program: None,
                     goose_launch_program: None,
+                    claude_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     archived: false,
@@ -24977,6 +28876,7 @@ exit 0
                     canonical_cwd: Some(canonical_original.clone()),
                     captured_conversation: None,
                     captured_record: None,
+                    claude_transcript_ready: false,
                     capture_ambiguous: false,
                     first_input_at: None,
                     generation: 0,

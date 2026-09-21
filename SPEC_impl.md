@@ -1184,15 +1184,15 @@ failure can leave private evidence, but cannot authorize another directory move.
   arbitrary terminal bytes; the default is "no sharpening", which is deliberately different from the no-integration case
   (generic sessions still get the baseline). Recognition is conservative by design — a vendor question phrase AND a
   rendered menu of numbered answers, both at the bottom of the screen — because a status that reads waiting at a working
-  session teaches users to ignore the column, while a missed prompt merely reads idle. Claude Code: watch
-  `~/.claude/projects/<munged-cwd>/` for the session record. Audited specifics that shape this: the record appears at
-  first prompt submission, not at launch, so correlation keys on first-input time and tolerates an unbounded
-  launch-to-first-input gap; the cwd munging is non-injective (`/`, `.`, `_` all become `-`); and per-line JSON fields
-  (sessionId, cwd, timestamps) are the reliable correlators — file birth times can postdate content after rewrites. An
-  identity is claimed only when correlation is unambiguous — two near-simultaneous launches in one cwd stay uncaptured
-  rather than choosing a record arbitrarily. A scan-derived Claude identity retains its exact record locator for
-  append/restart re-verification; a Claude hook report instead remains the agent's direct answer. Codex no longer uses
-  this fallback: even a single matching rollout may belong to a nested invocation rather than the foreground.
+  session teaches users to ignore the column, while a missed prompt merely reads idle. Claude Code used to watch
+  `~/.claude/projects/<munged-cwd>/` for the session record and correlate it by first-input window; that fallback is cut
+  over as of the Claude ownership proof below, and no integration scans vendor state for identity anymore. The audited
+  specifics that shaped the old correlation are kept here so nobody re-derives them innocently: the record appears at
+  first prompt submission, not at launch; the cwd munging is non-injective (`/`, `.`, `_` all become `-`); per-line JSON
+  fields (sessionId, cwd, timestamps) were the reliable correlators — file birth times can postdate content after
+  rewrites. An admitted Claude binding retains its exact transcript locator for refresh/pre-resume re-verification; a
+  Claude hook report is the agent's direct answer, never a correlation. No proof-carrying kind scans: even a single
+  matching record may belong to a nested invocation rather than the foreground.
 
   **Codex attribution and exact-record validation.** The Unix accept loop captures the kernel peer PID and its process
   start token before scheduling the connection handler. For a Codex report, a bounded, revalidated ancestry walk must
@@ -1272,17 +1272,22 @@ failure can leave private evidence, but cannot authorize another directory move.
   program that Goose launch's argv started, published pre-spawn and fenced on the generation, so admission classifies
   the current launch rather than the resume template. Goose admission refuses a `NULL`, stale, or `unknown` program
   before any process is inspected; pre-22 rows adopt `NULL` and fail closed, and Goose takes no Codex-style exception
-  either: every older Goose row offers fresh-only until its first proven report.
+  either: every older Goose row offers fresh-only until its first proven report. Migration 23 adds
+  `claude_launch_program` the same way: the program that Claude launch's argv started, published pre-spawn and fenced on
+  the generation. Claude admission refuses a `NULL`, stale, `unknown`, or `package` program before any process is
+  inspected; pre-23 rows adopt `NULL` and fail closed, and Claude takes no Codex-style exception either: every older
+  Claude row offers fresh-only until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Goose's proof has landed alongside Codex's and OMP's; Claude and Pi keep their existing acceptance behind the
-  discriminator gate until each proof lands, and new framework entry points default to deny rather than allow. The offer
-  gate has its final shape but flips per kind: Codex, OMP, and Goose require version 1, while the other kinds keep
-  today's offer behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface
-  consults. There is no report epoch, and no vendor event ordering beyond what the Codex proof establishes and the OMP
-  serial fences (a cancellation fence, not a cross-reporter chronology); the Goose store read is a point observation,
-  not a cross-reporter chronology either. Old processes and assets fail closed after the upgrade; nothing is
-  grandfathered.
+  Claude's proof has landed alongside Codex's, OMP's, and Goose's; Pi keeps its existing acceptance behind the
+  discriminator gate until its proof lands, and new framework entry points default to deny rather than allow. The offer
+  gate has its final shape but flips per kind: Codex, OMP, Goose, and Claude require version 1, while Pi keeps today's
+  offer behavior until its proof lands, writes 1, and flips the single per-kind predicate every surface consults. There
+  is no report epoch, and no vendor event ordering beyond what the Claude probes establish (admission is a point
+  observation, not a cross-reporter chronology); the Codex proof's ordering, the OMP serial fences (a cancellation
+  fence, not a cross-reporter chronology), and the Goose store read are point observations too. Old processes and assets
+  fail closed after the upgrade; nothing is grandfathered. The capture ticker never enumerates a transcript directory;
+  pre-resume verification is the staleness backstop.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1308,10 +1313,11 @@ failure can leave private evidence, but cannot authorize another directory move.
   configuration (a second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the
   user's once they touch them), and — for either vendor — an argv containing a bare `--` (our flags would become prompt
   text). `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns
-  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Claude's scan remains
-  the fallback when no report has been accepted; Codex requires attributed reporting and does not infer ownership from
-  nearby rollout files. An accepted report dominates scan-derived state, including ambiguity.
-  `docs/agent-hook-injection.md` is the user-facing account of the same mechanism.
+  injection off wholesale or per kind, read once at supervisor start and carried as a seam value. No integration scans
+  vendor state for identity anymore — Claude's record scan was the last fallback and the ownership proof below cut it
+  over — so a launch that skips injection stays runnable but uncaptured until its first proven report. An accepted
+  report dominates scan-derived state, including ambiguity. `docs/agent-hook-injection.md` is the user-facing account of
+  the same mechanism.
 
   **Goose and Pi reporters.** Pi never scans vendor state and keeps that contract. Goose used to share it and no longer
   does: the report still names the conversation, but admission validates the reported session's root metadata with one
@@ -1455,6 +1461,98 @@ failure can leave private evidence, but cannot authorize another directory move.
   equality verified at the v1.50.1 tag and live startup, spawn, and store behavior observed from the 1.50.1 binary;
   Docker/Flatpak transports, package-manager executions, and shell-wrapper injection stay fail-closed and labeled in
   `docs/harnesses/goose.md` rather than claimed.
+
+  **The Claude ownership proof.** Admission is one explicit branch (`report_claude_conversation`), wired through the
+  shared claim discipline, the atomic compare-and-swap over the complete prior binding, and the shared mirror with
+  version 1 — flipped in the same change as the per-kind predicate, since flipping alone would deny every Claude report.
+  The proof has two halves, and both must pass: process attribution establishes that the reporter descends from the
+  launched runtime, and exact transcript validation establishes that the reported id agrees with the transcript file it
+  names. That agreement is consistency between two reported values, not proof of which conversation inside the runtime
+  owns the foreground: a delegated in-process conversation that causes the same runtime to launch the ordinary hook
+  helper is indistinguishable from the parent's on the current evidence (see the stated residual below), so the
+  transcript half does not establish foreground rather than delegated ownership. Attribution walks the shared mechanics
+  to the current owned pane and applies Claude's restrictive corridor over the installation descriptor the durable
+  launch argv selects — classified at spawn (`classify_claude_launch`: `claude` → `Claude`, npm/npx/bun/bunx →
+  `Package`, sh/bash/dash → `Shell`, everything else → `Unknown`) and retained with the generation's provenance, never
+  re-derived from the resume template: `C` (exactly one native `claude` image, matched by resolved executable basename
+  so a script named `claude` never qualifies, whose live argv still describes a foreground session through the shared
+  CLI grammar — print mode and top-level `--agent` are foreground shapes, explicitly-parsed flags only), `S` (a known
+  transparent `sh -c 'exec claude …'` trampoline above the runtime, or an exec'd-away shell that leaves no link — the
+  same rule OMP's and Goose's `S` apply, no new generality). `Package` and `Unknown` refuse before any evidence: the
+  classifier names the shape honestly in the provenance column, but with no package/bin layout proved on the pinned
+  install there is no descriptor to bind the live chain to. There is deliberately no subcommand grammar in the
+  classifier (no Goose-`session` equivalent is verified for Claude): classification is launcher shape, and the
+  corridor's `C` evidence carries the argv check. The reporter itself must be the supported hook invocation — the shared
+  prefix matcher, since Claude's hook runs as the direct command (`farhelm internal hook --vendor claude`) rather than
+  through a persisted declaration — and between runtime and reporter only the narrow hook trampoline may appear: a
+  `sh -c` whose words are exactly the hook invocation. A second `claude` anywhere, any other session-hosting runtime, an
+  unclassified intermediary above the emitter, an interpreter between reporter and runtime, and unknown wrappers all
+  refuse. Only an attributed `SessionStart` is accepted, with one of the five subscribed sources (`startup`, `resume`,
+  `clear`, `compact`, `fork`) — the exact enum the pinned binary's hook schema carries, checked raw at the doorway and
+  re-checked at admission. A present subagent `agent_id` refuses on every report (a wrong-typed one refuses as
+  malformed, never coerced to absent); a top-level `agent_type` without one is accepted and never read. Attribution runs
+  twice, bracketing the vendor evidence: the first names the emitter, the second — process evidence only, no transcript
+  re-read — must name the same emitter after the evidence, so a PID reuse or exec between the evidence and the recheck
+  refuses instead of authorizing the wrong process. The transcript check between them is a single direct open of the
+  reported path — bounded prefix, no symlinks, no directory listing, no newest-file fallback — requiring the first
+  session line's `sessionId` to equal the reported id. A transcript that does not exist yet still admits, at version 1
+  with readiness suppressed (no Resume offer); the offer appears only through exact paths, a later attributed report for
+  the same binding or the refresh pass's single direct open. Refresh moves only the readiness bit under CAS when the
+  saved path stops verifying — suppression, not demotion, with the locator kept beside the binding for the next check —
+  and pre-resume verification demotes version 1 → 0 under CAS on any failure; both keep the id for the next attributed
+  report. The restart path verifies before validating the mode against the snapshot's offer, because that offer is built
+  from the suppressible readiness bit: validating first would refuse on a stale `FreshOnly` and leave a version-1 proof
+  nothing ever withdraws. The whole admission holds a 1 s deadline re-enforced before the commit, and the admitted
+  transcript path persists beside the binding as the verification hint, re-validated at every admission rather than
+  compared by the CAS (the CAS compares generation + conversation + version, so a legitimate transcript move cannot
+  wedge the binding). The stated residual: the transcript is read once per admission, and a file replaced between that
+  read and the commit is admitted and caught later by pre-resume verification — the same single-snapshot argument as
+  Goose's store read. A legitimate `/clear`, `/resume`, or `/branch` replaces the binding under CAS; a legitimate fork
+  is a new id admitted through both proofs, while a background copy's fork report fails foreground attribution so the
+  parent binding stands. Requiring the reporter to be the injected SessionStart hook running as a child of the runtime
+  it names proves the report arrived through a helper process that runtime launched — a process cannot report for itself
+  — but it does not distinguish which conversation hosted by that runtime the helper was launched for. Indistinguishable
+  same-runtime delegated reports are therefore an unsupported, unproven residual of the current evidence: if a real
+  supported vendor mode produces this shape, telling parent from delegate apart needs a vendor discriminator or a proven
+  mode restriction, not the existing process and id checks. Every link above the runtime is still classified against
+  indirection: a second `claude` in either layout, any other session-hosting runtime, and every unclassified wrapper
+  refuse, as does any surviving anchor that is not the session's own launched shell or this launch's own transparent
+  shell — documented as unsupported, never claimed safe. The bare-shell allowance is argv shape plus two legs, never
+  argv shape alone: a wrapper can redirect its own stdin to a script, exec a bare shell over its own pane PID, and then
+  restore the terminal fd (`exec` preserves the process while replacing image and argv, and the wrapper owns its
+  descriptors), so neither basename plus argc nor fd equality establishes the anchor. The corridor therefore compares
+  the anchor's walked argv for exact equality against the session's recorded launch argv — the `shell_words` parse of
+  the stored invocation, which a pane wrapper cannot rewrite from inside the pane — and its walked fd-0 target for byte
+  equality against the session terminal tmux reports (`#{pane_tty}`, matched client-side by pid, where a pane naming no
+  listed terminal refuses rather than skipping the leg). Equality rather than a character-device check, which
+  `/dev/null` would pass and which cannot tell the session's pty from a pty the wrapper made itself; the walk also
+  re-reads fd 0 before returning, so a redirect between the climb and the check refuses like an exec would. The terminal
+  query is bounded by the admission's remaining budget (it runs while the report holds the capture claim): expiry kills
+  the query process and refuses, releasing the claim through the ordinary error path. The stated residual: fd-0 targets
+  are observable only on Linux (`/proc/<pid>/fd/0`); on macOS the pinned libc exposes no fd-path API, so the caller
+  passes no terminal there and a bare-shell anchor refuses for the missing leg — fail closed where the evidence is
+  thinner. A runtime that is itself the pane anchor needs no such legs and still admits on both platforms, which is what
+  keeps legitimate macOS direct launches working. The record names the launched shell, not a runtime hand-typed into it:
+  two runtimes the operator runs by hand under one genuine shell stay indistinguishable, an accepted interactive
+  residual alongside the same-runtime one above. The supported emitter is a Claude runtime image in either of two
+  shapes: a native executable actually named `claude` (the corridor matches the resolved exe basename, so a script named
+  `claude` never qualifies), or the standard native install's versioned single file `.../claude/versions/<version>` —
+  parent directory exactly `versions`, grandparent exactly `claude`, file basename a version token of dot-separated
+  numerics with an optional prerelease suffix (`2.1.278`, `2.1.278-rc.1`; channel names, bare numbers, and deeper or
+  shallower nestings stay fail-closed). Both shapes share one recognition, applied in the corridor's `C` descriptor and
+  the nested-runtime matcher alike, so a versioned `claude` is an emitter candidate and a second one is nesting, never a
+  link to skip. The layout is grounded in the Linux probe of 2026-09-21: `~/.local/bin/claude` is a symlink to the ELF
+  `~/.local/share/claude/versions/2.1.278` (siblings `2.1.274`, `2.1.275` present), whose basename is never `claude` —
+  matching the basename alone failed closed for every real launch (observed live 2026-09-21: the vendor fires
+  `SessionStart`/`startup` with a vendor-shaped payload and the reporter reaches the socket, yet admission refuses with
+  `conflict` — no live Claude runtime claims the report). The live proof test pins admission through that layout end to
+  end. The pinned install's npm metadata maps that version's bin without establishing a node entry point, so directly
+  interpreted and unproven package layouts fail closed too, as do direct executions of the versioned file (argv[0] must
+  still carry the `claude` launcher spelling the CLI grammar requires). No macOS-native execution is claimed from Linux
+  fixtures. A legitimate startup report lost to claim saturation means no capture until that session's next report —
+  `SessionStart` fires once per process start and has no retry — fail closed and documented. Injection-skipped launches
+  (user `--settings`, bare `--`, kind exclusion) stay runnable without capture: with the scan fallback cut over, nothing
+  observes them.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the

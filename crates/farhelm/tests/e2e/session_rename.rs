@@ -9,11 +9,15 @@
 
 use crate::harness::*;
 
+use crate::boot_id_durable_outcome::listed;
 use crate::conversation_identity_capture::{
-    TEST_CAPTURE_AFTER, TEST_CAPTURE_GRACE, capture_harness, provoke_record, record_session,
-    wait_for_capture, wait_for_capture_clock_past, wait_for_first_input,
+    TEST_CAPTURE_AFTER, TEST_CAPTURE_GRACE, capture_harness, capture_harness_with_seams,
+    provoke_record, record_session, wait_for_capture, wait_for_capture_clock_past,
+    wait_for_first_input,
 };
 use crate::create_idempotency::handoff_to_new_supervisor;
+use crate::hook_identity::ServeTask;
+use crate::restart_with_resume::{report_conversation, report_session};
 use crate::terminal_backpressure::drain_for;
 use farhelm_proto::RestartOffer;
 
@@ -32,9 +36,104 @@ use farhelm_proto::RestartOffer;
 // The other half is the reply. `SessionRenamed` carries a `SessionInfo`
 // built the way `ListSessions` builds one — live-probed status (launch
 // sentinel included), rediscovered tabs, freshly derived restart offer —
-// and three tests below exist only to keep that from decaying into "the
+// and four tests below exist only to keep that from decaying into "the
 // stored row with a new title spliced in".
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// The restart offer the rename reply carries is freshly derived, not
+// echoed (PLAN_M5.md item 3)
+// ---------------------------------------------------------------------
+
+/// A rename reply reflects a readiness change ONLY its own capture pass
+/// could have observed — the positive oracle for the freshly derived
+/// restart offer.
+///
+/// An attributed Claude binding is established first (`Resume` through
+/// a pass, the premise), and then its transcript is UNPUBLISHED with no
+/// observing refresh in between — no list, no snapshot, only pass-free
+/// store reads. The rename's own capture pass is therefore the first
+/// thing that can see the file is gone: it must withhold readiness
+/// while keeping the identity and its locator, and the reply must say
+/// `FreshOnly`. A rename that skipped its pass and echoed a stale offer
+/// would answer `Resume` here — which is exactly the answer the
+/// negative test below cannot distinguish, since its fixture starts
+/// and ends `FreshOnly`.
+///
+/// The premise is re-checked pass-free immediately before the rename:
+/// if any pass but the rename's own observed the unpublish first, the
+/// oracle's "only the rename's pass could have seen it" would be void,
+/// and the test fails LOUDLY on the premise rather than passing for
+/// the weaker reason.
+///
+/// The ticker is quiescent by construction here, not by observation:
+/// the harness sets its interval to an hour, and the first tick is
+/// anchored one interval out (the loop starts its deadline at
+/// now + interval because `serve` just ran its own capture pass), so
+/// no tick can fire during a test that runs for seconds. The rename
+/// reply's own `Reply` pass is therefore the only capture pass in the
+/// unpublish-to-rename window. Merely stopping the accept task would
+/// not prove this — its drop path only requests cooperative shutdown
+/// and an already-running pass still runs to completion — which is why
+/// the seam, not the task handle, carries the guarantee, and why the
+/// quiescence holds through the final assertions too.
+#[farhelm_testtrace::test]
+async fn the_rename_reply_withholds_readiness_its_own_pass_observed_missing() {
+    let (h, fixtures) =
+        capture_harness_with_seams(|seams| seams.ticker_interval = Duration::from_secs(3600)).await;
+    let accepting = ServeTask::spawn(&h.sup, h.state.path()).await;
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let session = report_session(&h, &fixtures, work.path()).await;
+    let (chan, mut rx, mut seen, conversation) = provoke_record(&h, &session).await;
+    report_conversation(&h.client, chan, &mut rx, &mut seen, &conversation).await;
+    assert_eq!(
+        wait_for_capture(&h, &session.id, 30).await,
+        conversation,
+        "the attributed report first has to land durably"
+    );
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        RestartOffer::Resume,
+        "the verified binding first has to offer resume through a pass"
+    );
+    let (stored, saved, ready) = stored_claude_binding(h.state.path(), &session.id).await;
+    assert_eq!(
+        stored.as_deref(),
+        Some(conversation.as_str()),
+        "the premise: the binding the report established"
+    );
+    let saved = saved.expect("the premise: the admission saved its locator");
+    assert!(ready, "the premise: the verified transcript reads ready");
+    // Unpublish WITHOUT any observing refresh: no list, no snapshot —
+    // only pass-free store reads — between the delete and the rename.
+    std::fs::remove_file(&saved).expect("unpublish the transcript");
+    let (_, _, still_ready) = stored_claude_binding(h.state.path(), &session.id).await;
+    assert!(
+        still_ready,
+        "a background pass observed the unpublish before the rename ran; \
+         the oracle needs the rename's own pass to be first"
+    );
+    let renamed = renamed(rename(&h.sup, &session.id, "renamed-after-unpublish").await);
+    assert_eq!(
+        renamed.restart_offer,
+        RestartOffer::FreshOnly,
+        "the rename's own pass observed the missing transcript and withheld readiness; \
+         a pass-less reply would still say Resume"
+    );
+    let (stored, saved_again, ready) = stored_claude_binding(h.state.path(), &session.id).await;
+    assert_eq!(
+        stored.as_deref(),
+        Some(conversation.as_str()),
+        "withholding readiness is not demotion: the identity stands"
+    );
+    assert_eq!(
+        saved_again.as_deref(),
+        Some(saved.as_str()),
+        "withholding readiness is not withdrawal: the locator stands for the next check"
+    );
+    assert!(!ready, "the rename's pass durably withheld readiness");
+    accepting.stop().await;
+}
 
 /// Send one `RenameSession` over a connection of its own and return the
 /// supervisor's answer, whatever it is.
@@ -129,6 +228,33 @@ async fn stored_conversation(state: &std::path::Path, session_id: &str) -> Optio
         .expect("read the session row")
         .unwrap_or_else(|| panic!("session {session_id} has no durable row"))
         .captured_conversation
+}
+
+/// One session's Claude capture binding as the DATABASE holds it: the
+/// conversation, the saved transcript locator, and transcript
+/// readiness, asserted together because no one of them is the offer's
+/// input alone.
+///
+/// Read-only and pass-free like [`stored_conversation`], for the tests
+/// that must observe readiness WITHOUT running the refresh that would
+/// move it.
+async fn stored_claude_binding(
+    state: &std::path::Path,
+    session_id: &str,
+) -> (Option<String>, Option<String>, bool) {
+    let store = SessionStore::open(&state.join("supervisor.db"), false)
+        .await
+        .expect("open the database a second time");
+    let row = store
+        .session(session_id)
+        .await
+        .expect("read the session row")
+        .unwrap_or_else(|| panic!("session {session_id} has no durable row"));
+    (
+        row.captured_conversation,
+        row.captured_record,
+        row.claude_transcript_ready,
+    )
 }
 
 /// One session's title as the DATABASE holds it, read through a second
@@ -289,32 +415,27 @@ async fn a_rename_reply_reports_the_launch_sentinel_error_a_list_would() {
     );
 }
 
-/// A rename reply offers **resume** for a conversation NOTHING has
-/// captured yet — the rename's own pass is what captures it.
+/// A rename reply offers **fresh-only** for a conversation NOTHING has
+/// captured — the negative half of the restart-offer contract.
 ///
-/// Two things at once, and the ordering is what makes the second one
-/// testable. The offer moves from `FreshOnly` to `Resume` when a capture
-/// pass commits an identity, so a reply echoing
-/// `SessionEntry::info.restart_offer` would carry what it was at create —
-/// `FreshOnly` forever — and the UI would keep offering a fresh launch for
-/// a session that can be resumed.
+/// With report-only capture, a Claude identity arrives exclusively
+/// through an attributed hook report: no report, no binding, and a
+/// record the fixture wrote is just a file nobody claimed. So NOTHING
+/// here drives a pass, before or after: the record is provoked, the
+/// durable input's capture horizon is crossed, and only then does the
+/// rename run. `FreshOnly` in its reply is then the correct answer —
+/// and the durable absence is confirmed through a READ-ONLY store
+/// handle rather than through observation passes, because a list would
+/// run a pass and could only confirm what the reply already said.
 ///
-/// But capture rides the passes the supervisor already performs, and a
-/// test that drove those passes itself (by listing until the identity
-/// landed) would leave the reply nothing to do but read a value already
-/// committed — it would pass against a reply that never ran a capture pass
-/// at all. So NOTHING here drives a pass, before or after: the record is
-/// provoked, the durable input's capture horizon is crossed, and the rename
-/// is the first pass of any kind to run afterwards. `Resume` in its reply can then only mean
-/// the rename's own pass captured the identity, which is the
-/// `ListSessions` behavior the protocol promises this reply matches.
-///
-/// The identity is then confirmed through a READ-ONLY store handle rather
-/// than through `wait_for_capture`, for the same reason: that helper polls
-/// `list_sessions`, and a list would have captured the identity itself,
-/// retroactively making the assertion above pass for the wrong reason.
+/// What this does NOT prove is that the rename ran its own pass at
+/// all: a reply that skipped capture and echoed a stale create-time
+/// offer would answer identically here, since the starting offer is
+/// already `FreshOnly` and the durable conversation already absent.
+/// That positive oracle is the test above, whose fixture states differ
+/// before and after the rename's pass.
 #[farhelm_testtrace::test]
-async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
+async fn a_rename_reply_claims_nothing_without_a_report() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
@@ -323,7 +444,7 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
         RestartOffer::FreshOnly,
         "test premise: nothing is capturable until the agent writes its record"
     );
-    let (_chan, _rx, _seen, conversation) = provoke_record(&h, &session).await;
+    let (_chan, _rx, _seen, _conversation) = provoke_record(&h, &session).await;
 
     // Observe the same durable anchor and Unix clock the correlator uses,
     // without driving a list or capture pass. An elapsed delay alone would
@@ -337,23 +458,20 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
         "test premise: no pass may capture the identity before the rename"
     );
 
-    let reply = renamed(rename(&h.sup, &session.id, "renamed-after-capture").await);
-    assert_eq!(reply.title, "renamed-after-capture");
+    let reply = renamed(rename(&h.sup, &session.id, "renamed-after-record").await);
+    assert_eq!(reply.title, "renamed-after-record");
     assert_eq!(
         reply.restart_offer,
-        RestartOffer::Resume,
-        "the rename's own capture pass must have claimed the identity and the reply must \
-         reflect it, exactly as a list reply would"
+        RestartOffer::FreshOnly,
+        "the rename's own pass claims nothing without a report, and the reply must \
+         reflect that, exactly as a list reply would"
     );
-    // And it is genuinely the identity the agent reported, committed
-    // durably — not a `Resume` derived from something weaker.
+    // And nothing was committed durably on the way through — not a `Resume`
+    // derived from something weaker, and not a stray write either.
     assert_eq!(
-        stored_conversation(h.state.path(), &session.id)
-            .await
-            .as_deref(),
-        Some(conversation.as_str()),
-        "the identity the rename captured must be the one the fixture wrote, and must have \
-         been committed by that same pass"
+        stored_conversation(h.state.path(), &session.id).await,
+        None,
+        "the rename pass must leave the identity it cannot attribute unclaimed"
     );
 }
 
@@ -365,15 +483,19 @@ async fn a_rename_reply_captures_and_offers_resume_without_a_list_first() {
 /// path writes the first-input anchor through the entry its `InputRoute`
 /// pinned at attach time — an entry the rename has already replaced. If
 /// the rebuild COPIED that cell instead of sharing it, the anchor would
-/// land in the abandoned copy, the capture pass would go on reading the
-/// published entry's empty one, and this session would never become
-/// resumable: SPEC.md's resume promise silently broken by renaming a
-/// session at the wrong moment, with nothing anywhere reporting it.
+/// land in the abandoned copy, the published entry would keep its empty
+/// one, and the session's window would never start: the anchor a report
+/// would one day be checked against silently lost by renaming a session at
+/// the wrong moment, with nothing anywhere reporting it.
 ///
 /// The ordering is therefore load-bearing: attach first (so a route pins
-/// the pre-rename entry), rename second, and only then type.
+/// the pre-rename entry), rename second, and only then type. Past the
+/// scan cutover the stranded anchor no longer costs a capture — nothing
+/// captures without a report — but it is still the durable fact the
+/// report path reasons about, so the test asserts the anchor itself
+/// rather than the capture it once fed.
 #[farhelm_testtrace::test]
-async fn a_rename_before_first_input_still_captures_the_conversation() {
+async fn a_rename_before_first_input_keeps_the_first_input_anchor() {
     let (h, fixtures) = capture_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let session = record_session(&h, &fixtures, work.path(), "claude").await;
@@ -390,11 +512,9 @@ async fn a_rename_before_first_input_still_captures_the_conversation() {
 
     h.client.send_input(chan, b"first prompt\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "RECORD-WRITTEN:", 20).await;
-    let conversation = crate::conversation_identity_capture::marker_value(&seen, "RECORD-WRITTEN:");
 
-    assert_eq!(
-        wait_for_capture(&h, &session.id, 30).await,
-        conversation,
+    assert!(
+        crate::conversation_identity_capture::wait_for_first_input(&h, &session.id, 20).await > 0,
         "a rename must not strand the first-input anchor the capture window is measured from"
     );
 }
