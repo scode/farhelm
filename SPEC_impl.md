@@ -205,27 +205,43 @@ same hex. The palette is dark-only today; a light theme lands as a second `:root
 is the arrangement the no-literals rule exists to protect.
 
 Two of those roles are design constraints and not merely names. The first is the surface ladder: exactly three levels
-are in use — the ground (the page, which stays pure black for the chrome), the chrome one step above it (sidebar, main
-header, tab strip), and the floating level one step above that (menus, dialogs, forms, bands that interrupt a pane). The
-terminal's own `--terminal-bg` surface, Ghostty's default background for an out-of-the-box readable terminal, is not a
-rung on that ladder: it is the color xterm.js paints, mirrored so the pane's gutter and viewport agree. Which level an
-element sits on is recorded in the `:root` comments; a `--control-hover-bg` and a `--chip-bg` token fill a bordered
-control's hover state and a small chip respectively, named for that specific role rather than folded into the `--bg-*`
-surface family, so neither one reads as a fourth and fifth level to lay something out on. The second is that there is
-ONE accent, and what it may be spent on is a closed list rather than a palette to decorate with: selection,
-`:focus-visible`, the one filled primary control a surface is allowed, and any PRESSED disclosure control — a trigger
-wearing the accent for exactly as long as the thing it opened is showing. That last entry covers the session row's
-actions-menu toggle and the header's own archive and restart triggers alike; they are one category, not a rule plus
-exceptions, and the accent is what separates "this one is open" from the hover fill every ghost control already takes.
-The filled-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled
-control (`new session`), and each dialog that floats over it — create session, add a host, rename — supplies its own
-submit as THAT dialog's one primary, since a dialog is read as its own surface rather than counted against the
-sidebar's. Everything else, on any surface, stays ghost, including destructive actions, which mark themselves with red
-text rather than a red fill. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so
-anything joining that list has to be a place where the accent means "this is where you are" — the same thing the other
-entries say — because an accent spread across ordinary decoration would leave nothing to make the selection readable.
-Both constraints have a contrast floor under them: the quiet foreground tokens are set so that metadata stays at WCAG AA
-against the brightest surface it lands on, which is what caps how light the selected row's fill may go.
+are in use — the ground (the page), the chrome one step above it (sidebar, main header, tab strip), and the floating
+level one step above that (menus, dialogs, forms, bands that interrupt a pane). All three lean cool by the same small
+amount, the ground included: it is a near-black and not `#000`, because pure black would be the one untinted surface in
+a set meant to read as one material at three depths. The terminal's own `--terminal-bg` surface, Ghostty's default
+background for an out-of-the-box readable terminal, is not a rung on that ladder: it is the color xterm.js paints,
+mirrored so the pane's gutter and viewport agree. Which level an element sits on is recorded in the `:root` comments; a
+`--control-hover-bg` and a `--chip-bg` token fill a bordered control's hover state and a small chip respectively, named
+for that specific role rather than folded into the `--bg-*` surface family, so neither one reads as a fourth and fifth
+level to lay something out on. `--well` is a third fill of that kind: the inside of an input, select, or code box,
+darker than any surface a control can sit on so that a field reads as cut into its panel, and lighter than the ground so
+that a field on a dialog does not read as a hole through to the page. The second is that there is ONE accent, and what
+it may be spent on is a closed list rather than a palette to decorate with: selection, `:focus-visible`, the one filled
+primary control a surface is allowed, and any PRESSED disclosure control — a trigger wearing the accent for exactly as
+long as the thing it opened is showing. That last entry covers the session row's actions-menu toggle and the header's
+own archive and restart triggers alike; they are one category, not a rule plus exceptions, and the accent is what
+separates "this one is open" from the hover fill every ghost control already takes. The filled-primary entry is scoped
+per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each
+dialog that floats over it — create session, add a host, rename — supplies its own submit as THAT dialog's one primary,
+since a dialog is read as its own surface rather than counted against the sidebar's. Everything else, on any surface,
+stays ghost, including destructive actions, which mark themselves with red text rather than a red fill. SPEC.md requires
+the sidebar to mark the selected session's row readably at a glance, so anything joining that list has to be a place
+where the accent means "this is where you are" — the same thing the other entries say — because an accent spread across
+ordinary decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under
+them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on,
+which is what caps how light the selected row's fill may go.
+
+Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
+chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and
+`--fg-bright` text. The bar takes the leading edge of a thing chosen from a vertical list and the underside of a thing
+chosen from a horizontal set. The fill is deliberately quiet, only as chromatic as it takes to stay apart from the
+neutral hover tint beside it, and the bar is what announces the selection. The reason is what else is on screen: status
+colors are meant to be the loudest thing in the sidebar, and each dot-only status has a shape of its own as well as a
+color (filled circle running, triangle waiting, diamond idle with unseen output, hollow ring idle), so the session that
+needs a person outranks the one already open, and the sidebar can be read without telling hues apart. The launch
+composer used to carry a palette, corner radii, and a periwinkle selection of its own, a second accent that the closed
+list above rules out; a dialog now uses the shared tokens and adds only what being modal needs (a veil, a panel edge one
+step brighter than a control outline, a shadow), on the same one corner scale as everything else.
 
 `--font-ui` and `--font-mono` name the same vendored face — JetBrains Mono Nerd Font, described below in the xterm.js
 island section — rather than two different ones. The chrome (`--font-ui`) and the terminal (`--font-mono`, the stack

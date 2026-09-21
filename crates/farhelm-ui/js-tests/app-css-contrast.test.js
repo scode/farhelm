@@ -110,10 +110,10 @@ function contrastRatio(hexA, hexB) {
 
 // The bindings the palette's `:root` comments promise, as
 // [foreground token, background token, minimum ratio]. Text pairs use
-// WCAG AA's 4.5:1. `--accent` on `--bg-1` is the one non-text entry — the
-// selected row's inset bar and every `:focus-visible` ring are graphical
-// indicators, not text, so WCAG's lower 3:1 floor for those applies
-// instead of the text floor.
+// WCAG AA's 4.5:1. `--accent` is the non-text foreground, on `--bg-1` and
+// (further down) on `--accent-fill`: the selection bar and every
+// `:focus-visible` ring are graphical indicators, not text, so WCAG's lower
+// 3:1 floor for those applies instead of the text floor.
 const ROW_SURFACES = ["--bg-1", "--bg-2", "--accent-fill", "--accent-fill-hover"];
 const REQUIRED_BINDINGS = [
   ...["--bg-0", ...ROW_SURFACES].map((bg) => ["--fg-0", bg, 4.5]),
@@ -129,6 +129,25 @@ const REQUIRED_BINDINGS = [
   // fill, not a row surface, and shipped under the floor once already
   // (4.405:1) with nothing here to catch it.
   ["--fg-1", "--control-hover-bg", 4.5],
+  // `--well` is the inside of every input, select, and code box, so typed
+  // text (`--fg-0`) and the quieter text fields show at rest (`--fg-1`)
+  // both sit on it. It is darker than any row surface, so these pass with
+  // room to spare today; they are bound because a well is the surface most
+  // likely to be "lifted a little" in a later restyle, and nothing above
+  // would notice.
+  ["--fg-0", "--well", 4.5],
+  ["--fg-1", "--well", 4.5],
+  // The selection bar is drawn ON the selection fill (the composer's chosen
+  // chip, a selected tab), not only beside `--bg-1` as the row's is. The
+  // fill was deliberately made quiet and the bar is what announces the
+  // selection, so the bar losing its 3:1 against that fill would leave a
+  // selected control with nothing legible marking it.
+  ["--accent", "--accent-fill", 3],
+  // The launch button's destination text, on the launch button's fill. It is
+  // meant to be quieter than the verb beside it, which is exactly the kind of
+  // intent that erodes a pair below the floor: it sat at 4.05:1 until the
+  // pair was first computed.
+  ["--on-accent-dim", "--accent-edge", 4.5],
 ];
 
 /**
