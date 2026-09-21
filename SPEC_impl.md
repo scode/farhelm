@@ -1380,16 +1380,21 @@ failure can leave private evidence, but cannot authorize another directory move.
   that launch's argv started, retained beside the marker so admission classifies the current launch rather than the
   resume template (a future resume's command). OMP admission requires the marker to name the current binary's asset with
   the file's bytes re-verified; pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception: every
-  older OMP row offers fresh-only until its first proven report.
+  older OMP row offers fresh-only until its first proven report. Migration 23 adds `goose_launch_program` the same way:
+  the program that Goose launch's argv started, published pre-spawn and fenced on the generation, so admission
+  classifies the current launch rather than the resume template. Goose admission refuses a `NULL`, stale, or `unknown`
+  program before any process is inspected; pre-23 rows adopt `NULL` and fail closed, and Goose takes no Codex-style
+  exception either: every older Goose row offers fresh-only until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution proofs apply to Codex, Grok, and OMP. Goose, Claude, and Pi retain their existing acceptance behind the
+  Attribution proofs apply to Codex, Grok, OMP, and Goose. Claude and Pi retain their existing acceptance behind the
   discriminator gate, and new framework entry points default to deny rather than allow. The offer gate has its final
-  shape but flips per kind: Codex, Grok, and OMP require version 1, while the other kinds keep today's offer behavior
-  until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is no general
-  report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits that
-  ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology. Old processes and assets fail
-  closed after the upgrade; nothing is grandfathered.
+  shape but flips per kind: Codex, Grok, OMP, and Goose require version 1, while the other kinds keep today's offer
+  behavior until their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is
+  no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits
+  that ordering rule. The Goose store read is a point observation, not cross-reporter chronology. OMP uses serial
+  cancellation fences, not cross-reporter chronology. Old processes and assets fail closed after the upgrade; nothing is
+  grandfathered.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1427,22 +1432,25 @@ failure can leave private evidence, but cannot authorize another directory move.
   Farhelm token or session identity. Missing configuration leaves the Grok session usable but unable to gain a new exact
   resume target.
 
-  **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
-  MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
-  reporter and only supply current-launch enablement, executable, and instruction controls. The persisted command
-  contains no credential or session identity and falls back to `farhelm` on `PATH` for a manual Goose resume. Its empty
-  MCP interface reports `AGENT_SESSION_ID` when current Farhelm credentials enable it and carries the instruction
-  pointer in the initialize result. Pi loads a versioned TypeScript artifact materialized with private permissions under
-  Farhelm's state directory. The extension serializes `session_start` and `agent_end` reports, including the exact
-  absolute session file only after Pi has persisted it. The database retains a bounded, versioned Pi locator containing
-  both ID and optional file; list/status inspect only that token. Resume alone opens the exact file through the bounded
-  no-follow regular-file reader and compares its first `type=session` record's ID. Failure compare-replaces that exact
-  locator and generation with a same-ID fileless locator, so a concurrent newer report wins and the stale request gets
-  the ordinary offer-changed conflict. Each capture pass reconciles these report-only kinds with their own durable row
-  before serving an offer, without opening vendor files. This covers reports accepted before entry publication and
-  restart-time withdrawals. The mirror updates only if it still holds the identity observed before the row read,
-  protecting a different newer mirrored identity. An identity that changes away and back during the read may briefly
-  leave a stale offer until the next pass; restart always checks the durable identity.
+  **Goose and Pi reporters.** Pi never scans vendor state and keeps that contract. Goose used to share it and no longer
+  does: the report still names the conversation, but admission validates the reported session's root metadata with one
+  exact read (see the ownership proof below), which is validation of a report-driven identity rather than a scan. A
+  fresh Goose launch registers one named stdio MCP server, `farhelm-reporter`; Goose persists that declaration in its
+  conversation, so resumed launches add no second reporter and only supply current-launch enablement, executable, and
+  instruction controls. The persisted command contains no credential or session identity and falls back to `farhelm` on
+  `PATH` for a manual Goose resume. Its empty MCP interface reports `AGENT_SESSION_ID` when current Farhelm credentials
+  enable it and carries the instruction pointer in the initialize result. Pi loads a versioned TypeScript artifact
+  materialized with private permissions under Farhelm's state directory. The extension serializes `session_start` and
+  `agent_end` reports, including the exact absolute session file only after Pi has persisted it. The database retains a
+  bounded, versioned Pi locator containing both ID and optional file; list/status inspect only that token. Resume alone
+  opens the exact file through the bounded no-follow regular-file reader and compares its first `type=session` record's
+  ID. Failure compare-replaces that exact locator and generation with a same-ID fileless locator, so a concurrent newer
+  report wins and the stale request gets the ordinary offer-changed conflict. Each capture pass reconciles these
+  report-only kinds with their own durable row before serving an offer, without opening vendor files. This covers
+  reports accepted before entry publication and restart-time withdrawals. The mirror updates only if it still holds the
+  identity observed before the row read, protecting a different newer mirrored identity. An identity that changes away
+  and back during the read may briefly leave a stale offer until the next pass; restart always checks the durable
+  identity.
 
   **The OMP reporter and its locator.** OMP (`AgentKind::Omp`, wire `omp`) is a report-only integration with no
   record-root scanning, added beside the Goose/Pi pair rather than inside it. The locator is Pi's shape re-generalized:
@@ -1509,6 +1517,63 @@ failure can leave private evidence, but cannot authorize another directory move.
   (static claim, no runtime probe). Compiled and package-launcher forms have chain-level shape coverage; live lifecycle
   evidence covers the Bun-executed entry. Node execution and unknown wrapper shapes remain refused, as described in
   `website/src/content/docs/docs/harnesses/omp.md`.
+
+  **The Goose ownership proof.** Admission is one explicit branch (`report_goose_conversation`), wired through the
+  shared claim discipline, the atomic compare-and-swap over the complete prior binding, and the shared mirror with
+  version 1 — flipped in the same change as the per-kind predicate, since flipping alone would deny every Goose report.
+  The proof has two halves, and both must pass: process attribution establishes that the reporter descends from the
+  launched runtime, and exact store-metadata validation establishes that the reported session is that runtime's root
+  rather than a delegated child. Attribution walks the shared mechanics to the current owned pane and applies Goose's
+  restrictive corridor over the installation descriptor the durable launch argv selects — classified at spawn and
+  retained with the generation's provenance, never re-derived from the resume template: `G` (exactly one native `goose`
+  image, matched by resolved executable basename so a script named `goose` never qualifies, whose live argv still
+  describes a session through the same grammar injection uses), `S` (a known transparent `sh -c 'exec
+  goose …'`
+  trampoline above the runtime, or an exec'd-away shell that leaves no link — the same rule OMP's `S` applies). The
+  reporter itself must be exactly the helper invocation, and between runtime and reporter only the narrow MCP trampoline
+  may appear: a shell whose `-c` command shell-splits to byte-exactly the persisted declaration's words,
+  `exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook`. In practice the `exec` collapses that shell —
+  observed live, the reporter is a direct child of the runtime on both the `run` and the `session` startup paths — so
+  the common case is an empty between-section, and the trampoline rule exists for the shape the declaration describes
+  rather than a second live shape. A second `goose` anywhere, any other session-hosting runtime, unclassified
+  intermediaries, npm/npx/bun/direct-script Goose, and unknown wrappers all refuse; `Unknown` never reaches the
+  corridor. The source vocabulary is the helper's single word (`goose`), allowlisted at the doorway and re-checked at
+  admission; `agent_id` stays a rejection signal, and the transcript and event fields the helper never sends are ignored
+  rather than consulted. Attribution runs twice, bracketing the vendor evidence: the first names the emitter whose
+  environment resolves the store, the second — process evidence only, no vendor re-read — must name the same emitter
+  after the store read, so a PID reuse or exec between the evidence and the recheck refuses instead of authorizing the
+  wrong process's store. The store resolves from the attributed runtime's own exec-time environment — absolute
+  `GOOSE_PATH_ROOT`, else absolute `XDG_DATA_HOME`, else the runtime's `HOME` — XDG on both Linux and macOS (verified
+  against the `choose_app_strategy` CLI convention in the etcetera 0.11.0 the pinned Goose tree locks, not inferred),
+  first-match `getenv` semantics, no `passwd` fallback, no guessing. The read itself is one parameterized point lookup
+  plus same-snapshot schema evidence through a dedicated read-only open: a descriptor-free `metadata` preflight refuses
+  anything that does not stat as a regular file (a FIFO would stall the open itself, before any progress handler runs),
+  opening no descriptor on purpose — on Unix, closing any fd for an inode releases every POSIX lock the process holds on
+  it, so an open+drop preflight could release a concurrent worker's SQLite `SHARED` lock mid-probe — `sessions` must be
+  a real table with the pinned `id`/`session_type`/`parent_session_id` columns, `MAX(version)` must equal 16 exactly
+  (fresh stores carry one row; migrated stores append one per applied migration, so the gate is the maximum, never a row
+  count), and the reported id must read back exactly one bounded row. The allowlist is exactly `user` with a NULL parent
+  — NULL parentage necessary but never sufficient, since native children are created as `sub_agent` and linked in a
+  second transaction. The reader creates, migrates, checkpoints, and writes nothing; it refuses busy stores immediately
+  with zero wait, saturated workers by a two-slot semaphore, and everything past a 250 ms budget with a cancelling
+  progress handler. A worker stalled outside the VM answers the 1 s backstop with a refusal WITHOUT rejoining it — the
+  progress handler cannot interrupt a blocked open or read — and keeps its semaphore slot until it actually finishes
+  (the permit travels with the worker), so a stall can neither park the caller past the bound nor let later calls exceed
+  the two-worker bound; cancellation is also armed for an outer drop of the read. The whole admission holds a 1 s
+  deadline re-enforced before the commit. The admitted store path persists beside the binding as a verification hint,
+  re-resolved and re-validated at every admission rather than compared by the CAS. Before a Goose resume, the verifier
+  re-opens that locator through the same reader and requires the saved id to still read `user` with a NULL parent at
+  schema 16; the verdict runs under the session's capture claim from the reload through any demotion, so a same-ID
+  re-proof landing mid-verification commits strictly before or after it, never underneath a demotion aimed at the older
+  binding. Any failure compare-replaces version 1 → 0 under CAS — the id kept, the offer withdrawn — and refuses the
+  Resume, and a later attributed report re-proves normally. The capture ticker never opens the vendor store; pre-resume
+  verification is the staleness backstop. The stated residual: the store is read once per admission, and a row deleted
+  or flipped between that read and the commit is admitted and caught later by pre-resume verification — holding a vendor
+  lock across the commit to close the window would block Goose's own writer, so the window stays open by design. The
+  supported shape is the native CLI at pinned source revision `2090ad1c`, with schema-16 plus `SessionType` wire
+  equality verified at the v1.50.1 tag and live startup, spawn, and store behavior observed from the 1.50.1 binary;
+  Docker/Flatpak transports, package-manager executions, and shell-wrapper injection stay fail-closed and labeled in
+  `website/src/content/docs/docs/harnesses/goose.md` rather than claimed.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the

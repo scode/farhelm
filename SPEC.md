@@ -873,13 +873,16 @@ absolute: the report it delivers lands in farhelm's own database, and every run 
 Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
 example — hooks written into the agent's configuration — still stands. Grok is the documented opt-in exception: the user
 installs its hook entries, and Farhelm itself never writes, edits, or removes them. Claude retains scanning as its
-fallback when no report has been accepted. Codex, Goose, Pi, OMP, and Grok are report-only integrations: Farhelm never
-selects their conversation by scanning vendor state. A reporting credential alone does not establish which Codex
-conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
-it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
-session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
-file without following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh
-and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that request.
+fallback when no report has been accepted. Codex, Pi, OMP, and Grok are report-only integrations: Farhelm never selects
+their conversation by scanning vendor state. Goose is report-driven with an exact-record exception: the report names the
+conversation, and Farhelm validates that one record's root metadata in Goose's store before accepting it — a point
+lookup addressed by the reported id, not a scan, and not permission to claim there are no vendor-state reads. A
+reporting credential alone does not establish which Codex conversation is in the foreground. Goose persists a
+credential-free named MCP reporter with the conversation and reuses it on resume; Pi loads a private static extension
+from Farhelm's state directory on every launch. A Pi report without a session file withdraws the old resume target.
+Before a Pi resume, Farhelm reads the bounded first record of that exact file without following symlinks and requires
+its session ID to match. A failed check changes the durable offer to fresh and rejects the stale Resume request so the
+user can refresh; it never silently launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
@@ -919,15 +922,28 @@ delegated task, workpool, or revival child stays silent, while a separately laun
 interactive — is refused by process attribution instead. Sessions launched under the old gateless asset fail closed,
 runnable with no capture, until a relaunch installs the current asset. A parent lineage field never rejects: legitimate
 forks carry one. OMP captures admitted under the proof carry version 1 like Codex, with no historical exception: every
-older OMP row offers fresh-only until its first proven report. Every conversation-identity report carries a closed
-vendor discriminator naming the adapter that produced it — the injected hook command, the Goose helper, or a shipped
-asset — and a report addressed to a session of another kind is refused before any vendor state is consulted. The
-discriminator routes; it does not prove. Codex and Grok admission require foreground and record proofs, and their exact
-resume additionally requires versioned proof that the binding was admitted under those proofs, with the historical Codex
-exception described in SPEC_impl.md. Goose, Claude, and Pi retain their existing admission and resume rules; the
-discriminator alone adds no foreground protection. Old senders that predate the discriminator fail closed rather than
-reporting untagged. A refused report changes nothing: no stored identity, no offer, no ambiguity verdict, no pending
-state. Resume is never silently turned into fresh, and historical captures are never rewritten to look proven.
+older OMP row offers fresh-only until its first proven report.
+
+Goose reports must come from the foreground native Goose runtime under the session's owned pane, and the reported
+session must read back from that runtime's own store as exactly a `user` session with no parent — a positive allowlist,
+not "anything except a subagent", because Goose creates its native children as `sub_agent` rows and links them to the
+parent in a separate step, so a child can momentarily show no parent at all. Both halves are required: a native child
+fails the metadata even in the same process, and a separately launched root child fails attribution even with pristine
+metadata of its own. The store resolves from the runtime's environment through exact paths — absolute custom roots
+honored, nothing discovered — and opens read-only without creating, migrating, or writing anything; a missing, busy,
+malformed, or unsupported store refuses the report. A legitimate fork is a new `user` row admitted as a new binding,
+never lineage to accept. Goose captures admitted under the proof carry version 1 like Codex and OMP, with no historical
+exception: every older Goose row offers fresh-only until its first proven report.
+
+Every conversation-identity report carries a closed vendor discriminator naming the adapter that produced it — the
+injected hook command, the Goose helper, or a shipped asset — and a report addressed to a session of another kind is
+refused before any vendor state is consulted. The discriminator routes; it does not prove. Codex and Grok admission
+require foreground and record proofs, and their exact resume additionally requires versioned proof that the binding was
+admitted under those proofs, with the historical Codex exception described in SPEC_impl.md. Claude and Pi retain their
+existing admission and resume rules; the discriminator alone adds no foreground protection. Old senders that predate the
+discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored identity, no
+offer, no ambiguity verdict, no pending state. Resume is never silently turned into fresh, and historical captures are
+never rewritten to look proven.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
