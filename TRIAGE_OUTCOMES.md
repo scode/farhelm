@@ -672,8 +672,11 @@
 - Completion criteria: add the scoped planned item and triage rule, then remove this feedback file and its index entry
   during execution. Keep the planned TODO until the actual code fix is implemented; removing the feedback is not
   completion of that fix.
-- Execution: `in progress`; the planned item and triage instructions are applied locally. Queue removal and the
-  execution PR remain pending.
+- Execution: `complete`; verified TODO.md's Planned item "Keep session creation off the connection read loop" and the
+  already-planned cleanup rule in AGENTS.md and review_feedback_queue/AGENTS.md, all committed at the triage anchor.
+  Removed the feedback and index entry; the planned TODO remains and no background-create implementation was made. jj
+  change: `qlquzktqvlssswuknqluulkowzruntmw`; bookmark: `triage-complete-create-planning`; draft PR:
+  https://github.com/scode/farhelm/pull/842/changes.
 
 ## delete-quarantine-waits-unboundedly.md
 
