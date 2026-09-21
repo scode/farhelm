@@ -1036,3 +1036,19 @@ crossing takes milliseconds and lands far inside the supervisor's window; 20 of 
 Class: budget
 
 Cause: established
+
+## 2026-09-21 — `deleting_refuses_to_move_a_stranger_at_the_recorded_source` (crates/farhelm-supervisor/src/service/teardown.rs)
+
+The checkout-ownership fixture failed while removing its inode-allocation filler directory: on this filesystem the first
+replacement already had a different identity, so no fillers had been created. The failure reproduced in the exact-test
+selection. Cleanup now runs only when the fixture created fillers; the different-identity premise and foreign-directory
+preservation assertions remain. Fixed in #834. Observed on a Linux x86_64 container with four CPU slots, at combined
+stack source `43bc4d2a` (recorded Git base `58b2fc5c5730` plus dirty source), in workspace run
+`be8d017f-3d7b-41fe-9daf-4c2b644dc628` and focused run `35e269ac-5115-49d3-b476-9ca487e22409`. The latter selected
+fourteen exact failures from the workspace, with four nextest slots and zero retries. Both used pinned tmux 3.7c,
+executable SHA256 `ebc01bf8f9226634bda074fc7daf1c13dfbe2a89858eb3c6c32c96342d02f43b`, `LC_CTYPE=C.UTF-8` with `LANG` and
+`LC_ALL` unset, and only recorder-owned `FARHELM_TEST_TRACE_DIR` in the test environment.
+
+Class: fixture-premise
+
+Cause: established

@@ -101,7 +101,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use subtle::ConstantTimeEq;
-use tracing::warn;
 
 /// How long a query waits on `SQLITE_BUSY` before giving up.
 ///
@@ -120,7 +119,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 18;
+const SCHEMA_VERSION: i64 = 19;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -829,10 +828,6 @@ pub struct OfferBasis {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PriorRun {
     pub outcome: LastOutcome,
-    /// The session-level archive flag a successful restart clears.
-    /// Restored when a restart fails before touching anything external, so
-    /// a failed attempt cannot make an archived session appear active.
-    pub archived: bool,
     /// The pane the previous run confirmed, or empty for a launch that
     /// never confirmed one. Restored alongside the outcome so an aborted
     /// restart leaves the row describing the same terminal it did before.
@@ -857,7 +852,7 @@ pub struct PriorRun {
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
 /// function's transaction.
-type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64, i64);
+type RelaunchBasisColumns = (OutcomeColumns, String, i64, Option<String>, i64, i64);
 
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
 /// transaction: the outcome state, the pane, `created_at`, the title, the
@@ -1172,13 +1167,6 @@ pub struct StoredSession {
     pub id: String,
     /// Direct parent metadata, or `None` for an ordinary root session.
     pub parent: Option<String>,
-    /// Whether the session is hidden from the default list and has no
-    /// terminal until restart opens a new launch generation.
-    ///
-    /// This is metadata rather than an outcome state. The outcome records
-    /// the deliberate teardown as an annotated exit; this flag explains
-    /// why the row remains while its terminal does not.
-    pub archived: bool,
     pub title: String,
     /// Seconds since the Unix epoch when this row was inserted (`now_unix`,
     /// called once by the caller so the exact instant matches what
@@ -1571,6 +1559,9 @@ pub struct SessionStore {
 ///   Storage only; the state machine that drives it lives in
 ///   `crate::working_copies`. See the version-17→18 rung below for why the
 ///   pair is additive and why membership is a table.
+/// - 19: remove session archive state. Existing rows retain all other
+///   metadata and relationships and become visible through the ordinary
+///   session listing; the migration does not launch or recreate anything.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1626,7 +1617,6 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  parent                TEXT,
                  session_token         TEXT,
                  creation_seq          INTEGER,
-                 archived              INTEGER NOT NULL DEFAULT 0,
                  last_activity_at      INTEGER NOT NULL DEFAULT 0,
                  conversation_source   TEXT,
                  launch                TEXT,
@@ -1674,7 +1664,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 18;
+             PRAGMA user_version = 19;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2160,6 +2150,16 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 17 to 18")?;
         version = 18;
     }
+    if version == 18 {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions DROP COLUMN archived;
+             PRAGMA user_version = 19;
+             COMMIT;",
+        )
+        .context("migrating schema from version 18 to 19")?;
+        version = 19;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2295,10 +2295,10 @@ fn insert_session_row(
           outcome_state, exit_code, annotation, error_detail, \
           agent_kind, resume_template, canonical_cwd, captured_conversation, \
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
-          source_profile_id, source_profile_name, parent, session_token, archived, \
+          source_profile_id, source_profile_name, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, launch) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2328,7 +2328,6 @@ fn insert_session_row(
             row.source_profile.as_ref().map(|profile| &profile.name),
             row.parent,
             session_token,
-            i64::from(row.archived),
             row.last_activity_at,
             row.last_work_started_at,
             row.conversation_source,
@@ -2366,7 +2365,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                captured_conversation, captured_record, capture_ambiguous, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
-                               archived, last_activity_at, last_work_started_at, conversation_source, launch";
+                               last_activity_at, last_work_started_at, conversation_source, launch";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2415,19 +2414,18 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             generation: r.get(17)?,
             launch_scoped: r.get::<_, i64>(18)? != 0,
             created_at: r.get(19)?,
-            last_activity_at: r.get(25)?,
-            last_work_started_at: r.get(26)?,
+            last_activity_at: r.get(24)?,
+            last_work_started_at: r.get(25)?,
             creation_seq: 0,
             source_profile: None,
-            archived: r.get::<_, i64>(24)? != 0,
-            conversation_source: r.get(27)?,
+            conversation_source: r.get(26)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
         r.get(11)?,
         (r.get(20)?, r.get(21)?),
         r.get::<_, i64>(23)?,
-        r.get(28)?,
+        r.get(27)?,
     ))
 }
 
@@ -3782,10 +3780,6 @@ impl SessionStore {
     ///   selection belongs to a launch and not to a session (PLAN_M3.md item
     ///   10): a host that lost its user manager between two launches must
     ///   not leave the new run claiming a scope nothing created.
-    /// - `archived` is cleared because restart is the only unarchive path.
-    ///   The prior value rides in [`PriorRun`] so a definitive launch
-    ///   failure can restore the archived row rather than exposing it as an
-    ///   active session with no terminal.
     ///
     /// The immutable create-time snapshot (kind, template, invocation, cwd)
     /// is untouched in every case.
@@ -3806,8 +3800,7 @@ impl SessionStore {
             let current: Option<RelaunchBasisColumns> = tx
                 .query_row(
                     "SELECT outcome_state, exit_code, annotation, error_detail, pane, \
-                     generation, captured_conversation, capture_ambiguous, launch_scoped, \
-                     archived \
+                     generation, captured_conversation, capture_ambiguous, launch_scoped \
                      FROM sessions WHERE id = ?1",
                     rusqlite::params![id],
                     |r| {
@@ -3818,7 +3811,6 @@ impl SessionStore {
                             r.get(6)?,
                             r.get(7)?,
                             r.get(8)?,
-                            r.get(9)?,
                         ))
                     },
                 )
@@ -3831,7 +3823,6 @@ impl SessionStore {
                 captured_conversation,
                 capture_ambiguous,
                 scoped,
-                archived,
             )) = current
             else {
                 return Ok(RelaunchDecision::Gone);
@@ -3844,7 +3835,6 @@ impl SessionStore {
             let prior = PriorRun {
                 outcome: LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
                     .with_context(|| format!("session {id}"))?,
-                archived: archived != 0,
                 pane,
                 scoped: scoped != 0,
             };
@@ -3857,7 +3847,6 @@ impl SessionStore {
             tx.execute(
                 "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
-                 archived = 0, \
                  first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
@@ -3932,13 +3921,12 @@ impl SessionStore {
         );
         let pane = prior.pane.clone();
         let scoped = i64::from(prior.scoped);
-        let archived = i64::from(prior.archived);
         tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let conn = conn.lock().expect("session db mutex poisoned");
             let restored = conn
                 .execute(
                     "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
-                     error_detail = ?5, pane = ?6, launch_scoped = ?8, archived = ?9 \
+                     error_detail = ?5, pane = ?6, launch_scoped = ?8 \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -3949,7 +3937,6 @@ impl SessionStore {
                         pane,
                         generation,
                         scoped,
-                        archived,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -4318,44 +4305,23 @@ impl SessionStore {
                 .context("beginning outcome transition transaction")?;
             let mut committed = HashMap::new();
             for (id, generation, transition) in transitions {
-                let current: Option<(OutcomeColumns, i64, bool)> = tx
+                let current: Option<(OutcomeColumns, i64)> = tx
                     .query_row(
-                        "SELECT outcome_state, exit_code, annotation, error_detail, generation, \
-                             archived \
+                        "SELECT outcome_state, exit_code, annotation, error_detail, generation \
                              FROM sessions WHERE id = ?1",
                         rusqlite::params![id],
-                        |r| {
-                            Ok((
-                                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?),
-                                r.get(4)?,
-                                r.get::<_, i64>(5)? != 0,
-                            ))
-                        },
+                        |r| Ok(((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?), r.get(4)?)),
                     )
                     .optional()
                     .context("reading the current outcome")?;
-                let Some((
-                    (state, exit_code, annotation, error_detail),
-                    current_generation,
-                    archived,
-                )) = current
+                let Some(((state, exit_code, annotation, error_detail), current_generation)) =
+                    current
                 else {
                     continue;
                 };
                 let current =
                     LastOutcome::from_columns(&state, exit_code, annotation, error_detail)
                         .with_context(|| format!("session {id}"))?;
-                // Archive is an outcome fence of its own. The observation
-                // may have cloned this launch before archive reached
-                // SQLite; once the flag lands, no delayed pane or exit
-                // observation may restore terminal state to the row.
-                // Checked in the same transaction as the outcome write, so
-                // either commit order converges on archive's deliberate
-                // terminal-less exit.
-                if archived {
-                    committed.insert(id, current);
-                    continue;
-                }
                 // The generation fence (see `StoredSession::generation`).
                 // Reported as the CURRENT outcome rather than as an error
                 // or an absence: the caller's observation was simply about
@@ -4449,88 +4415,6 @@ impl SessionStore {
         })
         .await
         .context("session rename task panicked")?
-    }
-
-    /// Mark a session archived after its process tree and terminals are
-    /// gone, preserving the stored outcome unless archive stopped a live
-    /// agent itself.
-    ///
-    /// The outcome quartet is read in the same transaction as `archived`.
-    /// Only `stopped_live_agent` permits replacing it with the deliberate
-    /// `Exited`/`STOP_ANNOTATION` quartet; otherwise archive leaves every
-    /// outcome column unchanged. If that flag conflicts with an already
-    /// terminal stored outcome, the terminal knowledge wins and a warning
-    /// records both facts. `Ok(None)` means the row vanished. `Some(false)`
-    /// is the idempotent already-archived case; `Some(true)` means this call
-    /// performed the transition.
-    pub async fn archive_session(
-        &self,
-        id: &str,
-        stopped_live_agent: bool,
-    ) -> anyhow::Result<Option<bool>> {
-        let conn = Arc::clone(&self.conn);
-        let id = id.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Option<bool>> {
-            let mut conn = conn.lock().expect("session db mutex poisoned");
-            let tx = conn
-                .transaction()
-                .context("beginning the session archive transaction")?;
-            let Some((archived, outcome_state, exit_code, annotation, error_detail)) = tx
-                .query_row(
-                    "SELECT archived, outcome_state, exit_code, annotation, error_detail \
-                     FROM sessions WHERE id = ?1",
-                    rusqlite::params![id],
-                    |row| {
-                        Ok((
-                            row.get::<_, i64>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, Option<i32>>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                            row.get::<_, Option<String>>(4)?,
-                        ))
-                    },
-                )
-                .optional()
-                .context("reading the session archive flag")?
-            else {
-                return Ok(None);
-            };
-            let stored_outcome = LastOutcome::from_columns(
-                &outcome_state,
-                exit_code,
-                annotation,
-                error_detail,
-            )?;
-            if archived != 0 {
-                return Ok(Some(false));
-            }
-            let preserve_terminal = stopped_live_agent && stored_outcome.is_terminal();
-            if preserve_terminal {
-                warn!(
-                    session = %id,
-                    stored_outcome = ?stored_outcome,
-                    stopped_live_agent,
-                    "archive reported stopping a live agent, but the stored outcome is already terminal; preserving it"
-                );
-            }
-            if stopped_live_agent && !preserve_terminal {
-                tx.execute(
-                    "UPDATE sessions SET archived = 1, pane = '', outcome_state = 'exited', \
-                     exit_code = NULL, annotation = ?2, error_detail = NULL WHERE id = ?1",
-                    rusqlite::params![id, farhelm_proto::STOP_ANNOTATION],
-                )
-            } else {
-                tx.execute(
-                    "UPDATE sessions SET archived = 1, pane = '' WHERE id = ?1",
-                    rusqlite::params![id],
-                )
-            }
-            .context("archiving the session row")?;
-            tx.commit().context("committing the session archive")?;
-            Ok(Some(true))
-        })
-        .await
-        .context("session archive task panicked")?
     }
 
     /// Record when this session first had input forwarded to it
@@ -5531,7 +5415,6 @@ mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: id.to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -6420,7 +6303,6 @@ mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "demo".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -6474,7 +6356,6 @@ mod tests {
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
-                    archived: false,
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
                     last_work_started_at: 0,
@@ -7080,7 +6961,6 @@ mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
-                    archived: false,
                     title: "demo".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -7144,7 +7024,6 @@ mod tests {
                     conversation_source: Some("hook".to_string()),
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "structured".to_string(),
                     created_at: 1_700_000_000,
                     last_activity_at: 1_700_000_123,
@@ -7207,7 +7086,6 @@ mod tests {
                     conversation_source: None,
                     id: "s-omp".to_string(),
                     parent: None,
-                    archived: false,
                     title: "structured omp".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -7295,12 +7173,14 @@ mod tests {
         {
             // Restore the exact pre-checkout additions boundary. This fixture
             // tests preservation across 17 -> 18, not historical schema parity;
-            // the separate migration-ladder tests cover the latter.
+            // the separate migration-ladder tests cover the latter. Restore
+            // archived too, since schema 17 still carried that column.
             let conn = store.conn.lock().expect("db mutex");
             conn.execute_batch(
                 "DROP TABLE working_copy_members;
                  DROP TABLE working_copies;
                  ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
+                 ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 17;",
             )
             .expect("restore pre-checkout schema");
@@ -7348,6 +7228,107 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    /// Removing archive state must preserve the complete retained record.
+    ///
+    /// A successfully archived row had no pane and carried an ended outcome;
+    /// using that real shape prevents the migration from being validated by a
+    /// contradictory running fixture. Metadata, attachment bytes, and checkout
+    /// membership are separate durability promises, so each gets an explicit
+    /// witness here rather than being inferred from the session row surviving.
+    #[farhelm_testtrace::test]
+    async fn schema_18_rows_become_ordinary_sessions_without_relaunching() {
+        let (dir, store) = fresh_store().await;
+        insert_running(&store, "retained").await;
+        let attachment = dir.path().join("attachments/retained/note.txt");
+        std::fs::create_dir_all(attachment.parent().expect("attachment parent"))
+            .expect("create attachment directory");
+        std::fs::write(&attachment, b"retained attachment").expect("write attachment");
+        {
+            let conn = store.conn.lock().expect("db mutex");
+            conn.execute_batch(
+                "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 UPDATE sessions SET archived = 1,
+                     title = 'retained title', pane = '', outcome_state = 'exited',
+                     exit_code = 0, annotation = 'archived by user', parent = 'parent-session',
+                     captured_conversation = 'conversation-42', conversation_source = 'hook'
+                 WHERE id = 'retained';
+                 INSERT INTO working_copies (
+                     id, canonical_root, canonical_path, repo_owner, repo_name,
+                     original_basename, origin_session_id, allocation_state, created_at
+                 ) VALUES (
+                     'checkout', '/tmp', '/tmp/work', 'owner', 'repo', 'work',
+                     'retained', 'allocated', 1
+                 );
+                 INSERT INTO working_copy_members (session_id, working_copy_id)
+                 VALUES ('retained', 'checkout');
+                 PRAGMA user_version = 18;",
+            )
+            .expect("restore the schema-18 archive column");
+            let premise: (i64, i64, String, String) = conn
+                .query_row(
+                    "SELECT (SELECT user_version FROM pragma_user_version), archived, pane, outcome_state
+                     FROM sessions WHERE id = 'retained'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("read schema-18 premise");
+            assert_eq!(premise, (18, 1, String::new(), "exited".to_string()));
+        }
+        drop(store);
+
+        let migrated = SessionStore::open(&dir.path().join("supervisor.db"), true)
+            .await
+            .expect("migrate schema 18");
+        let row = migrated
+            .session("retained")
+            .await
+            .expect("read retained row")
+            .expect("session survives migration");
+        assert_eq!(row.title, "retained title");
+        assert_eq!(
+            row.outcome,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: Some("archived by user".to_string()),
+            }
+        );
+        assert_eq!(row.pane, "", "migration must preserve terminal absence");
+        assert_eq!(row.parent.as_deref(), Some("parent-session"));
+        assert_eq!(
+            row.captured_conversation.as_deref(),
+            Some("conversation-42")
+        );
+        assert_eq!(row.conversation_source.as_deref(), Some("hook"));
+        assert_eq!(
+            std::fs::read(&attachment).expect("read retained attachment"),
+            b"retained attachment"
+        );
+        assert_eq!(
+            migrated
+                .member_working_copies_all("retained")
+                .await
+                .expect("read retained membership")
+                .iter()
+                .map(|working_copy| working_copy.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["checkout"]
+        );
+        let conn = migrated.conn.lock().expect("db mutex");
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .expect("prepare schema read")
+            .query_map([], |row| row.get(1))
+            .expect("read schema")
+            .collect::<Result<_, _>>()
+            .expect("decode schema");
+        assert!(!columns.iter().any(|column| column == "archived"));
+        assert_eq!(
+            conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                .expect("read version"),
+            SCHEMA_VERSION
+        );
     }
 
     /// A database claiming a schema version this build does not
@@ -7620,7 +7601,6 @@ mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "s1".to_string(),
                     created_at: SENTINEL_CREATED_AT,
                     last_activity_at: SENTINEL_CREATED_AT,
@@ -7684,7 +7664,6 @@ mod tests {
             capture_ambiguous: false,
             id: id.to_string(),
             parent: None,
-            archived: false,
             title: id.to_string(),
             created_at: now_unix(),
             last_activity_at: now_unix(),
@@ -8861,7 +8840,6 @@ mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "t".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -9473,7 +9451,6 @@ mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "s1".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -9566,187 +9543,6 @@ mod tests {
             other => panic!("expected a claimed generation, got {other:?}"),
         }
     }
-
-    /// Archive keeps the row, records the deliberate stopped outcome, and
-    /// is idempotent. Restart clears the flag as part of opening the next
-    /// generation, while an aborted restart restores it with the prior run.
-    #[farhelm_testtrace::test]
-    async fn archive_is_durable_idempotent_and_restored_by_an_aborted_restart() {
-        let (_dir, store) = fresh_store().await;
-        insert_running(&store, "s1").await;
-
-        assert_eq!(store.archive_session("s1", true).await.unwrap(), Some(true));
-        assert_eq!(
-            store.archive_session("s1", true).await.unwrap(),
-            Some(false)
-        );
-        let archived = store.session("s1").await.unwrap().unwrap();
-        assert!(archived.archived);
-        assert_eq!(archived.title, "s1", "session metadata survives archive");
-        assert_eq!(archived.pane, "", "archive removes the terminal handle");
-        assert_eq!(
-            archived.outcome,
-            LastOutcome::Exited {
-                exit_code: None,
-                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
-            }
-        );
-
-        let claim = claimed(
-            store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
-                .await
-                .unwrap(),
-        );
-        assert!(claim.prior.archived);
-        assert!(!store.session("s1").await.unwrap().unwrap().archived);
-
-        assert!(
-            store
-                .abort_relaunch("s1", claim.generation, &claim.prior)
-                .await
-                .unwrap()
-        );
-        let restored = store.session("s1").await.unwrap().unwrap();
-        assert!(restored.archived);
-        assert_eq!(restored.outcome, archived.outcome);
-        assert_eq!(
-            crate::service::recovered_archive_flag(true, claim.prior.archived),
-            restored.archived,
-            "definitive recovery must agree in memory and SQLite"
-        );
-
-        let ambiguous = claimed(
-            store
-                .begin_relaunch("s1", uncaptured_basis(), true, false)
-                .await
-                .unwrap(),
-        );
-        let durable = store.session("s1").await.unwrap().unwrap();
-        assert!(!durable.archived);
-        assert_eq!(
-            crate::service::recovered_archive_flag(false, ambiguous.prior.archived),
-            durable.archived,
-            "ambiguous recovery must keep both representations visible"
-        );
-    }
-
-    /// Archive must not replace a witnessed exit or launch error with a
-    /// user-stop explanation merely because the row is being hidden. The
-    /// guarded live-stop direction is covered here too: terminal knowledge
-    /// wins even if a caller reports that a live agent was stopped.
-    #[farhelm_testtrace::test]
-    async fn archive_preserves_known_outcomes_and_only_marks_live_stops() {
-        let (dir, store) = fresh_store().await;
-        insert_running(&store, "error").await;
-        {
-            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open fixture");
-            conn.execute(
-                "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
-                 annotation = NULL, error_detail = 'exec failed' WHERE id = 'error'",
-                [],
-            )
-            .expect("plant the witnessed error");
-        }
-        assert_eq!(
-            store.session("error").await.unwrap().unwrap().outcome,
-            LastOutcome::Error {
-                detail: "exec failed".to_string()
-            }
-        );
-        store.archive_session("error", false).await.unwrap();
-        let error = store.session("error").await.unwrap().unwrap();
-        assert!(error.archived);
-        assert_eq!(
-            error.outcome,
-            LastOutcome::Error {
-                detail: "exec failed".to_string()
-            }
-        );
-
-        let (_dir, store) = fresh_store().await;
-        insert_running(&store, "exited").await;
-        store
-            .transition("exited", 0, Transition::ObservedExit { exit_code: Some(3) })
-            .await
-            .unwrap();
-        store.archive_session("exited", false).await.unwrap();
-        let exited = store.session("exited").await.unwrap().unwrap();
-        assert!(exited.archived);
-        assert_eq!(
-            exited.outcome,
-            LastOutcome::Exited {
-                exit_code: Some(3),
-                annotation: None,
-            }
-        );
-
-        let (_dir, store) = fresh_store().await;
-        insert_running(&store, "live").await;
-        store.archive_session("live", true).await.unwrap();
-        assert_eq!(
-            store.session("live").await.unwrap().unwrap().outcome,
-            LastOutcome::Exited {
-                exit_code: None,
-                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
-            }
-        );
-
-        let (dir, store) = fresh_store().await;
-        insert_running(&store, "terminal").await;
-        {
-            let conn = Connection::open(dir.path().join("supervisor.db")).expect("open fixture");
-            conn.execute(
-                "UPDATE sessions SET outcome_state = 'error', exit_code = NULL, \
-                 annotation = NULL, error_detail = 'already failed' WHERE id = 'terminal'",
-                [],
-            )
-            .expect("plant the terminal outcome");
-        }
-        store.archive_session("terminal", true).await.unwrap();
-        let terminal = store.session("terminal").await.unwrap().unwrap();
-        assert!(terminal.archived);
-        assert_eq!(
-            terminal.outcome,
-            LastOutcome::Error {
-                detail: "already failed".to_string()
-            }
-        );
-    }
-
-    /// Once archive commits, a delayed observation from the retired pane
-    /// cannot repopulate either its terminal handle or its prior outcome.
-    #[farhelm_testtrace::test]
-    async fn archive_fences_a_stale_outcome_observation() {
-        let (_dir, store) = fresh_store().await;
-        insert_running(&store, "s1").await;
-        store.archive_session("s1", true).await.unwrap();
-
-        let committed = store
-            .transition(
-                "s1",
-                0,
-                Transition::RediscoveredExit {
-                    pane: "%late".to_string(),
-                    exit_code: Some(17),
-                },
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        let row = store.session("s1").await.unwrap().unwrap();
-        assert!(row.archived);
-        assert_eq!(row.pane, "");
-        assert_eq!(committed, row.outcome);
-        assert_eq!(
-            row.outcome,
-            LastOutcome::Exited {
-                exit_code: None,
-                annotation: Some(farhelm_proto::STOP_ANNOTATION.to_string()),
-            }
-        );
-    }
-
     /// Restore the profiles table that every schema from v8 through v14 had.
     ///
     /// These downgrade fixtures start from a current database, where the
@@ -9766,49 +9562,6 @@ mod tests {
         )
         .expect("restore the historical profiles table");
     }
-
-    /// The v11-to-v12 migration preserves every preexisting row and gives
-    /// each one the only truthful historical value: it was not archived.
-    #[farhelm_testtrace::test]
-    async fn schema_11_rows_migrate_as_unarchived() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("supervisor.db");
-        let store = SessionStore::open(&db_path, true)
-            .await
-            .expect("create current db");
-        insert_running(&store, "s1").await;
-        drop(store);
-
-        let conn = Connection::open(&db_path).expect("open fixture");
-        restore_pre_v15_profiles_table(&conn);
-        // Every column added AFTER v11 has to come off, not just the one
-        // this test is about: the ladder replays from whatever
-        // `user_version` claims, and a leftover column makes the next
-        // step's `ADD COLUMN` fail as a duplicate rather than exercising
-        // the migration under test.
-        conn.execute_batch(
-            "ALTER TABLE sessions DROP COLUMN archived;
-             ALTER TABLE sessions DROP COLUMN last_activity_at;
-             ALTER TABLE sessions DROP COLUMN conversation_source;
-             ALTER TABLE sessions DROP COLUMN launch;
-             ALTER TABLE sessions DROP COLUMN last_work_started_at;
-             ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
-             DROP TABLE working_copies;
-             DROP TABLE working_copy_members;
-             PRAGMA user_version = 11;",
-        )
-        .expect("downgrade the fixture to the pre-archive schema");
-        drop(conn);
-
-        let migrated = SessionStore::open(&db_path, true)
-            .await
-            .expect("migrate v11");
-        let row = migrated.session("s1").await.unwrap().unwrap();
-        assert!(!row.archived);
-        assert_eq!(row.title, "s1");
-        assert_eq!(row.pane, "%0");
-    }
-
     /// Version 16 adds only the structured-origin snapshot. A real v15 row
     /// has no such fact to preserve, so migration must retain its launch
     /// bundle and leave the snapshot absent instead of trying to parse a raw
@@ -9923,6 +9676,7 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
                  DROP TABLE working_copies;
                  DROP TABLE working_copy_members;
+                 ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 16;",
             )
             .expect("remove the v17 and v18 additions from the fixture");
@@ -10014,10 +9768,9 @@ mod tests {
 
         let conn = Connection::open(&db_path).expect("open fixture");
         restore_pre_v15_profiles_table(&conn);
-        // Same "every later column has to come off" requirement
-        // `schema_11_rows_migrate_as_unarchived` documents — conversation
-        // provenance, structured launch metadata and work-start ordering
-        // postdate this migration too.
+        // Reverse every later schema change, including removed columns.
+        // Version 12 still had archived, while activity, provenance, launch
+        // metadata and work-start ordering all arrived later.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN last_activity_at;
              ALTER TABLE sessions DROP COLUMN conversation_source;
@@ -10026,6 +9779,7 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
+             ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
              PRAGMA user_version = 12;",
         )
         .expect("downgrade the fixture to the pre-activity schema");
@@ -10102,6 +9856,7 @@ mod tests {
         // Remove every column added after v13 before replaying the ladder.
         // Leaving a work-start or checkout-origin column behind would make its own
         // migration fail on a duplicate instead of exercising provenance.
+        // Restore archived as well so its later removal sees the old shape.
         conn.execute_batch(
             "ALTER TABLE sessions DROP COLUMN conversation_source;
              ALTER TABLE sessions DROP COLUMN launch;
@@ -10109,6 +9864,7 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
+             ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
              PRAGMA user_version = 13;",
         )
         .expect("downgrade the fixture to the pre-report schema");
@@ -10755,7 +10511,6 @@ mod tests {
                     conversation_source: None,
                     id: "s1".to_string(),
                     parent: None,
-                    archived: false,
                     title: "s1".to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),
@@ -10964,7 +10719,6 @@ mod tests {
             conversation_source: None,
             id: "s1".to_string(),
             parent: None,
-            archived: false,
             title: title.to_string(),
             created_at: 1_700_000_000,
             last_activity_at: 1_700_000_000,

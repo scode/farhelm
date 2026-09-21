@@ -60,11 +60,10 @@ connection error or ordinary conflict alone does not authorize a second checkout
 
 ## What deletion does
 
-A checkout stays in place while any retained session uses it or one of its subdirectories. Stopped, exited, errored and
-archived sessions all count. Archiving a session does not move the checkout. Deleting the final session moves the entire
-checkout into `farhelm-archived-working-copies` under its original root, with a timestamped name. This includes
-untracked files and Git metadata; it frees no disk space. Empty that archive by hand when you decide its contents are no
-longer needed.
+A checkout stays in place while any retained session uses it or one of its subdirectories. Stopped, exited, and errored
+sessions all count. Deleting the final session moves the entire checkout into `farhelm-archived-working-copies` under
+its original root, with a timestamped name. This includes untracked files and Git metadata; it frees no disk space.
+Empty that archive by hand when you decide its contents are no longer needed.
 
 An ordinary session that borrows a managed checkout can be its final reference, so deleting that borrower can cause the
 move. Same-directory replacement keeps a reference throughout. Moving a replacement elsewhere releases the old checkout

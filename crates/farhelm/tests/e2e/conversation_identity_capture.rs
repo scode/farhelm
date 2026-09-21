@@ -1073,7 +1073,6 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
-                    archived: false,
                     id: format!("extra-{i}"),
                     parent: None,
                     title: format!("extra-{i}"),

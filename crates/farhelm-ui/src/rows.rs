@@ -205,13 +205,8 @@ pub(crate) fn menu_row_reordered(
 /// the banner and the no-match line, not to the calm fleet-empty sentence.
 ///
 /// The reply must also COVER the fleet
-/// (`SessionListing::omits_fleet_members`), which is the stricter of the two
-/// filter flags and deliberately so: the ordinary view's own total is now a
-/// count of the non-archived list, so `total == 0` there means "nothing
-/// active", not "nothing at all". Keyed on `filtered` instead, a fleet of
-/// nothing but archived sessions would announce itself as empty. The right
-/// pane says "no active sessions" for that case, which is the claim the
-/// reply actually supports.
+/// (`SessionListing::omits_fleet_members`): a narrowed reply cannot prove
+/// that the fleet itself is empty.
 pub(crate) fn is_empty_fleet(listing: &SessionListing) -> bool {
     listing.sessions.is_empty()
         && listing.total == 0
@@ -250,11 +245,8 @@ pub(crate) fn listing_is_complete(listing: &SessionListing) -> bool {
 ///
 /// - **The reply speaks for the whole fleet.** A narrowed listing omits
 ///   every session it left out, and "left out" is not "went away". Read from
-///   `SessionListing::omits_fleet_members` rather than from `filtered`, and
-///   the difference is the DEFAULT view: it reads as unfiltered to a user
-///   (that is the banner's question) while still hiding every archived
-///   session, so a session archived from another client would otherwise
-///   vanish from this reply and be mistaken for one that left.
+///   `SessionListing::omits_fleet_members` rather than from `filtered` so
+///   compatibility replies that ignore a requested filter stay conservative.
 /// - **The reply holds the whole view** ([`listing_is_complete`], i.e. the
 ///   helm's `truncated` flag is off). A reply the helm's cap cut is missing
 ///   every session past the cutoff for a reason that has nothing to do with
@@ -382,11 +374,7 @@ const TRUNCATION_NOTE: &str = " — could not read the list to the end";
 /// - **Truncation.** "showing N of …" is reserved for a reply the helm's
 ///   cap cut (`truncated`, via [`listing_is_complete`]) — nothing else
 ///   makes a list short. The denominator printed beside N is `matching`
-///   for a filtered banner and the view's own `total` for an unfiltered
-///   one; the default view is why those two are not the same thing — the
-///   helm answers it with a real `matching`, because its archive exclusion
-///   is a server-side predicate, while the sentence a reader sees counts
-///   the view.
+///   for a filtered banner and the view's own `total` for an unfiltered one.
 /// - **Filtering.** A filtered list says "N matching of M sessions"
 ///   (PLAN_M6_75.md item 7), which is the distinction the second count
 ///   exists to make: without it, a filter that hid 690 of 700 rows and a
@@ -397,16 +385,8 @@ const TRUNCATION_NOTE: &str = " — could not read the list to the end";
 ///   silently reverted to the unfiltered sentence would leave a user unsure
 ///   whether their filter took at all.
 ///
-///   The archive switch is NOT one of those filters, in either position.
-///   `M` is the size of the view the rows came from — the non-archived list
-///   by default, the whole fleet with the switch on (`api::SessionListing::
-///   total`, and `aggregate::SessionListBody::total` on the helm side) — so the ordinary
-///   list reads "12 sessions" rather than "12 matching of 12 sessions". The
-///   shipped alternative, an M that counted archived rows the list did not
-///   show, made the two numbers disagree with nothing typed into any filter
-///   and no wording able to explain the gap. The accepted consequence is
-///   that "filtered" now means a filter a PERSON applied (maintainer's
-///   verdict, 2026-08-22).
+///   `M` is the size of the whole fleet, so "filtered" means a filter a
+///   person applied rather than an implicit list mode.
 /// - **A filter the helm did not answer.** `matching` is absent only where
 ///   substituting a number would be a fabrication (`api::matching_count`),
 ///   and that case gets the unfiltered sentence plus a clause saying why —
@@ -512,7 +492,6 @@ mod tests {
             restart_offer: crate::RestartOffer::FreshOnly,
             created_at: 0,
             last_activity_at: 0,
-            archived: false,
             tabs: Vec::new(),
             host: None,
             host_identity: None,
@@ -734,8 +713,8 @@ mod tests {
     /// set explicitly — the banner reads nothing else, so the sessions
     /// themselves are placeholders.
     ///
-    /// This is the archive-switch-on reply: nothing is filtered and nothing
-    /// is withheld, so both request flags are false. `matching` mirrors
+    /// Nothing is filtered or withheld, so both request flags are false.
+    /// `matching` mirrors
     /// `total`, which is what `api::matching_count` substitutes when the helm
     /// makes no matching claim — the unfiltered cases must be built the way
     /// `api::fetch_sessions` actually builds them, or they would pin wording
@@ -750,21 +729,6 @@ mod tests {
             filtered: false,
             omits_fleet_members: false,
             truncated,
-        }
-    }
-
-    /// The DEFAULT view's reply: no filter a person applied — so the banner
-    /// treats it as unfiltered — over a request that still permits the helm
-    /// to withhold every archived session.
-    ///
-    /// The one listing where the two request flags disagree, and therefore
-    /// the fixture every test of that divergence is built from. Both flags
-    /// describe what was ASKED, so `omits_fleet_members` is true here
-    /// whether or not this particular fleet has an archived session in it.
-    fn default_view_listing(rows: usize, total: u64) -> SessionListing {
-        SessionListing {
-            omits_fleet_members: true,
-            ..listing(rows, total, false)
         }
     }
 
@@ -847,16 +811,6 @@ mod tests {
                 listing(0, 3, true),
                 "banner truncation-banner",
                 "showing 0 of 3 sessions — could not read the list to the end",
-            ),
-            // The DEFAULT view takes the unfiltered wording. The total it
-            // prints is the size of the list it is showing, because archived
-            // sessions are now outside both — the shape that used to say "4
-            // matching of N sessions" here, with N counting rows the list
-            // withheld and nothing typed into any filter.
-            (
-                default_view_listing(4, 4),
-                "banner session-count",
-                "4 sessions",
             ),
         ];
         for (listing, class, text) in cases {
@@ -980,11 +934,6 @@ mod tests {
             !absence_is_evidence(&filtered_listing(3, 3, 700, false)),
             "and a filter omits what did not match, which is not what left"
         );
-        assert!(
-            !absence_is_evidence(&default_view_listing(3, 3)),
-            "the default view reads as unfiltered and still hides archived rows, so a session \
-             archived from another client must not be mistaken for one that left"
-        );
     }
 
     /// The helm's flag is the ONLY thing that makes a listing incomplete;
@@ -1027,11 +976,6 @@ mod tests {
         assert!(
             !is_empty_fleet(&filtered_listing(0, 0, 0, false)),
             "a filter over an empty fleet is a search that found nothing, and must say so"
-        );
-        assert!(
-            !is_empty_fleet(&default_view_listing(0, 0)),
-            "the default view's zero total means nothing ACTIVE; a fleet of archived sessions \
-             must not announce itself as empty"
         );
         assert!(
             !is_empty_fleet(&listing(0, 3, false)),
@@ -1127,12 +1071,6 @@ mod tests {
             no_match_line(&listing(0, 0, false)),
             None,
             "and an unfiltered listing has no filter to report on"
-        );
-        assert_eq!(
-            no_match_line(&default_view_listing(0, 0)),
-            None,
-            "an empty default view is a list with nothing in it, not a search that found \
-             nothing — nobody typed a query to be told about"
         );
         assert_eq!(
             no_match_line(&filtered_listing(2, 0, 700, false)),

@@ -310,7 +310,6 @@ mod tests {
     fn fake_session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
             parent: None,
-            archived: false,
             id: id.to_string(),
             title: "x".to_string(),
             created_at,

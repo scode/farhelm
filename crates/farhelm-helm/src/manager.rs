@@ -1220,7 +1220,7 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
 /// EXCEPT the sampled status and timestamps handled here: each is computed
 /// by machinery the reply did not run. `status` is
 /// [`merged_status`]'s subject. Activity age and work-start ordering are the supervisor's
-/// sampler's, and a create/rename/restart/archive reply merely copies
+/// sampler's, and a create/rename/restart reply merely copies
 /// whatever the entry happened to hold when it was built — which can be
 /// OLDER than what a `ListSessions` drain already committed here, because
 /// replies and drains race and nothing orders them.
@@ -4757,7 +4757,6 @@ mod tests {
     fn session(id: &str, created_at: i64) -> SessionInfo {
         SessionInfo {
             parent: None,
-            archived: false,
             id: id.to_string(),
             title: id.to_string(),
             created_at,

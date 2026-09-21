@@ -37,7 +37,6 @@ pub(super) struct RowState {
     pub(super) error: Option<String>,
     pub(super) busy: bool,
     pub(super) confirming: bool,
-    pub(super) confirming_archive: bool,
     pub(super) confirming_replace: bool,
     pub(super) renaming: bool,
     pub(super) nav_disabled: bool,

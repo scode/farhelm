@@ -104,7 +104,7 @@ fn render(agent: &Command) -> String {
          Lifecycle commands require an exact session id. Rename also requires the exact old\n\
          title from discovery: --expected-title='old title'. An empty old title is written\n\
          --expected-title=. To act on yourself deliberately, discover your * session and pass\n\
-         its id. Self-stop can kill this command; stop leaves the row, archive files it.\n\
+         its id. Self-stop can kill this command; stop leaves the row.\n\
          Restart requires --mode from the discovered restart_offer: resume, fallback-template,\n\
          or fresh. Prefer resume; never downgrade after a refusal. Use --stop-if-running only\n\
          with deliberate permission to stop the target. Restart uses its stored configuration;\n\
@@ -352,14 +352,14 @@ mod tests {
         );
     }
 
-    /// The real `rename`/`stop`/`archive` verbs render the exact usage and
+    /// The real `rename`/`stop` verbs render the exact usage and
     /// meaning an agent reads, pinned byte-for-byte against production's
     /// own `AgentCmd`.
     ///
     /// [`a_verb_with_arguments_renders_its_command_line`] only proves the
     /// renderer's MECHANISM is correct against a synthetic fixture; nothing
     /// before this test independently confirmed that the real,
-    /// clap-derived `rename`/`stop`/`archive` variants actually produce
+    /// clap-derived `rename`/`stop` variants actually produce
     /// this text rather than, say, `<SESSION>` silently losing its
     /// brackets or a doc comment losing its trailing clause. A literal
     /// string here is what a careless edit to `AgentCmd`'s derive
@@ -371,10 +371,8 @@ mod tests {
         for expected in [
             "farhelm agent rename <TITLE> --session <SESSION> --expected-title <EXPECTED_TITLE>  \
              Rename an explicitly named session if its title is unchanged",
-            "farhelm agent stop --session <SESSION>     \
+            "farhelm agent stop --session <SESSION>  \
              Stop an explicitly named session's agent process tree",
-            "farhelm agent archive --session <SESSION>  \
-             Archive an explicitly named session",
         ] {
             assert!(
                 lines.iter().any(|line| line == expected),

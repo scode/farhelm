@@ -9,7 +9,7 @@
 //! diagnostic on stderr: `farhelm spawn`'s only successful output is the
 //! child id, and `farhelm agent`'s is the listing it was asked for
 //! (`hosts`/`sessions`), the one-line confirmation of a lifecycle action
-//! (`rename`/`stop`/`archive`/`restart`), or — for the two creating verbs
+//! (`rename`/`stop`/`restart`), or — for the two creating verbs
 //! (`create`/`clone`) — the NEW SESSION'S ID and nothing else, with the
 //! human-readable confirmation on stderr beside it. That last shape is
 //! `spawn`'s contract deliberately: the created id is the one agent output
@@ -92,7 +92,7 @@ enum Cmd {
     },
     /// Ask the helm about the fleet, or act on it, from inside a Farhelm
     /// session — `hosts`/`sessions` are read-only questions,
-    /// `rename`/`stop`/`archive`/`restart` are fleet-wide lifecycle actions, and
+    /// `rename`/`stop`/`restart` are fleet-wide lifecycle actions, and
     /// `create`/`clone` put a new session on any host in the fleet.
     ///
     /// `disable_help_subcommand` because [`AgentCmd::Help`] is farhelm's
@@ -204,12 +204,6 @@ enum AgentCmd {
         #[arg(long = "session", allow_hyphen_values = true)]
         session: String,
     },
-    /// Archive an explicitly named session.
-    Archive {
-        /// Exact session id from `farhelm agent sessions`.
-        #[arg(long = "session", allow_hyphen_values = true)]
-        session: String,
-    },
     /// Restart an explicitly named session using its advertised mode.
     Restart {
         /// Exact session id from `farhelm agent sessions`.
@@ -313,9 +307,6 @@ impl AgentCmd {
                 title: title.clone(),
             }),
             AgentCmd::Stop { session } => Some(farhelm_proto::AgentVerb::Stop {
-                session_id: Some(session.clone()),
-            }),
-            AgentCmd::Archive { session } => Some(farhelm_proto::AgentVerb::Archive {
                 session_id: Some(session.clone()),
             }),
             AgentCmd::Restart {
@@ -726,7 +717,7 @@ fn main() -> anyhow::Result<()> {
                 // rather than a table — there is exactly one row to
                 // report, and a script capturing stdout wants the plain
                 // sentence SPEC.md's CLI contract promises, not a one-row
-                // table with headers. A deliberate self-stop, self-archive,
+                // table with headers. A deliberate self-stop,
                 // or self-restart can still terminate this CLI before it
                 // prints, because the explicit target ID names the same
                 // process tree carrying the credential.
@@ -762,14 +753,6 @@ fn main() -> anyhow::Result<()> {
                         );
                     };
                     println!("stopped {}", safe_cell(&target_for_reply));
-                }
-                AgentCmd::Archive { .. } => {
-                    let AgentReply::Session { session } = reply else {
-                        anyhow::bail!(
-                            "the helm answered archive with something other than a session"
-                        );
-                    };
-                    println!("archived {}", safe_cell(&session.id));
                 }
                 AgentCmd::Restart { .. } => {
                     let AgentReply::Restarted { session } = reply else {
@@ -1383,7 +1366,7 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
             _ => anyhow::bail!("only discovery replies can be printed as JSON"),
         };
         let envelope = serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "caller": {
                 "session_id": asking,
                 "host_id": caller_host_id,
@@ -1422,7 +1405,7 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
 /// ([`farhelm_proto::AgentReply::Stopped`]) carries no fields at all, so a
 /// confirmation naming WHICH session stopped — when the caller sent no
 /// `--session` and meant "this one" — has nowhere else to read that id
-/// from. `Rename` and `Archive` do not need it; their replies are the
+/// from. `Rename` does not need it; its reply is the
 /// updated row.
 ///
 /// NO TIMEOUT here, deliberately. The supervisor bounds the upcall
@@ -1616,7 +1599,7 @@ async fn agent_request(request: farhelm_proto::AgentVerb) -> anyhow::Result<(Str
 /// applied it on another host; the answer was lost), and what differs is
 /// what the reader should do next. A listing has nothing to double-apply
 /// and gets the plain transport wording, which already reads as "ask
-/// again". A MUTATION — a rename/stop/archive/restart, or a create/clone that may
+/// again". A MUTATION — a rename/stop/restart, or a create/clone that may
 /// by now have a session running on some host — may ALREADY have taken
 /// effect, so it gets
 /// the same "look before you retry" remedy the relay's own delivered-but-
@@ -1639,14 +1622,8 @@ fn lost_reply(cause: &str, mutating: bool) -> anyhow::Error {
 /// response back by `req_id` across two hops and nothing on either hop
 /// re-checks the shape, so this is the only place a mismatch can be caught.
 ///
-/// `Session` covers BOTH `Rename` and `Archive` — the wire's own choice
-/// (`AgentReply::Session` is one shape for two verbs; see that variant's
-/// docs) — so this check can confirm "the helm answered with a session row"
-/// but not "with THIS verb's own effect"; a helm that renamed when asked to
-/// archive would still pass it. That is an acceptable gap: it is a bug in
-/// the helm's own dispatch, not a wire-shape mismatch, and nothing this
-/// process can observe would tell the two apart without re-deriving policy
-/// that belongs to the helm alone.
+/// `Session` is the rename reply shape, so this check confirms the helm
+/// answered with the kind of payload that command promises.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReplyKind {
     Hosts,
@@ -1665,9 +1642,7 @@ impl ReplyKind {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
             farhelm_proto::AgentVerb::Profiles {} => ReplyKind::Profiles,
-            farhelm_proto::AgentVerb::Rename { .. } | farhelm_proto::AgentVerb::Archive { .. } => {
-                ReplyKind::Session
-            }
+            farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
             farhelm_proto::AgentVerb::Stop { .. } => ReplyKind::Stopped,
             farhelm_proto::AgentVerb::Restart { .. } => ReplyKind::Restarted,
             // `Created`, not `Session`: the two payloads are identical and
@@ -1756,7 +1731,7 @@ fn truncation_notice(reply: &AgentReply) -> Option<String> {
 ///
 /// Only ever called with the reply to `Hosts`, `Sessions`, or `Profiles` —
 /// the four lifecycle verbs print their own one-line confirmation instead
-/// (see `main`'s `Rename`/`Stop`/`Archive`/`Restart` arms) and the two creating verbs
+/// (see `main`'s `Rename`/`Stop`/`Restart` arms) and the two creating verbs
 /// print an id on stdout with their confirmation on stderr — which is why
 /// the lifecycle and `Created` tags are an ERROR here rather than tables of
 /// their own.
@@ -1895,19 +1870,8 @@ fn host_cell(session: &farhelm_proto::AgentSession) -> String {
         .unwrap_or_else(|| "(unknown)".to_string())
 }
 
-/// The STATUS cell: the status word, overridden for an archived session and
-/// annotated for a stale one.
-///
-/// `archived` REPLACES the word rather than joining it, because a live
-/// status is meaningless for an archived session: whatever the helm last
-/// saw is history the user has already filed away, and printing `running`
-/// beside an archive marker invites an agent to go and interact with it.
-/// `stale` is additive instead — the word is still the last thing anyone
-/// observed, and what the reader needs is to know it may be old.
+/// The STATUS cell, annotated when the helm's reading may be stale.
 fn session_status_cell(session: &farhelm_proto::AgentSession) -> String {
-    if session.archived {
-        return "archived".to_string();
-    }
     if session.stale {
         return format!("{} (stale)", session.status);
     }
@@ -2114,7 +2078,7 @@ const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
 /// [`safe_cell`] — used to reach `anyhow::bail!` (and from there, this
 /// process's own unescaped `Result` printer) with neither protection. That
 /// was a latent gap even for the helm's own fixed refusal strings, and the
-/// lifecycle verbs made it a real one: a rename/stop/archive/restart refusal can
+/// lifecycle verbs made it a real one: a rename/stop/restart refusal can
 /// now carry a TARGET supervisor's own free-text prose (a rejected title,
 /// say), which this process never validated on the way out.
 fn safe_error_message(message: &str) -> String {
@@ -2631,7 +2595,6 @@ mod tests {
             agent: "claude".to_string(),
             status: "running".to_string(),
             current: false,
-            archived: false,
             restart_offer: Default::default(),
             stale: false,
         }
@@ -2772,36 +2735,6 @@ mod tests {
         assert!(title.ends_with('…'), "the cut must be marked: {title}");
         assert!(!rendered.contains(&long), "a non-final cell is bounded");
     }
-
-    /// Spec: STATUS says `archived` for an archived session and appends
-    /// `(stale)` to a cached one.
-    ///
-    /// Both facts are ones the status word alone cannot carry. A cached
-    /// `running` from a host that went offline overnight is byte-identical
-    /// to one observed a second ago, and SPEC.md requires such rows to be
-    /// clearly marked. An archived session's live status is worse than
-    /// uninformative: it is history the user filed away, so showing
-    /// `running` there invites an agent to go and interact with it.
-    #[farhelm_testtrace::test]
-    fn the_status_column_reports_archive_and_staleness() {
-        let mut archived = agent_session("s1", "t");
-        archived.archived = true;
-        let mut stale = agent_session("s2", "t");
-        stale.stale = true;
-        let rendered = render_agent_reply(&sessions(vec![archived, stale]))
-            .expect("a sessions listing renders as a table");
-        assert_eq!(
-            rendered,
-            [
-                " ID HOST TITLE CWD AGENT  STATUS          OFFER",
-                " s1 h    t     /w  claude archived        fresh",
-                " s2 h    t     /w  claude running (stale) fresh",
-                "",
-            ]
-            .join("\n")
-        );
-    }
-
     /// Spec: a truncated listing produces a warning naming the cut; a
     /// complete one produces none.
     ///

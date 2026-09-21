@@ -359,9 +359,9 @@ test("an unlabeled folder result replaces fresh intent without cloning", async (
 });
 
 /** Exercise the last-reference rule with real processes and a real clone.
- * Archive retains a reference even after stopping its process. Only Delete
- * of the final borrower may move the complete checkout, including dirty work. */
-test("borrowers retain the checkout until the final archived session is deleted", async ({ page, request }) => {
+ * Stop retains a reference after ending its process. Only Delete of the
+ * final borrower may move the complete checkout, including dirty work. */
+test("borrowers retain the checkout until the final stopped session is deleted", async ({ page, request }) => {
   const fixture = await checkoutFixture("browser-lifetime");
   const ids: string[] = [];
   try {
@@ -422,10 +422,9 @@ test("borrowers retain the checkout until the final archived session is deleted"
       expect((await fs.readdir(fixture.root)).sort()).toEqual([path.basename(origin.cwd), "unmanaged"].sort());
     }
     await assertLive(page, nested.id);
-    const archived = await request.post(`/api/sessions/${nested.id}/archive`);
-    expect(archived.ok(), await archived.text()).toBe(true);
+    const stopped = await request.post(`/api/sessions/${nested.id}/stop`);
+    expect(stopped.ok(), await stopped.text()).toBe(true);
     const retained = await sessionState(request, nested.id);
-    expect(retained.archived).toBe(true);
     expect(retained.working_copy).toEqual(original.working_copy);
     expect(await contents(origin.cwd)).toEqual(before);
     await deleteSession(request, nested.id);

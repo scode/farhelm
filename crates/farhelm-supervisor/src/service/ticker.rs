@@ -1061,7 +1061,7 @@ async fn sample_pass(
         match sup.store.transition_many(observations).await {
             Ok(committed) => {
                 // `transition_many` returns the current durable value when
-                // a restart or archive beat this snapshot. Mirroring that
+                // a restart beat this snapshot. Mirroring that
                 // value, rather than the proposed transition, prevents an
                 // old pane's death from overwriting a fresh launch in RAM.
                 for entry in &entries {
@@ -1639,7 +1639,6 @@ mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: id.to_string(),
                     created_at: now,
                     last_activity_at: now,
@@ -2079,7 +2078,7 @@ mod tests {
         // deadness. `session_tabs` (single-session replies) hides the
         // corpses; `session_tabs_including_dead` (teardown's scope
         // enumeration) still names them — a hidden corpse still owns a
-        // cgroup scope that archive and delete must stop.
+        // cgroup scope that delete must stop.
         let terminal = sup
             .sessions
             .lock()
@@ -3229,7 +3228,6 @@ mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: id.to_string(),
                     created_at: at,
                     last_activity_at: at,
@@ -3270,8 +3268,6 @@ mod tests {
 
     /// Failed durable writes retain one exact key, while a second proven
     /// burst is allowed to replace that pending fact with the newer one.
-    /// Archive between the failed write and retry must preserve that accepted
-    /// history even though it discards the live pane's classification evidence.
     #[farhelm_testtrace::test]
     async fn work_start_retry_reuses_the_key_and_a_new_burst_supersedes_it() {
         let state = StateDir::new();
@@ -3346,22 +3342,6 @@ mod tests {
             conn.execute_batch("DROP TRIGGER reject_work_start;")
                 .expect("restore writes");
         }
-        clock.store(90_000, Ordering::Relaxed);
-        let old = entry;
-        let lifecycle = sup.lifecycle_locks.claim("retry").await;
-        let entry = sup
-            .teardown_for_archive(&old, "retry")
-            .await
-            .unwrap_or_else(|_| panic!("archive the terminal-less retry fixture"));
-        sup.sessions
-            .lock()
-            .await
-            .insert("retry".to_string(), Arc::clone(&entry));
-        drop(lifecycle);
-        assert!(
-            entry.info.archived,
-            "fixture must cross the actual archive boundary"
-        );
         assert_eq!(
             entry
                 .activity
@@ -3370,9 +3350,6 @@ mod tests {
                 .pending_work_started_at,
             Some(newer)
         );
-        // An obsolete entry can still be visited by a previously snapshotted
-        // sampler pass. Its rejection must not erase the transferred retry.
-        persist_work_started(&sup, &old, false).await;
         persist_work_started(&sup, &entry, false).await;
 
         assert_eq!(
@@ -3396,7 +3373,7 @@ mod tests {
                 .expect("row")
                 .last_work_started_at,
             newer,
-            "reload must retain the accepted burst after archive"
+            "reload must retain the accepted burst"
         );
         assert_eq!(
             entry
@@ -4295,7 +4272,6 @@ mod tests {
                     conversation_source: None,
                     id: id.to_string(),
                     parent: None,
-                    archived: false,
                     title: id.to_string(),
                     created_at: now_unix(),
                     last_activity_at: now_unix(),

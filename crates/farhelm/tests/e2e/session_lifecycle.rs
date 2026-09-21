@@ -4173,59 +4173,6 @@ async fn stop_succeeds_when_the_recorded_pane_was_recycled_onto_another_session(
          pid would have killed its agent"
     );
 }
-
-/// Archiving a session whose recorded pane was recycled must succeed.
-///
-/// Archive shares delete's teardown shape but publishes a retained row
-/// instead of removing one, so it needs its own coverage: the archive
-/// flag is committed only after every process and terminal artifact is
-/// gone, which means a probe refusal left the session neither archived
-/// nor cleanly deletable.
-#[farhelm_testtrace::test]
-async fn archive_succeeds_when_the_recorded_pane_was_recycled_onto_another_session() {
-    let w = recycled_pane_wedge().await;
-
-    let archived =
-        w.h.client
-            .archive_session(&w.old.id)
-            .await
-            .expect("archive must tolerate a pane id recycled onto another session");
-    assert!(
-        archived.archived,
-        "the archive flag is committed only after teardown finished: {archived:?}"
-    );
-
-    // An archived session stays LISTED (archiving retains the row, it
-    // does not remove it) — what changes is the flag and the settled
-    // exited status, which is why this asserts on the row rather than on
-    // its absence.
-    let listed = wait_for_listing(
-        &w.h.client,
-        30,
-        "the archived session settles as an archived, exited row while the bystander stays live",
-        |sessions| {
-            sessions.iter().any(|s| {
-                s.id == w.old.id
-                    && s.archived
-                    && matches!(s.status, SessionStatus::Exited { exit_code: None })
-            }) && sessions
-                .iter()
-                .any(|s| s.id == w.new.id && s.status.is_live())
-        },
-    )
-    .await;
-    assert_eq!(listed.len(), 2, "no session may have been lost: {listed:?}");
-    assert_eq!(
-        pane_id_of(
-            &w.h.state.path().join("tmux.sock"),
-            &format!("fh-{}", w.new.id)
-        )
-        .await,
-        w.pane,
-        "and the bystander must still hold the recycled pane"
-    );
-}
-
 /// `pane_process` must report the owning session's FULL name, even when
 /// that name begins with exactly the name the caller asked about.
 ///
@@ -5836,8 +5783,8 @@ async fn a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the
     wait_until_scope_gone(&scopes, &unit, 5).await;
 }
 
-/// Standalone reproduction of the systemd 255 quirk the delete/archive
-/// tests above document — with no supervisor and no tmux anywhere in the
+/// Standalone reproduction of the systemd 255 quirk the delete tests above
+/// document — with no supervisor and no tmux anywhere in the
 /// loop, so it isolates the quirk to systemd's own behavior rather than to
 /// anything farhelm's launch or teardown path does.
 ///
@@ -6141,10 +6088,6 @@ async fn without_a_user_manager_a_launch_records_the_fallback_and_stops_like_m2(
 /// derives it, never read back, because the database deliberately does not
 /// store one (`store::StoredSession::launch_scoped`).
 ///
-/// `pub(crate)` rather than private because `archive.rs`'s systemd-255
-/// scope-kill test needs the identical lookup against its own live harness;
-/// sharing this one function keeps the derivation in a single place
-/// instead of a second copy drifting from it.
 pub(crate) async fn launch_scope_of(h: &Harness, session_id: &str) -> Option<String> {
     stored_launch_scope(h.state.path(), session_id).await
 }

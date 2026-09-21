@@ -1617,7 +1617,7 @@ test("multi-session flow: create two, open and type in one, stop and delete the 
     });
 
     // Stop session B via its row button. No confirmation for stop
-    // (SPEC.md gives confirmation to delete/archive, not stop), and the
+    // (SPEC.md gives confirmation to delete, not stop), and the
     // badge must flip on the next poll WITHOUT a reload.
     //
     // The badge still SAYS exited and adds the stop annotation as a
@@ -3743,7 +3743,7 @@ test("compact rows retain distinct ended and harness glyphs within two character
   await patchPreferences(request, { compact: true });
   await page.route(SESSION_LISTING, (route) => fulfillAsHelm(route, {
     status: 200, contentType: "application/json",
-    body: JSON.stringify({ sessions: cases.map((item) => ({ ...item, title: `example-${item.id}`, cwd: "/tmp", stale: true, archived: true })), total: cases.length, truncated: false }),
+    body: JSON.stringify({ sessions: cases.map((item) => ({ ...item, title: `example-${item.id}`, cwd: "/tmp", stale: true })), total: cases.length, truncated: false }),
   }));
   try {
     await page.setViewportSize({ width: 800, height: 600 });
@@ -4094,7 +4094,7 @@ test("truncation banner shows when the listing reports truncated", async ({
           { id: "synthetic-2", title: "synthetic-2", cwd: "/tmp", invocation: "true" },
         ],
         total: 700,
-        // The ordinary request excludes archived rows server-side, so the
+        // The ordinary request includes every row server-side, so the
         // helm answers it with a real matching count even though nobody
         // typed a filter. Keep the fixture on the current helm contract
         // instead of exercising the old-peer fallback.
@@ -4107,7 +4107,7 @@ test("truncation banner shows when the listing reports truncated", async ({
   await page.goto("/");
   await expect(page.locator(".truncation-banner")).toBeVisible();
   // The UNFILTERED shortfall wording, and that is the whole point of
-  // pinning it here: the archive switch is a view rather than a filter, so
+  // pinning it here: the ordinary list is a view rather than a filter, so
   // an untouched list says "showing N of M sessions" and carries no
   // `filtered` modifier — even though the reply beside it does carry a
   // matching count.

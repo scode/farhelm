@@ -104,11 +104,11 @@ kills it, and confirms it went away, rather than trusting a `systemd-run` on `PA
 per-launch cgroup scope, which is containment rather than a level of the tree (`systemd-run --scope` execs in place
 too). Each launch records what it selected, so a session can outlive the manager that scoped it.
 
-Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting or
-archiving it takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the
-session's `FARHELM_AGENT_ID` — the value is the session's own id, set on every agent launch, so the marker says "an
-agent of this session" rather than "this generation of it" — and, for sessions launched by builds predating that marker,
-anything wearing the session marker with no other claim on it. All of those additionally require the session's
+Stopping a session and restarting it reap the agent's tree and leave the session's terminal tabs running; deleting it
+takes the tabs too. What a stop claims is the pane process's descendants plus every process carrying the session's
+`FARHELM_AGENT_ID` — the value is the session's own id, set on every agent launch, so the marker says "an agent of this
+session" rather than "this generation of it" — and, for sessions launched by builds predating that marker, anything
+wearing the session marker with no other claim on it. All of those additionally require the session's
 `FARHELM_SESSION_ID`: one session's stop can never reach another's processes however their other markers read. A tab's
 shell wears its own tab marker, which is what keeps it out — and, when a tab or a whole session is torn down, what earns
 it a SIGHUP alongside the SIGTERM: an interactive shell ignores SIGTERM and exits on the hangup its terminal closing

@@ -46,7 +46,7 @@
 //!
 //! Since the two-pane shell, the token is OWNED BY `AppBody` and shared
 //! with the selected session's view (see [`PaneGate`]): the view's
-//! rename/restart/archive claim the same token the list's create and host
+//! rename/restart claim the same token the list's create and host
 //! mutations do, so neither pane can start a write under the other's, and
 //! the open click's read covers view-side work too.
 //!
@@ -152,7 +152,7 @@ impl OpLock {
 /// mutually exclusive pages with a private token each. `AppBody` therefore
 /// owns ONE `OpLock` and hands it to both panes; this wrapper is what the
 /// session view holds, and it adds the one rule the bare token cannot
-/// express: the sidebar's per-row stop/delete/rename/archive deliberately
+/// express: the sidebar's per-row stop/delete/rename deliberately
 /// do NOT claim the token (two rows' operations must stay concurrent — a
 /// pinned property), so the view's claim must ALSO refuse while any of
 /// those row operations is in flight. `row_ops` is the live count the list

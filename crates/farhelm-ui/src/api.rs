@@ -186,9 +186,6 @@ pub(crate) struct DirectoryBrowse {
 /// the list instead of erroring.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionFilter {
-    /// Whether the list includes archived sessions. False is the ordinary
-    /// view and therefore still an active server-side predicate.
-    pub(crate) include_archived: bool,
     /// A registered host's id, from `GET /api/hosts`.
     pub(crate) host: Option<HostId>,
     /// The exact session id whose direct children should be listed.
@@ -221,44 +218,17 @@ impl SessionFilter {
     /// that are NOT in the reply, and nothing in a reply can say why
     /// something is missing from it.
     ///
-    /// The DEFAULT view answers yes, and must: it hides archived sessions,
-    /// so an archived session missing from the rows has not left the fleet.
-    ///
-    /// Deliberately NOT the banner's question. See
-    /// [`Self::narrows_beyond_archive`] for why the two diverge, and note
-    /// which way each errs — this one is the conservative half, so when in
-    /// doubt a caller wants this one.
+    /// Any explicit filter may leave fleet members out of the reply.
     pub(crate) fn omits_fleet_members(&self) -> bool {
-        self != &SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        }
+        self != &SessionFilter::default()
     }
 
     /// Whether the USER narrowed this listing — the BANNER predicate.
     ///
     /// True for a filter the user applied (host, parent, directory, profile,
-    /// status, title) and false for the archive switch in either position.
-    /// That is what makes the ordinary list say "12 sessions" rather than "12
-    /// matching of 12 sessions": with nothing typed there is no filter to
-    /// report, and the helm now counts the same view the rows come from
-    /// (`SessionListBody::total` there, [`SessionListing::total`] here), so
-    /// the two numbers no longer need a sentence explaining why they differ.
-    ///
-    /// Turning the archive switch ON is not a narrowing either — it WIDENS
-    /// the view, and the total widens with it — so it too keeps the
-    /// unfiltered wording.
-    ///
-    /// This is the weaker of the pair by construction: every filter it
-    /// reports is also one [`Self::omits_fleet_members`] reports, and the
-    /// default view is the gap between them. Using this one to decide what a
-    /// reply is evidence about would read an archived session's absence as a
-    /// departure.
-    pub(crate) fn narrows_beyond_archive(&self) -> bool {
-        self != &SessionFilter {
-            include_archived: self.include_archived,
-            ..SessionFilter::default()
-        }
+    /// status, or title).
+    pub(crate) fn narrows(&self) -> bool {
+        self != &SessionFilter::default()
     }
 
     /// This filter as the query string's parameters, percent-encoded and
@@ -273,9 +243,6 @@ impl SessionFilter {
     /// their filter.
     fn query(&self) -> String {
         let mut parts: Vec<String> = Vec::new();
-        if self.include_archived {
-            parts.push("include_archived=true".to_string());
-        }
         if let Some(host) = self.host {
             parts.push(format!("host={host}"));
         }
@@ -792,12 +759,8 @@ pub(crate) struct SessionListing {
     /// M that moved when the user typed would make "N matching of M" compare
     /// a number against itself.
     ///
-    /// It DOES follow the archive switch, because that switch says which
-    /// list this is rather than narrowing one: the default view's rows and
-    /// its M are both about the non-archived fleet, and turning the switch on
-    /// widens both. The helm computes it that way
-    /// (`aggregate::SessionListBody::total`), and nothing here adjusts the
-    /// number it was given.
+    /// The helm computes the fleet-wide value
+    /// (`aggregate::SessionListBody::total`), and nothing here adjusts it.
     pub(crate) total: u64,
     /// How many sessions matched the filter, fleet-wide — or `None` when
     /// this helm did not say and no honest number can be substituted.
@@ -814,7 +777,7 @@ pub(crate) struct SessionListing {
     /// counted.
     pub(crate) matching: Option<u64>,
     /// Whether the USER narrowed this request — what the banner's wording
-    /// follows (`SessionFilter::narrows_beyond_archive`).
+    /// follows (`SessionFilter::narrows`).
     ///
     /// From the REQUEST, never derived by comparing `matching` against
     /// `total`: a filter that happens to match everything is still a filter,
@@ -822,9 +785,6 @@ pub(crate) struct SessionListing {
     /// silently reverting to the unfiltered wording and leaving the user
     /// wondering whether their filter took.
     ///
-    /// The archive switch is not one of those filters in either position —
-    /// see the predicate's own docs, and [`Self::omits_fleet_members`] for
-    /// the field that DOES count it.
     pub(crate) filtered: bool,
     /// Whether the request behind this listing PERMITTED the helm to leave some
     /// of the fleet out (`SessionFilter::omits_fleet_members`) — the flag
@@ -835,14 +795,8 @@ pub(crate) struct SessionListing {
     /// question a reader can answer from a reply, since a session that is
     /// not here left no trace saying why.
     ///
-    /// A second flag rather than a second reading of `filtered`, because the
-    /// two questions have different answers for exactly one listing: the
-    /// DEFAULT view, which is unfiltered to a reader (`filtered` is false, so
-    /// the banner says "12 sessions") while still hiding every archived
-    /// session (so an absent row is not a departure). Collapsing them would
-    /// make a poll retire an optimistic rename, close an editor, or drop a
-    /// confirmation the moment a session was archived somewhere else.
-    ///
+    /// Kept separate from `filtered` because compatibility handling can
+    /// distinguish what was requested from what an older helm answered.
     /// From the REQUEST as well, for the same reason: what a reply covers is
     /// a property of what was asked, not of what came back.
     pub(crate) omits_fleet_members: bool,
@@ -1477,10 +1431,8 @@ async fn refusal_text(method: &str, url: &str, resp: reqwest::Response) -> Strin
 /// number by another name. That is what makes a helm one version behind
 /// produce the banner it always did.
 ///
-/// "Unfiltered" here is the BANNER's reading
-/// (`SessionFilter::narrows_beyond_archive`), which is what keeps the
-/// ordinary view and the archive switch out of the ignored-filter clause
-/// below. Both are honest under it: the modern helm answers the default view
+/// "Unfiltered" here is the banner's reading (`SessionFilter::narrows`).
+/// The modern helm answers the default view
 /// with a real matching count, and an older one that never filtered still
 /// served the whole fleet, which is what `total` then describes.
 ///
@@ -1542,8 +1494,8 @@ pub(crate) async fn fetch_sessions(
     // BOTH predicates, because they answer different questions about the
     // same request and the listing carries both: what the banner says
     // happened, and what this reply is allowed to be evidence about. See
-    // `SessionFilter::narrows_beyond_archive` for where they part.
-    let filtered = filter.narrows_beyond_archive();
+    // `SessionFilter::narrows` for the user-visible predicate.
+    let filtered = filter.narrows();
     Ok(SessionListing {
         sessions: body.sessions,
         total: body.total,
@@ -2089,21 +2041,6 @@ pub(crate) async fn rename_session(base: &str, id: &str, title: &str) -> Result<
     let url = format!("{base}/api/sessions/{}/rename", encode_path_segment(id));
     let body = serde_json::json!({ "title": title });
     let resp = send(client().post(&url).json(&body)).await?;
-    if !resp.status().is_success() {
-        return Err(refusal_text("POST", &url, resp).await);
-    }
-    resp.json::<Session>().await.map_err(|e| e.to_string())
-}
-
-/// Archive a session and return its retained, terminal-less state.
-///
-/// The response is authoritative even for a retry: archive is idempotent,
-/// so an ambiguous first request can be repeated without turning recovery
-/// into an error. The caller uses the returned `archived` flag rather than
-/// guessing from an emptied tab list or an exited status.
-pub(crate) async fn archive_session(base: &str, id: &str) -> Result<Session, String> {
-    let url = format!("{base}/api/sessions/{}/archive", encode_path_segment(id));
-    let resp = send(client().post(&url)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
@@ -3804,105 +3741,6 @@ mod tests {
              can be quoted on"
         );
     }
-
-    /// The archive switch parts the two predicates, and each answers the
-    /// question it exists for.
-    ///
-    /// This is the whole point of there being two. The DEFAULT view sends an
-    /// empty query string (omission is the wire spelling of
-    /// `include_archived=false`) and reads as unfiltered to a person, so the
-    /// banner says "12 sessions" — while the helm is still withholding every
-    /// archived row, so the reply covers less than the fleet and nothing may
-    /// read an absence in it as a departure. Collapse the two and one of
-    /// those goes wrong: either the ordinary list announces a filter nobody
-    /// applied, or a session archived from another client is mistaken for one
-    /// that left.
-    ///
-    /// Turning the switch ON is the mirror case: it widens the view rather
-    /// than narrowing it, so the banner stays unfiltered and the reply
-    /// becomes fleet-wide.
-    #[farhelm_testtrace::test]
-    fn the_archive_switch_is_a_view_rather_than_a_filter() {
-        let ordinary = SessionFilter::default();
-        assert!(
-            !ordinary.narrows_beyond_archive(),
-            "nothing was typed, so the banner has no filter to report"
-        );
-        assert!(
-            ordinary.omits_fleet_members(),
-            "the ordinary view still hides archived rows, so its absences prove nothing"
-        );
-        assert_eq!(ordinary.query(), "");
-
-        let widened = SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        };
-        assert!(
-            !widened.narrows_beyond_archive(),
-            "the switch widens the view; it is not a filter in either position"
-        );
-        assert!(
-            !widened.omits_fleet_members(),
-            "and with it on the reply is the whole fleet, so absence IS evidence"
-        );
-
-        let searched = SessionFilter {
-            title: "needle".to_string(),
-            ..SessionFilter::default()
-        };
-        assert!(
-            searched.narrows_beyond_archive() && searched.omits_fleet_members(),
-            "a filter a person applied answers both questions the same way"
-        );
-    }
-
-    /// The sidebar's two filter controls read the switch differently, on
-    /// purpose, and this pins the pair rather than either half alone.
-    ///
-    /// `rows::count_banner` chooses its matching wording with
-    /// [`SessionFilter::narrows_beyond_archive`], while `list::ListView`
-    /// enables Clear with a full comparison against the default. The switch
-    /// is the one setting where those disagree, and each direction is a
-    /// separate way to get it wrong: call the widened view matching and the
-    /// ordinary count lies; hide the switch from Clear and a user who turned
-    /// it on has no control offering to put it back.
-    ///
-    /// Kept beside the predicate rather than in the view because that is
-    /// where the decision is testable at all — the count wording is Dioxus
-    /// markup a browser has to render, and the e2e archive spec pins the
-    /// rendered half.
-    #[farhelm_testtrace::test]
-    fn the_archive_switch_is_clearable_without_being_announced() {
-        let widened = SessionFilter {
-            include_archived: true,
-            ..SessionFilter::default()
-        };
-        assert!(
-            !widened.narrows_beyond_archive(),
-            "the badge must stay off: the switch chose a view, it did not narrow one"
-        );
-        assert_ne!(
-            widened,
-            SessionFilter::default(),
-            "and Clear must stay live: the switch is still a setting to undo"
-        );
-        assert_eq!(
-            SessionFilter {
-                include_archived: false,
-                host: None,
-                parent: String::new(),
-                directory: String::new(),
-                profile: String::new(),
-                status: String::new(),
-                title: String::new(),
-            },
-            SessionFilter::default(),
-            "while the archive-excluding view with nothing typed IS the default, so Clear has \
-             nothing to offer there — the fact that makes the comparison above a real one"
-        );
-    }
-
     /// Each dimension reaches the wire under the helm's own parameter name,
     /// and every value is encoded rather than pasted.
     ///
@@ -3913,7 +3751,6 @@ mod tests {
     #[farhelm_testtrace::test]
     fn every_filter_dimension_travels_under_its_own_encoded_parameter() {
         let filter = SessionFilter {
-            include_archived: true,
             host: Some(7),
             parent: "session/root".to_string(),
             directory: "/srv/my project".to_string(),
@@ -3921,10 +3758,10 @@ mod tests {
             status: "waiting".to_string(),
             title: "a&b".to_string(),
         };
-        assert!(filter.narrows_beyond_archive());
+        assert!(filter.narrows());
         assert_eq!(
             filter.query(),
-            "include_archived=true&host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
+            "host=7&parent=session%2Froot&directory=%2Fsrv%2Fmy%20project&\
              profile=claude%20code&status=waiting&title=a%26b"
         );
     }
@@ -3990,24 +3827,19 @@ mod tests {
     #[farhelm_testtrace::test]
     fn only_an_exactly_empty_value_clears_a_dimension() {
         let blank = SessionFilter {
-            include_archived: true,
             title: String::new(),
             ..SessionFilter::default()
         };
-        assert!(
-            !blank.narrows_beyond_archive(),
-            "an empty box filters nothing"
-        );
+        assert!(!blank.narrows(), "an empty box filters nothing");
 
         let spaced = SessionFilter {
-            include_archived: true,
             title: " ".to_string(),
             ..SessionFilter::default()
         };
-        assert!(spaced.narrows_beyond_archive());
+        assert!(spaced.narrows());
         assert_eq!(
             spaced.query(),
-            "include_archived=true&title=%20",
+            "title=%20",
             "a space is a search for a space, not a cleared filter"
         );
 
@@ -4016,11 +3848,10 @@ mod tests {
         // blank.
         assert!(
             SessionFilter {
-                include_archived: true,
                 host: Some(0),
                 ..SessionFilter::default()
             }
-            .narrows_beyond_archive()
+            .narrows()
         );
     }
 

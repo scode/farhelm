@@ -1830,7 +1830,7 @@ pub(crate) async fn wait_until_pid_gone(pid: u32, secs: u64) {
 /// Shared by every scope-gated test that needs to confirm a torn-down
 /// scope's unit was actually collected, rather than each inlining its own
 /// poll loop (`.agents/test-authoring.md`'s "use shared polling helpers"
-/// rule). By the time a delete or archive RPC has returned success, the
+/// rule). By the time a delete RPC has returned success, the
 /// production teardown path (`kill_scope`'s own `confirm_scope_gone` in
 /// sweep.rs) should already have settled this — this wait is a small
 /// margin for the manager's answer to lag by a beat, not a substitute for
@@ -2337,7 +2337,6 @@ mod tests {
     fn scripted_session(id: &str, title: &str) -> SessionInfo {
         SessionInfo {
             parent: None,
-            archived: false,
             id: id.to_string(),
             title: title.to_string(),
             created_at: 1_700_000_000,

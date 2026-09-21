@@ -9,12 +9,10 @@ use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
-    self, ListSort, Preferences, SessionFilter, SessionListing, archive_session, delete_session,
-    fetch_hosts, fetch_session, fetch_sessions, queue_seen_write, rename_session, replace_session,
-    stop_session,
+    self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
+    fetch_session, fetch_sessions, queue_seen_write, rename_session, replace_session, stop_session,
 };
 use crate::app_bar::AppBar;
-use crate::archive::confirmation as archive_confirmation;
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
 use crate::ops::{OpLock, ReadGate};
@@ -74,7 +72,7 @@ fn rename_result_owns_editor(editor: Option<&RenameEditor>, generation: u64) -> 
 /// Decide what a listing is allowed to say about the editor's source.
 ///
 /// `None` means the listing has no authority to change availability. A
-/// filtered, archive-omitting, truncated, or mutation-local read may hide the
+/// filtered, truncated, or mutation-local read may hide the
 /// source without proving that it left the fleet.
 fn listed_rename_unavailable(
     editor: &RenameEditor,
@@ -255,8 +253,8 @@ const SORT_OPTIONS: [(ListSort, &str); 3] = [
     (ListSort::Title, "title A–Z"),
 ];
 
-/// SPEC.md's auto-select fallback — "the newest-created non-archived
-/// session" — chosen from the rows one listing actually carries.
+/// SPEC.md's auto-select fallback — the newest-created session from the rows
+/// one listing actually carries.
 ///
 /// A function of its own because the choice is subtler than it looks and
 /// because it is the half of the fallback that can be tested without a
@@ -276,7 +274,7 @@ const SORT_OPTIONS: [(ListSort, &str); 3] = [
 ///   timestamp would make every such row lose to any row that has one, and
 ///   would make an all-old fleet's winner arbitrary. Rows with no stamp are
 ///   therefore not candidates; if none of them has one, the answer is the
-///   first non-archived row in the listing's own order, which is what this
+///   first row in the listing's own order, which is what this
 ///   fallback did before `created_at` existed here.
 /// - **Equal stamps keep the listing's order.** `created_at` has one-second
 ///   granularity, so ties are ordinary rather than exotic. `min_by` over a
@@ -286,9 +284,9 @@ const SORT_OPTIONS: [(ListSort, &str); 3] = [
 fn newest_created_fallback(sessions: &[Session]) -> Option<&Session> {
     sessions
         .iter()
-        .filter(|session| !session.archived && session.created_at > 0)
+        .filter(|session| session.created_at > 0)
         .min_by(|a, b| b.created_at.cmp(&a.created_at))
-        .or_else(|| sessions.iter().find(|session| !session.archived))
+        .or_else(|| sessions.first())
 }
 
 /// Whether a listing reply may touch this view at all.
@@ -343,20 +341,17 @@ fn accepts_listing(
 /// is about to change, or is mid-decision, and is not a stable thing to
 /// snapshot right now. Shared by both callers rather than duplicated,
 /// because clone and replace need the identical answer to the identical
-/// question — a row mid-archive-confirmation, say, is exactly as unstable
-/// a clone source as it is a replace source.
+/// question.
 fn clone_is_refused(
     busy: bool,
     session_id: &str,
     pending: &HashSet<String>,
     confirming: &HashSet<String>,
-    confirming_archive: &HashSet<String>,
     confirming_replace: &HashSet<String>,
     renaming: Option<&str>,
 ) -> bool {
     busy || pending.contains(session_id)
         || confirming.contains(session_id)
-        || confirming_archive.contains(session_id)
         || confirming_replace.contains(session_id)
         || renaming == Some(session_id)
 }
@@ -477,7 +472,7 @@ pub(crate) fn ListView(
     open_destination: Option<OpenDestination>,
     /// The SHARED live-operation token (see `ops`'s module docs): owned by
     /// `AppBody` rather than created here, because the selected session's
-    /// view claims the same token for its own restart/archive — a private
+    /// view claims the same token for its own restart — a private
     /// token per pane would let the two panes mutate the fleet under each
     /// other.
     ops: OpLock,
@@ -487,8 +482,7 @@ pub(crate) fn ListView(
     /// count is the only way the other pane can refuse to start a write
     /// while one is in flight.
     row_ops: Signal<u32>,
-    /// A session this list REMOVED — a successful delete, or an archive
-    /// (which the default filter drops). `AppBody` reconciles the
+    /// A session this list removed through a successful delete. `AppBody` reconciles the
     /// selection: without this, deleting the selected row would leave the
     /// right pane showing a session this client knows is gone.
     on_removed: EventHandler<String>,
@@ -624,19 +618,9 @@ pub(crate) fn ListView(
     // at all (deleted from elsewhere, say) — there is no row left for a
     // dangling entry to ever affect, so this is tidiness, not correctness.
     let mut confirming = use_signal(HashSet::<String>::new);
-    // Archive has a distinct prompt because its consequence and mutation
-    // differ from delete's. Keeping the sets separate also makes the row's
-    // mutual exclusion explicit instead of overloading one flag with an
-    // action kind that every handler would then have to decode.
-    let mut confirming_archive = use_signal(HashSet::<String>::new);
-    // Replace's own prompt, on the same footing as the two above. Unlike
-    // `confirming_archive` — which `commit_listing` retires once a row
-    // ARCHIVES, since an archived row's `archive_confirmation` prompt no
-    // longer applies to it — this one reconciles the same way `confirming`
-    // does: only a row that leaves the listing ENTIRELY drops its pending
-    // replace confirmation, because replace stays a legitimate action on an
-    // archived row (`row::session_menu_order` offers it unconditionally,
-    // same as clone).
+    // Replace's own prompt, on the same footing as the one above. It
+    // reconciles the same way `confirming` does: only a row that leaves the
+    // listing entirely drops its pending replace confirmation.
     let mut confirming_replace = use_signal(HashSet::<String>::new);
     // At most one row's actions menu is open, and this parent owns which.
     // A per-row boolean would let two menus fight, and the parent is the
@@ -850,7 +834,7 @@ pub(crate) fn ListView(
     // command, or structured launch choice is implied by this convenience.
     let mut ordinary_new_cwd = use_signal(|| None::<String>);
     // The page-local host query carried by listing reads. The selector changes
-    // only this field, so archive exclusion and every retired API dimension
+    // only this field, so every retired API dimension
     // stay at their `SessionFilter` defaults.
     let mut filter = use_signal(SessionFilter::default);
     // The order the reads are carrying, seeded from the helm's shared
@@ -1043,16 +1027,9 @@ pub(crate) fn ListView(
                     menu_open.set(None);
                 }
             }
-            // The right pane's placeholder may only claim "no active
-            // sessions" on a committed result that actually proves one:
-            // the DEFAULT view's own reply, uncut, with no rows. Not `rows::is_empty_fleet` — that helper answers a
-            // different question (is the WHOLE fleet empty), and the
-            // ordinary view withholds archived rows, so it can never
-            // support that claim no matter what its own count says. An
-            // archived-only fleet lists nothing in the default view, and
-            // "no ACTIVE sessions" is exactly right for it. A user filter
-            // proves nothing about the pane and leaves the verdict as it
-            // was.
+            // The right pane's placeholder may only claim an empty fleet on
+            // a committed, uncut default listing. A user filter proves
+            // nothing about the pane and leaves the verdict as it was.
             if requested == SessionFilter::default() && !listing.truncated {
                 fleet_empty.set(Some(listing.sessions.is_empty()));
             }
@@ -1077,20 +1054,6 @@ pub(crate) fn ListView(
             confirming
                 .write()
                 .retain(|id| live_ids.contains(id.as_str()));
-            let active_ids: HashSet<&str> = listing
-                .sessions
-                .iter()
-                .filter(|session| !session.archived)
-                .map(|session| session.id.as_str())
-                .collect();
-            confirming_archive
-                .write()
-                .retain(|id| active_ids.contains(id.as_str()));
-            // Replace reconciles against `live_ids`, not `active_ids`: an
-            // archived row is still a legitimate replace target (see the
-            // signal's own doc), so archiving a row elsewhere must not
-            // silently dismiss a replace confirmation already open on it —
-            // only the row leaving the listing entirely does that.
             confirming_replace
                 .write()
                 .retain(|id| live_ids.contains(id.as_str()));
@@ -1172,10 +1135,8 @@ pub(crate) fn ListView(
         // `commit_listing`).
         let index = poll_sequence.peek().to_owned();
         poll_sequence += 1;
-        // The EVIDENCE predicate, never the banner's: the default view reads
-        // as unfiltered on screen while still hiding archived rows, so
-        // authorizing its reads to treat absence as departure would retire
-        // work on any session archived from another client.
+        // The evidence predicate, never the banner's: a narrowed request
+        // cannot treat an omitted row as a departure.
         let authoritative = !requested.omits_fleet_members();
         let generation = listing_reads.write().start();
         async move {
@@ -1416,7 +1377,6 @@ pub(crate) fn ListView(
         // The same argument covers an open RENAME field, which replaces
         // the same buttons for the same reason.
         if confirming.read().contains(&id)
-            || confirming_archive.read().contains(&id)
             || confirming_replace.read().contains(&id)
             || rename_editor
                 .read()
@@ -1616,7 +1576,6 @@ pub(crate) fn ListView(
     let mut do_delete_on_confirm = do_delete.clone();
     let on_delete = move |target: DeleteTarget| {
         if pending.read().contains(&target.id)
-            || confirming_archive.read().contains(&target.id)
             || confirming_replace.read().contains(&target.id)
             || rename_editor
                 .read()
@@ -1716,87 +1675,8 @@ pub(crate) fn ListView(
         confirming.write().remove(&id);
     };
 
-    // Archive shares the per-row operation gate with stop, rename, and
-    // delete, but it owns a separate confirmation. A successful response is
-    // followed by a list read because the applied archive switch decides
-    // whether the retained row disappears or changes in place; the client
-    // cannot repair the fleet-wide counts by editing one row itself.
-    let archive_base = base.clone();
-    let archive_refresh = request_listing.clone();
-    let mut do_archive = move |id: String| {
-        if !begin_row_op(&id) {
-            return;
-        }
-        errors.write().remove(&id);
-        let base = archive_base.clone();
-        let refresh = archive_refresh.clone();
-        spawn(async move {
-            match archive_session(&base, &id).await {
-                Ok(_) => {
-                    // The row leaves the LOCAL listing before the selection
-                    // owner hears about the removal: the auto-select that
-                    // runs the moment the selection clears reads this very
-                    // listing, and the archived row still sitting in it —
-                    // as the remembered id, no less — would be immediately
-                    // re-selected, defeating the reconciliation.
-                    if !filter.peek().include_archived
-                        && let Some(Ok(current)) = listing.write().as_mut()
-                    {
-                        current.sessions.retain(|s| s.id != id);
-                    }
-                    refresh(Trigger::Explicit);
-                    // An archived session leaves the DEFAULT filter, so for
-                    // the selection's owner it has been removed just as a
-                    // delete removes. Under an include-archived filter the
-                    // row stays listed, so the selection legitimately
-                    // stays too.
-                    if !filter.peek().include_archived {
-                        on_removed.call(id.clone());
-                    }
-                }
-                Err(e) => {
-                    errors.write().insert(id.clone(), format!("archive: {e}"));
-                }
-            }
-            end_row_op(&id);
-        });
-    };
-    let mut do_archive_on_confirm = do_archive.clone();
-    let on_archive = move |session: Session| {
-        if session.archived
-            || pending.read().contains(&session.id)
-            || confirming.read().contains(&session.id)
-            || confirming_replace.read().contains(&session.id)
-            || rename_editor
-                .read()
-                .as_ref()
-                .map(|editor| editor.id.as_str())
-                == Some(session.id.as_str())
-        {
-            return;
-        }
-        if archive_confirmation(&session, session.tabs.len()).is_some() {
-            confirming_archive.write().insert(session.id);
-        } else {
-            do_archive_on_confirm(session.id);
-        }
-    };
-    let confirm_archive = move |id: String| {
-        // Same shared-token refusal as `confirm_delete`, for the same
-        // keep-the-prompt reason.
-        if ops.busy_now() {
-            return;
-        }
-        if confirming_archive.write().remove(&id) {
-            do_archive(id);
-        }
-    };
-    let cancel_archive = move |id: String| {
-        confirming_archive.write().remove(&id);
-    };
-
-    // Replace shares the per-row operation gate with stop, rename,
-    // archive, and delete (`begin_row_op`, which is also what enforces the
+    // Replace shares the per-row operation gate with stop, rename, and
+    // delete (`begin_row_op`, which is also what enforces the
     // page-wide nav lock here — see that helper's own doc), but its
     // success path does something none of the others do: it changes which
     // session is SELECTED, not merely how the clicked row itself now reads.
@@ -1861,7 +1741,6 @@ pub(crate) fn ListView(
             &session.id,
             &pending.read(),
             &confirming.read(),
-            &confirming_archive.read(),
             &confirming_replace.read(),
             rename_editor
                 .read()
@@ -1873,8 +1752,8 @@ pub(crate) fn ListView(
         confirming_replace.write().insert(session.id);
     };
     let confirm_replace = move |id: String| {
-        // Same shared-token refusal as `confirm_delete`/`confirm_archive`,
-        // for the same keep-the-prompt reason.
+        // Same shared-token refusal as `confirm_delete`, for the same
+        // keep-the-prompt reason.
         if ops.busy_now() {
             return;
         }
@@ -1925,7 +1804,6 @@ pub(crate) fn ListView(
             &session.id,
             &pending.read(),
             &confirming.read(),
-            &confirming_archive.read(),
             &confirming_replace.read(),
             rename_editor
                 .read()
@@ -1962,7 +1840,6 @@ pub(crate) fn ListView(
             &session.id,
             &pending.read(),
             &confirming.read(),
-            &confirming_archive.read(),
             &confirming_replace.read(),
             rename_editor
                 .read()
@@ -1994,7 +1871,6 @@ pub(crate) fn ListView(
         if ops.busy_now()
             || pending.read().contains(&id)
             || confirming.read().contains(&id)
-            || confirming_archive.read().contains(&id)
             || confirming_replace.read().contains(&id)
             || rename_editor.peek().is_some()
         {
@@ -2147,7 +2023,7 @@ pub(crate) fn ListView(
     let guarded_open = use_callback(guarded_open);
     // Auto-select (BUGS_BURNDOWN.md issue 5, interviewed): an empty right
     // pane is a state to END, not to show — the remembered selection if
-    // its row is still listed, else the newest-created non-archived row.
+    // its row is still listed, else the newest-created row.
     // That fallback is picked by `created_at` rather than by position (see
     // `newest_created_fallback`), and has to be: the list is no longer
     // necessarily read in creation order, so the first row is whatever the
@@ -2275,7 +2151,7 @@ pub(crate) fn ListView(
     // Unlike every OTHER handler's silent, log-only failure path
     // (`api::mark_seen`'s own doc explains why the automatic mark stays
     // silent), a MANUAL toggle's failure surfaces to the row's error line
-    // exactly like `on_stop`/`on_delete`/`on_archive`/`on_rename_submit`
+    // exactly like `on_stop`/`on_delete`/`on_rename_submit`
     // above (SPEC.md, Errors and diagnostics) — the user asked for this one
     // directly, so losing it silently would be exactly the kind of
     // succeeded-when-it-failed illusion that section forbids.
@@ -2307,11 +2183,8 @@ pub(crate) fn ListView(
     let on_delete = use_callback(on_delete);
     let confirm_delete = use_callback(confirm_delete);
     let cancel_delete = use_callback(cancel_delete);
-    let on_archive = use_callback(on_archive);
     let on_clone = use_callback(on_clone);
     let on_replace = use_callback(on_replace);
-    let confirm_archive = use_callback(confirm_archive);
-    let cancel_archive = use_callback(cancel_archive);
     let confirm_replace = use_callback(confirm_replace);
     let cancel_replace = use_callback(cancel_replace);
     let on_rename_start = use_callback(on_rename_start);
@@ -2721,9 +2594,6 @@ pub(crate) fn ListView(
                                     // that refusal made visible.
                                     busy: busy || pending.read().contains(&session.id),
                                     confirming: confirming.read().contains(&session.id),
-                                    confirming_archive: confirming_archive
-                                        .read()
-                                        .contains(&session.id),
                                     confirming_replace: confirming_replace
                                         .read()
                                         .contains(&session.id),
@@ -2765,9 +2635,6 @@ pub(crate) fn ListView(
                                 on_delete,
                                 on_confirm_delete: confirm_delete,
                                 on_cancel_delete: cancel_delete,
-                                on_archive,
-                                on_confirm_archive: confirm_archive,
-                                on_cancel_archive: cancel_archive,
                                 on_rename_start,
                                 on_menu_toggle: toggle_menu,
                                 session,
@@ -2806,10 +2673,8 @@ mod tests {
 
     /// Only a complete fleet-wide listing may change rename availability.
     ///
-    /// The default browser listing deliberately omits archived sessions, so
-    /// absence there cannot distinguish deletion from archiving. This pins
-    /// both that refusal and the authoritative transition without inventing
-    /// a product UI that requests the all-fleet view.
+    /// A partial or mutation-local listing cannot prove that an editor's
+    /// source left the fleet.
     #[farhelm_testtrace::test]
     fn rename_availability_changes_only_on_authoritative_absence() {
         let editor = RenameEditor {
@@ -2830,7 +2695,7 @@ mod tests {
         assert_eq!(
             listed_rename_unavailable(&editor, true, &listing(Vec::new(), true)),
             None,
-            "the default active-only view cannot prove why the source is absent"
+            "a partial view cannot prove why the source is absent"
         );
         assert_eq!(
             listed_rename_unavailable(&editor, false, &listing(Vec::new(), false)),
@@ -2895,7 +2760,7 @@ mod tests {
     }
 
     /// A clone (or replace — the two share this predicate, see its own doc)
-    /// click is refused by EACH of its five guards independently, and
+    /// click is refused by each guard independently, and
     /// accepted only when every one of them is clear.
     ///
     /// This pins the regression the guard exists to prevent: the row's own
@@ -2908,37 +2773,33 @@ mod tests {
     /// dropped any single one of them would fail here rather than only
     /// under a real browser.
     #[farhelm_testtrace::test]
-    fn a_clone_is_refused_by_any_one_of_its_five_guards() {
+    fn a_clone_is_refused_by_any_one_of_its_guards() {
         let id = "session-1";
         let empty = HashSet::new();
         let holding = HashSet::from([id.to_string()]);
 
         assert!(
-            !clone_is_refused(false, id, &empty, &empty, &empty, &empty, None),
+            !clone_is_refused(false, id, &empty, &empty, &empty, None),
             "nothing is holding this row, so the clone must proceed"
         );
         assert!(
-            clone_is_refused(true, id, &empty, &empty, &empty, &empty, None),
+            clone_is_refused(true, id, &empty, &empty, &empty, None),
             "the shared page-wide lock alone must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &holding, &empty, &empty, &empty, None),
+            clone_is_refused(false, id, &holding, &empty, &empty, None),
             "a stop or delete already in flight for THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &holding, &empty, &empty, None),
+            clone_is_refused(false, id, &empty, &holding, &empty, None),
             "an open delete confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &empty, &holding, &empty, None),
-            "an open archive confirmation on THIS row must refuse it"
-        );
-        assert!(
-            clone_is_refused(false, id, &empty, &empty, &empty, &holding, None),
+            clone_is_refused(false, id, &empty, &empty, &holding, None),
             "an open replace confirmation on THIS row must refuse it"
         );
         assert!(
-            clone_is_refused(false, id, &empty, &empty, &empty, &empty, Some(id)),
+            clone_is_refused(false, id, &empty, &empty, &empty, Some(id)),
             "this row's own open rename editor must refuse it"
         );
         // A guard keyed to a DIFFERENT row must never refuse this one —
@@ -2946,7 +2807,7 @@ mod tests {
         // guard that read them as a single shared flag would block every
         // clone in the list the instant any one row was mid-operation.
         assert!(
-            !clone_is_refused(false, id, &empty, &empty, &empty, &empty, Some("other-row")),
+            !clone_is_refused(false, id, &empty, &empty, &empty, Some("other-row")),
             "another row's rename must not block this row's clone"
         );
     }
@@ -3103,9 +2964,7 @@ mod tests {
     /// output put it. EQUAL STAMPS are ordinary rather than exotic, since
     /// `created_at` has one-second granularity, and the tie has to resolve to
     /// the listing's own head rather than to whichever row an iterator
-    /// happened to visit last. ARCHIVED rows are excluded because SPEC.md's
-    /// fallback says non-archived and an archived session has no terminal to
-    /// open. MISSING `created_at` is an older helm (`Session::created_at`),
+    /// happened to visit last. MISSING `created_at` is an older helm (`Session::created_at`),
     /// where the honest answer is the one this fallback gave before the field
     /// was decoded at all.
     #[farhelm_testtrace::test]
@@ -3113,21 +2972,16 @@ mod tests {
         // Ids are spelled as words rather than as UUIDs so each assertion
         // reads as "which session won" — the row's position and its stamp
         // are what every case here is about, and a real id would hide both.
-        fn row(id: &str, created_at: i64, archived: bool) -> Session {
+        fn row(id: &str, created_at: i64) -> Session {
             Session {
                 created_at,
-                archived,
                 ..crate::list::row::row_specimen(id)
             }
         }
 
         // Title order: the newest session sits last, exactly where a
         // first-row fallback would miss it.
-        let by_title = [
-            row("aaa", 300, false),
-            row("mmm", 100, false),
-            row("zzz", 500, false),
-        ];
+        let by_title = [row("aaa", 300), row("mmm", 100), row("zzz", 500)];
         assert_eq!(
             newest_created_fallback(&by_title).map(|s| s.id.as_str()),
             Some("zzz")
@@ -3136,32 +2990,17 @@ mod tests {
         // Ties keep the listing's own order. `Iterator::max_by` returns the
         // LAST maximal element, so a naive `max_by` here would answer "third"
         // — and would change its answer as unrelated rows were appended.
-        let tied = [
-            row("first", 500, false),
-            row("second", 100, false),
-            row("third", 500, false),
-        ];
+        let tied = [row("first", 500), row("second", 100), row("third", 500)];
         assert_eq!(
             newest_created_fallback(&tied).map(|s| s.id.as_str()),
             Some("first"),
             "equal creation stamps must resolve to the listing's own head"
         );
 
-        // Archived rows are not candidates even when they are the newest.
-        let with_archived = [row("archived-newest", 900, true), row("live", 100, false)];
-        assert_eq!(
-            newest_created_fallback(&with_archived).map(|s| s.id.as_str()),
-            Some("live")
-        );
-
         // A helm too old to send the field leaves every stamp at zero, which
-        // means UNKNOWN. The answer is the first non-archived row, not the
+        // means UNKNOWN. The answer is the first row, not the
         // one an ordering over zeroes would single out.
-        let stampless = [
-            row("archived", 0, true),
-            row("head", 0, false),
-            row("tail", 0, false),
-        ];
+        let stampless = [row("head", 0), row("tail", 0)];
         assert_eq!(
             newest_created_fallback(&stampless).map(|s| s.id.as_str()),
             Some("head")
@@ -3169,7 +3008,7 @@ mod tests {
 
         // Mixed: one row does carry a stamp, so the unknowns must not be
         // allowed to beat it by being earlier in the list.
-        let mixed = [row("unknown", 0, false), row("stamped", 1, false)];
+        let mixed = [row("unknown", 0), row("stamped", 1)];
         assert_eq!(
             newest_created_fallback(&mixed).map(|s| s.id.as_str()),
             Some("stamped"),
@@ -3177,10 +3016,5 @@ mod tests {
         );
 
         assert_eq!(newest_created_fallback(&[]), None);
-        assert_eq!(
-            newest_created_fallback(&[row("only-archived", 900, true)]).map(|s| s.id.as_str()),
-            None,
-            "an all-archived listing offers nothing to auto-select"
-        );
     }
 }

@@ -551,10 +551,6 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(sessions::rename_session),
         )
         .route(
-            "/api/sessions/{id}/archive",
-            axum::routing::post(sessions::archive_session),
-        )
-        .route(
             "/api/sessions/{id}/replace",
             axum::routing::post(sessions::replace_session),
         )
@@ -1735,7 +1731,7 @@ const BUILD_STAMP_HEADER: &str = "x-farhelm-build";
 /// Classifying it needs a fact this function is not given — whether the
 /// failed REQUEST changed anything — because the same lost answer means
 /// "retry freely" for a listing and "the outcome is unknown" for a
-/// mutation, be it a rename/stop/archive or a create/clone. The agent
+/// mutation, be it a rename/stop/restart or a create/clone. The agent
 /// caller asks that question first
 /// (`agent_requests::transport_outcome`) and only falls back here; the
 /// REST caller keeps the `Internal` it has always produced, since a

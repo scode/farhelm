@@ -4,8 +4,8 @@
 //!
 //! ## Why this lives outside both rows
 //!
-//! The two menus render completely different ITEMS (rename/stop/archive/
-//! delete versus retry/adopt/edit/remove) with completely different
+//! The two menus render completely different ITEMS (rename/stop/delete
+//! versus retry/adopt/edit/remove) with completely different
 //! visibility rules, so nothing here decides what a menu contains or what
 //! its items do. What the two rows share instead is everything about a menu
 //! that has NOTHING to do with what it lists: a `position: fixed` panel has
@@ -100,7 +100,7 @@ const MENU_PANEL_VIEWPORT_MARGIN_PX: f64 = 8.0;
 /// left scrolling inside its own panel.
 ///
 /// Sized for the session row's FULL menu, eight items (rename, mark seen,
-/// clone, replace with, replace, stop, archive, delete) plus the separator
+/// clone, replace with, replace, stop, delete) plus the separator
 /// and the panel's own padding and border. The number is empirical, not
 /// derived from the stylesheet: a six-item menu measured 178px from the
 /// panel's top to the bottom of its last item on Chromium (62px of slack
@@ -116,7 +116,7 @@ const MENU_PANEL_VIEWPORT_MARGIN_PX: f64 = 8.0;
 /// directly rather than assumed: a throwaway `boundingBox()` on the panel
 /// in `sidebar.spec.ts`'s "the mark-seen item is reachable and operable by
 /// role and keyboard" test (the one fixture already reliably reaching a
-/// live, unarchived, seen-state-answered session — see that test's own
+/// live, seen-state-answered session — see that test's own
 /// `pinAutoSelect`/45s-wait setup) read 239px on Chromium for the full
 /// eight-item panel, one pixel under the OLD 240px reserve. That is not the
 /// six-item measurement's 62px of slack; it is next to none, so the
@@ -277,7 +277,7 @@ fn menu_panel_style(toggle_rect: PixelsRect) -> String {
 /// by the time a measurement can even start. `Unmeasured` is what that
 /// first render is — the panel exists in the DOM (so its own height is
 /// ready and tab order includes it, and any `autofocus` element inside it
-/// — the delete/archive confirm's cancel button, the rename field — can
+/// — the delete confirm's cancel button, the rename field — can
 /// actually RECEIVE that focus; see `menu_panel_placement_style`'s own
 /// doc for why hiding via `visibility` would have silently broken that)
 /// but paints nothing, which is what keeps a still-pending measurement
@@ -426,8 +426,8 @@ pub(crate) fn measurement_outcome(
 // Everything below identifies a menu item by WHAT IT DOES (the type
 // parameter `A`) rather than by where it currently sits — the fix for a
 // real bug the session row hit first: its item set is not fixed for the
-// life of an open menu (archiving a session withdraws Stop and Archive
-// while Delete's DOM node survives in place), so a scheme that filed
+// life of an open menu (a refresh can withdraw conditional actions while
+// another DOM node survives in place), so a scheme that filed
 // handles under "index 3" left a surviving item's handle at an index the
 // shorter list no longer reaches. Positions are derived from `MenuOrder`
 // at the moment a key is pressed; nothing durable is ever keyed by one.
@@ -532,8 +532,8 @@ pub(crate) fn cancel_menu_focus(mut queue: MenuFocusQueue) {
 /// [`MenuOrder::pack`] packs the visible actions to the front, so
 /// iteration stops at the first gap by construction.
 ///
-/// `N` is the row's OWN total action count (5 for the session row, 5 for
-/// the host row today — the match is incidental, not a constraint this
+/// `N` is the row's OWN total action count (7 for the session row, 5 for
+/// the host row today — the difference is not a constraint this
 /// type enforces) — a compile-time fact each row bakes into its own
 /// `MenuOrder` type alias, never inferred or shared across rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -548,8 +548,7 @@ impl<A: Copy + Eq, const N: usize> MenuOrder<A, N> {
     /// every row keeps in one place so the rendered list and the
     /// navigable list cannot disagree about what "the first item" or "the
     /// last item" means. `visible` is the row's own state-dependent
-    /// answer for each one (an archived session withdraws Stop and
-    /// Archive; a non-ssh host withdraws Edit and Remove).
+    /// answer for each one (a non-ssh host withdraws Edit and Remove).
     pub(crate) fn pack(all: [A; N], mut visible: impl FnMut(A) -> bool) -> Self {
         let mut packed = [None; N];
         let mut next = 0;
@@ -1230,7 +1229,7 @@ pub(crate) fn next_menu_focus(
 //
 // A poll can withdraw a menu item while the menu stays open and nothing the
 // user did touched focus at all — the host row's `adoptable` flipping off
-// mid-open is the concrete case, and the session row's `archived` toggle can
+// mid-open is the concrete case, and the session row's seen-state toggle can
 // do the identical thing. `menu_focus` only ever stores a POSITION, and a
 // withdrawal from the middle of the list shifts every later item's index
 // down, so the numeric slot a withdrawn action vacates can be, and often is,
@@ -1659,8 +1658,8 @@ mod tests {
         assert_eq!(next_menu_focus(4, Some(3), Next), Some(0));
         assert_eq!(next_menu_focus(4, Some(0), Previous), Some(3));
 
-        // An archived row's shorter list (rename + delete only) wraps on
-        // its own length, not on some assumed four.
+        // A shorter conditional list wraps on its own length, not on some
+        // assumed four.
         assert_eq!(next_menu_focus(2, Some(1), Next), Some(0));
 
         // A stale index from a render whose item set has since shrunk is

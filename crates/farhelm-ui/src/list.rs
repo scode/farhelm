@@ -1,5 +1,5 @@
 //! The session list: `ListView` (the flat listing, its filter and search
-//! surface, and its stop/delete/archive/create/rename actions), `SessionRow`
+//! surface, and its stop/delete/create/rename actions), `SessionRow`
 //! (one row, including the inline lifecycle confirmations), and
 //! `CreateSessionForm` (the "new session" inline form). All three are
 //! `ListView`'s own concern — none of them is meaningful mounted outside

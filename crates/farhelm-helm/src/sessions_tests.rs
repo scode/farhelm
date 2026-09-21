@@ -209,7 +209,6 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
                 req_id,
                 session: SessionInfo {
                     parent: None,
-                    archived: false,
                     id: "sess-1".into(),
                     title: "some-agent".into(),
                     created_at: 1_700_000_000,
@@ -326,7 +325,6 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                     req_id,
                     session: SessionInfo {
                         parent: None,
-                        archived: false,
                         id: "structured-tilde".into(),
                         title: "structured tilde".into(),
                         created_at: 1_700_000_001,
@@ -476,7 +474,6 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     req_id,
                     session: SessionInfo {
                         parent: None,
-                        archived: false,
                         id: id.into(),
                         title: id.into(),
                         created_at: 1_700_000_000,
@@ -605,7 +602,6 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
                 req_id,
                 session: SessionInfo {
                     parent: None,
-                    archived: false,
                     id: "sess-1".into(),
                     title: "t".into(),
                     created_at: 1_700_000_000,
@@ -1385,7 +1381,6 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         assert_eq!(resume_template, None);
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -1507,7 +1502,6 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
                 req_id,
                 session: SessionInfo {
                     parent: None,
-                    archived: false,
                     id: "sess-1".into(),
                     title: "sess-1".into(),
                     created_at: 1_700_000_000,
@@ -1613,7 +1607,6 @@ async fn replace_of_a_profile_backed_session_follows_its_profile() {
         assert_eq!(resume_template, None);
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -1836,7 +1829,6 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
         );
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -1891,95 +1883,6 @@ async fn replace_of_a_session_whose_profile_was_deleted_falls_back_to_its_invoca
 
     peer.await.unwrap();
 }
-
-/// An archived source is a legitimate replace target (SPEC.md's Replace
-/// bullet: there is no agent to kill on one, only a record to delete). The
-/// replacement is an ordinary, RUNNING create — archiving is never a
-/// create-time flag.
-#[farhelm_testtrace::test]
-async fn replace_of_an_archived_session_creates_a_fresh_replacement() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let source = farhelm_proto::SessionInfo {
-        archived: true,
-        ..rest_harness::session("sess-1", 1_700_000_000)
-    };
-    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    let fleet = harness.fleet.clone();
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession { req_id, cwd, .. } = request else {
-            panic!("expected CreateSession, got {request:?}");
-        };
-        assert_eq!(cwd, "/sess-1");
-        let created = SessionInfo {
-            parent: None,
-            archived: false,
-            id: "sess-2".into(),
-            title: "sess-1".into(),
-            created_at: 1_700_000_500,
-            last_activity_at: 1_700_000_500,
-            last_work_started_at: 0,
-            creation_seq: None,
-            cwd: "/sess-1".into(),
-            canonical_cwd: None,
-            invocation: "agent".into(),
-            resume_template: None,
-            launch: None,
-            status: farhelm_proto::SessionStatus::Unknown,
-            annotation: None,
-            restart_offer: farhelm_proto::RestartOffer::default(),
-            tabs: Vec::new(),
-            source_profile: None,
-            github_repo: None,
-            working_copy: None,
-        };
-        // See `spliced_replace_harness`'s doc: fixture updated before reply.
-        fleet.edit(local, |script| script.sessions.push(created.clone()));
-        writer
-            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
-                req_id,
-                session: created,
-            }))
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
-            panic!("expected DeleteSession, got {request:?}");
-        };
-        assert_eq!(session_id, "sess-1");
-        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
-        writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
-            .await
-            .unwrap();
-    });
-
-    harness.await_refreshed(local).await;
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/replace",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.id, "sess-2");
-    assert!(!session.archived, "a replacement is never born archived");
-
-    peer.await.unwrap();
-}
-
 /// If the create fails, the source is untouched: the handler returns before
 /// ever sending a delete, and the row stays listed exactly as it was — the
 /// "nothing was lost" half of `do_replace_session`'s asymmetric failure
@@ -2060,7 +1963,6 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
         };
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -2193,7 +2095,6 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
         };
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -2345,7 +2246,6 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
 
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -2534,7 +2434,6 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         assert_eq!(intent_key, None);
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "replaced-with-title".into(),
             created_at: 1_700_000_500,
@@ -2605,106 +2504,6 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
 
     peer.await.unwrap();
 }
-
-/// A "replace with" override on an ARCHIVED source still creates the
-/// override and removes the archived record — SPEC.md's replace-with
-/// bullet says it is offered on archived sessions too, an archived source
-/// having no agent to kill, only a record to delete, and that stays true
-/// whether or not the create half carries an override.
-#[farhelm_testtrace::test]
-async fn a_replace_with_override_of_an_archived_source_creates_it_and_removes_the_source() {
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, Frame, SessionInfo};
-
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let source = farhelm_proto::SessionInfo {
-        archived: true,
-        ..rest_harness::session("sess-1", 1_700_000_000)
-    };
-    let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
-    let fleet = harness.fleet.clone();
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::CreateSession {
-            req_id,
-            cwd,
-            invocation,
-            ..
-        } = request
-        else {
-            panic!("expected CreateSession, got {request:?}");
-        };
-        assert_eq!(cwd, "/replaced-with-archived");
-        assert_eq!(invocation, Some("archived-override".to_string()));
-        let created = SessionInfo {
-            parent: None,
-            archived: false,
-            id: "sess-2".into(),
-            title: "sess-1".into(),
-            created_at: 1_700_000_500,
-            last_activity_at: 1_700_000_500,
-            last_work_started_at: 0,
-            creation_seq: None,
-            cwd: "/replaced-with-archived".into(),
-            canonical_cwd: None,
-            invocation: "archived-override".into(),
-            resume_template: None,
-            launch: None,
-            status: farhelm_proto::SessionStatus::Unknown,
-            annotation: None,
-            restart_offer: farhelm_proto::RestartOffer::default(),
-            tabs: Vec::new(),
-            source_profile: None,
-            github_repo: None,
-            working_copy: None,
-        };
-        fleet.edit(local, |script| script.sessions.push(created.clone()));
-        writer
-            .write_frame(&Frame::control(&ControlMsg::SessionCreated {
-                req_id,
-                session: created,
-            }))
-            .await
-            .unwrap();
-
-        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-        let ControlMsg::DeleteSession { req_id, session_id } = request else {
-            panic!("expected DeleteSession, got {request:?}");
-        };
-        assert_eq!(session_id, "sess-1");
-        fleet.edit(local, |script| script.sessions.retain(|s| s.id != "sess-1"));
-        writer
-            .write_control(&ControlMsg::SessionDeleted { req_id })
-            .await
-            .unwrap();
-    });
-
-    harness.await_refreshed(local).await;
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/replace",
-        serde_json::json!({
-            "with": { "cwd": "/replaced-with-archived", "invocation": "archived-override" }
-        }),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let session: farhelm_proto::SessionInfo = serde_json::from_str(&body).unwrap();
-    assert_eq!(session.id, "sess-2");
-    assert!(!session.archived, "a replacement is never born archived");
-    assert_eq!(session.cwd, "/replaced-with-archived");
-    assert_eq!(session.invocation, "archived-override");
-
-    peer.await.unwrap();
-}
-
 /// "Replace with" keeps the source's own host: SPEC.md draws that line
 /// explicitly (clone is the way to a different host), and this pins the
 /// helm-side refusal that enforces it — a 409 before either the create or
@@ -2842,7 +2641,6 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
         assert_eq!(invocation, Some("override-agent".to_string()));
         let created = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-2".into(),
             title: "sess-1".into(),
             created_at: 1_700_000_500,
@@ -3066,7 +2864,6 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
                 req_id,
                 session: SessionInfo {
                     parent: None,
-                    archived: false,
                     id: "sess-1".into(),
                     title: "sess-1".into(),
                     created_at: 1_700_000_000,
@@ -3583,7 +3380,6 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
                 req_id,
                 session: farhelm_proto::SessionInfo {
                     parent: None,
-                    archived: false,
                     id: "sess-1".into(),
                     title: "t".into(),
                     created_at: 1_700_000_000,
@@ -3732,7 +3528,6 @@ async fn rename_session_forwards_the_title_verbatim() {
         // title alone looked right.
         let expected_session = SessionInfo {
             parent: None,
-            archived: false,
             id: "sess-1".into(),
             title: expected_title.clone(),
             created_at: 1_700_000_000,
@@ -3910,7 +3705,6 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                     req_id,
                     session: farhelm_proto::SessionInfo {
                         parent: None,
-                        archived: false,
                         id: "sess-1".into(),
                         title: String::new(),
                         created_at: 1_700_000_000,
@@ -4345,7 +4139,6 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
                 req_id,
                 session: SessionInfo {
                     parent: None,
-                    archived: false,
                     id: "sess-new".into(),
                     title: "sess-new".into(),
                     created_at: 1_700_000_500,
@@ -4515,7 +4308,6 @@ async fn a_stale_claim_blocks_the_cache_seed_but_not_the_remembered_default() {
     };
     let session = SessionInfo {
         parent: None,
-        archived: false,
         id: "sess-stale".into(),
         title: "sess-stale".into(),
         created_at: 1_700_000_700,
@@ -6146,14 +5938,14 @@ async fn the_stale_list_survives_a_helm_restart_from_helm_db_alone() {
 
     let (status, body) = post_text(
         &restarted,
-        "/api/sessions/survivor/archive",
+        "/api/sessions/survivor/stop",
         serde_json::json!({}),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert!(
         body.contains("unreachable-reprobing") && body.contains(&host.to_string()),
-        "archive must name the stale owner's host and current state: {body}"
+        "stop must name the stale owner's host and current state: {body}"
     );
 
     let (_, hosts) = get_json(&restarted, "/api/hosts").await;
@@ -6256,188 +6048,12 @@ async fn a_session_created_on_an_identity_less_host_is_routable_at_once() {
     assert_eq!(value["total"], 1);
     peer.abort();
 }
-
-/// Lifecycle mutation replies must reach the list immediately rather
-/// than waiting for the owning host's next refresh tick.
-///
-/// The browser suite caught both as user-visible lies. A restart of an
-/// exited session succeeded while the list went on saying `exited` for a
-/// poll interval; and its own shared-session reset (delete, then create)
-/// left the deleted row listed beside the new one, so a strict locator
-/// found two rows where the test meant one. The merged view serves what
-/// the helm has RECORDED, so every mutation that changes what a session
-/// is — or whether it is — records the result.
-#[farhelm_testtrace::test]
-async fn lifecycle_mutations_reach_the_list_without_waiting_for_a_refresh() {
-    use farhelm_proto::ControlMsg;
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-
-    let exited = farhelm_proto::SessionInfo {
-        status: farhelm_proto::SessionStatus::Exited { exit_code: Some(1) },
-        ..rest_harness::session("sess-1", 500)
-    };
-    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-    let renamed = farhelm_proto::SessionInfo {
-        title: "renamed-later".to_string(),
-        ..rest_harness::session("sess-1", 500)
-    };
-    let archived = farhelm_proto::SessionInfo {
-        archived: true,
-        title: "renamed-later".to_string(),
-        status: farhelm_proto::SessionStatus::Exited { exit_code: None },
-        ..rest_harness::session("sess-1", 500)
-    };
-    let peer = tokio::spawn(async move {
-        let (r, w) = tokio::io::split(peer_side);
-        let mut reader = FrameReader::new(r);
-        let mut writer = FrameWriter::new(w);
-        handshake(&mut reader, &mut writer, "supervisor")
-            .await
-            .unwrap();
-        loop {
-            let Ok(Some(frame)) = reader.read_frame().await else {
-                return;
-            };
-            match parse_control(&frame) {
-                // The host now reports it ALIVE — the whole point of
-                // the restart the caller just made.
-                Ok(ControlMsg::RestartSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionRestarted {
-                        req_id,
-                        session: rest_harness::session("sess-1", 500),
-                    })
-                    .await
-                    .unwrap(),
-                Ok(ControlMsg::RenameSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionRenamed {
-                        req_id,
-                        session: renamed.clone(),
-                    })
-                    .await
-                    .unwrap(),
-                Ok(ControlMsg::ArchiveSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionArchived {
-                        req_id,
-                        session: archived.clone(),
-                    })
-                    .await
-                    .unwrap(),
-                Ok(ControlMsg::DeleteSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionDeleted { req_id })
-                    .await
-                    .unwrap(),
-                _ => return,
-            }
-        }
-    });
-
-    // The cached row says `exited`, and the harness refreshes once an
-    // hour — so anything the list shows differently was recorded by the
-    // mutation itself.
-    let harness = rest_harness::spliced_helm_listing(client_side, vec![exited]).await;
-    let (_, before) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(before["sessions"][0]["status"]["state"], "exited");
-
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/restart",
-        serde_json::json!({ "mode": "fresh" }),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let (_, after) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(
-        after["sessions"][0]["status"]["state"], "running",
-        "a completed restart must not leave the list showing the state it restarted FROM"
-    );
-
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/rename",
-        serde_json::json!({ "title": "renamed-later" }),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let (_, after) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(
-        after["sessions"][0]["title"], "renamed-later",
-        "and a completed rename must not either"
-    );
-
-    let before_archive_revision = harness.manager.events().revision();
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/archive",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&body).unwrap()["archived"],
-        true
-    );
-    assert!(
-        harness.manager.events().revision() > before_archive_revision,
-        "recording a changed archive reply must wake feed subscribers"
-    );
-    let (_, ordinary) = get_json(&harness, "/api/sessions").await;
-    assert!(row_ids(&ordinary).is_empty());
-    assert_eq!(ordinary["matching"], 0);
-    assert_eq!(
-        ordinary["total"], 0,
-        "archiving takes the session out of the default view, denominator included — the \
-         list and its own count describe the same view"
-    );
-    let (_, retained) = get_json(&harness, "/api/sessions?include_archived=true").await;
-    assert_eq!(row_ids(&retained), vec!["sess-1"]);
-    assert_eq!(retained["sessions"][0]["archived"], true);
-    assert_eq!(
-        retained["total"], 1,
-        "the session is still a fleet member; the widened view counts it"
-    );
-
-    let archived_revision = harness.manager.events().revision();
-    let (status, body) = post_text(
-        &harness,
-        "/api/sessions/sess-1/archive",
-        serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    assert_eq!(
-        harness.manager.events().revision(),
-        archived_revision,
-        "an idempotent archive reply must not publish another fleet revision"
-    );
-
-    // A delete is the quadrant the browser suite found missing: the row
-    // must be gone from the list the moment the delete answers, not at
-    // the next refresh.
-    let request = axum::http::Request::builder()
-        .method("DELETE")
-        .uri("/api/sessions/sess-1")
-        .header("host", "127.0.0.1:7433")
-        .body(axum::body::Body::empty())
-        .unwrap();
-    let response = tower::ServiceExt::oneshot(harness.router(), request)
-        .await
-        .unwrap();
-    assert_eq!(response.status(), axum::http::StatusCode::OK);
-    let (_, after) = get_json(&harness, "/api/sessions").await;
-    assert!(
-        row_ids(&after).is_empty(),
-        "a deleted session must leave the list at once, or a delete-then-create shows both: \
-         {after}"
-    );
-    peer.abort();
-}
-
 /// Every session mutation reads the catalog before it asks the supervisor.
 ///
-/// A broken catalog must not turn a completed create, restart, rename, or
-/// archive into an error reply. This test keeps routing healthy while making
+/// A broken catalog must not turn a completed create, restart, or rename
+/// into an error reply. This test keeps routing healthy while making
 /// only the profile catalog read fail (at the schema level, since the store
-/// skips a merely undecodable row), then proves all four handlers refuse
+/// skips a merely undecodable row), then proves all three handlers refuse
 /// without sending a mutation frame. The profile-backed create also pins
 /// that its otherwise necessary bundle lookup shares this preflight read.
 #[farhelm_testtrace::test]
@@ -6491,7 +6107,6 @@ async fn catalog_failure_precedes_every_session_mutation() {
             "/api/sessions/profile-order/rename",
             serde_json::json!({ "title": "not-applied" }),
         ),
-        ("/api/sessions/profile-order/archive", serde_json::json!({})),
     ] {
         let (status, response) = post_text(&harness, path, body).await;
         assert_eq!(
@@ -6503,7 +6118,7 @@ async fn catalog_failure_precedes_every_session_mutation() {
     peer.await.unwrap();
 }
 
-/// Create, detail, restart, rename, and archive never expose `Unresolved`.
+/// Create, detail, restart, and rename never expose `Unresolved`.
 ///
 /// The supervisor deliberately reports only immutable profile provenance;
 /// the helm owns the current existence verdict. This test returns the
@@ -6519,9 +6134,8 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
     ///
     /// Reconstructing it for every mutation ensures no earlier helm verdict
     /// can accidentally make a later assertion pass through cached state.
-    fn unresolved_profiled_session(id: &str, archived: bool) -> SessionInfo {
+    fn unresolved_profiled_session(id: &str) -> SessionInfo {
         SessionInfo {
-            archived,
             source_profile: Some(SourceProfile {
                 id: id.to_string(),
                 name: "claude".to_string(),
@@ -6545,7 +6159,7 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
     else {
         panic!("fresh catalog has capacity")
     };
-    let original = unresolved_profiled_session(&profile.id, false);
+    let original = unresolved_profiled_session(&profile.id);
     let peer_profile_id = profile.id.clone();
     let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
     let peer = tokio::spawn(async move {
@@ -6584,21 +6198,14 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
                 Ok(ControlMsg::RestartSession { req_id, .. }) => writer
                     .write_control(&ControlMsg::SessionRestarted {
                         req_id,
-                        session: unresolved_profiled_session(&peer_profile_id, false),
+                        session: unresolved_profiled_session(&peer_profile_id),
                     })
                     .await
                     .unwrap(),
                 Ok(ControlMsg::RenameSession { req_id, .. }) => writer
                     .write_control(&ControlMsg::SessionRenamed {
                         req_id,
-                        session: unresolved_profiled_session(&peer_profile_id, false),
-                    })
-                    .await
-                    .unwrap(),
-                Ok(ControlMsg::ArchiveSession { req_id, .. }) => writer
-                    .write_control(&ControlMsg::SessionArchived {
-                        req_id,
-                        session: unresolved_profiled_session(&peer_profile_id, true),
+                        session: unresolved_profiled_session(&peer_profile_id),
                     })
                     .await
                     .unwrap(),
@@ -6665,15 +6272,15 @@ async fn every_live_session_reply_resolves_profile_existence_before_json() {
     }
 
     assert!(harness.store.delete_profile(&profile_id).await.unwrap());
-    let (status, archived) = post_text(
+    let (status, renamed) = post_text(
         &harness,
-        "/api/sessions/profile-live/archive",
-        serde_json::json!({}),
+        "/api/sessions/profile-live/rename",
+        serde_json::json!({ "title": "renamed after deletion" }),
     )
     .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{archived}");
-    let archived: serde_json::Value = serde_json::from_str(&archived).unwrap();
-    assert_eq!(archived["source_profile"]["existence"], "deleted");
+    assert_eq!(status, axum::http::StatusCode::OK, "{renamed}");
+    let renamed: serde_json::Value = serde_json::from_str(&renamed).unwrap();
+    assert_eq!(renamed["source_profile"]["existence"], "deleted");
     peer.abort();
 }
 
@@ -7229,25 +6836,6 @@ async fn combined_filters_narrow_rather_than_widen() {
     assert_eq!(value["matching"], 0);
     assert_eq!(value["total"], 4);
 }
-
-/// The default list excludes archived rows, so it reports a matching
-/// count beside the fleet total even when no text dimension is present.
-///
-/// Reporting no `matching` there would have been the convenient answer,
-/// and the UI does substitute `total` where a count is absent — but that
-/// substitution is meant for a helm that predates filtering, and the
-/// default view's archive exclusion IS a predicate this helm applied. A
-/// present count is what lets the client tell the two apart.
-#[farhelm_testtrace::test]
-async fn the_default_archive_predicate_reports_both_counts() {
-    let (harness, _local, _alpha) = filterable_fleet().await;
-
-    let (status, value) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(value["total"], 4);
-    assert_eq!(value["matching"], 4);
-}
-
 /// A status word this build does not know is a 400 naming the
 /// vocabulary, never an empty list.
 ///
@@ -7313,61 +6901,13 @@ async fn only_an_empty_filter_value_clears_it_and_whitespace_is_content() {
     assert_eq!(row_ids(&value), vec!["spaced"]);
     assert_eq!(value["matching"], 1);
 
-    // The exactly-empty value clears the TEXT dimension. The implicit
-    // archive exclusion remains, so this is still a counted predicate.
+    // Clearing the only predicate restores the unfiltered response, which
+    // omits the matching count rather than duplicating the fleet total.
     let (_, value) = get_json(&harness, "/api/sessions?title=").await;
     assert_eq!(row_ids(&value), vec!["spaced", "plain"]);
     assert_eq!(value["total"], 2);
-    assert_eq!(value["matching"], 2);
+    assert!(value.get("matching").is_none());
 }
-
-/// Archived sessions leave the ordinary view — its rows AND its total — and
-/// reappear in both only through the inclusion switch.
-///
-/// The denominator half is the point: the served `total` is a count of the
-/// view the request asked for, so the ordinary list can never show ten rows
-/// above "of 12 sessions" with nothing typed into any filter.
-#[farhelm_testtrace::test]
-async fn archived_sessions_are_hidden_by_default_and_included_on_request() {
-    let mut archived = filterable(
-        "archived",
-        200,
-        "/tmp/archive",
-        "retained",
-        farhelm_proto::SessionStatus::Exited { exit_code: None },
-        None,
-    );
-    archived.archived = true;
-    let harness = rest_harness::helm_listing(vec![
-        archived,
-        filterable(
-            "active",
-            100,
-            "/tmp/active",
-            "ordinary",
-            farhelm_proto::SessionStatus::Running,
-            None,
-        ),
-    ])
-    .await;
-
-    let (_, ordinary) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(row_ids(&ordinary), vec!["active"]);
-    assert_eq!(ordinary["matching"], 1);
-    assert_eq!(
-        ordinary["total"], 1,
-        "the default view's total counts the default view: one active session"
-    );
-
-    let (_, all) = get_json(&harness, "/api/sessions?include_archived=true").await;
-    assert_eq!(row_ids(&all), vec!["archived", "active"]);
-    assert!(all.get("matching").is_none());
-    assert_eq!(
-        all["total"], 2,
-        "the switch widens the view, so it widens the count with it"
-    );
-}
-
 /// An identity-less host's sessions live in the manager's MEMORY rather
 /// than in helm.db, so they reach the merged list by a different path —
 /// and the filter has to apply on that path too.
@@ -7421,68 +6961,6 @@ async fn a_filter_applies_to_an_identity_less_hosts_in_memory_rows() {
         "an identity-less host's rows count toward the fleet total like any other"
     );
 }
-
-/// The archive switch moves the denominator on the IN-MEMORY path too.
-///
-/// The two sources reach `total` by different code — the persisted side by
-/// an indexed count over a column, the identity-less side by walking the
-/// actor's own list — so the rule has to be stated twice and can drift
-/// exactly once. Drifted, a fleet whose only archived session lives on an
-/// identity-less host would show the ordinary list under a total that counts
-/// one row it does not display, which is the incoherence the whole change
-/// removes.
-#[farhelm_testtrace::test]
-async fn an_identity_less_hosts_archived_rows_leave_the_default_view_s_total() {
-    use farhelm_proto::SessionStatus;
-
-    let mut archived = filterable(
-        "memory-archived",
-        200,
-        "/opt/work",
-        "Put away",
-        SessionStatus::Exited { exit_code: None },
-        None,
-    );
-    archived.archived = true;
-    let harness = rest_harness::FleetBuilder::new()
-        .await
-        .local(rest_harness::HostScript {
-            identity: None,
-            sessions: vec![
-                archived,
-                filterable(
-                    "memory-active",
-                    100,
-                    "/opt/other",
-                    "Still here",
-                    SessionStatus::Running,
-                    None,
-                ),
-            ],
-            ..rest_harness::HostScript::default()
-        })
-        .await
-        .start()
-        .await;
-    let local = rest_harness::local_id(&harness.store).await;
-    harness.await_refreshed(local).await;
-
-    let (status, ordinary) = get_json(&harness, "/api/sessions").await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-    assert_eq!(row_ids(&ordinary), vec!["memory-active"]);
-    assert_eq!(
-        ordinary["total"], 1,
-        "an in-memory archived row is outside the default view and outside its count"
-    );
-
-    let (_, all) = get_json(&harness, "/api/sessions?include_archived=true").await;
-    assert_eq!(row_ids(&all), vec!["memory-archived", "memory-active"]);
-    assert_eq!(
-        all["total"], 2,
-        "and the switch brings it back to both, exactly as it does for a cached host"
-    );
-}
-
 // ---- Listing order (`?sort=`) ------------------------------------
 //
 // Same posture as the filter tests above: every assertion drives the real
@@ -7625,7 +7103,10 @@ async fn the_sort_parameter_selects_the_order_and_an_unknown_word_is_refused() {
     ] {
         let (_, value) = get_json(&harness, uri).await;
         assert_eq!(value["total"], 4, "{uri} changed the fleet total");
-        assert_eq!(value["matching"], 4, "{uri} changed the matching count");
+        assert!(
+            value.get("matching").is_none(),
+            "{uri} added a filter count"
+        );
     }
 
     let (status, body) = get_json(&harness, "/api/sessions?sort=cwd").await;
@@ -7730,7 +7211,10 @@ async fn activity_groups_by_reported_status_while_other_orders_and_counts_ignore
     ] {
         let (_, value) = get_json(&harness, uri).await;
         assert_eq!(value["total"], 4, "{uri} changed the fleet total");
-        assert_eq!(value["matching"], 4, "{uri} changed the matching count");
+        assert!(
+            value.get("matching").is_none(),
+            "{uri} added a filter count"
+        );
     }
 
     let (_, value) = get_json(&harness, "/api/sessions?sort=activity&status=running").await;
@@ -7809,7 +7293,7 @@ async fn disconnecting_a_host_demotes_its_running_rows_through_real_stale_plumbi
         "the demotion moved the row without touching its cached key"
     );
     assert_eq!(value["total"], 2);
-    assert_eq!(value["matching"], 2);
+    assert!(value.get("matching").is_none());
 
     let (_, value) = get_json(&harness, "/api/sessions?sort=activity&status=running").await;
     assert_eq!(

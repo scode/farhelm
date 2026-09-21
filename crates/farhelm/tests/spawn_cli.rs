@@ -285,7 +285,6 @@ fn child_session(cwd: String) -> SessionInfo {
         annotation: None,
         restart_offer: RestartOffer::FreshOnly,
         tabs: Vec::<TabInfo>::new(),
-        archived: false,
         source_profile: Some(SourceProfile {
             id: "profile-1".to_string(),
             name: "Agent One".to_string(),

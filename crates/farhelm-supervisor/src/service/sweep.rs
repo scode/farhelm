@@ -162,7 +162,7 @@ fn environ_markers(environ: &[u8], session_id: &str, tab_id: Option<&str>) -> En
 /// Before tabs, "the session's processes" was one set and the sweep was
 /// keyed on the session's environment marker alone. Tabs break that in
 /// three directions at once: SPEC.md says stopping or restarting the agent
-/// leaves a tab's shell running, deleting or archiving takes everything
+/// leaves a tab's shell running, deleting takes everything
 /// down, and closing ONE tab must reach that tab and nothing else. Those
 /// are three different sets over the same marked processes, so the sweep
 /// has to be told which one it is running.
@@ -211,7 +211,7 @@ pub(crate) enum SweepTarget {
     /// marker, and the legacy bucket.
     AgentOnly,
     /// Every process carrying the session marker, tabs included: what
-    /// `DeleteSession` (and, later, archive) claims.
+    /// `DeleteSession` claims.
     WholeSession,
     /// One tab's own processes: what `CloseTab` claims. Selection requires
     /// the session marker AND that tab's exact minted id — never a tab
@@ -223,7 +223,7 @@ pub(crate) enum SweepTarget {
 /// Selects whether a failed cgroup kill is diagnostic or blocks publication.
 ///
 /// STOP and restart retain the process-tree sweep's original guarantee even
-/// when a manager operation fails. Delete and archive must also keep their
+/// when a manager operation fails. Delete must also keep its
 /// row so the user can retry: a warning would otherwise publish success while
 /// a scrubbed daemon could remain reachable only through the cgroup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1441,7 +1441,7 @@ const SCOPE_GRACE_POLL: Duration = Duration::from_millis(200);
 /// case; treating that exit status as a failed teardown is what refused
 /// every Replace of a running claude session on 0.6.0-rc.4 (the
 /// `ScopeKillFailure::Refuse` policy PR #597 introduced for delete and
-/// archive, which is correct for a unit that SURVIVES and must stay).
+/// delete, which is correct for a unit that SURVIVES and must stay).
 /// The error text is deliberately not matched anywhere; the shape of
 /// the decision — retired unit wins, surviving unit refuses — is what
 /// stays true across systemd versions.
@@ -2032,7 +2032,7 @@ mod tests {
 
     /// Every nonempty quiesce pass must survive the real aggregate-error cap.
     ///
-    /// The archive flake was opaque because only the final failure was known.
+    /// The teardown flake was opaque because only the final failure was known.
     /// This drives the production accumulator through all five allowed passes,
     /// then proves that twenty earlier per-process failures cannot hide any of
     /// the bounded identity trail.
@@ -2467,7 +2467,7 @@ mod tests {
     /// operation errored while the sweep it exists to reinforce succeeded
     /// completely. The sweep's verdict is the whole answer for WARN.
     ///
-    /// The same fixture also checks REFUSE: delete and archive need the
+    /// The same fixture also checks REFUSE: delete needs the
     /// cgroup error to remain visible after a clean sweep because they are
     /// about to discard the row that would make a retry possible. The
     /// refusal names the unit and says why the session stays retained.
@@ -2550,7 +2550,7 @@ mod tests {
     /// process (every node-based agent) kills everything and retires the
     /// unit, yet exits 1 with "Failed to send signal SIGKILL to auxiliary
     /// processes: Invalid argument". On 0.6.0-rc.4 that exit status alone
-    /// made every Replace, delete, and archive of a running claude session
+    /// made every Replace and delete of a running claude session
     /// refuse with "the named cgroup scope(s) could not be torn down ...
     /// the session is kept", both sessions left in place. The e2e suite pins
     /// the same contract against the real manager

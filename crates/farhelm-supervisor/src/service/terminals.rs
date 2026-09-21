@@ -167,7 +167,7 @@ pub(crate) struct DiscoveredTab {
 
 /// Rediscover one session's tabs from a pane-state map, in creation order.
 ///
-/// Tabs are not durable metadata — SPEC.md says a reboot or archive erases
+/// Tabs are not durable metadata — SPEC.md says a reboot erases
 /// them and nothing recreates them — so tmux's own window markers are the
 /// record, and this is the one function that turns them back into tabs.
 /// Taking an already-fetched map rather than querying keeps the
@@ -399,15 +399,12 @@ enum TabResolution {
 /// exists to say exactly that. So the two cases are told apart by the
 /// durable outcome, and neither orders the agent's end against the restart.
 ///
-/// An entry loses its terminal on exactly two paths, and the wording
+/// An entry loses its terminal when the supervisor reloads it without a
+/// surviving tmux session, and the wording
 /// follows which one it was, in the same precedence the UI's own
 /// terminal-absence decision uses (`terminal_absence` in the session view),
 /// so a refusal never contradicts the band on screen:
 ///
-/// - An archived entry (`archive_session` publishes it terminal-less)
-///   names the archive: its terminal was removed on purpose, and restart
-///   is how a fresh one comes back. Archive outranks the reboot below
-///   because it is a deliberate act that stands whatever the boot did.
 /// - An entry the boot-id classifier marked [`LastOutcome::Interrupted`]
 ///   names the reboot and points at the one way forward, restart, which
 ///   SPEC.md says offers to resume the conversation.
@@ -422,19 +419,9 @@ enum TabResolution {
 /// session's own [`RestartOffer`]: only a session whose conversation was
 /// captured can be promised a resume, and SPEC.md forbids implying one
 /// where a fresh launch is what the user would get.
-fn missing_terminal_message(
-    id: &str,
-    archived: bool,
-    outcome: &LastOutcome,
-    offer: RestartOffer,
-) -> String {
+fn missing_terminal_message(id: &str, outcome: &LastOutcome, offer: RestartOffer) -> String {
     let id = truncate_for_error(id);
-    if archived {
-        format!(
-            "session {id} has no terminal: it is archived, which removed its terminal; restart \
-             creates a fresh one"
-        )
-    } else if matches!(outcome, LastOutcome::Interrupted) {
+    if matches!(outcome, LastOutcome::Interrupted) {
         let restart = match offer {
             RestartOffer::Resume => "restart offers to resume the conversation",
             RestartOffer::FallbackTemplate => "restart runs its configured resume command",
@@ -491,7 +478,7 @@ async fn resolve_terminal_inner(
         );
         RequestError::new(
             ErrorKind::NotFound,
-            missing_terminal_message(&entry.info.id, entry.info.archived, &outcome, offer),
+            missing_terminal_message(&entry.info.id, &outcome, offer),
         )
     })?;
     match terminal {
@@ -1542,7 +1529,7 @@ impl Supervisor {
     /// Whether `key` still has an unresolved output client.
     ///
     /// Output-client overlap is a per-terminal hazard. Restart, tab close, and
-    /// attach therefore use this narrower check; archive and delete retain the
+    /// attach therefore use this narrower check; delete retains the
     /// session-wide check because they tear down every terminal together.
     pub(crate) fn has_output_reap_for_key(&self, key: &AttachmentKey) -> bool {
         let mut registry = self
@@ -1611,7 +1598,7 @@ impl Supervisor {
 
     /// Wait outside `attachments` for every old output client on one session.
     ///
-    /// A test seam for the whole-session registry contract. Production archive
+    /// A test seam for the whole-session registry contract. Production delete
     /// and delete fail fast when this state exists; they do not pin a request
     /// while runtime-owned reapers keep retrying.
     #[cfg(test)]
@@ -2162,12 +2149,8 @@ mod tests {
     /// SPEC.md says the supervisor cannot know after a reboot.
     #[farhelm_testtrace::test]
     fn missing_terminal_wording_follows_the_durable_outcome() {
-        let resumable = missing_terminal_message(
-            "s-1",
-            false,
-            &LastOutcome::Interrupted,
-            RestartOffer::Resume,
-        );
+        let resumable =
+            missing_terminal_message("s-1", &LastOutcome::Interrupted, RestartOffer::Resume);
         assert!(resumable.contains("host rebooted"), "{resumable}");
         assert!(
             resumable.contains("restart offers to resume"),
@@ -2175,12 +2158,8 @@ mod tests {
         );
         // Only a captured conversation may be promised a resume: the other
         // two offers name what restart would really do instead.
-        let fresh = missing_terminal_message(
-            "s-1",
-            false,
-            &LastOutcome::Interrupted,
-            RestartOffer::FreshOnly,
-        );
+        let fresh =
+            missing_terminal_message("s-1", &LastOutcome::Interrupted, RestartOffer::FreshOnly);
         assert!(fresh.contains("host rebooted"), "{fresh}");
         assert!(
             fresh.contains("fresh agent") && !fresh.contains("resume"),
@@ -2188,34 +2167,10 @@ mod tests {
         );
         let template = missing_terminal_message(
             "s-1",
-            false,
             &LastOutcome::Interrupted,
             RestartOffer::FallbackTemplate,
         );
         assert!(template.contains("configured resume command"), "{template}");
-
-        // An archived entry lost its terminal to the archive, not to any
-        // restart, and says so; the reboot still wins when both apply.
-        let archived = missing_terminal_message(
-            "s-1",
-            true,
-            &LastOutcome::Exited {
-                exit_code: None,
-                annotation: Some("stopped by user".to_string()),
-            },
-            RestartOffer::FreshOnly,
-        );
-        assert!(archived.contains("archived"), "{archived}");
-        assert!(!archived.contains("restarted"), "{archived}");
-        // Archive outranks the reboot, matching the UI's `terminal_absence`
-        // precedence: the band on screen says "archived", so must this.
-        let archived_after_reboot =
-            missing_terminal_message("s-1", true, &LastOutcome::Interrupted, RestartOffer::Resume);
-        assert!(
-            archived_after_reboot.contains("archived")
-                && !archived_after_reboot.contains("rebooted"),
-            "{archived_after_reboot}"
-        );
 
         for other in [
             LastOutcome::Launching,
@@ -2229,20 +2184,19 @@ mod tests {
                 detail: "exec failed".to_string(),
             },
         ] {
-            let text = missing_terminal_message("s-1", false, &other, RestartOffer::FreshOnly);
+            let text = missing_terminal_message("s-1", &other, RestartOffer::FreshOnly);
             assert!(
                 text.contains("has no terminal on this host"),
                 "{other:?}: {text}"
             );
             assert!(
-                !text.contains("rebooted") && !text.contains("archived"),
-                "{other:?} must claim neither a reboot nor an archive: {text}"
+                !text.contains("rebooted"),
+                "{other:?} must not claim a reboot: {text}"
             );
         }
         for text in [
             resumable,
-            archived,
-            missing_terminal_message("s-1", false, &LastOutcome::Running, RestartOffer::FreshOnly),
+            missing_terminal_message("s-1", &LastOutcome::Running, RestartOffer::FreshOnly),
         ] {
             assert!(
                 !text.contains("after the agent ended"),

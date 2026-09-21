@@ -178,7 +178,7 @@ pub fn is_tab_unit(unit: &str) -> bool {
 /// The glob every generation of a session's LAUNCH scope matches, or `None`
 /// for a session id that cannot safely name a unit.
 ///
-/// Delete and archive ask the manager for these names because the row only
+/// Delete asks the manager for these names because the row only
 /// records its current generation. A prior generation can still contain a
 /// daemon after its portable sweep reported clean, and tmux has no record of
 /// that scope once the old pane is gone. The `[0-9]*` suffix is deliberately

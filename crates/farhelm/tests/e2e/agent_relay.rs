@@ -493,7 +493,7 @@ async fn a_helm_that_never_answers_times_the_request_out() {
 /// the credential — by the time a request reaches it, `session_id` is the
 /// only claim about who is asking — so a supervisor that forwarded an
 /// unchecked id would hand the helm a lie it has no way to detect, and
-/// every later verb (rename, stop, archive) would act on it.
+/// every later verb (rename or stop) would act on it.
 #[farhelm_testtrace::test]
 async fn a_peer_may_not_ask_as_another_session() {
     let h = harness().await;

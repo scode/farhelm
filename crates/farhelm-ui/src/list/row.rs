@@ -8,7 +8,6 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use crate::archive::confirmation as archive_confirmation;
 use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, LocalHostIcon, PermissionGlyph,
     PermissionIcon, QualifierGlyph, QualifierIcon, RemoteHostIcon,
@@ -25,48 +24,28 @@ use crate::menu_panel::{
     measurement_outcome, menu_panel_placement_style, remember_menu_item, should_measure_on_mount,
 };
 
-/// Which ordinary row controls exist for the current retention state.
-///
-/// Archive removes terminal lifecycle actions, not metadata management: an
-/// archived row can still be opened, renamed, or deleted, but cannot be
-/// stopped or archived a second time. Clone, ReplaceWith, and Replace carry
-/// NO field here at all — unlike these four, all three are offered
-/// unconditionally on every retention state (see
-/// `MENU_ACTIONS`/`session_menu_order`), because none is a lifecycle action
-/// or a metadata edit on the row at all: each only reads the row to seed a
-/// brand-new create (opening a pre-filled form for clone and ReplaceWith,
-/// or acting at once for Replace), which needs nothing about this row to be
-/// live or mutable — an archived session has no running process to act on,
-/// but its host, directory, title, and launch profile (or raw invocation)
-/// are all still on this `Session`. Clone and ReplaceWith both turn that
-/// history back into a running agent without un-archiving the original,
-/// differing only in whether the archived record survives the launch
-/// (Clone keeps it, ReplaceWith deletes it exactly as Replace does); plain
-/// Replace discards the archived record entirely and puts the running
-/// agent in its place instead, with no chance to edit anything first.
+/// Which optional row controls exist for the current session state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RowControlVisibility {
     rename: bool,
     stop: bool,
-    archive: bool,
     delete: bool,
     /// Whether the mark-read/mark-unread item is offered — the ONE field
-    /// here whose condition is not a pure function of `archived`. It needs
-    /// both the row's LIVE
+    /// here whose condition depends on the row's live
     /// status (running, waiting, or idle — an ended session has no dot and
     /// no meaningful unseen state to toggle) and whether the helm sent
     /// `seen_activity_at` at all (an old helm offers no toggle it cannot
     /// answer PUT requests for), so the caller computes it from the whole
-    /// `Session` rather than this function deriving it from `archived`
-    /// alone.
+    /// `Session` rather than this function deriving it from one field.
     mark_seen: bool,
 }
 
-fn row_control_visibility(archived: bool, mark_seen: bool) -> RowControlVisibility {
+/// Keep ordinary actions available for ended sessions too; only the seen
+/// toggle depends on live status and the helm's seen-state capability.
+fn row_control_visibility(mark_seen: bool) -> RowControlVisibility {
     RowControlVisibility {
         rename: true,
-        stop: !archived,
-        archive: !archived,
+        stop: true,
         delete: true,
         mark_seen,
     }
@@ -76,11 +55,10 @@ fn row_control_visibility(archived: bool, mark_seen: bool) -> RowControlVisibili
 //
 // Everything below identifies a menu item by WHAT IT DOES rather than by
 // where it currently sits. That distinction is the fix for a real bug:
-// the item set is not fixed for the life of an open menu. Archiving a
-// session withdraws Stop and Archive, and the surviving Delete keeps its
-// DOM node rather than remounting, so a scheme that filed handles under
-// "index 3" left Delete's handle at an index the shorter list no longer
-// reaches while navigation had already moved on to the new numbering.
+// the item set is not fixed for the life of an open menu. Seen-state
+// availability can change while the surviving actions keep their DOM nodes,
+// so a scheme that filed handles under an index could leave a handle at a
+// position the shorter list no longer reaches.
 // Positions are derived from `MenuOrder` at the moment a key is pressed;
 // nothing durable is ever keyed by one.
 
@@ -95,7 +73,7 @@ enum MenuAction {
     /// Toggle the row's seen state — "mark read" or "mark unread" depending
     /// on the CURRENT predicate, never a fixed label. Inserted right after
     /// `Rename`: both are metadata edits on the row rather than lifecycle
-    /// actions, so grouping them ahead of Stop/Archive/Delete keeps that
+    /// actions, so grouping them ahead of Stop/Delete keeps that
     /// distinction visible in the menu's own order.
     MarkSeen,
     Clone,
@@ -114,7 +92,6 @@ enum MenuAction {
     ReplaceWith,
     Replace,
     Stop,
-    Archive,
     Delete,
 }
 
@@ -131,14 +108,13 @@ enum MenuAction {
 /// first" (ReplaceWith) to "swap this one out, unedited" (Replace) —
 /// putting them beside each other is what lets a user compare the three
 /// without hunting across the menu.
-const MENU_ACTIONS: [MenuAction; 8] = [
+const MENU_ACTIONS: [MenuAction; 7] = [
     MenuAction::Rename,
     MenuAction::MarkSeen,
     MenuAction::Clone,
     MenuAction::ReplaceWith,
     MenuAction::Replace,
     MenuAction::Stop,
-    MenuAction::Archive,
     MenuAction::Delete,
 ];
 
@@ -151,17 +127,13 @@ const MENU_ACTIONS: [MenuAction; 8] = [
 /// it by one entry the way a hand-copied number could.
 type MenuOrder = menu_panel::MenuOrder<MenuAction, { MENU_ACTIONS.len() }>;
 
-/// Builds this render's item list from the retention state — the bridge
+/// Builds this render's item list from available controls — the bridge
 /// between `RowControlVisibility`'s named fields and the shared
 /// `MenuOrder::pack`'s generic `(action) -> bool` predicate.
 ///
 /// `Clone`, `ReplaceWith`, and `Replace` all answer `true` unconditionally
-/// rather than reading a `RowControlVisibility` field: none of the three
-/// has one, because all three are offered on every retention state (see
-/// that struct's own doc for why the omission is deliberate rather than a
-/// gap this match should be filling). None needs a running process any
-/// more than the others do — an archived source has no agent to kill, only
-/// a record to delete before the fresh session takes its place.
+/// rather than reading a `RowControlVisibility` field. They seed a new
+/// session from metadata and do not require the source's process to be alive.
 fn session_menu_order(controls: RowControlVisibility) -> MenuOrder {
     MenuOrder::pack(MENU_ACTIONS, |action| match action {
         MenuAction::Rename => controls.rename,
@@ -170,7 +142,6 @@ fn session_menu_order(controls: RowControlVisibility) -> MenuOrder {
         MenuAction::ReplaceWith => true,
         MenuAction::Replace => true,
         MenuAction::Stop => controls.stop,
-        MenuAction::Archive => controls.archive,
         MenuAction::Delete => controls.delete,
     })
 }
@@ -654,7 +625,7 @@ std::thread_local! {
 /// One row, in two layers. The row itself is a plain `<div>` wrapper
 /// around two real `<button>`s — the open button (the session's stacked
 /// identity lines, see "Host and staleness" below) and the small "⋯" actions-menu
-/// toggle beside it. Everything else — rename, clone, stop, archive,
+/// toggle beside it. Everything else — rename, clone, stop,
 /// delete, and their confirm prompts — mounts inside the floating panel the
 /// toggle anchors, and only while that panel is open. Real buttons
 /// rather than a `div` with `role`/`tabindex`/a hand-rolled `onkeydown`:
@@ -667,7 +638,7 @@ std::thread_local! {
 /// interactive content nested inside a `<button>` — a whole-row button
 /// could not legally host the toggle. Tab order follows the layers:
 /// closed, it walks open → toggle and on to the next row; open, the
-/// panel's controls follow the toggle (rename → clone → stop → archive →
+/// panel's controls follow the toggle (rename → clone → stop →
 /// delete, as visible per `RowControlVisibility`); confirming, the panel
 /// holds consequence text plus confirm → cancel (with initial FOCUS on
 /// cancel — see "Focus-on-open" below). Rename instead opens ListView's
@@ -676,7 +647,7 @@ std::thread_local! {
 /// ## Host and staleness (PLAN_M6.md item 6)
 ///
 /// Compact rows use one visual line. Outside compact mode, an ended status or
-/// stale/archive qualifier adds a full-width detail line between identity and
+/// stale qualifier adds a full-width detail line between identity and
 /// host metadata. The identity line reserves fixed status and locality slots,
 /// then carries title, glyph-only agent identity, and activity age. Compact
 /// ended states use the status slot for an icon, while their complete wording
@@ -887,14 +858,11 @@ pub(super) fn SessionRow(
     on_delete: EventHandler<DeleteTarget>,
     on_confirm_delete: EventHandler<String>,
     on_cancel_delete: EventHandler<String>,
-    on_archive: EventHandler<Session>,
-    on_confirm_archive: EventHandler<String>,
-    on_cancel_archive: EventHandler<String>,
     /// The read/unread toggle's click, from either the menu item or the
     /// row's own dot (SPEC.md, Status): the session id and
     /// the target `seen_activity_at` to PUT — `Some(effective_activity)` to
     /// mark read, `None` to mark unread. A tuple like `on_rename_start`
-    /// rather than the whole `Session` like `on_clone`/`on_archive`: the
+    /// rather than the whole `Session` like `on_clone`: the
     /// caller needs nothing else about the row, and computing the target
     /// value here (where the current unseen predicate is already in scope)
     /// keeps `ListView` from having to re-derive it.
@@ -906,7 +874,6 @@ pub(super) fn SessionRow(
         error,
         busy,
         confirming,
-        confirming_archive,
         confirming_replace,
         renaming,
         nav_disabled,
@@ -978,7 +945,7 @@ pub(super) fn SessionRow(
     // complete ended message or a qualifier whose compact presentation is a
     // glyph. Live and unknown rows otherwise keep their existing two-line
     // height rather than acquiring an empty layout row.
-    let has_detail = ended_badge.is_some() || session.stale || session.archived;
+    let has_detail = ended_badge.is_some() || session.stale;
     // The browser suite's stable wire token for locality, the same role
     // `data-host-kind` plays in the host panel: a plain string rather than
     // `Debug`'s derived spelling, so a rename of the enum's variants (their
@@ -995,14 +962,11 @@ pub(super) fn SessionRow(
         id: session.id.clone(),
         status: session.status.clone(),
     };
-    let archive_target = session.clone();
     let clone_target = session.clone();
     let replace_with_target = session.clone();
     let replace_target = session.clone();
     let confirm_id = session.id.clone();
     let cancel_id = session.id.clone();
-    let confirm_archive_id = session.id.clone();
-    let cancel_archive_id = session.id.clone();
     let confirm_replace_id = session.id.clone();
     let cancel_replace_id = session.id.clone();
     let rename_start = (session.id.clone(), session.title.clone());
@@ -1014,7 +978,7 @@ pub(super) fn SessionRow(
     // that serves this write is itself helm-local with nothing to refuse for
     // an unreachable host (SPEC_impl.md's `session_seen` paragraph).
     let offers_mark_seen = session.status.is_live() && unseen.is_some();
-    let controls = row_control_visibility(session.archived, offers_mark_seen);
+    let controls = row_control_visibility(offers_mark_seen);
     // "mark read" when the row currently has unseen output, "mark unread"
     // otherwise — the label follows the CURRENT predicate every render,
     // never a value captured once.
@@ -1036,27 +1000,19 @@ pub(super) fn SessionRow(
     // rather than fight the other for the one original.
     let dot_mark_seen_target = mark_seen_target.clone();
     let menu_id = session.id.clone();
-    // This render's item list, derived from the same visibility answer
-    // that decides whether each item renders at all — an archived row's
-    // menu is Rename, Clone, Replace, Delete, in that order, with Stop and
-    // Archive withdrawn, so Delete sits wherever THIS shorter list puts it
-    // rather than at whatever position a fixed numbering across every
-    // retention state would give it. Every focus position below is read
-    // out of this one value (see `MenuOrder`), so the rendered list and the
-    // navigable list cannot disagree.
+    // This render's item list is also the source of every focus position,
+    // so the rendered and navigable menus cannot disagree.
     let menu_order = session_menu_order(controls);
     // Whether the panel is currently showing its item list rather than a
     // confirmation prompt. Rename immediately closes this panel and mounts
     // ListView's stable dialog, so it is not a panel sub-state.
-    let showing_menu_items = !(confirming || confirming_archive || confirming_replace);
+    let showing_menu_items = !(confirming || confirming_replace);
     // The accessible name for the panel's prompt states. Only read when
     // one of them is showing; the menu state names its inner list
     // instead. Same clamp as the toggle's own name, for the same reason
     // (see `clamp_title`).
     let prompt_label = if confirming {
         format!("delete confirmation for {}", clamp_title(&session.title))
-    } else if confirming_archive {
-        format!("archive confirmation for {}", clamp_title(&session.title))
     } else if confirming_replace {
         format!("replace confirmation for {}", clamp_title(&session.title))
     } else {
@@ -1080,7 +1036,6 @@ pub(super) fn SessionRow(
     let replace_with_key_id = session.id.clone();
     let replace_key_id = session.id.clone();
     let stop_key_id = session.id.clone();
-    let archive_key_id = session.id.clone();
     let delete_key_id = session.id.clone();
     // The toggle's own `MountedData`, captured once via `onmounted` below,
     // and where the panel believes its own screen position currently is
@@ -1282,11 +1237,10 @@ pub(super) fn SessionRow(
         open_intent,
         close_menu: on_menu_toggle,
     };
-    // The item set can change UNDER an open menu: archiving a session
-    // withdraws stop and archive while the panel stays up, and a session
-    // ending (or, in principle, an old-helm connection losing the seen-state
-    // field mid-session — not reachable in practice, but the predicate does
-    // not assume otherwise) withdraws mark-seen the same way. Rename and
+    // Ending a session withdraws mark-seen from an open menu. Losing the
+    // seen-state field would do the same; the predicate does not assume it
+    // stays present, even though an old-helm transition is not reachable here.
+    // Rename and
     // delete keep their DOM nodes across that change (Dioxus diffs them
     // in place), so nothing re-registers them and the withdrawn items'
     // handles would otherwise sit in the map retaining detached nodes,
@@ -1295,59 +1249,53 @@ pub(super) fn SessionRow(
     // click path because no click is involved — the listing simply
     // reports a different session.
     //
-    // `use_reactive` because `session.archived`/`offers_mark_seen` are plain
-    // prop-derived values: an effect body that merely closed over them would
+    // `use_reactive` because `offers_mark_seen` is a plain
+    // prop-derived value: an effect body that merely closed over it would
     // run once with the first render's answer and never again.
     //
     // Stale FOCUS is reconciled by ACTION identity rather than by comparing
     // the stored position against the new list's length — see
     // `menu_panel::reconcile_menu_focus`'s own doc for why a length check
-    // misses a withdrawal from the MIDDLE of the list (this row's own
-    // shorter list happens not to reorder around Stop/Archive today, but
-    // the host row's identical effect hits the case directly, and this row
-    // shares the mechanics rather than a second, narrower copy of them).
-    let archived = session.archived;
+    // misses a withdrawal from the middle of the list. Removing MarkSeen
+    // shifts the surviving actions even when focus stays within the new bounds.
     let withdrawal_close_id = session.id.clone();
-    use_effect(use_reactive(
-        (&archived, &offers_mark_seen),
-        move |(archived, offers_mark_seen)| {
-            let order = session_menu_order(row_control_visibility(archived, offers_mark_seen));
-            item_handles
-                .write()
-                .retain(|action, _| order.position(*action).is_some());
-            let focused_position = *menu_focus.peek();
-            // `menu_open` is this render's own belief about whether THIS row's
-            // menu is the open one — passed through so `reconcile_menu_focus`
-            // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):
-            // `on_menu_toggle` below is an ordinary click TOGGLE, not an
-            // idempotent close, and calling it when some OTHER dismissal (a
-            // layout closer, a newer host-menu choice) has already closed this
-            // row's menu since this prop was computed would reopen it instead.
-            match menu_panel::reconcile_menu_focus(
-                *previous_menu_order.peek(),
-                order,
-                focused_position,
-                menu_open,
-            ) {
-                menu_panel::MenuFocusReconciliation::Unchanged => {}
-                menu_panel::MenuFocusReconciliation::Moved(position) => {
-                    menu_focus.set(Some(position));
-                }
-                // No surviving item to aim focus at. Left as-is rather than
-                // cleared here: closing through `on_menu_toggle` is what the
-                // dismissal effect below keys its focus-return on
-                // (`was_inside`), and clearing `menu_focus` first would make
-                // that check see nothing to return focus FROM. Only ever
-                // reached while `menu_open` is true (see the call above), so
-                // this toggle call is always a genuine close of THIS row's own
-                // open menu, never a reopen.
-                menu_panel::MenuFocusReconciliation::Withdrawn => {
-                    on_menu_toggle.call(withdrawal_close_id.clone());
-                }
+    use_effect(use_reactive(&offers_mark_seen, move |offers_mark_seen| {
+        let order = session_menu_order(row_control_visibility(offers_mark_seen));
+        item_handles
+            .write()
+            .retain(|action, _| order.position(*action).is_some());
+        let focused_position = *menu_focus.peek();
+        // `menu_open` is this render's own belief about whether THIS row's
+        // menu is the open one — passed through so `reconcile_menu_focus`
+        // can gate `Withdrawn` on it (F4/COR-SESSION-WITHDRAWAL-REOPEN):
+        // `on_menu_toggle` below is an ordinary click TOGGLE, not an
+        // idempotent close, and calling it when some OTHER dismissal (a
+        // layout closer, a newer host-menu choice) has already closed this
+        // row's menu since this prop was computed would reopen it instead.
+        match menu_panel::reconcile_menu_focus(
+            *previous_menu_order.peek(),
+            order,
+            focused_position,
+            menu_open,
+        ) {
+            menu_panel::MenuFocusReconciliation::Unchanged => {}
+            menu_panel::MenuFocusReconciliation::Moved(position) => {
+                menu_focus.set(Some(position));
             }
-            previous_menu_order.set(order);
-        },
-    ));
+            // No surviving item to aim focus at. Left as-is rather than
+            // cleared here: closing through `on_menu_toggle` is what the
+            // dismissal effect below keys its focus-return on
+            // (`was_inside`), and clearing `menu_focus` first would make
+            // that check see nothing to return focus FROM. Only ever
+            // reached while `menu_open` is true (see the call above), so
+            // this toggle call is always a genuine close of THIS row's own
+            // open menu, never a reopen.
+            menu_panel::MenuFocusReconciliation::Withdrawn => {
+                on_menu_toggle.call(withdrawal_close_id.clone());
+            }
+        }
+        previous_menu_order.set(order);
+    }));
     // Every close funnels through here, whichever path caused it —
     // Escape, Tab, a click on the toggle, or one of `ListView`'s
     // automatic dismissals (a sidebar scroll or resize, the hosts panel
@@ -1426,7 +1374,6 @@ pub(super) fn SessionRow(
             class: row_class,
             "data-session-id": "{session.id}",
             "data-session-stale": "{session.stale}",
-            "data-session-archived": "{session.archived}",
             "data-session-selected": "{selected}",
             // The browser suite's hook for the locality glyph, the same
             // role `data-host-kind` plays on a host panel row: a stable
@@ -1463,7 +1410,7 @@ pub(super) fn SessionRow(
                     // the open button inert for the whole time a prompt is
                     // showing, rather than giving it a second, competing
                     // meaning as an implicit cancel.
-                    disabled: nav_disabled || confirming || confirming_archive || confirming_replace
+                    disabled: nav_disabled || confirming || confirming_replace
                         || renaming,
                     onclick: move |_| on_open.call(open_session.clone()),
                     // STACKED lines rather than one squeezed flex row: the
@@ -1564,12 +1511,6 @@ pub(super) fn SessionRow(
                                         span { class: "visually-hidden", "stale" }
                                     }
                                 }
-                                if session.archived {
-                                    span { class: "compact-qualifier", title: "archived",
-                                        QualifierIcon { glyph: QualifierGlyph::Archived }
-                                        span { class: "visually-hidden", "archived" }
-                                    }
-                                }
                             }
                         }
                         // The agent track is a bounded visual classifier.
@@ -1628,9 +1569,6 @@ pub(super) fn SessionRow(
                             if session.stale {
                                 span { class: "stale-badge", title: "stale", "stale" }
                             }
-                            if session.archived {
-                                span { class: "archived-badge", title: "archived", "archived" }
-                            }
                         }
                     }
                     }
@@ -1670,7 +1608,7 @@ pub(super) fn SessionRow(
                 // (BUGS_BURNDOWN.md issue 5's interviewed design — the row
                 // itself carries no action buttons). The panel is also
                 // where a destructive action CONFIRMS: clicking delete or
-                // archive swaps the panel's contents for the consequence
+                // delete swaps the panel's contents for the consequence
                 // line and confirm/cancel pair, keeping the whole exchange
                 // on one small surface instead of bouncing the user
                 // somewhere else. Rename lives here too — the ONLY
@@ -1883,31 +1821,9 @@ pub(super) fn SessionRow(
                                 onclick: move |_| on_cancel_delete.call(cancel_id.clone()),
                                 "cancel"
                             }
-                        } else if confirming_archive {
-                            if let Some(consequence) = archive_confirmation(&session, session.tabs.len()) {
-                                span { class: "confirm-consequence", "{consequence}:" }
-                            } else {
-                                span { class: "confirm-consequence", "archiving removes the terminal:" }
-                            }
-                            span { class: "confirm-title", "\"{session.title}\"" }
-                            button {
-                                r#type: "button",
-                                class: "btn confirm-archive",
-                                // See confirm-delete: refusal made visible.
-                                disabled: busy,
-                                onclick: move |_| on_confirm_archive.call(confirm_archive_id.clone()),
-                                "confirm archive"
-                            }
-                            button {
-                                r#type: "button",
-                                class: "btn archive-cancel",
-                                autofocus: true,
-                                onclick: move |_| on_cancel_archive.call(cancel_archive_id.clone()),
-                                "cancel"
-                            }
                         } else if confirming_replace {
                             // Same two-element, consequence-first shape as
-                            // the delete and archive prompts above — see
+                            // the delete prompt above — see
                             // the component doc's opening paragraphs for
                             // why the consequence never shrinks or
                             // ellipsizes while the title does. Unlike
@@ -2066,29 +1982,17 @@ pub(super) fn SessionRow(
                                         "{mark_seen_label}"
                                     }
                                 }
-                                // Offered on EVERY row, archived included,
-                                // unconditionally — see
-                                // `RowControlVisibility`'s own doc for why
-                                // clone has no visibility field to gate it
-                                // at all. Archiving withdraws only the
-                                // PROCESS action, stop: there is no live
-                                // agent left to stop. Rename stays
-                                // reachable on the same archived row, since
-                                // it edits metadata rather than a process,
-                                // and restart (elsewhere in this UI, not on
-                                // this menu) relaunches an archived
-                                // session's OWN process and un-archives it
-                                // in doing so. Clone is a third, DIFFERENT
-                                // thing again: rather than acting on this
+                                // Offered on every row, unconditionally —
+                                // see `RowControlVisibility`'s own doc for
+                                // why clone has no visibility field to gate
+                                // it at all. Rather than acting on this
                                 // row's process at all, it reads this row's
                                 // host, directory, title, and launch
                                 // profile (or raw invocation) to seed a
                                 // brand-new, independent create — the click
                                 // only OPENS that form pre-filled
                                 // (`create_form::CreatePrefill`); nothing
-                                // here mutates or restarts anything itself,
-                                // and the archived original is left exactly
-                                // as it was.
+                                // here mutates or restarts anything itself.
                                 button {
                                     r#type: "button",
                                     class: "btn session-row-menu-item session-row-clone",
@@ -2235,41 +2139,6 @@ pub(super) fn SessionRow(
                                         "stop"
                                     }
                                 }
-                                if controls.archive {
-                                    button {
-                                        r#type: "button",
-                                        class: "btn session-row-menu-item session-row-archive",
-                                        role: "menuitem",
-                                        aria_disabled: if busy { "true" },
-                                        tabindex: if menu_tab_stop == Some(MenuAction::Archive) { "0" } else { "-1" },
-                                        onmounted: move |element| {
-                                            remember_menu_item(
-                                                menu_wiring,
-                                                MenuAction::Archive,
-                                                element.data(),
-                                            )
-                                        },
-                                        onfocusin: move |_| {
-                                            menu_focus.set(menu_order.position(MenuAction::Archive));
-                                        },
-                                        onfocusout: move |_| menu_focus.set(None),
-                                        onkeydown: move |evt| {
-                                            handle_menu_key(
-                                                &evt,
-                                                menu_order.position(MenuAction::Archive),
-                                                menu_wiring,
-                                                &archive_key_id,
-                                            );
-                                        },
-                                        onclick: move |_| {
-                                            if busy {
-                                                return;
-                                            }
-                                            on_archive.call(archive_target.clone());
-                                        },
-                                        "archive"
-                                    }
-                                }
                                 // The boundary before the destructive
                                 // item, as a real one: sighted users
                                 // already got a rule (drawn by this
@@ -2389,7 +2258,6 @@ pub(super) fn row_specimen(id: &str) -> Session {
         restart_offer: crate::RestartOffer::FreshOnly,
         created_at: 0,
         last_activity_at: 0,
-        archived: false,
         tabs: Vec::new(),
         host: None,
         host_identity: None,
@@ -2409,101 +2277,12 @@ pub(super) fn row_specimen(id: &str) -> Session {
 mod tests {
     use super::*;
 
-    /// Revealing an archived row must keep its metadata actions while
-    /// withholding lifecycle controls that no longer have a terminal to act
-    /// on. Clone carries no field of its own to pin here at all — see
-    /// `RowControlVisibility`'s own doc for why it is offered on every
-    /// retention state unconditionally; `menu_order_follows_the_retention_
-    /// state_rather_than_a_fixed_numbering` below is what actually proves
-    /// it survives archiving, through `session_menu_order` instead.
-    #[farhelm_testtrace::test]
-    fn archived_rows_keep_metadata_controls_without_lifecycle_controls() {
-        assert_eq!(
-            row_control_visibility(true, false),
-            RowControlVisibility {
-                rename: true,
-                stop: false,
-                archive: false,
-                delete: true,
-                mark_seen: false,
-            }
-        );
-    }
-
-    /// The item list a render offers, and every focus position derived
-    /// from it, must follow the retention state rather than a fixed
-    /// numbering — and clone, replace-with, and replace, in particular,
-    /// must sit right after rename, in that order, in BOTH retention
-    /// states, since all three are offered unconditionally.
-    ///
-    /// This is the arithmetic behind a real bug. Archiving a session
-    /// while its menu is open withdraws stop and archive, and delete's
-    /// DOM node survives that change rather than remounting — so a scheme
-    /// that filed handles under "position 3" left delete's handle at an
-    /// index the two-item list no longer reaches, and Home/End/arrows
-    /// silently did nothing. Keying handles by action and asking
-    /// `MenuOrder` for the position at key-press time is the fix; this
-    /// pins the half of it that can be checked without a renderer.
-    ///
-    /// The `last()` case earns its own assertion because ArrowUp on a
-    /// closed toggle and End both resolve through it, and an archived row's
-    /// last item is Delete at the END of the SHORTER five-item archived
-    /// list (Rename, Clone, ReplaceWith, Replace, Delete), not wherever it
-    /// would sit in the seven-item active one.
-    #[farhelm_testtrace::test]
-    fn menu_order_follows_the_retention_state_rather_than_a_fixed_numbering() {
-        // `mark_seen: false` throughout — this test is about the archive
-        // dimension specifically; `mark_seen_sits_right_after_rename_when_offered`
-        // below is where MarkSeen's own predicate and position are pinned.
-        let active = session_menu_order(row_control_visibility(false, false));
-        assert_eq!(active.len(), 7);
-        assert_eq!(active.get(0), Some(MenuAction::Rename));
-        assert_eq!(active.get(1), Some(MenuAction::Clone));
-        assert_eq!(active.get(2), Some(MenuAction::ReplaceWith));
-        assert_eq!(active.get(3), Some(MenuAction::Replace));
-        assert_eq!(active.get(4), Some(MenuAction::Stop));
-        assert_eq!(active.get(5), Some(MenuAction::Archive));
-        assert_eq!(active.get(6), Some(MenuAction::Delete));
-        assert_eq!(active.get(7), None);
-        assert_eq!(active.last(), Some(MenuAction::Delete));
-        assert_eq!(active.position(MenuAction::Clone), Some(1));
-        assert_eq!(active.position(MenuAction::ReplaceWith), Some(2));
-        assert_eq!(active.position(MenuAction::Replace), Some(3));
-        assert_eq!(active.position(MenuAction::Delete), Some(6));
-
-        let archived = session_menu_order(row_control_visibility(true, false));
-        assert_eq!(archived.len(), 5);
-        assert_eq!(archived.get(0), Some(MenuAction::Rename));
-        assert_eq!(archived.get(1), Some(MenuAction::Clone));
-        assert_eq!(archived.get(2), Some(MenuAction::ReplaceWith));
-        assert_eq!(archived.get(3), Some(MenuAction::Replace));
-        assert_eq!(archived.get(4), Some(MenuAction::Delete));
-        assert_eq!(archived.get(5), None);
-        assert_eq!(archived.last(), Some(MenuAction::Delete));
-        // The whole point: the SAME action, a different position, and no
-        // durable state anywhere that remembers the old one. ReplaceWith
-        // and Replace both join clone here — all three stay reachable on an
-        // archived row (see `session_menu_order`'s own doc for why).
-        assert_eq!(archived.position(MenuAction::Clone), Some(1));
-        assert_eq!(archived.position(MenuAction::ReplaceWith), Some(2));
-        assert_eq!(archived.position(MenuAction::Replace), Some(3));
-        assert_eq!(archived.position(MenuAction::Delete), Some(4));
-        // Withdrawn actions have no position at all, which is what the
-        // handle map's rebuild filters on when the set shrinks under an
-        // open menu.
-        assert_eq!(archived.position(MenuAction::Stop), None);
-        assert_eq!(archived.position(MenuAction::Archive), None);
-    }
-
-    /// MarkSeen's own dimension, independent of the archive one the test
-    /// above covers: offered or not, it sits right after Rename — the
-    /// plan's stated position — in EVERY retention state, and withdrawn
-    /// entirely reads exactly like Stop/Archive being withdrawn (no
-    /// position at all, not a disabled one).
+    /// MarkSeen sits right after Rename when offered and disappears entirely
+    /// when the helm cannot answer the seen-state write.
     #[farhelm_testtrace::test]
     fn mark_seen_sits_right_after_rename_when_offered() {
-        let offered = session_menu_order(row_control_visibility(false, true));
-        assert_eq!(offered.len(), 8);
+        let offered = session_menu_order(row_control_visibility(true));
+        assert_eq!(offered.len(), 7);
         assert_eq!(offered.get(0), Some(MenuAction::Rename));
         assert_eq!(offered.get(1), Some(MenuAction::MarkSeen));
         assert_eq!(offered.get(2), Some(MenuAction::Clone));
@@ -2511,16 +2290,7 @@ mod tests {
         assert_eq!(offered.get(4), Some(MenuAction::Replace));
         assert_eq!(offered.position(MenuAction::MarkSeen), Some(1));
 
-        let offered_archived = session_menu_order(row_control_visibility(true, true));
-        assert_eq!(offered_archived.len(), 6);
-        assert_eq!(offered_archived.get(0), Some(MenuAction::Rename));
-        assert_eq!(offered_archived.get(1), Some(MenuAction::MarkSeen));
-        assert_eq!(offered_archived.get(2), Some(MenuAction::Clone));
-        assert_eq!(offered_archived.get(3), Some(MenuAction::ReplaceWith));
-        assert_eq!(offered_archived.get(4), Some(MenuAction::Replace));
-        assert_eq!(offered_archived.get(5), Some(MenuAction::Delete));
-
-        let withdrawn = session_menu_order(row_control_visibility(false, false));
+        let withdrawn = session_menu_order(row_control_visibility(false));
         assert_eq!(
             withdrawn.position(MenuAction::MarkSeen),
             None,
@@ -2567,9 +2337,6 @@ mod tests {
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
             let on_cancel_delete = use_callback(|_: String| {});
-            let on_archive = use_callback(|_: Session| {});
-            let on_confirm_archive = use_callback(|_: String| {});
-            let on_cancel_archive = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let session = row_specimen("session-1");
@@ -2581,7 +2348,6 @@ mod tests {
                         error: None,
                         busy: false,
                         confirming: false,
-                        confirming_archive: false,
                         confirming_replace: false,
                         renaming: false,
                         nav_disabled: false,
@@ -2602,9 +2368,6 @@ mod tests {
                     on_delete,
                     on_confirm_delete,
                     on_cancel_delete,
-                    on_archive,
-                    on_confirm_archive,
-                    on_cancel_archive,
                     on_rename_start,
                     on_menu_toggle,
                 }
@@ -2659,9 +2422,6 @@ mod tests {
             let on_delete = use_callback(|_: DeleteTarget| {});
             let on_confirm_delete = use_callback(|_: String| {});
             let on_cancel_delete = use_callback(|_: String| {});
-            let on_archive = use_callback(|_: Session| {});
-            let on_confirm_archive = use_callback(|_: String| {});
-            let on_cancel_archive = use_callback(|_: String| {});
             let on_rename_start = use_callback(|_: (String, String)| {});
             let on_menu_toggle = use_callback(|_: String| {});
             let selected = SELECTED.with(|selected| selected.get());
@@ -2675,7 +2435,6 @@ mod tests {
                             error: None,
                             busy: false,
                             confirming: false,
-                            confirming_archive: false,
                             confirming_replace: false,
                             renaming: false,
                             nav_disabled: false,
@@ -2696,9 +2455,6 @@ mod tests {
                         on_delete,
                         on_confirm_delete,
                         on_cancel_delete,
-                        on_archive,
-                        on_confirm_archive,
-                        on_cancel_archive,
                         on_rename_start,
                         on_menu_toggle,
                     }

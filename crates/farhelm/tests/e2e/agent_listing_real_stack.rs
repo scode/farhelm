@@ -27,7 +27,7 @@
 //! processes carrying only the credentials a real session's agent is
 //! given — both the two read-only listings (`hosts`/`sessions`) and, in
 //! this file's second test, the three lifecycle verbs
-//! (`rename`/`stop`/`archive`), each verified against the real,
+//! (`rename`/`stop`), each verified against the real,
 //! post-mutation state a browser's own REST call would see.
 //!
 //! # Why the attachment is part of the fixture
@@ -415,16 +415,16 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     // only invite someone to reorder them.
 }
 
-/// Spec: the shipped `farhelm agent rename/stop/archive`, run against the
+/// Spec: the shipped `farhelm agent rename/stop`, run against the
 /// real stack, each produce the UI-visible effect `GET /api/sessions`
-/// reports — a real rename, a real process kill, and a real archive —
+/// reports — a real rename and a real process kill —
 /// through the exact assembly a browser's own REST call would use.
 ///
 /// This is the lifecycle counterpart to
 /// [`the_shipped_agent_commands_are_answered_by_the_real_helm`], and
 /// exercises what that test cannot: `HelmAgentRequests::handle`'s `Rename`/
-/// `Stop`/`Archive` arms calling the SAME `sessions.rs` functions
-/// (`do_rename_session`/`do_stop_session`/`do_archive_session`) the REST
+/// `Stop` arms calling the SAME `sessions.rs` functions
+/// (`do_rename_session`/`do_stop_session`) the REST
 /// routes call, through a real routed connection to a real supervisor
 /// managing real (fake-agent) processes. A unit test driving the handler
 /// directly cannot see a startup-wiring or routing regression that only
@@ -434,13 +434,13 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// ## Two sessions, deliberately — a "controller" and a "target"
 ///
 /// Every `farhelm agent` call here authenticates as the CONTROLLER, and
-/// `stop`/`archive` are pointed at the TARGET with an explicit `--session`
+/// `stop` is pointed at the TARGET with an explicit `--session`
 /// — which is also, on its own, the strongest evidence a fixture can offer
 /// for the wide-authority half of `AgentVerb`'s contract ("act on the
 /// asker OR any session the helm knows"): the reply names a session the
 /// asking connection was never attached to at all.
 ///
-/// This is not only a style choice. `stop` and `archive` end with the
+/// This is not only a style choice. `stop` ends with the
 /// supervisor's process-tree SWEEP, which claims every same-user process
 /// on the machine whose environment carries the TARGET session's exact
 /// `FARHELM_SESSION_ID` marker (`sweep.rs`'s environment-marker scan,
@@ -451,11 +451,10 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 /// sweep and may be SIGTERM'd before it can print a confirmation. That is a property of an unattended CLI
 /// process racing a kill sweep it started against itself, not a defect in
 /// the relay or in `HelmAgentRequests`: nothing is supposed to survive a
-/// self-archive, the disposable CLI invocation least of all, since ending
-/// the whole tree — calling CLI included — is exactly what the verb was
-/// asked to do. What is lost is only the confirmation LINE, and only for a
-/// caller that both asked-as and acted-on one session. Routing
-/// `stop`/`archive` at a
+/// self-stop, including the disposable CLI invocation, since ending the
+/// whole tree is exactly what the verb was asked to do. What is lost is
+/// only the confirmation LINE, and only for a caller that both asked-as
+/// and acted-on one session. Routing `stop` at a
 /// SEPARATE target session sidesteps the race entirely — the controller's
 /// marker never matches the target's sweep — which is what makes this
 /// fixture deterministic. `rename` triggers no sweep at all, so it safely
@@ -551,7 +550,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
         "the rename must be visible through the same read a browser uses: {controller_detail}"
     );
 
-    // `stop`/`archive`, both with an explicit `--session` naming the
+    // `stop`, with an explicit `--session` naming the
     // TARGET — see the module docs for why acting on a different session
     // than the asker is what keeps this fixture out of the sweep's way.
     let stopped = agent_command_args(
@@ -586,38 +585,6 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
         Some(STOP_ANNOTATION),
         "a stop through the agent relay must record the same annotation a REST stop would: \
          {target_detail}"
-    );
-
-    let archived = agent_command_args(
-        &["archive", "--session", &target_id],
-        &controller_id,
-        &token,
-        &socket,
-    )
-    .await;
-    assert_eq!(archived, format!("archived {target_id}\n"));
-    let fleet = get_json(
-        &client,
-        &format!("{}/api/sessions?include_archived=true", helm.base),
-    )
-    .await;
-    let rows = fleet["sessions"].as_array().expect("sessions is an array");
-    let row = rows
-        .iter()
-        .find(|row| row["id"] == target_id)
-        .unwrap_or_else(|| panic!("the archived session must still be listed: {fleet}"));
-    assert_eq!(
-        row["archived"], true,
-        "the archive must be visible in the same listing the UI polls: {row}"
-    );
-    let default_view = get_json(&client, &format!("{}/api/sessions", helm.base)).await;
-    assert!(
-        default_view["sessions"]
-            .as_array()
-            .expect("sessions is an array")
-            .iter()
-            .all(|row| row["id"] != target_id),
-        "an archived session must not appear in the default, non-archived view: {default_view}"
     );
 
     // `helm`, `supervisor` and `work` deliberately outlive this test's last

@@ -58,7 +58,6 @@ mod marker_model;
 mod tab_lifecycle_edges;
 mod terminal_tabs;
 
-mod archive;
 mod attachment_uploads;
 
 mod replay_marker;

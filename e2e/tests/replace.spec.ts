@@ -1,6 +1,6 @@
 // Replace's browser contract: the "replace" menu item (row.rs's
 // `.session-row-replace`) opens an inline confirmation in the same panel
-// clone/archive/delete already use, and confirming creates a fresh session
+// clone/delete already use, and confirming creates a fresh session
 // with the source's cwd, title, and invocation, selects it, and removes the
 // source — all in one round trip through `POST /api/sessions/{id}/replace`
 // (SPEC.md's "replace"). The helm-level composition (create-then-delete, the
@@ -33,7 +33,7 @@ import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, waitForTermText } from "./helpers/term";
 
 /** Find one session by its opaque server id, independent of title changes —
- * the same helper `clone.spec.ts` and `archive.spec.ts` each define locally,
+ * the same helper `clone.spec.ts` defines locally,
  * repeated here rather than shared because it is three lines and the
  * sharing would cost an import cycle nobody else needs. */
 function row(page: Page, id: string) {
@@ -76,10 +76,10 @@ test("replacing a live session creates a fresh row in its place, selected, with 
 
     await openRowMenu(sourceRow);
     await sourceRow.locator(".session-row-replace").click();
-    // The inline prompt: consequence and title, same shape delete's and
-    // archive's own prompts use (row.rs's `.confirm-consequence`/
+    // The inline prompt: consequence and title, the same shape delete's
+    // prompt uses (row.rs's `.confirm-consequence`/
     // `.confirm-title`), and the one sentence that distinguishes this
-    // prompt from either — every `replace_consequence` arm ends by naming
+    // prompt from deletion — every `replace_consequence` arm ends by naming
     // the replacement.
     await expect(sourceRow.locator(".confirm-consequence")).toContainText(
       "a fresh session with the same settings takes its place",

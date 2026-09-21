@@ -285,26 +285,24 @@ $ farhelm agent sessions
   ID        HOST         TITLE   CWD          AGENT  STATUS
 * session-1 this machine auth     /w/auth     claude running
   session-2 builder      docs     /w/docs     codex  idle (stale)
-  session-3 builder      old      /w/old      codex  archived
+  session-3 builder      old      /w/old      codex  exited
 ```
 
-`(stale)` means the row is the last thing the helm heard before that host went unreachable, not a live reading.
-`archived` replaces the status word for a session you have archived. A very large fleet is cut — at 5,000 rows, or
-sooner if the rows themselves are large enough to make the answer unsendable — and the cut is announced on stderr rather
-than left to be mistaken for the whole answer.
+`(stale)` means the row is the last thing the helm heard before that host went unreachable, not a live reading. A very
+large fleet is cut — at 5,000 rows, or sooner if the rows themselves are large enough to make the answer unsendable —
+and the cut is announced on stderr rather than left to be mistaken for the whole answer.
 
-The same relay also carries three lifecycle verbs, on the same credential:
+The same relay also carries lifecycle verbs on the same credential:
 
 ```
 farhelm agent rename --session <id> --expected-title=<old-title> -- <new-title>
 farhelm agent stop --session <id>
-farhelm agent archive --session <id>
 ```
 
 Every lifecycle command requires an exact session ID from the listing. Acting on the asking session is allowed, but it
 must be deliberate. Rename also requires the title the caller observed; a mismatch refuses without changing anything,
 which prevents one agent from overwriting a concurrent rename. Success prints one plain confirmation line on stdout
-(`renamed <id> to "<title>"`, `stopped <id>`, `archived <id>`), escaped the same way the listing tables are.
+(`renamed <id> to "<title>"`, `stopped <id>`), escaped the same way the listing tables are.
 
 And it carries two verbs that CREATE, which is where going through the helm buys something `farhelm spawn` cannot do at
 all:
