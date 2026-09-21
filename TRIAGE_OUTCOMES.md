@@ -626,7 +626,9 @@
 - Decision: the user chose discard after discussing the limited diagnostic impact and the extra state needed to separate
   the ending reason from cleanup completion.
 - Completion criteria: remove the feedback file and its index entry during execution without changing code or specs.
-- Execution: `pending`.
+- Execution: `complete`; removed the feedback file and index entry without code or spec changes. jj change:
+  `qtnkzurtorxvyunyvpswpltovustmllz`; bookmark: `triage-discard-upload-commit-diagnostic`; draft PR:
+  https://github.com/scode/farhelm/pull/839/changes.
 
 ## host-views-transiently-pairs-new-identity-with-stale-mismatch.md
 
