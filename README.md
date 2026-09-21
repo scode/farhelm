@@ -17,7 +17,7 @@ Take the helm - control your agents far away and local.
 <!-- readme-hero-url -->
 
 ![Farhelm supervising seven agent sessions across three hosts, with one session's Claude Code terminal
-open](https://raw.githubusercontent.com/scode/farhelm/d3de0b797dd1ebb253f69fd562597d32c219b367/readme-hero.png)
+open](https://raw.githubusercontent.com/scode/farhelm/5ea34fbd79224617c4873cb7bbf6b9ddeebd0665/readme-hero.png)
 
 <!-- /readme-hero-url -->
 
