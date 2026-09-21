@@ -384,11 +384,17 @@ pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> 
 /// Render the model and effort of a saved selection, stopping before the
 /// permission.
 ///
-/// The visible recent row spells the permission itself, so it can color
-/// "yolo" as a warning without cutting that word back out of a formatted
-/// string; this is the prefix it renders in front of that word. Every other
-/// summary appends the permission through [`selection_summary_without_harness`],
-/// so the two never disagree about the model or effort a row will apply.
+/// The composer's SEARCH result for a recent setup spells the permission
+/// itself, so it can color "yolo" as a warning without cutting that word back
+/// out of a formatted string; this is the prefix it renders in front of that
+/// word. Every other complete summary appends the permission through
+/// [`selection_summary_without_harness`], so the two never disagree about the
+/// model or effort a row will apply.
+///
+/// The compact recent row used to render this too and now renders
+/// [`selection_explicit_before_permissions`]. The search result was left as
+/// it was: it has a second line to itself, so it never had the compact row's
+/// problem of three identical one-line summaries hiding the one that differs.
 pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) -> String {
     format!(
         "model: {} · effort: {}",
@@ -399,6 +405,42 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
             .unwrap_or_else(|| "default".to_string()),
     )
 }
+
+/// Render only the model and effort a saved selection sets EXPLICITLY, in the
+/// summary's own spelling, stopping before the permission; empty when both
+/// are defaults.
+///
+/// This is what the compact recent row shows. Three rows that each spelled
+/// out "model: default · effort: default · permissions: default" made the
+/// one row that differed hard to find, so the visible row lists what is
+/// unusual about a setup and nothing else.
+///
+/// That is a statement about the VISIBLE row only. [`selection_summary`]
+/// names every default on purpose, so that absence is never mistaken for an
+/// invisible retained value, and the row's title and accessible name still
+/// carry that complete summary. The row itself keeps the same promise another
+/// way: when nothing at all is explicit it says `defaults`, where a blank
+/// would leave a reader guessing (see [`RECENT_ALL_DEFAULTS`]).
+///
+/// The permission is left out because the row spells it itself, so that it
+/// can color "yolo" as a warning without cutting the word back out of a
+/// formatted string.
+pub(crate) fn selection_explicit_before_permissions(selection: &LaunchSelection) -> Vec<String> {
+    let model = selection
+        .model
+        .as_deref()
+        .map(|model| format!("model: {model}"));
+    let effort = selection.effort.map(|effort| format!("effort: {effort:?}"));
+    model.into_iter().chain(effort).collect()
+}
+
+/// The word a compact recent row shows when its setup sets nothing
+/// explicitly: no model, no effort, and the default permission.
+///
+/// A word and not a blank, because a blank cell cannot be told apart from
+/// one that failed to render, and because saying so keeps the summary's
+/// promise that a default is always named.
+pub(crate) const RECENT_ALL_DEFAULTS: &str = "defaults";
 
 /// The bounded kinds understood by composer search.
 ///
@@ -1149,6 +1191,43 @@ mod tests {
         assert_eq!(
             selection_summary(&selection),
             "Codex · model: gpt-6-astra · effort: High · permissions: yolo"
+        );
+    }
+
+    /// The compact recent row lists only what a setup sets explicitly, in the
+    /// complete summary's own spelling, and lists nothing for a default.
+    ///
+    /// The row exists to make the unusual setup easy to spot among three, so
+    /// a default that leaked into it would bring back the wall of "default"
+    /// the row was changed to remove. The spelling is pinned against
+    /// [`selection_summary_before_permissions`] because the row's title still
+    /// shows the complete summary: an explicit value worded one way in the
+    /// row and another way in its own tooltip would read as two different
+    /// settings.
+    #[test]
+    fn the_explicit_summary_names_only_what_the_selection_sets() {
+        let selection = |model: Option<&str>, effort: Option<LaunchEffort>| LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: model.map(Into::into),
+            effort,
+            permissions: None,
+        };
+
+        assert!(selection_explicit_before_permissions(&selection(None, None)).is_empty());
+        assert_eq!(
+            selection_explicit_before_permissions(&selection(Some("gpt-6-astra"), None)),
+            ["model: gpt-6-astra"]
+        );
+        assert_eq!(
+            selection_explicit_before_permissions(&selection(None, Some(LaunchEffort::High))),
+            ["effort: High"]
+        );
+
+        let both = selection(Some("gpt-6-astra"), Some(LaunchEffort::High));
+        assert_eq!(
+            selection_explicit_before_permissions(&both).join(" · "),
+            selection_summary_before_permissions(&both),
+            "a fully explicit setup reads the same in the row as in the complete summary"
         );
     }
 

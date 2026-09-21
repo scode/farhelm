@@ -941,11 +941,20 @@ pub(crate) fn HostsPanel(
     rsx! {
         section { class: "hosts-panel",
             div { class: "hosts-heading",
+                // Number and label in separate spans so the stylesheet can
+                // draw this as a section heading, label first ("HOSTS 3"),
+                // the same way the session list's count is drawn. Number
+                // first in the DOM and the space kept inside the label: the
+                // element's text content stays "3 hosts", which is what a
+                // screen reader announces and what the browser suite
+                // asserts. Before the first read there is no number, and the
+                // bare word is the whole heading.
                 div { class: "host-count",
                     if let Some(hosts) = read.hosts() {
-                        if hosts.len() == 1 { "1 host" } else { "{hosts.len()} hosts" }
+                        span { class: "heading-count", "{hosts.len()}" }
+                        span { class: "heading-label", if hosts.len() == 1 { " host" } else { " hosts" } }
                     } else {
-                        "hosts"
+                        span { class: "heading-label", "hosts" }
                     }
                 }
                 label { class: "host-details-control",
