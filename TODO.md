@@ -24,6 +24,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Fix the Launch and Cancel button label alignment in the new-session form; both labels should be centered within their buttons.
 - Fix the vertical alignment of the destination selector and browse-folders button in the new-session form; their labels should be centered within their controls.
 - On Farhelm startup with existing sessions, render each session's last known state immediately instead of briefly marking many sessions green/active for several seconds while the live state settles; reconcile the cached state with the current live state once available.
+- Investigate suppressing the Claude and Codex startup prompts that ask whether to trust the working directory, using supported per-session mechanisms where available without weakening their trust boundaries; keep the warning when Farhelm cannot establish directory trust safely.
 
 - Assess what is needed to prevent native and shelled-out subagents from replacing or withdrawing the foreground
   conversation's restart target across harnesses. #801 adds Codex-specific ownership checks; Claude, Goose, Pi, and OMP
