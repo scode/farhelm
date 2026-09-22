@@ -700,6 +700,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: None,
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         },
         LaunchSelection {
             harness: LaunchHarness::Codex,

@@ -1306,6 +1306,33 @@ failure can leave private evidence, but cannot authorize another directory move.
   capture. Reports received before in-memory publication use the durable launching row and discover its owned pane from
   tmux. Historical bare Codex IDs are retained but fail closed rather than being guessed into a new locator.
 
+  **Grok attribution, ordering, and exact-record validation.** Grok uses the same peer PID, bounded ancestry walk,
+  capture claim, complete-binding CAS, ownership provenance, and mirror helper as Codex. Its corridor requires exactly
+  one native `grok` image with `--no-leader` in the option region, followed only by the hook-shaped reporter and the
+  same narrow shell trampoline. A nested Grok, foreign session runtime, missing option, or unreadable argv refuses the
+  report. This is the supported native corridor; wrappers may still launch but cannot establish capture ownership.
+
+  The hook parser accepts the observed snake_case and camelCase spellings for session id, event name, and transcript
+  path, and requires duplicate spellings to agree after event-name normalization. `SessionStart` alone selects a UUID
+  and must carry source `new` or `load` plus an RFC3339 timestamp. `UserPromptSubmit` and `Stop` carry enrichment only;
+  they may supply an exact path for the selected UUID but cannot replace it. Only `subagentType` maps into the shared
+  raw child marker, so child-marked callbacks are refused at the common doorway before vendor I/O.
+
+  A bounded `grok:` locator stores the UUID, optional absolute `updates.jsonl`, canonical arbitrary-precision event
+  timestamp, and current readiness. Its transition function runs under the shared claim after an authoritative row
+  reload. A different UUID must have a strictly newer timestamp. The same UUID may advance its timestamp but cannot
+  lower it; an equal repeat preserves an established path and may fill an absent one. Enrichment must match the selected
+  UUID and inherits its timestamp. This one locator transition supplies restart-stable ordering without a schema field,
+  event log, or retired-id set.
+
+  Readiness requires the bounded no-follow first record of the exact `updates.jsonl` to use the observed
+  `_x.ai/session/update` method and carry the UUID at `params.sessionId`. Its sibling `summary.json` must be a complete,
+  bounded UTF-8 JSON document carrying the same UUID at `info.id`; a valid prefix is not enough. Reconciliation rechecks
+  that pair under the shared claim, persists readiness withdrawal without discarding UUID or timestamp, and publishes
+  only the matching generation. Resume rechecks immediately before launch and substitutes the verified UUID, never
+  either path. No history scan or path derivation participates. Grok's manual hook configuration is the deliberate
+  exception to per-launch injection: Farhelm invokes no editor and writes no vendor file.
+
   **Shared attribution framework and the five-step admission.** The ancestry walk above is shared mechanics, not Codex
   code: at most 64 live `Running` edges from the socket peer to the owned pane, the peer's start token verified first,
   loops and a missing pane refused, and every edge plus every image observation re-read before the walk returns (an exec
@@ -1315,20 +1342,21 @@ failure can leave private evidence, but cannot authorize another directory move.
   MiB per walk, with over-budget or truncated argv recorded as missing rather than prefix-matched). The per-kind step
   applies its own restrictive corridor to the returned chain — only the reporter plus a narrow trampoline between
   runtime and reporter; any other session-hosting runtime or unclassified intermediary refuses. Codex's instance is
-  exactly-one native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only. Admission runs five steps:
-  cheap envelope/kind/generation gating with no vendor I/O (the doorway's discriminator check re-applied against the
-  fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the bounded capture
-  claim (one shared session-keyed `capture_locks` registry for report admission and Codex readiness refresh, never the
-  lifecycle claim, at most a second of waiting on the report path) and a reload comparing kind, generation, and the
-  complete prior binding; the mutation-free runtime and vendor-root proofs with repeat attribution around the evidence;
-  the atomic generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness, and the
-  ambiguity reset together; and the mirror of only the committed result into the matching current-generation entry under
-  the same claim. Rejection at any pre-write step changes nothing durable, in memory, ambiguous, pending, or offered.
-  Refresh and report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's
-  version beside the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup
-  — and a rejected report never triggers a readiness withdrawal through them. Scan writes, restart verification and
-  lifecycle resets retain their durable generation/binding fences; they do not all acquire this capture claim. The
-  timeout bounds lock acquisition, not the entire admission operation.
+  exactly one native `codex` image, a hook-shaped reporter, and shell-`-c` trampolines only; Grok's adds the required
+  `--no-leader` option to its one native image. Admission runs five steps: cheap envelope/kind/generation gating with no
+  vendor I/O (the doorway's discriminator check re-applied against the fenced resolution, plus raw
+  event/source/agent-identity validation before diagnostic sanitation); the bounded capture claim (one shared
+  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim, at most
+  a second of waiting on the report path) and a reload comparing kind, generation, and the complete prior binding; the
+  mutation-free runtime and vendor-root proofs with repeat attribution around the evidence; the atomic
+  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness, and the ambiguity
+  reset together; and the mirror of only the committed result into the matching current-generation entry under the same
+  claim. Rejection at any pre-write step changes nothing durable, in memory, ambiguous, pending, or offered. Refresh and
+  report-only reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside
+  the identity, so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a
+  rejected report never triggers a readiness withdrawal through them. Scan writes, restart verification and lifecycle
+  resets retain their durable generation/binding fences; they do not all acquire this capture claim. The timeout bounds
+  lock acquisition, not the entire admission operation.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL
@@ -1341,16 +1369,17 @@ failure can leave private evidence, but cannot authorize another directory move.
   — bare IDs stay excluded, nothing is backfilled, and file existence or a valid header can never upgrade a version.
   Relaunch clears provenance to 0 exactly when it clears the capture (Fresh/fallback) and preserves both together on
   Resume; the restart claim compares the version alongside the identity, so a provenance change under an unchanged
-  conversation still invalidates a stale claim. Protocol 28 carries the required closed-enum report discriminator that
-  the doorway gates on; senders predating it fail closed at decode and at the missing CLI flag alike.
+  conversation still invalidates a stale claim. Protocol 28 introduced the required closed-enum report discriminator
+  that the doorway gates on; protocol 29 adds Grok to that closed enum together with its agent-kind and launch-harness
+  variants. Senders predating either required variant fail closed at decode and at the missing CLI flag alike.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
-  Attribution proofs currently apply only to Codex. OMP, Goose, Claude, and Pi retain their existing acceptance behind
-  the discriminator gate, and new framework entry points default to deny rather than allow. The offer gate has its final
-  shape but flips per kind: only Codex requires version 1 today, while the other kinds keep today's offer behavior until
-  their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is no report epoch,
-  and no vendor event ordering beyond what the Codex proof establishes. Old processes and assets fail closed after the
-  upgrade; nothing is grandfathered.
+  Attribution proofs apply to Codex and Grok. OMP, Goose, Claude, and Pi retain their existing acceptance behind the
+  discriminator gate, and new framework entry points default to deny rather than allow. The offer gate has its final
+  shape but flips per kind: Codex and Grok require version 1, while the other kinds keep today's offer behavior until
+  their proof lands, writes 1, and flips the single per-kind predicate every surface consults. There is no general
+  report epoch. Grok's locator carries only its vendor-specific selection timestamp; no other kind inherits that
+  ordering rule. Old processes and assets fail closed after the upgrade; nothing is grandfathered.
 
   **The per-launch identity hook.** Scanning cannot see a conversation being replaced inside a live process: Claude
   Code's `/clear` and Codex's `/new` both mint a new conversation id with nothing on disk pointing back at the record
@@ -1380,6 +1409,13 @@ failure can leave private evidence, but cannot authorize another directory move.
   the fallback when no report has been accepted; Codex requires attributed reporting and does not infer ownership from
   nearby rollout files. An accepted report dominates scan-derived state, including ambiguity.
   `docs/agent-hook-injection.md` is the user-facing account of the same mechanism.
+
+  Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
+  cannot take a per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each
+  for `SessionStart`, `UserPromptSubmit`, and `Stop`, all invoking `farhelm internal hook --vendor grok` without
+  `--announce`. The tracked launch supplies the credential in the inherited environment; the configuration contains no
+  Farhelm token or session identity. Missing configuration leaves the Grok session usable but unable to gain a new exact
+  resume target.
 
   **Goose and Pi reporters.** These integrations never scan vendor state. A fresh Goose launch registers one named stdio
   MCP server, `farhelm-reporter`; Goose persists that declaration in its conversation, so resumed launches add no second
@@ -1670,23 +1706,21 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as
   both a structured harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to
   `--always-approve`, refuses model and effort choices, and stores
-  `grok --no-leader [--always-approve] --resume {conversation}` as argv elements. Its dedicated kind reuses the shared
-  ownership-proven capture and exact Resume lifecycle; it uses generic activity status and requires the user's manual
-  hook configuration for conversation capture.
-
-  OMP is also a structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's,
-  omits model and provider flags for the harness default, and compiles an explicit model as
-  `omp --provider openrouter --model <id>` (provider intent explicit; a literal custom id stays one argv element and is
-  stored verbatim — provider qualification is not a promise of literal upstream routing for unknown ids; OMP's own
-  resolution still runs alias, fuzzy, and `:suffix` interpretations on the id it receives, as documented in
-  `docs/harnesses/omp.md`). `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not
-  offered), and `--approval-mode yolo|always-ask` carries the YOLO/Approve choices while `default` adds no flag and
-  stays omitted in the stored selection — unlike Pi, no YOLO default is rewritten on. SmartApprove and Chat are refused
-  for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size. Resolving
-  `SourceProfile` snapshots while draining remote sessions discovers catalog state only: those observations never select
-  the helm-wide remembered default. A successful profile-backed create through the user's REST surface alone writes that
-  default; agent-relay creates and clones do not, so an agent's work cannot change the profile the user's next dialog
-  suggests.
+  `grok --no-leader [--always-approve] --resume {conversation}` as argv elements. The dedicated kind preserves the
+  ownership policy across helm and supervisor storage. It uses the generic activity classifier while the manually
+  configured reporter supplies ownership-proven conversation capture. OMP is also a structured harness only at launch
+  time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the harness
+  default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit; a
+  literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
+  upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
+  id it receives, as documented in `docs/harnesses/omp.md`). `--thinking <effort>` carries the seven-level list (`off`
+  through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the YOLO/Approve choices
+  while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO default is rewritten on.
+  SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's
+  "P" at sidebar size. Resolving `SourceProfile` snapshots while draining remote sessions discovers catalog state only:
+  those observations never select the helm-wide remembered default. A successful profile-backed create through the
+  user's REST surface alone writes that default; agent-relay creates and clones do not, so an agent's work cannot change
+  the profile the user's next dialog suggests.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

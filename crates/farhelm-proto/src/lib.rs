@@ -2232,6 +2232,8 @@ pub enum ReportVendor {
     Pi,
     /// Oh-my-pi, via the shipped extension asset.
     Omp,
+    /// xAI's Grok Build CLI, via manually configured lifecycle hooks.
+    Grok,
 }
 
 /// Compatibility posture: within one protocol version the set of messages
@@ -2760,9 +2762,10 @@ pub enum ControlMsg {
     /// re-list to see it.
     SessionRestarted { req_id: u64, session: SessionInfo },
     /// A session's agent reporting its own conversation identity from
-    /// inside its process — sent by the vendor `SessionStart` hook farhelm
-    /// injects into the agent's launch argv, the moment a new (or resumed)
-    /// conversation id comes into being. Accepted only on a
+    /// inside its process — sent by a configured vendor hook when a new or
+    /// resumed conversation id comes into being. Farhelm injects the hook
+    /// for vendors that support per-launch configuration; Grok uses the same
+    /// message from its manually installed callbacks. Accepted only on a
     /// session-authenticated connection (`ControlMsg::Hello::auth`), and
     /// only to report on the session that connection is authenticated AS —
     /// a peer cannot report a conversation for any session but its own. A
@@ -2784,9 +2787,10 @@ pub enum ControlMsg {
     /// The credential identifies the Farhelm session, not necessarily its
     /// foreground vendor conversation: tools and nested invocations can inherit
     /// it. The supervisor applies the stored kind's attribution rules before
-    /// accepting a replacement. Codex additionally requires a kernel-attributed
-    /// foreground process and matching root transcript metadata; a persistent
-    /// child record alone is insufficient.
+    /// accepting a replacement. Codex and Grok additionally require a
+    /// kernel-attributed foreground process. Codex then checks root transcript
+    /// metadata; Grok checks the exact session record and summary. A persistent
+    /// child record alone is insufficient for either kind.
     ///
     /// This is not a security boundary against the same Unix user, who owns the
     /// processes and vendor files. Shape validation and literal argv substitution
@@ -2801,13 +2805,16 @@ pub enum ControlMsg {
     /// a later resume should target. Overwriting the prior report is
     /// therefore the correct outcome, not a duplicate request to reject.
     /// Accepted reports replace earlier identities within the current launch.
-    /// Vendor hook ordering supplies the event order; the wire has no sequence
-    /// field. The durable generation comparison rejects a report racing a
-    /// relaunch. Lifecycle teardown removes old reporters, and Codex attribution
-    /// also requires ancestry reaching the current owned pane.
+    /// Most vendors rely on hook delivery order because the wire has no shared
+    /// sequence field. Grok carries its RFC 3339 selection time inside the
+    /// opaque locator, so its adapter can reject a delayed callback. The durable
+    /// generation comparison rejects a report racing a relaunch. Lifecycle
+    /// teardown removes old reporters, while the foreground-attributed kinds
+    /// also require ancestry reaching the current owned pane.
     ReportConversation {
         req_id: u64,
-        /// Which vendor adapter produced this report (version 28). The
+        /// Which vendor adapter produced this report (version 28; Grok was
+        /// added to the closed set in version 29). The
         /// supervisor rejects a mismatch against the destination session's
         /// durable kind before any vendor I/O: without it a plain id
         /// addressed to any id-reporting kind is accepted on shape alone,
@@ -6671,7 +6678,7 @@ mod tests {
             serde_json::from_value::<ControlMsg>(unknown_vendor).is_err(),
             "an unknown vendor decoded under a closed enum"
         );
-        for vendor in ["claude", "codex", "goose", "pi", "omp"] {
+        for vendor in ["claude", "codex", "goose", "pi", "omp", "grok"] {
             let tagged = serde_json::json!({
                 "type": "report_conversation",
                 "vendor": vendor,

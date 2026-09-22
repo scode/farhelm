@@ -3234,11 +3234,12 @@ pub(super) fn CreateSessionForm(
                 let fresh_authority = live_preview_authority.peek().clone();
                 // An accepted request replays its recorded launch snapshot.
                 // New requests still validate against today's catalog.
-                if !replaying_fresh && let LaunchIntent::Structured(selection) = &binding.agent {
-                    if !crate::launch_composer::selection_is_compatible(selection, &catalog_for_submit) {
-                        error.set(Some("this saved choice is no longer supported by the current catalog; choose a compatible model or effort".into()));
-                        return;
-                    }
+                if !replaying_fresh
+                    && let LaunchIntent::Structured(selection) = &binding.agent
+                    && !crate::launch_composer::selection_is_compatible(selection, &catalog_for_submit)
+                {
+                    error.set(Some("this saved choice is no longer supported by the current catalog; choose a compatible model or effort".into()));
+                    return;
                 }
                 let base = base.clone();
                 // The target row's install identity as this form knew it at

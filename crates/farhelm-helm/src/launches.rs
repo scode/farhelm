@@ -1279,6 +1279,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         })
         .expect("compile permissive Grok launch");
         assert_eq!(permissive.invocation, "grok --no-leader --always-approve");

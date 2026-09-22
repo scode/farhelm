@@ -197,13 +197,15 @@ pub(crate) enum CaptureState {
     ///
     /// Dominates every scan-derived state, including `Ambiguous`, after the
     /// reporting path has applied the kind's attribution requirements. This is
-    /// not blanket trust in inherited credentials: Codex additionally binds the
-    /// emitter to the foreground process and checks root transcript metadata.
+    /// not blanket trust in inherited credentials: Codex and Grok additionally
+    /// bind the emitter to the foreground process, then verify their own exact
+    /// vendor records.
     ///
     /// Replaceable only by another `Reported`, and that replacement is the
     /// whole reason this variant exists: `/clear` (Claude) and `/new`
-    /// (Codex) start a NEW conversation inside the same process, and the
-    /// old id is then precisely the one that must not be resumed any more.
+    /// (Codex and Grok) start a NEW conversation inside the same process,
+    /// and the old id is then precisely the one that must not be resumed any
+    /// more.
     ///
     /// ## The contract with the durable write
     ///
@@ -760,12 +762,12 @@ fn is_spoken_for(
 
 /// Reconcile report-only identities with the durable row before serving an offer.
 ///
-/// A startup report can arrive before its in-memory entry is published, and Pi's
-/// restart verifier can withdraw a stale file independently of the report handler.
+/// A startup report can arrive before its in-memory entry is published, while an
+/// exact-file verifier can withdraw readiness independently of the report handler.
 /// Neither transition has a vendor scan to repair its mirror. These kinds therefore
 /// read their durable row each capture pass, including when no agent home exists.
-/// Codex reloads under its capture claim before verification, since a report may
-/// have replaced the initial row while this pass waited for the claim.
+/// Codex and Grok reload under the capture claim before checking their exact vendor
+/// evidence, since a report may have replaced the initial row while this pass waited.
 /// A different mirrored identity wins over this observation. A change away and
 /// back can still leave a stale offer until the next pass; restart reads the row.
 ///
@@ -786,6 +788,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
                 | farhelm_proto::AgentKind::Codex
                 | farhelm_proto::AgentKind::Pi
                 | farhelm_proto::AgentKind::Omp
+                | farhelm_proto::AgentKind::Grok
         ) {
             continue;
         }
@@ -815,13 +818,12 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         }
         // The `_claimed` variant: this loop already holds this session's
         // capture claim (above), and the per-key mutex is not reentrant —
-        // calling the claiming wrapper here parked the pass against itself
-        // and no capture pass over a hook-reported Codex row ever completed.
-        match sup.refresh_codex_capture_claimed(&mut row).await {
+        // calling the claiming wrapper here parks the pass against itself.
+        match sup.refresh_reported_capture_claimed(&mut row).await {
             Ok(true) => {}
             Ok(false) => continue,
             Err(error) => {
-                warn!(session = %entry.info.id, %error, "could not refresh the exact Codex capture");
+                warn!(session = %entry.info.id, %error, "could not refresh the exact reported capture");
                 continue;
             }
         }
@@ -886,10 +888,10 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
 ///   re-reads it only when that stamp moved — which is exactly the
 ///   resume-append signal SPEC_impl.md describes.
 ///
-/// Report-only reconciliation precedes this scan work. Codex separately
-/// re-reads a bounded header from each captured exact path, including
-/// pending locators, so a settled capture does not imply zero filesystem
-/// work for the pass as a whole.
+/// Report-only reconciliation precedes this scan work. Codex re-reads a
+/// bounded header from each captured exact path; Grok rechecks its exact
+/// update/summary pair. Pending locators are included, so a settled capture
+/// does not imply zero filesystem work for the pass as a whole.
 ///
 /// ## The claim discipline
 ///
@@ -1326,7 +1328,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
 ///
 /// The horizon is `first input + after + grace` — the scan's own settling
 /// point, reused rather than given a constant of its own. It is late
-/// enough for both vendors from opposite directions: Claude reports at
+/// enough for both launch-injected vendors from opposite directions: Claude reports at
 /// process startup, so a Claude session is normally `Reported` before it
 /// has an anchor at all, while Codex reports at the first prompt, which is
 /// the very event that sets the anchor. A session with no first input yet

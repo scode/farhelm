@@ -584,8 +584,7 @@ pub async fn stamp_of(path: &Path) -> anyhow::Result<Option<RecordStamp>> {
     }
 }
 
-/// Read at most [`RECORD_PREFIX_BYTES`] of a file as (lossy) text, or
-/// `Ok(None)` if it is gone.
+/// Open a vendor record without following a symlink or blocking on a FIFO.
 ///
 /// Opened `O_NOFOLLOW | O_NONBLOCK` and then re-validated through the
 /// resulting descriptor: `O_NOFOLLOW` refuses a symlink placed where a
@@ -593,13 +592,7 @@ pub async fn stamp_of(path: &Path) -> anyhow::Result<Option<RecordStamp>> {
 /// an open that would never return, and the `fstat`-based regular-file
 /// check is what closes the gap between the enumeration's `file_type` and
 /// this open (the entry could have been replaced in between).
-///
-/// Lossy UTF-8 rather than strict because the prefix routinely ends
-/// mid-character, and a strict decode would fail the whole read over a
-/// truncation that never touches the correlators on the first line.
-pub(crate) async fn read_prefix(path: &Path) -> anyhow::Result<Option<String>> {
-    use tokio::io::AsyncReadExt;
-
+async fn open_regular_file(path: &Path) -> anyhow::Result<Option<tokio::fs::File>> {
     let opened = tokio::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -622,12 +615,52 @@ pub(crate) async fn read_prefix(path: &Path) -> anyhow::Result<Option<String>> {
             path.display()
         );
     }
+    Ok(Some(file))
+}
+
+/// Read at most [`RECORD_PREFIX_BYTES`] of a growing record as lossy text.
+///
+/// Record identity lives at the beginning of an otherwise unbounded stream,
+/// so truncation and a final partial UTF-8 code point are both expected here.
+/// `Ok(None)` means the path disappeared before it could be opened.
+pub(crate) async fn read_prefix(path: &Path) -> anyhow::Result<Option<String>> {
+    use tokio::io::AsyncReadExt;
+
+    let Some(file) = open_regular_file(path).await? else {
+        return Ok(None);
+    };
     let mut buffer = Vec::new();
     file.take(RECORD_PREFIX_BYTES as u64)
         .read_to_end(&mut buffer)
         .await
         .map_err(|e| anyhow::Error::new(e).context(format!("reading {}", path.display())))?;
     Ok(Some(String::from_utf8_lossy(&buffer).into_owned()))
+}
+
+/// Read one complete small vendor file as strict UTF-8.
+///
+/// Unlike [`read_prefix`], callers use this when trailing bytes affect the
+/// meaning of the document. Reading one byte beyond the shared bound makes an
+/// oversized file a refusal instead of accepting a valid-looking prefix.
+pub(crate) async fn read_complete(path: &Path) -> anyhow::Result<Option<String>> {
+    use tokio::io::AsyncReadExt;
+
+    let Some(file) = open_regular_file(path).await? else {
+        return Ok(None);
+    };
+    let mut buffer = Vec::new();
+    file.take((RECORD_PREFIX_BYTES + 1) as u64)
+        .read_to_end(&mut buffer)
+        .await
+        .map_err(|e| anyhow::Error::new(e).context(format!("reading {}", path.display())))?;
+    anyhow::ensure!(
+        buffer.len() <= RECORD_PREFIX_BYTES,
+        "{} exceeds the bounded complete-file limit",
+        path.display()
+    );
+    let text = String::from_utf8(buffer)
+        .map_err(|e| anyhow::Error::new(e).context(format!("decoding {}", path.display())))?;
+    Ok(Some(text))
 }
 
 /// Seconds since the Unix epoch for a `SystemTime`, or `None` for a
