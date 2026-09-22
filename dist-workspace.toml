@@ -91,6 +91,16 @@
 #   notice would have been `sign-sums` failing afterwards on assets that were
 #   never built. A failure inside a build job is a job FAILURE, which `host`
 #   does reject, so that is where the gate had to go.
+# - `CHANGELOG.md` at the root is NOT configured here and needs no setting:
+#   axoproject discovers any root `CHANGELOG*`/`RELEASES*` on its own
+#   (`auto-includes = false` only keeps it out of the archives), and dist's
+#   announce step copies the section whose heading names the tagged version
+#   into the GitHub release body, using the heading text as the release name.
+#   A stable tag needs an exact heading; a prerelease tag falls back to its
+#   stable version's section, then to an `Unreleased` one. `releasing/AGENTS.md`
+#   stipulates the file's layout around those rules, and the gate's changelog
+#   step compares the plan job's computed announcement with the file so a
+#   heading dist misreads fails the build instead of naming a release wrong.
 #
 # One thing dist 0.32 does NOT offer: holding the GitHub Release as a draft
 # until the publish jobs finish. `dist host --steps=release` creates the
