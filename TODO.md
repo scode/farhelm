@@ -31,6 +31,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `create-runs-inline-on-read-loop.md`; it does not request immediate implementation.
 
 ## Near term
+
+- Fix the misleading destination path in the new-session composer for `gh:owner/repo` launches. After selecting a
+  repository and entering a session name, the directory field still shows an unrelated path that will not be used, even
+  though the fresh-checkout preview names the intended directory. The reported session launched in the correct checkout;
+  make the composer consistently show the effective destination as repository and name choices change.
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently connected displays and falling back safely when the display layout changes so the window never reopens off-screen or unusably large.
 - Fix the vertical alignment of the destination selector and browse-folders button in the new-session form; their labels should be centered within their controls.
 - On Farhelm startup with existing sessions, render each session's last known state immediately instead of briefly marking many sessions green/active for several seconds while the live state settles; reconcile the cached state with the current live state once available.
