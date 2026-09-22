@@ -12,7 +12,7 @@ Previously the session launcher had a considerably different look and feel from 
 
 ### 🔄 Changed
 
-- The session launcher uses the main window's colors, corners, and selection style, and its recent-setup rows show only what each setup changes from the defaults. (#819, #820)
+- The session launcher uses the main window's colors, corners, and selection style, and its "recent-setup" rows, that show recent launches, only show what those launches explicitly override relative to default values. (#819, #820)
 
 ### 🔧 Fixed
 
