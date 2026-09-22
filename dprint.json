@@ -7,7 +7,9 @@
   "excludes": [
     "**/*-lock.json",
     "target/**",
-    "lore/**"
+    "lore/**",
+    "CHANGELOG.md",
+    "releasing/changelog.d/*.md"
   ],
   "plugins": [
     "https://plugins.dprint.dev/json-0.23.0.wasm",

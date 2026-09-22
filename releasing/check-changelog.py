@@ -242,8 +242,9 @@ def _check_highlights(lines: list[str]) -> list[str]:
 def _check_bullets(lines: list[str]) -> list[str]:
     """Every entry is one list item, one paragraph, ending in `(#N)` or `(#N, #M)`; no headings, no free prose.
 
-    dprint wraps long bullets onto indented continuation lines, so an item is the `- ` line plus the indented lines
-    after it, and the PR reference is checked on the item's joined text rather than on its last physical line.
+    The file is stored one paragraph per line (GitHub renders a release body like a comment, newline as line break),
+    but an item is still taken to be the `- ` line plus any indented lines after it, and the PR reference is checked
+    on the joined text, so a hand-wrapped bullet is flagged for its reference, not misread as several entries.
     """
     problems: list[str] = []
     items: list[list[str]] = []
@@ -290,8 +291,10 @@ def parse_fragment(path: Path, text: str) -> Fragment:
     covers it in the sweep. The body is free prose for curation.
 
     The front matter is a leading `---` block, YAML-style, rather than a `key: value` header followed by a divider.
-    dprint formats these files with everything else, and a `---` line directly under text is a setext heading to
-    Markdown, which dprint rewrites into `## kind: added`; a leading front matter block is the one shape it leaves alone.
+    A `---` line directly under text is a setext heading to Markdown, and the first draft of this format learned that
+    from dprint rewriting `kind: added` over a divider into `## kind: added`. The fragments are excluded from dprint
+    now for a different reason (see `_check_bullets`), but the leading block is the shape every Markdown tool treats
+    as metadata, so it stays.
     """
     lines = text.splitlines()
     if not lines or lines[0] != "---":

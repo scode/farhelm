@@ -42,7 +42,11 @@ The layout is stipulated, not suggested. The checker refuses deviations, so read
   looks at them and the emoji stay out of the release name.
 - Highlights is prose: one `####` subsection per item, each a title and one or more paragraphs, no bullets at the top
   level. Every other category is bullets: one `-` item per entry, one paragraph, ending in its PR reference as `(#N)` or
-  `(#N, #M)`. dprint wraps long bullets onto indented continuation lines; that is still one item.
+  `(#N, #M)`.
+- One paragraph per physical line, however long. `CHANGELOG.md` and the fragments are excluded from dprint in
+  `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every newline as a
+  line break, and HackMD does the same, so a section hard-wrapped at 120 columns shows up ragged on the release page and
+  in the curation note. The checker tolerates indented continuation lines as part of an item, but do not write them.
 - An item that gets a highlight also gets its one-line bullet in its category. The category lists are complete on their
   own; Highlights is a reading aid, and a release with nothing worth a paragraph has no Highlights heading.
 - A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
@@ -79,14 +83,14 @@ Cursor is a harness choice in the launch composer. This is launch only: Farhelm 
 conversation and cannot resume one.
 ```
 
-The front matter is a leading `---` block, YAML-style, because dprint formats these files like any other Markdown and a
-`---` line directly under text is a setext heading to it (it rewrites `kind: added` over a `---` into `## kind: added`);
-a leading block is the one shape it leaves alone. `kind:` is one of `breaking`, `added`, `changed`, `fixed`, `removed`,
-or `none`, naming the category the entry lands in. `none` records a required commit that was considered and has nothing
-user-facing; its body says why, so curation can tell an omission from a decision. An optional `pr: 123` (or
-`pr: 123, 456`) line claims PR numbers when the fragment is written after its change merged, or covers several PRs at
-once; a fragment added in the change's own commit needs no `pr:` because the sweep pairs it with the commit that added
-it.
+The front matter is a leading `---` block, YAML-style, because a `---` line directly under text is a setext heading to
+Markdown (the first draft of this format had dprint rewrite `kind: added` over a `---` into `## kind: added`); a leading
+block is the one shape every Markdown tool treats as metadata. `kind:` is one of `breaking`, `added`, `changed`,
+`fixed`, `removed`, or `none`, naming the category the entry lands in. `none` records a required commit that was
+considered and has nothing user-facing; its body says why, so curation can tell an omission from a decision. An optional
+`pr: 123` (or `pr: 123, 456`) line claims PR numbers when the fragment is written after its change merged, or covers
+several PRs at once; a fragment added in the change's own commit needs no `pr:` because the sweep pairs it with the
+commit that added it.
 
 The body is a draft in user-facing voice: the first paragraph is the one-liner candidate, further paragraphs are
 material for a highlight. Err toward including caveats. It is not reviewed at PR time and it is not the final text;
