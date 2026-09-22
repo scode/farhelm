@@ -2195,12 +2195,21 @@ samp {
   min-width: 4ch;
 }
 
+/* The agent badge is two fixed columns, not a shrink-wrapped flex group: the
+   harness mark always occupies the first cell and the permission lock the
+   second, whether or not a lock is rendered. As a flex group the badge was
+   right-aligned and narrower on rows without a lock, so their harness mark
+   slid over into the lock's column and the marks zigzagged down a mixed list.
+   A fleet where every session runs unattended never shows the shift (every
+   row has a lock), which is why it survived; the README hero fleet mixes the
+   two and made it visible. The cell widths match `.sidebar-glyph`. */
 .session-agent {
   grid-column: 4;
   justify-self: end;
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: 10px 10px;
   align-items: center;
-  gap: 2px;
+  column-gap: 2px;
   color: var(--fg-1);
 }
 .session-activity-column {
