@@ -156,16 +156,16 @@ sandboxing and trusts the workspace for the run. Muse-specific hooks, conversati
 recognition are not implemented; no Muse integration kind is implied by the presence of its built-in profiles.
 
 OpenCode is a structured harness, not a built-in profile. Its Zen model is required: Farhelm suggests
-`opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-5.6-luna`,
-`opencode/gpt-5.6-terra`, `opencode/gpt-5.6-sol`, and `opencode/gpt-6-astra`. The custom-model field also accepts a bare
+`opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-6-luna`,
+`opencode/gpt-5.6-terra`, `opencode/gpt-6-sol`, and `opencode/gpt-6-astra`. The custom-model field also accepts a bare
 Zen model name or an `opencode/<model>` value. A bare value is passed as `opencode/<model>`; another provider prefix is
 refused. OpenCode has no offered effort choices. Its default permission mode adds no flag, and YOLO uses OpenCode's
 `--auto`, which auto-approves only permissions not explicitly denied. OpenCode uses generic activity status with no
 hooks, conversation capture/resume, or waiting-state recognition.
 
 Goose, Pi, and OMP are structured OpenRouter harnesses, not built-in profiles. All three require an explicit model and
-suggest `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, `z-ai/glm-5.3`, `openai/gpt-5.6-luna`,
-`openai/gpt-5.6-terra`, `openai/gpt-5.6-sol`, and `openai/gpt-6-astra`; a literal custom OpenRouter id remains available
+suggest `z-ai/glm-5.3-flash`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, `z-ai/glm-5.3`, `openai/gpt-6-luna`,
+`openai/gpt-5.6-terra`, `openai/gpt-6-sol`, and `openai/gpt-6-astra`; a literal custom OpenRouter id remains available
 after selecting a harness. Goose requests `off`, `low`, `medium`, `high`, or `max` thinking and offers `approve`,
 `smart approve`, `chat`, and `yolo` modes. Pi requests `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`
 thinking and has only the visibly labelled YOLO mode; this describes the absence of Pi's built-in tool gate, not its
