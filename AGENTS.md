@@ -464,6 +464,16 @@ ready, enables auto-merge, or merges them; publishing or landing requires a sepa
 official and which Farhelm drew, the brand terms that decided that, and the one sizing rule they all share. Read it
 before adding or changing a mark; vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
 
+# Brand marks: the icon and the wordmark
+
+The app icon is `packaging/farhelm-desktop/icon.svg` (the source of `icon.png` and `Farhelm.icns` beside it). The
+wordmark, "farhelm" in JetBrains Mono Nerd Font Bold with the icon's block cursor after it, is
+`packaging/farhelm-desktop/wordmark-dark.svg` and `wordmark-light.svg`, one per ground. Its letters are outlines pulled
+from the font the UI crate vendors by `docs/readme/outline-wordmark.py` into `docs/readme/wordmark-outline.json`, and
+`docs/readme/render-svgs.mjs` inlines them into the wordmark files and the README's header and pillars blocks under
+`docs/readme/`. Anything that needs the name as a mark uses those files; anything that changes the mark changes the
+script and re-runs it, never the SVGs by hand, and the outline step only reruns when the word or the font changes.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
