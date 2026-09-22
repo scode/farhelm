@@ -1526,9 +1526,16 @@ pub(super) fn SessionRow(
                         span {
                             class: "session-agent",
                             title: "{display_peer(&agent_tooltip)}",
-                            HarnessIcon { glyph: agent.harness }
+                            // Give each glyph its own hover target. The
+                            // parent still exposes provenance and argv when
+                            // the pointer is between the two marks.
+                            span { title: "{display_peer(&agent_tooltip)}",
+                                HarnessIcon { glyph: agent.harness }
+                            }
                             if let Some(permission) = agent.permission {
-                                PermissionIcon { glyph: permission }
+                                span { title: "{permission_description(permission)}",
+                                    PermissionIcon { glyph: permission }
+                                }
                             }
                             if let Some(source) = &session.source_profile {
                                 span { class: "visually-hidden", "{display_peer(&source_profile_label(source))}. " }

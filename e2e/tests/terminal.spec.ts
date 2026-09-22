@@ -3727,8 +3727,9 @@ test("a long error detail wraps completely and compact ended rows stay one line"
 
 /**
  * Compact state and harness marks have a fixed visual budget even when all
- * state qualifiers are present. Synthetic rows pin the exact displayed
- * semantics without needing the real vendor programs installed in the fleet.
+ * state qualifiers are present. Synthetic rows pin the exact displayed and
+ * per-glyph hover semantics without needing the real vendor programs installed
+ * in the fleet.
  */
 test("compact rows retain distinct ended and harness glyphs within two characters", async ({ page, request }, testInfo) => {
   const preferences = await readPreferences(request);
@@ -3752,9 +3753,13 @@ test("compact rows retain distinct ended and harness glyphs within two character
     for (const item of cases) {
       const row = page.locator(`[data-session-id="${item.id}"]`);
       await expect(row.locator(`.harness-glyph[data-glyph="${item.harness}"]`)).toBeVisible();
+      await expect(row.locator(".harness-glyph").locator("..")).toHaveAttribute("title", / — /);
       await expect(row.locator(".session-agent")).toHaveAttribute("title", new RegExp(item.invocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
       await expect(row.locator(".permission-glyph")).toHaveCount(item.permission ? 1 : 0);
-      if (item.permission) await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
+      if (item.permission) {
+        await expect(row.locator(".permission-glyph")).toHaveAttribute("data-glyph", item.permission);
+        await expect(row.locator(".permission-glyph").locator("..")).toHaveAttribute("title", /permission bypass|full-auto/);
+      }
       if (["stopped", "exited", "interrupted", "error"].includes(item.id)) {
         await expect(row.locator(`.ended-status-glyph[data-glyph="${item.id}"]`)).toBeVisible();
         await expect(row.locator(".status-dot")).toHaveCount(0);
@@ -3853,8 +3858,8 @@ function liveDotListing(extra: Record<string, unknown> = {}) {
 // the readable half, painted geometry for the visible half — and then proves
 // the accessibility assertion actually bites by breaking the word on purpose.
 //
-// The accessible name is read off the ROW, not off the badge: the badge
-// carries `title="running"`, and a `title` is the accname algorithm's last
+// The accessible name is read off the ROW, not off the badge or dot: both
+// carry `title="running"`, and a `title` is the accname algorithm's last
 // resort, so a badge whose word had gone `display: none` would still answer
 // "running" for itself. The row button has no such fallback — its name comes
 // from its contents, and hidden contents drop out of it.
@@ -3885,6 +3890,7 @@ test("a live session draws a dot with a hidden word and a relative age", async (
   // painted, and round rather than a stray square.
   const dot = badge.locator(".status-dot");
   await expect(dot).toHaveCount(1);
+  await expect(dot, "the pointer's own tooltip must name the dot's status").toHaveAttribute("title", "running");
   const dotBox = (await dot.boundingBox())!;
   expect(dotBox).not.toBeNull();
   expect(dotBox.width).toBeGreaterThan(0);

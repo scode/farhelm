@@ -196,6 +196,11 @@ remain in its accessible text and tooltip. The working directory is tilde-folded
 abbreviations is lossy, so the untouched string rides along in a `title` attribute — the row is a summary, and the full
 truth stays one hover away.
 
+Each live dot carries its status word on the dot itself, with the optional mark read / mark unread action following it.
+The agent and permission SVGs sit in separate `title` targets, so hovering the open lock explains its permission mode
+instead of returning only the combined agent summary. The combined summary remains on the agent track for provenance and
+the full invocation.
+
 `status::status_badge` supplies the status wording; the row chooses its presentation according to compact mode. Live
 states keep their text for screen readers alongside the colored dot. Ended states use a distinct icon in compact mode,
 with the complete wording in accessible text and a tooltip. Outside compact mode the wording gets a full-width wrapping

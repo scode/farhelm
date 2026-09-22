@@ -4095,8 +4095,13 @@ pub(super) fn CreateSessionForm(
                                             live_browse_connection, cwd, cwd_raw_seed, cwd_edited,
                                         );
                                     },
-                                    "browse folders on "
-                                    span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                                    // Center the whole label as one inline
+                                    // unit when Browse moves below the host
+                                    // selector at narrow widths.
+                                    span {
+                                        "browse folders on "
+                                        span { class: "peer-value", dir: "ltr", "{selected_host_label}" }
+                                    }
                                 }
                             }
                             {host_notes.clone()}
