@@ -103,7 +103,7 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 
   # D15's version shape: X.Y.Z or vX.Y.Z, with an optional -rc.N or -dev.N
   # prerelease suffix (the two kinds of prerelease this project cuts — see
-  # AGENTS.md's release sections; a -dev.N is an rc under another name, so
+  # releasing/AGENTS.md; a -dev.N is an rc under another name, so
   # the installer treats the two identically); no leading zeros anywhere.
   # Any other suffix stays rejected on purpose: a pinned version that does
   # not match a tag this project would ever publish is a typo, not a

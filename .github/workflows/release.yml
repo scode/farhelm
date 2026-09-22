@@ -146,6 +146,13 @@ jobs:
             exit 1
           fi
           echo "ok: $GITHUB_REF_NAME matches [workspace.package].version"
+      - name: "Assert the changelog dist is about to publish"
+        run: |
+          set -euo pipefail
+          python3 releasing/check-changelog.py format
+          python3 releasing/check-changelog.py announce --tag "$GITHUB_REF_NAME" --manifest-env PLAN_MANIFEST
+        env:
+          "PLAN_MANIFEST": "${{ needs.plan.outputs.val }}"
       - name: "Free unused image toolchains before native desktop gates"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |

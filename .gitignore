@@ -49,3 +49,4 @@ e2e/.auth/storage-state.json
 # What the README hero capture's stack script publishes about the fleet it
 # booted (e2e/readme-hero/start-stack.sh); per run, removed by its trap.
 e2e/readme-hero/.stack-info.json
+__pycache__/

@@ -98,6 +98,30 @@
     fi
     echo "ok: $GITHUB_REF_NAME matches [workspace.package].version"
 
+- name: Assert the changelog dist is about to publish
+  # dist copies the `CHANGELOG.md` section for the tagged version into the
+  # GitHub release body and names the release after its heading, silently
+  # publishing bare download tables when it finds no section and whatever
+  # section it did match when a heading is malformed. Both are wrong releases
+  # that nothing downstream would notice. The plan job already computed the
+  # announcement (`announcement_title` and `announcement_changelog` in its
+  # manifest, exposed as the `val` output every build job receives), so this
+  # compares that against the checker's own reading of the file: a stable tag
+  # must land on the newest section exactly, a prerelease on nothing or on its
+  # own version's stable section. `releasing/AGENTS.md` has the format.
+  #
+  # The manifest travels in an environment variable rather than being
+  # interpolated into the script, so its JSON is never shell text. dist is not
+  # installed yet at this point in the build job (its install step comes after
+  # these spliced steps), which is why the plan job's manifest is reused
+  # instead of running `dist plan` again.
+  env:
+    PLAN_MANIFEST: ${{ needs.plan.outputs.val }}
+  run: |
+    set -euo pipefail
+    python3 releasing/check-changelog.py format
+    python3 releasing/check-changelog.py announce --tag "$GITHUB_REF_NAME" --manifest-env PLAN_MANIFEST
+
 - name: Free unused image toolchains before native desktop gates
   # The release job later holds cargo-dist's musl output, the final web bundle,
   # and a native WebKit/Dioxus smoke build at once. GitHub's stock Linux image
