@@ -32,7 +32,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently connected displays and falling back safely when the display layout changes so the window never reopens off-screen or unusably large.
-- Fix the Launch and Cancel button label alignment in the new-session form; both labels should be centered within their buttons.
 - Fix the vertical alignment of the destination selector and browse-folders button in the new-session form; their labels should be centered within their controls.
 - On Farhelm startup with existing sessions, render each session's last known state immediately instead of briefly marking many sessions green/active for several seconds while the live state settles; reconcile the cached state with the current live state once available.
 - Investigate suppressing the Claude and Codex startup prompts that ask whether to trust the working directory, using supported per-session mechanisms where available without weakening their trust boundaries; keep the warning when Farhelm cannot establish directory trust safely.
