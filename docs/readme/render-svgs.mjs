@@ -170,7 +170,11 @@ const pillars = (p) => [
   },
   {
     title: "The real terminal",
-    lines: ["Not a chat wrapper. You drive the agent’s", "own TUI, keystroke for keystroke."],
+    lines: [
+      "Not a chat wrapper. You drive the agent’s own",
+      "TUI, keystroke for keystroke. Paste in a",
+      "screenshot and the agent has the file.",
+    ],
     icon: `<rect x="3" y="6" width="34" height="28" rx="3" fill="none" stroke="${p.accent}" stroke-width="2.5"/>
       <path d="M10 15l6 5-6 5" fill="none" stroke="${p.fg}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
       <rect x="19" y="23" width="9" height="3" fill="${p.cursor}"/>`,

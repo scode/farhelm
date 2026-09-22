@@ -23,7 +23,7 @@
       <path d="M10 15l6 5-6 5" fill="none" stroke="#e6ebf1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
       <rect x="19" y="23" width="9" height="3" fill="#5CF08A"/></g>
     <text x="88" y="44" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#e6ebf1">The real terminal</text>
-    <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" fill="#b8c0cc"><tspan x="88" y="68">Not a chat wrapper. You drive the agent’s</tspan><tspan x="88" y="87">own TUI, keystroke for keystroke.</tspan></text>
+    <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" fill="#b8c0cc"><tspan x="88" y="68">Not a chat wrapper. You drive the agent’s own</tspan><tspan x="88" y="87">TUI, keystroke for keystroke. Paste in a</tspan><tspan x="88" y="106">screenshot and the agent has the file.</tspan></text>
   </g>
   <g transform="translate(480 128)">
     <rect x="8" y="8" width="464" height="112" rx="8" fill="#141920" stroke="#2a3340"/>
