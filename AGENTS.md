@@ -37,14 +37,18 @@ The CI workflow's formatting job runs this source-only check and requires zero u
 explains a deliberate observation window, scheduling stimulus, or polling interval; it does not replace a readiness
 oracle or excuse an unverified fixture premise.
 
-Before creating or updating a PR, or claiming work is done, use judgment to select the checks below that can
-meaningfully validate the change. The list is the authoritative inventory of CI-equivalent gates and what each one
-covers, not a requirement to run every command for every diff. Run each command whose inputs, generated artifacts, or
-exercised behavior may have changed. Select and order checks by the risks they cover, the signal they provide, their
-cost, and the uncertainty that remains. Cost can favor a fast check over an equally credible slow one, but it cannot
-excuse skipping the only check that covers a material risk. Widen when a change is cross-cutting, security-sensitive,
-lifecycle-sensitive, installer- or release-sensitive, or otherwise uncertain, and use the whole list when that is the
-most credible validation rather than as a mechanical default.
+Before creating, updating, or merging a PR, or claiming work is done, make a judgment call about what validation would
+add useful evidence. Never mechanically run the entire test battery. A PR, rebase, stack completion, or merge request is
+not by itself a reason to launch it. The list below is the authoritative inventory of available CI-equivalent checks and
+their coverage, not a checklist to execute in full.
+
+Start with the actual diff, the successful checks already available, and the concrete risks still uncovered. Choose the
+smallest set of checks likely to expose a regression in the affected behavior; no additional runtime tests is a valid
+choice when existing evidence still covers the change. Widen only when a specific material risk or unresolved failure
+needs broader coverage. Cross-cutting, security, lifecycle, installer, or release changes deserve careful assessment,
+not an automatic full run. Before choosing a full battery, explain what risk it covers that existing evidence and
+targeted checks cannot adequately cover. Cost does not excuse ignoring a material risk, but running more tests without
+identifying one is not diligence.
 
 For a documentation-only change that cannot affect generated artifacts or executable examples — ordinary Markdown
 documentation, a lore entry, agent instructions, or comments with no doctest or generation role — do NOT run Rust,
@@ -52,17 +56,19 @@ JavaScript, desktop, installer, provisioning, or browser tests. Run only formatt
 checks that actually inspect the changed files, if any exist. Do not run a check solely because it appears in the full
 gate list.
 
-When building a stack of reviewable changes, do not run the highest-cost relevant gates after every commit or PR by
-default. At each review unit, run fast, high-signal checks that cover that unit and catch failures while they are cheap
-to localize. Once the intended stack is complete, run the highest-cost relevant gates once at the stack tip so they
-cover the combined diff. Run a highest-cost gate earlier when it is the only credible coverage for a material risk or
-when later work depends on its result. If the stack changes after a tip result, apply the per-command reuse rule and
-rerun only checks whose coverage is no longer valid.
+When building a stack, use targeted checks at each review unit to catch likely regressions while they are cheap to
+localize. At the tip, assess the combined diff for interactions those checks did not cover. Stack completion does not
+require another battery or the highest-cost gates; run broader checks only for identified coverage gaps. Apply the same
+judgment when landing the stack.
 
-Reuse is per command. Check the diff from the tested revision to the current head, rerun anything whose inputs or
-exercised behavior may have changed, and rerun when there is real uncertainty about coverage. A failed, interrupted,
-stale, or poorly identified run is not reusable. Report checks run now; checks reused, with the covered revision and why
-the intervening diff leaves their coverage intact; and checks skipped, with the reason.
+Reuse is per command. Compare the tested revision with the current head, including upstream changes and conflict
+resolutions after a rebase. A new commit hash does not invalidate a successful run. If extensive validation just
+finished and a minor rebase preserves the tested behavior, reuse it without more runtime tests. If the rebase changes
+behavior, run targeted checks most likely to expose a problem in those changes or their interactions; widen only when
+that leaves a material gap. Resolve uncertainty by inspecting the diff before defaulting to execution. Failed,
+interrupted, poorly identified runs, or runs whose coverage no longer applies are not evidence of a pass. Report checks
+run now; checks reused, with the covered revision and why their coverage still applies; and checks skipped, with the
+reason.
 
 For Rust execution, first put the pinned nextest and tmux on PATH using the guarded setup in
 `docs/test-run-evidence.md`. Run from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes
@@ -244,16 +250,18 @@ and `-rc.N` counters are independent, so `0.3.0-dev.2` and `0.3.0-rc.1` can both
 difference: it tells whoever reads the tag list later that the build was a trial of work in progress, not a claim that
 this is what will ship as `X.Y.Z`.
 
-The browser end-to-end suite is deliberately NOT in that per-change list, and its CI job is disabled (`if: false` in
-ci.yml): it is far too slow to pay on every PR. It gates MERGING instead — before landing a PR stack on main, run
-`cd e2e && npx playwright test` (Chromium and WebKit; WebKit stands in for the desktop app's actual engine family). It
-needs `cargo build` and `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first (it
-drives the built web UI against a real helm and supervisor), plus a one-time
-`cd e2e && npm install && npx playwright install chromium webkit`. This split lets changes accumulate across a stack and
-surface bugs once, before merge, without each PR paying the suite's cost — but it also means NOTHING else runs it: CI
-green does not include e2e. The reuse rule above applies here too. A successful run covering the stack may stand when
-later changes are provably outside the browser suite's inputs and exercised behavior (documentation-only changes are the
-obvious case); compare the tested revision to the landing head and rerun for any relevant or uncertain change.
+Browser end-to-end validation follows the same judgment and reuse rules, including at merge time. Its CI job is disabled
+(`if: false` in ci.yml), so CI green does not include browser coverage. Assess whether the change leaves a concrete
+browser integration risk untested; choose relevant specs when they cover it, and run the full suite only when the risk
+needs that breadth. Do not start the full suite merely because a PR is about to merge. Documentation-only changes need
+no browser tests, and a minor rebase does not discard existing browser evidence.
+
+When browser validation is warranted, run the selected specs through the recorder on Chromium and WebKit (WebKit stands
+in for the desktop app's engine family). The full-suite child command is `cd e2e && npx playwright test`. It needs
+`cargo build` and `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it
+drives the built web UI against a real helm and supervisor, plus a one-time
+`cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results
+when the intervening diff leaves their coverage intact; see `docs/test-run-evidence.md` for recorded selections.
 
 # Reproducing failures: narrow tests first
 
