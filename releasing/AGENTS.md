@@ -92,10 +92,10 @@ considered and has nothing user-facing; its body says why, so curation can tell 
 several PRs at once; a fragment added in the change's own commit needs no `pr:` because the sweep pairs it with the
 commit that added it.
 
-The body is a draft in user-facing voice: the first paragraph is the one-liner candidate, further paragraphs are
-material for a highlight. Err toward including caveats. It is not reviewed at PR time and it is not the final text;
-curation rewrites it. When the draft rests on a guess (a PR with no description, say), say so in the body so the curator
-verifies it.
+The body is a draft in user-facing voice, written after reading `releasing/EDITORIAL_GUIDANCE.md`, the maintainer's
+accumulated wording rules: the first paragraph is the one-liner candidate, further paragraphs are material for a
+highlight. Err toward including caveats. It is not reviewed at PR time and it is not the final text; curation rewrites
+it. When the draft rests on a guess (a PR with no description, say), say so in the body so the curator verifies it.
 
 ## The checker
 
@@ -123,25 +123,32 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    required commit since the last stable release is included unless the user explicitly excludes it, `MISSING` ones get
    an entry written now from the commit and PR, and `STALE` ones are curated or deleted. This is the sweep the fragment
    rule exists to make cheap.
-2. Draft the section from the fragments and from whatever the user and the agent agree on in conversation. Decide which
-   items earn a highlight. Publish the draft as an owner-only HackMD note through the `skillette-hackmd` mechanics and
-   iterate there and inline in the session until the user is satisfied; the note is the review surface, not a record,
-   and is deleted once the section is committed.
-3. Make the changelog PR: the new `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
-   `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), `dprint fmt`, and
-   `python3 releasing/check-changelog.py format` passing. Merge it before going on.
-4. On a `release-X.Y.Z` branch off the merged main: bump the version to `X.Y.Z` in the root `Cargo.toml`'s
+2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
+   agent agree on in conversation, following that guidance. Decide which items earn a highlight. Publish the draft as an
+   owner-only HackMD note through the `skillette-hackmd` mechanics and iterate there and inline in the session until the
+   user is satisfied; the note is the review surface, not a record, and is deleted once the section is committed.
+   HackMD's API exposes a note's text but not its comments, so feedback left as comments has to be pasted into the
+   session; edits made to the note's text come back with `export`.
+3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
+   internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Append each
+   such rule to `releasing/EDITORIAL_GUIDANCE.md` in the same changelog PR, with the example that prompted it, so the
+   next draft (fragment or section) starts from it instead of repeating the correction. Feedback that only fixes the one
+   entry is applied and not recorded.
+4. Make the changelog PR: the new `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
+   `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), any guidance gathered in
+   step 3, `dprint fmt`, and `python3 releasing/check-changelog.py format` passing. Merge it before going on.
+5. On a `release-X.Y.Z` branch off the merged main: bump the version to `X.Y.Z` in the root `Cargo.toml`'s
    `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, refresh `Cargo.lock` (`cargo metadata` suffices),
    and commit exactly those three files as `chore: release X.Y.Z`.
-5. Before tagging: the version-parity tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`
+6. Before tagging: the version-parity tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`
    through the recorder), `dist plan --tag vX.Y.Z` naming BOTH packages under the version (a mismatch makes the desktop
    archive silently vanish), and `python3 releasing/check-changelog.py announce --tag vX.Y.Z`, which must print that
    dist's announcement matches.
-6. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the release: every asset
+7. Push the tag `vX.Y.Z` at the bump commit and watch the workflow to completion. Then verify the release: every asset
    present including `SHA256SUMS` and `SHA256SUMS.minisig`, the release NOT marked prerelease, `releases/latest`
    pointing at it, and the release page showing the changelog section above the download tables with the heading text as
    its name.
-7. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
+8. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
 
 A failed tag build publishes nothing; fix on main and cut again with the next patch version, since a tag name is never
 reused. The release branch is left as it is, like the earlier ones.

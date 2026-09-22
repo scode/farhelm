@@ -6,14 +6,14 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ### ✨ Highlights
 
-#### The launch composer looks like the rest of Farhelm
+#### The session launcher looks like the rest of Farhelm
 
-The dialog that starts a new session had its own palette, corner radius, shadow, and selection color. It now uses the same ones as the main view, and selection is drawn the same way everywhere: the selected session in the sidebar, the selected terminal tab, and every chosen option in the composer share one look. Recent-setup rows show only the settings a setup sets explicitly, or "defaults" when it sets none, and line up as columns so the row that differs is easy to spot. (#819, #820)
+Previously the session launcher had a considerably different look and feel from the rest of Farhelm. It now uses the same colors, corners, and selection style as the main window, and its list of recent setups shows only what each one changes from the defaults. (#819, #820)
 
 ### 🔄 Changed
 
-- The launch composer uses the main view's colors, corners, and selection style, and recent-setup rows show only what each setup sets. (#819, #820)
+- The session launcher uses the main window's colors, corners, and selection style, and its recent-setup rows show only what each setup changes from the defaults. (#819, #820)
 
 ### 🔧 Fixed
 
-- Buttons, inputs, and selects in the launch composer render in the UI typeface instead of the platform's sans-serif. (#818)
+- Buttons, inputs, and selects in the session launcher render in Farhelm's typeface instead of the platform's sans-serif. (#818)
