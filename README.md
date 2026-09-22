@@ -4,7 +4,7 @@
 > at this time, for a variety of reasons. Do not expect user-friendliness, do not expect the documentation to be correct
 > or helpful, and do not expect anything else either. This notice goes away when that changes.
 
-<!-- The header and the pillars below are SVG files rendered by docs/readme/render-svgs.mjs; edit that
+<!-- The header, the pillars, and the how-it-works drawing are SVG files rendered by docs/readme/render-svgs.mjs; edit that
      script and re-run it rather than the SVGs. GitHub shows an SVG only through <img>, which cannot see
      the page's colour scheme, so each block is two files picked by a <picture> media query. -->
 
@@ -51,12 +51,19 @@ the live terminal.</sub></p>
 
 ## How it works
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/readme/how-it-works-dark.svg">
+    <img alt="How Farhelm works: the helm on your laptop lists every session from every host and reaches a supervisor on each remote box over ssh; the selected session's real terminal fills the pane" src="docs/readme/how-it-works-light.svg" width="960">
+  </picture>
+</p>
+
 One **helm** is the control plane: it holds the host list, serves the UI, and connects straight to a **supervisor** on
 each host over SSH. The supervisor owns the agents' real terminals and their state. Nothing listens on a network port,
 nothing goes through a relay, and every box in the diagram can restart without losing a session.
 
 <details>
-<summary>Architecture diagram</summary>
+<summary>More details (architecture diagram)</summary>
 
 ![Farhelm architecture](docs/farhelm-architecture.svg)
 

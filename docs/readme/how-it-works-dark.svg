@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" width="960" role="img"
+  aria-label="How Farhelm works: the helm runs on your laptop and shows every session from every host in one list; it reaches a supervisor on each remote box over ssh; the selected session's real terminal fills the pane.">
+  <line x1="462" y1="140" x2="660" y2="90" stroke="#7c8694" stroke-width="2"/>
+    <rect x="539" y="104" width="44" height="22" rx="11" fill="#141920" stroke="#2a3340"/>
+    <rect x="547" y="113" width="9" height="7" rx="1.5" fill="#7c8694"/>
+    <path d="M549 113v-2.5a2.5 2.5 0 0 1 5 0v2.5" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+    <text x="560" y="119" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#b8c0cc">ssh</text>
+  <line x1="462" y1="200" x2="660" y2="250" stroke="#7c8694" stroke-width="2"/>
+    <rect x="539" y="214" width="44" height="22" rx="11" fill="#141920" stroke="#2a3340"/>
+    <rect x="547" y="223" width="9" height="7" rx="1.5" fill="#7c8694"/>
+    <path d="M549 223v-2.5a2.5 2.5 0 0 1 5 0v2.5" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+    <text x="560" y="229" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#b8c0cc">ssh</text>
+  <rect x="50" y="30" width="400" height="250" rx="12" fill="#141920" stroke="#2a3340" stroke-width="1.5"/>
+    <rect x="62" y="42" width="376" height="226" fill="#05070a"/>
+    <rect x="62" y="42" width="138" height="226" fill="#141920"/>
+    <text x="72" y="60" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="8" fill="#8b95a3" letter-spacing="1">HOSTS</text><circle cx="76" cy="73" r="3" fill="#7fd88f"/><text x="86" y="76" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">this mac</text><circle cx="76" cy="88" r="3" fill="#7fd88f"/><text x="86" y="91" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">build-box</text><circle cx="76" cy="103" r="3" fill="#7fd88f"/><text x="86" y="106" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">gpu-1</text><text x="72" y="134" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="8" fill="#8b95a3" letter-spacing="1">SESSIONS</text><rect x="62" y="142" width="138" height="19" fill="#15263d"/>
+      <rect x="62" y="142" width="2" height="19" fill="#5896e8"/><circle cx="76" cy="152" r="3" fill="#7fd88f"/><text x="86" y="155" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">fix flaky attach test</text><circle cx="76" cy="171" r="3" fill="#e47a72"/><text x="86" y="174" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">migrate auth tokens</text><circle cx="76" cy="190" r="3" fill="#d8b45f"/><text x="86" y="193" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">readme rewrite</text><circle cx="76" cy="209" r="3" fill="#7fd88f"/><text x="86" y="212" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">bench tokenizer</text><circle cx="76" cy="228" r="3" fill="#d8b45f"/><text x="86" y="231" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">port ci to nextest</text><circle cx="76" cy="247" r="3" fill="#5a6472"/><text x="86" y="250" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" fill="#e6ebf1">release 0.3.1</text><text x="212" y="62" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="9" font-weight="700" fill="#e6ebf1">fix flaky attach test</text>
+    <text x="212" y="75" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="8" fill="#5896e8">build-box</text>
+    <line x1="212" y1="84" x2="428" y2="84" stroke="#242c37"/><rect x="212" y="96" width="150" height="6" rx="3" fill="#3a4450"/><rect x="224" y="111" width="90" height="6" rx="3" fill="#3a4450"/><rect x="224" y="126" width="200" height="6" rx="3" fill="#3a4450"/><rect x="212" y="141" width="120" height="6" rx="3" fill="#3a4450"/><rect x="224" y="156" width="60" height="6" rx="3" fill="#3a4450"/><rect x="224" y="171" width="180" height="6" rx="3" fill="#3a4450"/><rect x="212" y="186" width="100" height="6" rx="3" fill="#3a4450"/><rect x="224" y="201" width="140" height="6" rx="3" fill="#3a4450"/><rect x="224" y="216" width="30" height="6" rx="3" fill="#3a4450"/><rect x="212" y="231" width="170" height="6" rx="3" fill="#3a4450"/><rect x="212" y="246" width="7" height="12" fill="#5CF08A"/>
+    <path d="M30 280 H470 L490 298 H10 Z" fill="#141920" stroke="#2a3340" stroke-width="1.5"/>
+    <rect x="210" y="280" width="80" height="4" fill="#2a3340"/>
+  <rect x="660" y="30" width="250" height="140" rx="8" fill="#141920" stroke="#2a3340" stroke-width="1.5"/>
+    <g stroke="#7c8694" stroke-width="2" stroke-linecap="round">
+      <line x1="676" y1="44" x2="694" y2="44"/>
+      <line x1="676" y1="50" x2="694" y2="50"/>
+      <line x1="676" y1="56" x2="694" y2="56"/>
+    </g>
+    <text x="704" y="54" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" fill="#e6ebf1">build-box</text>
+    <text x="898" y="54" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" fill="#7c8694">supervisor</text><rect x="672" y="68" width="226" height="26" rx="5" fill="#15263d" stroke="#5896e8" stroke-width="2"/>
+      <rect x="682" y="76" width="12" height="10" rx="2" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+      <path d="M685 79l2 2-2 2" fill="none" stroke="#7c8694" stroke-width="1.2"/>
+      <circle cx="706" cy="81" r="3" fill="#7fd88f"/>
+      <text x="716" y="85" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#e6ebf1">fix flaky attach test</text><rect x="672" y="100" width="226" height="26" rx="5" fill="none" stroke="#2a3340" stroke-width="1"/>
+      <rect x="682" y="108" width="12" height="10" rx="2" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+      <path d="M685 111l2 2-2 2" fill="none" stroke="#7c8694" stroke-width="1.2"/>
+      <circle cx="706" cy="113" r="3" fill="#d8b45f"/>
+      <text x="716" y="117" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#e6ebf1">port ci to nextest</text><rect x="672" y="132" width="226" height="26" rx="5" fill="none" stroke="#2a3340" stroke-width="1"/>
+      <rect x="682" y="140" width="12" height="10" rx="2" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+      <path d="M685 143l2 2-2 2" fill="none" stroke="#7c8694" stroke-width="1.2"/>
+      <circle cx="706" cy="145" r="3" fill="#5a6472"/>
+      <text x="716" y="149" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#e6ebf1">release 0.3.1</text>
+  <rect x="660" y="200" width="250" height="108" rx="8" fill="#141920" stroke="#2a3340" stroke-width="1.5"/>
+    <g stroke="#7c8694" stroke-width="2" stroke-linecap="round">
+      <line x1="676" y1="214" x2="694" y2="214"/>
+      <line x1="676" y1="220" x2="694" y2="220"/>
+      <line x1="676" y1="226" x2="694" y2="226"/>
+    </g>
+    <text x="704" y="224" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" fill="#e6ebf1">gpu-1</text>
+    <text x="898" y="224" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" fill="#7c8694">supervisor</text><rect x="672" y="238" width="226" height="26" rx="5" fill="none" stroke="#2a3340" stroke-width="1"/>
+      <rect x="682" y="246" width="12" height="10" rx="2" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+      <path d="M685 249l2 2-2 2" fill="none" stroke="#7c8694" stroke-width="1.2"/>
+      <circle cx="706" cy="251" r="3" fill="#d8b45f"/>
+      <text x="716" y="255" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#e6ebf1">readme rewrite</text><rect x="672" y="270" width="226" height="26" rx="5" fill="none" stroke="#2a3340" stroke-width="1"/>
+      <rect x="682" y="278" width="12" height="10" rx="2" fill="none" stroke="#7c8694" stroke-width="1.5"/>
+      <path d="M685 281l2 2-2 2" fill="none" stroke="#7c8694" stroke-width="1.2"/>
+      <circle cx="706" cy="283" r="3" fill="#7fd88f"/>
+      <text x="716" y="287" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" fill="#e6ebf1">bench tokenizer</text>
+  <text x="250" y="330" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="#b8c0cc">your laptop: the helm, its UI, and a local supervisor</text>
+  <text x="250" y="350" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="#b8c0cc">every host's sessions in one list, one real terminal</text>
+  <text x="785" y="372" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="#b8c0cc">any Linux box you can ssh to:</text>
+  <text x="785" y="390" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" fill="#b8c0cc">a supervisor that owns its sessions' terminals</text>
+</svg>
