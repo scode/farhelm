@@ -26,11 +26,12 @@
 //! for a screen reader to read, so REMEMBER to pair the icon with the word
 //! rather than reaching for the icon alone.
 //!
-//! Two glyphs today, sized and structured for more to join them: the module
-//! doc for `list::shared::HostLocality` is where a future alias or
-//! tooltip feature (TODO.md's "host aliases" entry, which reuses this same
-//! title-line slot) would extend what appears beside these icons, not this
-//! file's shape.
+//! The locality pair was the first two glyphs; the harness marks, permission
+//! locks, ended-status shapes, and qualifier joined later under the same
+//! inline rule. The module doc for `list::shared::HostLocality` is where a
+//! future alias or tooltip feature (TODO.md's "host aliases" entry, which
+//! reuses this same title-line slot) would extend what appears beside these
+//! icons, not this file's shape.
 //!
 //! Both roots also carry `data-glyph="local"`/`"remote"` — the shared
 //! `host-kind-icon` class sizes and positions either glyph identically, so
@@ -58,11 +59,9 @@ pub(crate) enum HarnessGlyph {
     Muse,
     Goose,
     Pi,
-    /// OMP — the Pi fork's terminal command. Drawn as the Greek capital
-    /// omega rather than a second letter mark: at sidebar size a Latin
-    /// letter would sit beside Pi's "P" as two near-identical strokes, while
-    /// the omega's open bowl reads as a different mark even at the smallest
-    /// supported row width.
+    /// OMP — the Pi fork's terminal command. Carries OMP's own block-pi
+    /// mark, which is visibly a different drawing from Pi's pixel-grid "P"
+    /// even at the smallest supported row width.
     Omp,
     OpenCode,
     Terminal,
@@ -93,13 +92,87 @@ pub(crate) enum QualifierGlyph {
     Stale,
 }
 
-/// Draw the one-character harness mark used in the sidebar's agent track.
+// ===== Harness marks ==================================================
+//
+// Every harness mark is a filled or stroked path normalized into the shared
+// 12-unit box by ONE rule: the drawing's native bounding box is scaled so its
+// longer side spans 10 of the 12 units and then centred, leaving a one-unit
+// margin so the mark is optically the same weight as the lock beside it. The
+// `transform` strings below are the precomputed result of that rule for each
+// mark's native coordinates, so the row's marks agree on size by construction
+// rather than by eye. The rule, the provenance of every geometry, and the
+// brand constraints that shaped the choices are in `docs/harness-marks.md`;
+// read that before adding, replacing, or "tidying" a mark here.
+//
+// Official geometry is used UNALTERED apart from that uniform scale — several
+// of the brand terms forbid modification, and keeping the path bytes identical
+// to the pinned upstream file is what lets `THIRD_PARTY_NOTICES.md` cite a
+// commit rather than describe a derivative. Never render a mark as an SVG
+// `text` element: the earlier letter marks did, and a capital at font-size 9
+// came out roughly three quarters the height of the drawn marks beside it.
+
+/// Farhelm's own Claude mark: an eight-ray tapered starburst, generated as
+/// eight triangles from a 2.2-unit-wide base at the centre of a 24-unit box
+/// to a tip 11 units out. It deliberately is NOT the Anthropic spark:
+/// Anthropic's trademark guidelines grant no self-serve right to display
+/// the logo and forbid recolouring it (see `docs/harness-marks.md`), so
+/// the sidebar evokes "spark" without copying the mark.
+const CLAUDE_STARBURST: &str = "M14.20 12.00L12.00 1.00L9.80 12.00ZM13.56 13.56L19.78 4.22L10.44 10.44ZM12.00 14.20L23.00 12.00L12.00 9.80ZM10.44 13.56L19.78 19.78L13.56 10.44ZM9.80 12.00L12.00 23.00L14.20 12.00ZM10.44 10.44L4.22 19.78L13.56 13.56ZM12.00 9.80L1.00 12.00L12.00 14.20ZM13.56 10.44L4.22 4.22L10.44 13.56Z";
+
+/// OpenAI's monochrome "blossom", the mark Codex ships under everywhere
+/// (there is no Codex-specific logo). Bytes of the `d` attribute of
+/// `OpenAI-black-monoblossom.svg` from OpenAI's official brand download,
+/// unaltered; OpenAI's brand terms permit referential use but forbid
+/// modification, which is why the 2.5 KB path lives in its own file
+/// rather than being simplified for this size.
+const OPENAI_BLOSSOM: &str = include_str!("icons/openai-blossom.svgpath");
+
+/// Cursor's official 2D cube (`CUBE_2D_LIGHT.svg` from cursor.com/brand),
+/// unaltered. Cursor's own site renders this same geometry in
+/// `currentColor`, so a monochrome rendering matches the owner's use.
+const CURSOR_CUBE: &str = "M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z";
+
+/// Goose's official glyph, the 24-unit path from the project's own
+/// `Goose.tsx` icon component (Apache-2.0), unaltered. A detailed goose
+/// silhouette; the project's own smallest use is 24px, so at sidebar size it
+/// reads as a bird-shaped mark rather than a goose. Kept because it is the
+/// mark and it is permitted, not because it is crisp.
+const GOOSE_GLYPH: &str = include_str!("icons/goose.svgpath");
+
+/// Pi's official badge mark from the pi.dev press kit: a 4x4 pixel grid
+/// "P" with a detached dot. Every coordinate is a multiple of 140 in a
+/// 560 box, so the normalized mark lands on 2.5-unit cells exactly.
+const PI_BADGE: &str =
+    "M420 280H280V140H0V0H420V280ZM560 560H420V280H560V560ZM140 560H0V140H140V280H280V420H140V560Z";
+
+/// OMP's official mark, the block-style pi from omp.sh's favicon, with the
+/// favicon's background tile dropped. Three axis-aligned rectangles, so it
+/// survives 12px with no anti-aliasing fuzz. This replaced an earlier
+/// Greek omega that was Farhelm's own invention.
+const OMP_PI: &str = "M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z";
+
+/// OpenCode's favicon cut: one ring drawn with the even-odd rule. The
+/// project's logo file is a two-tone pair of nested frames whose inner
+/// mid-grey square collapses under `currentColor`; the favicon is the
+/// small-size simplification the project itself publishes.
+const OPENCODE_RING: &str = "M384 416H128V96H384V416ZM320 160H192V352H320V160Z";
+
+/// Muse Code's mark is borrowed from an unofficial community VS Code
+/// extension (MIT), because Meta publishes no Muse Code mark at all and
+/// Meta's own corporate marks require brand approval for any use. It is a
+/// stroked "M" whose four terminals carry round dots; the source icon's
+/// blue and its sparkle are dropped. Stroked rather than filled, so the
+/// stroke widths are the source's own and scale with the group transform.
+const MUSE_STEM: &str = "M4 20V5l6 9 6-9v15";
+const MUSE_DOTS: &str = "M4 20h0M16 20h0M4 5h0M16 5h0";
+
+/// Draw the harness mark used in the sidebar's agent track.
 ///
-/// The C/M/L paths are Farhelm's interim letter marks. The OpenCode geometry
-/// is the two-path mark from anomalyco/opencode commit
-/// `e03db9bc6908f75c9334d8aa997deeaac81c0298`, licensed MIT, Copyright (c)
-/// 2025 opencode. It stays inline so the web and desktop bundles cannot drift
-/// and so no client downloads branding at runtime.
+/// Which harnesses carry an official mark, which carry one Farhelm drew, and
+/// why, is documented per constant above and in `docs/harness-marks.md`; the
+/// attributions for the vendored geometry are in `THIRD_PARTY_NOTICES.md`.
+/// Everything stays inline so the web and desktop bundles cannot drift and
+/// so no client downloads branding at runtime.
 #[component]
 pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
     let token = match glyph {
@@ -113,6 +186,9 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
         HarnessGlyph::OpenCode => "opencode",
         HarnessGlyph::Terminal => "terminal",
     };
+    // Each transform is the normalization rule applied to the mark's native
+    // bounding box; the box is recorded beside it so a reader can check the
+    // arithmetic (tx = (12 - w*s)/2 - x*s, likewise for y, s = 10/max(w,h)).
     rsx! {
         svg {
             class: "sidebar-glyph harness-glyph",
@@ -120,19 +196,26 @@ pub(crate) fn HarnessIcon(glyph: HarnessGlyph) -> Element {
             view_box: "0 0 12 12",
             "aria-hidden": "true",
             match glyph {
-                HarnessGlyph::Codex => rsx! { path { d: "M10 2.4A4.8 4.8 0 1 0 10 9.6L8.5 8.1A2.7 2.7 0 1 1 8.5 3.9Z", fill: "currentColor" } },
-                HarnessGlyph::Claude => rsx! { path { d: "M2 2h2v6h6v2H2z", fill: "currentColor" } },
-                HarnessGlyph::Muse => rsx! { path { d: "M1.2 10V2h1.9l2.9 4.6L8.9 2h1.9v8H9V5.2L6.8 8.7H5.2L3 5.2V10z", fill: "currentColor" } },
-                HarnessGlyph::Cursor => rsx! { path { d: "M2 1L10 6L6 7L4 11Z", fill: "currentColor" } },
-                HarnessGlyph::Goose => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "G" } },
-                HarnessGlyph::Pi => rsx! { text { x: "3", y: "9", fill: "currentColor", font_size: "9", "P" } },
-                HarnessGlyph::Omp => rsx! { text { x: "2", y: "9", fill: "currentColor", font_size: "9", "Ω" } },
-                HarnessGlyph::OpenCode => rsx! {
-                    // Source geometry uses a 240×300 canvas. A nested group
-                    // preserves that ratio inside this common 12px glyph box.
-                    g { transform: "scale(.05 .04)",
-                        path { d: "M180 240H60V120H180V240Z", fill: "currentColor" }
-                        path { d: "M180 60H60V240H180V60ZM240 300H0V0H240V300Z", fill: "currentColor", fill_rule: "evenodd" }
+                // bbox 1,1 22x22 in a 24 box
+                HarnessGlyph::Claude => rsx! { g { transform: "translate(0.5455 0.5455) scale(0.454545)", path { d: CLAUDE_STARBURST, fill: "currentColor" } } },
+                // bbox 118.557,119.958 484.139x479.818 in a 721 box
+                HarnessGlyph::Codex => rsx! { g { transform: "translate(-1.4488 -1.4331) scale(0.020655)", path { d: OPENAI_BLOSSOM, fill: "currentColor" } } },
+                // bbox 0,0 466.74x532.095
+                HarnessGlyph::Cursor => rsx! { g { transform: "translate(1.6141 1.0000) scale(0.018794)", path { d: CURSOR_CUBE, fill: "currentColor" } } },
+                // bbox 4.328,3.789 16.628x16.628 in a 24 box
+                HarnessGlyph::Goose => rsx! { g { transform: "translate(-1.6030 -1.2788) scale(0.601409)", path { d: GOOSE_GLYPH, fill: "currentColor" } } },
+                // bbox 0,0 560x560
+                HarnessGlyph::Pi => rsx! { g { transform: "translate(1.0000 1.0000) scale(0.017857)", path { d: PI_BADGE, fill: "currentColor" } } },
+                // bbox 14,16 36x40 in a 64 box
+                HarnessGlyph::Omp => rsx! { g { transform: "translate(-2.0000 -3.0000) scale(0.250000)", path { d: OMP_PI, fill: "currentColor" } } },
+                // bbox 128,96 256x320 in a 512 box
+                HarnessGlyph::OpenCode => rsx! { g { transform: "translate(-2.0000 -2.0000) scale(0.031250)", path { d: OPENCODE_RING, fill: "currentColor", fill_rule: "evenodd" } } },
+                // Stroke geometry: stem stroke 2.6 and dot stroke 4.2 with round
+                // caps give a bbox of 1.9,2.9 16.2x19.2 in the source's 24 box.
+                HarnessGlyph::Muse => rsx! {
+                    g { transform: "translate(0.7917 -0.5104) scale(0.520833)", fill: "none", stroke: "currentColor", stroke_linecap: "round", stroke_linejoin: "round",
+                        path { d: MUSE_STEM, stroke_width: "2.6" }
+                        path { d: MUSE_DOTS, stroke_width: "4.2" }
                     }
                 },
                 HarnessGlyph::Terminal => rsx! { path { d: "M1.5 2h9v8h-9zM3.1 4l1.5 1.5L3.1 7M6 7h2.5", fill: "none", stroke: "currentColor", stroke_width: "1.2", stroke_linecap: "round", stroke_linejoin: "round" } },

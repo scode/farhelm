@@ -458,6 +458,12 @@ Validate each change using the "Finishing work" rules above. Completion means th
 PR exists, not that it has merged. Report the item-to-PR mapping and any blocked items. This workflow never marks PRs
 ready, enables auto-merge, or merges them; publishing or landing requires a separate user request.
 
+# Harness marks in the sidebar
+
+`docs/harness-marks.md` records where every harness mark in `crates/farhelm-ui/src/icons.rs` comes from, which are
+official and which Farhelm drew, the brand terms that decided that, and the one sizing rule they all share. Read it
+before adding or changing a mark; vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
