@@ -79,7 +79,7 @@ there is not a fragment.
 kind: added
 ---
 
-Cursor is a harness choice in the launch composer. This is launch only: Farhelm does not track a Cursor session's
+Cursor is a harness choice in the session launcher. This is launch only: Farhelm does not track a Cursor session's
 conversation and cannot resume one.
 ```
 
