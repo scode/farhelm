@@ -4119,6 +4119,7 @@ mod tests {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         let claimed = sup
             .store
@@ -4179,6 +4180,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         for (invocation, profile_name, agent_kind, resume_template, source_profile, expected) in [
             (
@@ -4453,6 +4455,7 @@ mod tests {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         assert_eq!(session.launch, Some(expected.clone()));
         let stored = sup

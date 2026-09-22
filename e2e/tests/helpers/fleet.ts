@@ -906,7 +906,7 @@ export async function readPreferences(request: APIRequestContext): Promise<Prefe
  * Write a sparse patch to the helm's shared preference: an absent field is
  * untouched, an explicit `null` clears it, a value replaces it.
  *
- * `remembered_permissions` is accepted here for test-fixture convenience
+ * The remembered launch fields are accepted here for test-fixture convenience
  * (planting or clearing a known memory directly, without driving a real
  * structured launch through the UI) even though no shipped client ever
  * sends it: the route validates and merges it exactly like every other
@@ -919,6 +919,7 @@ export async function patchPreferences(
     last_selected?: string | null;
     compact?: boolean | null;
     remembered_permissions?: string | null;
+    remembered_workspace_trust?: boolean | null;
   },
 ): Promise<void> {
   const response = await request.put("/api/preferences", { data: patch });

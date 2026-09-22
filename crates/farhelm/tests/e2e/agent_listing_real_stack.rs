@@ -869,6 +869,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        workspace_trust: None,
     };
     let (status, body) = post(
         &client,

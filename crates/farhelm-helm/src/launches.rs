@@ -424,6 +424,17 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             argv.push(flag.to_string());
         }
     }
+    // Pi's project settings and extensions are separate from its absent
+    // tool gate; this flag must never be inferred from `permissions`.
+    match (selection.harness, selection.workspace_trust) {
+        (LaunchHarness::Muse, Some(true)) => argv.push("--trust-workspace".to_string()),
+        (LaunchHarness::Pi, Some(trust)) => argv.push(if trust {
+            "--approve".to_string()
+        } else {
+            "--no-approve".to_string()
+        }),
+        _ => {}
+    }
 
     Ok(CompiledLaunch {
         invocation: shell_words::join(argv),
@@ -456,6 +467,11 @@ fn program(harness: LaunchHarness) -> &'static str {
 }
 
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
+    if selection.workspace_trust.is_some()
+        && !matches!(selection.harness, LaunchHarness::Muse | LaunchHarness::Pi)
+    {
+        return Err("workspace trust is not offered by this harness".to_string());
+    }
     if selection.model.is_none() {
         let message = match selection.harness {
             LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
@@ -586,6 +602,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         }
     }
 
@@ -600,6 +617,7 @@ mod tests {
                     model: model.map(str::to_owned),
                     effort: None,
                     permissions,
+                    workspace_trust: None,
                 };
                 let launch = compile(input.clone()).unwrap();
                 let mut expected = vec!["agent".to_string()];
@@ -663,6 +681,7 @@ mod tests {
             model: Some("gpt-5.6-terra".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         assert_eq!(
             shell_words::split(&compile(codex).unwrap().invocation).unwrap(),
@@ -681,6 +700,7 @@ mod tests {
             model: Some("claude-fable-5".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         assert_eq!(
             shell_words::split(&compile(claude).unwrap().invocation).unwrap(),
@@ -699,6 +719,7 @@ mod tests {
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         assert_eq!(
             shell_words::split(&compile(muse).unwrap().invocation).unwrap(),
@@ -717,6 +738,7 @@ mod tests {
             model: Some("opencode/grok-4.6".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         let compiled = compile(opencode).expect("OpenCode's documented flags compile");
         assert_eq!(compiled.agent_kind, AgentKind::Generic);
@@ -742,6 +764,7 @@ mod tests {
             model: Some("private-zen-model".to_string()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let compiled = compile(bare.clone()).expect("bare Zen model");
         assert_eq!(
@@ -773,6 +796,7 @@ mod tests {
             model: Some("opencode/glm-5.3".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: None,
+            workspace_trust: None,
         };
 
         assert!(
@@ -874,6 +898,7 @@ mod tests {
                 model: Some("muse-spark-1.3-contributor".to_string()),
                 effort: Some(effort),
                 permissions: None,
+                workspace_trust: None,
             };
             assert!(
                 compile(selection).is_err(),
@@ -891,6 +916,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Max),
             permissions: Some(LaunchPermission::SmartApprove),
+            workspace_trust: None,
         })
         .expect("Goose selection compiles");
         assert_eq!(
@@ -913,6 +939,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Minimal),
             permissions: None,
+            workspace_trust: None,
         })
         .expect("Pi selection compiles");
         assert_eq!(pi.selection.permissions, Some(LaunchPermission::Yolo));
@@ -940,6 +967,7 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         assert_eq!(
             shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap(),
@@ -961,6 +989,7 @@ mod tests {
         ] {
             let compiled = compile(LaunchSelection {
                 permissions: Some(permission),
+                workspace_trust: None,
                 ..base.clone()
             })
             .expect("every offered Goose permission compiles");
@@ -989,11 +1018,13 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let omitted = shell_words::split(&compile(base.clone()).unwrap().invocation).unwrap();
         let yolo = shell_words::split(
             &compile(LaunchSelection {
                 permissions: Some(LaunchPermission::Yolo),
+                workspace_trust: None,
                 ..base.clone()
             })
             .unwrap()
@@ -1010,6 +1041,7 @@ mod tests {
             assert!(
                 compile(LaunchSelection {
                     permissions: Some(permission),
+                    workspace_trust: None,
                     ..base.clone()
                 })
                 .is_err(),
@@ -1031,6 +1063,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: Some(LaunchEffort::Minimal),
             permissions: Some(LaunchPermission::Approve),
+            workspace_trust: None,
         })
         .expect("OMP selection compiles");
         assert_eq!(full.agent_kind, AgentKind::Omp);
@@ -1055,6 +1088,7 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         })
         .expect("OMP yolo compiles");
         assert_eq!(
@@ -1079,6 +1113,7 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         })
         .expect("OMP default compiles");
         assert_eq!(
@@ -1116,6 +1151,7 @@ mod tests {
             model: Some("release/candidate'42;$literal".to_string()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         })
         .expect("a custom OMP id is the escape hatch");
         assert_eq!(
@@ -1142,6 +1178,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: Some(*effort),
                     permissions: None,
+                    workspace_trust: None,
                 })
                 .is_ok(),
                 "OMP's catalog offers {effort:?}"
@@ -1153,6 +1190,7 @@ mod tests {
                 model: Some("z-ai/glm-5.3".into()),
                 effort: Some(LaunchEffort::Ultra),
                 permissions: None,
+                workspace_trust: None,
             })
             .is_err(),
             "ultra is not in OMP's released offering"
@@ -1166,6 +1204,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
                     permissions: Some(permission),
+                    workspace_trust: None,
                 })
                 .is_err(),
                 "OMP must reject {permission:?}"
@@ -1205,6 +1244,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
                     permissions: None,
+                    workspace_trust: None,
                 })
                 .is_ok()
             );
@@ -1215,8 +1255,56 @@ mod tests {
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,
                 permissions: Some(LaunchPermission::Chat),
+                workspace_trust: None,
             })
             .is_err()
         );
+    }
+
+    /// A workspace-trust choice changes only a supported harness's one-run
+    /// project-content flag. Pi's mandatory YOLO tool mode remains separate.
+    #[test]
+    fn workspace_trust_compiles_only_for_muse_and_pi() {
+        for (harness, trust, expected_flag) in [
+            (LaunchHarness::Muse, Some(true), Some("--trust-workspace")),
+            (LaunchHarness::Muse, Some(false), None),
+            (LaunchHarness::Pi, Some(true), Some("--approve")),
+            (LaunchHarness::Pi, Some(false), Some("--no-approve")),
+        ] {
+            let mut choice = selection(harness);
+            if harness == LaunchHarness::Pi {
+                choice.model = Some("z-ai/glm-5.3".into());
+            }
+            choice.workspace_trust = trust;
+            let compiled = compile(choice).expect("supported trust choice compiles");
+            let argv = shell_words::split(&compiled.invocation).unwrap();
+            assert_eq!(
+                argv.iter()
+                    .filter(|word| matches!(
+                        word.as_str(),
+                        "--trust-workspace" | "--approve" | "--no-approve"
+                    ))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                expected_flag.into_iter().collect::<Vec<_>>()
+            );
+            assert_eq!(compiled.selection.workspace_trust, trust);
+            if harness == LaunchHarness::Pi {
+                assert_eq!(compiled.selection.permissions, Some(LaunchPermission::Yolo));
+            }
+        }
+        for harness in [
+            LaunchHarness::Codex,
+            LaunchHarness::Claude,
+            LaunchHarness::Goose,
+        ] {
+            let mut choice = selection(harness);
+            choice.model = Some("z-ai/glm-5.3".into());
+            choice.workspace_trust = Some(true);
+            assert_eq!(
+                compile(choice).unwrap_err(),
+                "workspace trust is not offered by this harness"
+            );
+        }
     }
 }

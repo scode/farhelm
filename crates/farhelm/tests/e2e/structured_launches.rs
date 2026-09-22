@@ -649,6 +649,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let created = launch(&h, &fixture, selection.clone()).await;
         assert_eq!(created.launch, Some(selection.clone()));
@@ -669,30 +670,35 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             model: Some("composer-2.5".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         },
         LaunchSelection {
             harness: LaunchHarness::Codex,
             model: Some("release/candidate'42;$literal".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         },
         LaunchSelection {
             harness: LaunchHarness::Claude,
             model: Some("claude-fable-5".to_string()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         },
         LaunchSelection {
             harness: LaunchHarness::Muse,
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: Some(LaunchEffort::Xhigh),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         },
         LaunchSelection {
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/grok-4.6".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         },
     ];
 
@@ -817,6 +823,7 @@ async fn explicit_spawn_inheritance_preserves_a_structured_parent_at_the_process
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        workspace_trust: None,
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
     assert_forwarded(&observed_argv(&h, &parent.id, 1).await, &selection);
@@ -881,6 +888,7 @@ async fn restricted_raw_data_is_refused_and_profile_override_clears_structured_m
         model: Some("gpt-6-astra".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        workspace_trust: None,
     };
     let parent = launch(&h, &fixture, selection.clone()).await;
     assert_forwarded(&observed_argv(&h, &parent.id, 1).await, &selection);
@@ -1225,6 +1233,7 @@ mod decoder_tests {
             model: Some("z-ai/glm-5.3".to_string()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
 
         // Omitted permission: no approval-mode option may exist.
@@ -1233,6 +1242,7 @@ mod decoder_tests {
         // Approve: exactly the always-ask pair.
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
+            workspace_trust: None,
             ..base.clone()
         };
         assert_forwarded(
@@ -1243,6 +1253,7 @@ mod decoder_tests {
         // YOLO: exactly the yolo pair.
         let yolo = LaunchSelection {
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
             ..base.clone()
         };
         assert_forwarded(

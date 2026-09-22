@@ -98,31 +98,33 @@ Tauri+Leptos would mean gluing two frameworks for no clear gain. Skipping dioxus
 tested surface (the spawn CLI and test fixtures need it anyway) and avoids the framework's most churn-prone part.
 
 The session list's chosen ORDER, last-selected session, compact-row choice, and the launch composer's remembered
-permissions mode are one preference the HELM keeps, in a singleton row of `helm.db` (`preferences`: `list_sort`,
-`last_selected`, `compact`, `remembered_permissions`) behind `GET`/`PUT /api/preferences`, device-authenticated like
-every other route. `remembered_permissions` is the one field of the four no client ever PUTs: the helm writes it itself,
-as a side effect of a successful user-initiated STRUCTURED launch, so every client and the spawn path agree on what
-actually launched rather than trusting any one client's report. Both clients read it once after authentication —
-`PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort control and the
-auto-select effect see the remembered values on their first run and no frame shows a default that is then corrected. On
-desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so nothing is visible; in
-the browser the first paint deliberately waits on that one round trip to the helm — a page with a valid credential used
-to paint its sidebar synchronously from localStorage — so the list never appears in an order that then changes. A write
-is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent field is untouched, an
-explicit `null` clears one), so two clients changing different fields at nearly the same time cannot clobber each other;
-the signal in the page is updated before the request leaves, which is what keeps the choice in force when the write
-fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot land on the helm in
-reverse order; the write queue is process state outside the remounted tree, and after credential recovery the gate
-overlays and replays any local choice whose write never got through, so reauthentication cannot roll the current client
-back to the helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry reads as "nothing
-remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty seconds. The sort
-travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the selection is a bare
-session id (the browser's old `{helm, id}` record was keyed by helm identity only because origin-scoped storage could
-outlive a state-directory swap, and a row in the helm's own database cannot describe another helm's fleet). An absent or
-unrecognized sort word still reads as the UI default (`activity`) on the client, because the row outlives the build that
-validated it. Nothing is kept per client: no localStorage key, no field in `desktop-client.json` (which now holds
-credentials only), no eval round trip. The visible consequences are the ones SPEC.md names — one answer shared by every
-client, and a second client attaching to whatever was selected most recently anywhere.
+permissions and workspace-trust choices are one preference the HELM keeps, in a singleton row of `helm.db`
+(`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`, `remembered_workspace_trust`) behind
+`GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered launch fields are written
+by the helm after a successful user structured launch; no shipped client PUTs them. Workspace trust changes only after
+an explicit Muse or Pi choice. An agent-originated create and an unsupported harness leave it alone. This makes the
+remembered values facts of accepted launches rather than claims from one client. Both clients read the row once after
+authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
+control and the auto-select effect see the remembered values on their first run and no frame shows a default that is
+then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
+nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
+valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
+then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
+field is untouched, an explicit `null` clears one), so two clients changing different fields at nearly the same time
+cannot clobber each other; the signal in the page is updated before the request leaves, which is what keeps the choice
+in force when the write fails. Same-field writes are serialized latest-wins in the client, so a burst of changes cannot
+land on the helm in reverse order; the write queue is process state outside the remounted tree, and after credential
+recovery the gate overlays and replays any local choice whose write never got through, so reauthentication cannot roll
+the current client back to the helm's older row. The seed read runs under a seconds-scale deadline of its own and expiry
+reads as "nothing remembered", so a stalled preference endpoint cannot blank the page for the funnel's full sixty
+seconds. The sort travels as the bare word `?sort=` takes and is validated against that vocabulary at the write; the
+selection is a bare session id (the browser's old `{helm, id}` record was keyed by helm identity only because
+origin-scoped storage could outlive a state-directory swap, and a row in the helm's own database cannot describe another
+helm's fleet). An absent or unrecognized sort word still reads as the UI default (`activity`) on the client, because the
+row outlives the build that validated it. Nothing is kept per client: no localStorage key, no field in
+`desktop-client.json` (which now holds credentials only), no eval round trip. The visible consequences are the ones
+SPEC.md names — one answer shared by every client, and a second client attaching to whatever was selected most recently
+anywhere.
 
 Keeping the order out of `SessionFilter` mirrors the helm's own split, and on this side the argument is about
 reconciliation rather than about caches: what a reply COVERS is keyed to the filter — whether the banner may say the
@@ -1594,6 +1596,13 @@ repository recents; structured history additionally projects the saved selection
 diagnostics but skip the folder projection. Repository setups group by destination kind, canonical repository and
 complete selection, independently of their previous ephemeral cwd. Adoption purges the old install's repository
 suggestions with its other history; ordinary history rows retain their existing semantics.
+
+Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
+create transaction as structured launch history, only for an explicit Muse or Pi choice from a user-originated create.
+Muse true adds `--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor
+settings. Pi true adds `--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. Unsupported
+harnesses reject an explicit trust value. The composer clears that value on a switch to an unsupported harness and
+restores it from the preference row on a fresh open or reset. Older selection JSON decodes without a trust choice.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order

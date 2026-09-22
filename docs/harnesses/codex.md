@@ -4,6 +4,13 @@ Farhelm tracks the foreground Codex conversation and offers Resume when its exac
 identity. A launch credential alone does not authorize a child process to replace that identity. Codex capture requires
 both an attributable reporting process and matching root-conversation metadata in the reported transcript.
 
+## Workspace trust
+
+Codex may ask whether to trust the working directory at startup. Farhelm leaves that prompt to you. Codex 0.155.1
+accepts a per-run `projects` config override for an exact absolute directory, but Farhelm compiles its launch argv
+before a fresh checkout has its final accepted path. The existing hook-trust bypass is separate and does not establish
+directory trust. Farhelm does not write Codex's persistent trust state.
+
 ## Launchers and wrappers
 
 The process chain from Farhelm's reporting hook back to the owned terminal pane must contain exactly one native
