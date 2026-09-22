@@ -341,7 +341,10 @@ mod tests {
 
         let (status, value) = request(&harness, "GET", "/api/profiles", None).await;
         assert_eq!(status, axum::http::StatusCode::OK);
-        assert_eq!(value["profiles"].as_array().unwrap().len(), 6);
+        assert_eq!(
+            value["profiles"].as_array().unwrap().len(),
+            crate::store::builtin_profiles().len()
+        );
         assert_eq!(value["default_profile"], serde_json::Value::Null);
         assert!(
             value["profiles"]

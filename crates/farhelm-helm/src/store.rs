@@ -13327,7 +13327,9 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn helm_profile_catalog_crud_is_bounded_and_validated() {
         let (_dir, store) = fresh_store().await;
-        assert_eq!(store.profiles().await.unwrap(), builtin_profiles());
+        let mut expected = builtin_profiles();
+        expected.sort_by(|left, right| left.id.cmp(&right.id));
+        assert_eq!(store.profiles().await.unwrap(), expected);
         let builtin = builtin_profile("builtin-claude").unwrap();
         assert!(store.update_profile(builtin).await.is_err());
         assert!(store.delete_profile("builtin-claude").await.is_err());
