@@ -11,6 +11,19 @@ use super::{
 
 pub(crate) const PREFIX: &str = "codex:";
 
+/// The vendor's own foreground-transition vocabulary: the hook `source`
+/// values a genuine foreground Codex lifecycle event carries.
+///
+/// A single predicate so the doorway's raw check and admission's
+/// sanitized backstop cannot drift apart: both consult this, and neither
+/// invents its own list. `agent_type` alone is not consulted here — a
+/// legitimate top-level `--agent` invocation carries one — while a
+/// present subagent `agent_id` is rejected separately at the doorway,
+/// before sanitation could blur it.
+pub(crate) fn is_foreground_source(source: &str) -> bool {
+    matches!(source, "startup" | "resume" | "clear" | "compact")
+}
+
 /// Runtime session identity and persistent thread identity are not interchangeable.
 /// A pending clear retains its exact path without offering the discarded thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,7 +274,10 @@ mod tests {
             None,
         )
         .expect("Codex integration");
-        assert_eq!(snapshot.restart_offer(Some(&stored)), RestartOffer::Resume);
+        assert_eq!(
+            snapshot.restart_offer(Some(&stored), 0),
+            RestartOffer::Resume
+        );
         assert_eq!(
             snapshot.filled_resume_argv(&stored),
             Some(vec![
@@ -277,6 +293,52 @@ mod tests {
         );
     }
 
+    /// Exact Resume requires version 1 for a kind with an implemented
+    /// proof — except the deliberate Codex exception: valid `codex:` v1
+    /// tokens produced under the two-proof contract before the version
+    /// column existed stay resumable at 0, while bare IDs stay excluded
+    /// and unknown versions refuse.
+    ///
+    /// Why this test matters: it pins the interim offer behavior that
+    /// the upgrade depends on. Old validated tokens must keep resuming
+    /// (no upgrade may strand a proven binding), old bare IDs must never
+    /// start resuming (no grandfathering), and a future version must fail
+    /// closed (data preserved, Resume refused) until a contract knows it.
+    #[farhelm_testtrace::test]
+    fn codex_resume_requires_provenance_except_its_documented_v1_tokens() {
+        let snapshot = IntegrationSnapshot::resolve(&["codex".to_string()], None, None)
+            .expect("Codex integration");
+        // A token exactly as a verified admission encodes one: version 1,
+        // a plausible runtime id, an exact absolute record path, a
+        // persistent thread, and the resumable bit verification sets.
+        let stored = "codex:{\"version\":1,\"runtime_session_id\":\"0194fdc4-8c7c-7a1c-9f2e-abcdef012345\",\"session_file\":\"/tmp/rollout-17.jsonl\",\"thread_id\":\"thread-17\",\"resumable\":true}";
+        assert_eq!(
+            snapshot.restart_offer(Some(stored), 1),
+            RestartOffer::Resume,
+            "a binding admitted under the contract offers Resume"
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some(stored), 0),
+            RestartOffer::Resume,
+            "a valid v1 token predating the version column stays resumable"
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some(stored), 2),
+            RestartOffer::FreshOnly,
+            "an unknown provenance version refuses exact Resume"
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some(stored), -1),
+            RestartOffer::FreshOnly,
+            "a negative provenance version refuses exact Resume"
+        );
+        assert_eq!(
+            snapshot.restart_offer(Some("historical-thread"), 1),
+            RestartOffer::FreshOnly,
+            "version 1 never blesses a bare id the verifier rejects"
+        );
+    }
+
     /// Old rows can retain a bare thread id, but that value has no foreground
     /// provenance. It remains stored for history while both user-visible
     /// restart decisions fail closed instead of guessing which transcript owns it.
@@ -285,7 +347,7 @@ mod tests {
         let snapshot = IntegrationSnapshot::resolve(&["codex".to_string()], None, None)
             .expect("Codex integration");
         assert_eq!(
-            snapshot.restart_offer(Some("historical-thread")),
+            snapshot.restart_offer(Some("historical-thread"), 0),
             RestartOffer::FreshOnly
         );
         assert_eq!(snapshot.filled_resume_argv("historical-thread"), None);

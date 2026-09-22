@@ -1580,20 +1580,25 @@ pub(crate) struct KeyedLocks {
 }
 
 impl KeyedLocks {
+    /// The per-key mutex, creating it on first use. The map hop never
+    /// blocks: it is held only for the lookup itself, never across the
+    /// acquisition await.
+    fn lock_for(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.locks.lock().expect("keyed lock map poisoned");
+        match locks.get(key).and_then(std::sync::Weak::upgrade) {
+            Some(existing) => existing,
+            None => {
+                let fresh = Arc::new(tokio::sync::Mutex::new(()));
+                locks.insert(key.to_string(), Arc::downgrade(&fresh));
+                fresh
+            }
+        }
+    }
+
     /// Hold this key's lock until the returned guard is dropped, waiting
     /// out any holder already running under the same key.
     pub(crate) async fn claim(self: &Arc<Self>, key: &str) -> KeyedGuard {
-        let lock = {
-            let mut locks = self.locks.lock().expect("keyed lock map poisoned");
-            match locks.get(key).and_then(std::sync::Weak::upgrade) {
-                Some(existing) => existing,
-                None => {
-                    let fresh = Arc::new(tokio::sync::Mutex::new(()));
-                    locks.insert(key.to_string(), Arc::downgrade(&fresh));
-                    fresh
-                }
-            }
-        };
+        let lock = self.lock_for(key);
         // Announced HERE — after the map hop, and with no await between
         // this and the acquisition below, so a task the counter has
         // reported cannot fail to be registered on the per-key mutex by the
@@ -1614,6 +1619,45 @@ impl KeyedLocks {
             key: key.to_string(),
             _held: lock.lock_owned().await,
         }
+    }
+
+    /// [`claim`](Self::claim) with a deadline: `None` when another
+    /// capture transaction still holds the key at `deadline`.
+    ///
+    /// The report path cannot wait open-endedly — the reporter's budget
+    /// is two seconds wall to wall, and a claim that parks past it turns
+    /// a slow capture pass into a hook error the vendor shows the user.
+    /// A timed-out claim is a `Conflict` rejection, a no-op for durable
+    /// capture, memory, ambiguity, and offers: the reporter retries on
+    /// its next lifecycle event, and the refresh pass converges the row
+    /// meanwhile. Background refresh paths keep the unbounded [`claim`](Self::claim).
+    pub(crate) async fn claim_before(
+        self: &Arc<Self>,
+        key: &str,
+        deadline: tokio::time::Instant,
+    ) -> Option<KeyedGuard> {
+        let lock = self.lock_for(key);
+        // Announced for tests the same way `claim` is: the counter hop
+        // below runs with no await between it and the acquisition, so a
+        // reported waiter is genuinely registered on the mutex.
+        #[cfg(test)]
+        {
+            *self
+                .reached
+                .lock()
+                .expect("keyed lock arrival map poisoned")
+                .entry(key.to_string())
+                .or_default() += 1;
+            self.reached_changed.notify_waiters();
+        }
+        let held = tokio::time::timeout_at(deadline, lock.lock_owned())
+            .await
+            .ok()?;
+        Some(KeyedGuard {
+            registry: Arc::clone(self),
+            key: key.to_string(),
+            _held: held,
+        })
     }
 
     /// Report whether a key is held at this instant for deterministic
@@ -2161,6 +2205,11 @@ pub struct SessionSnapshot {
     /// identity will ever be claimed for this launch. Durable, so this is
     /// also what a restart-after-ambiguity test asserts survived.
     pub capture_ambiguous: bool,
+    /// The ownership provenance read beside `captured_conversation` from
+    /// the same row. Restart conditions its claim on both (see
+    /// [`OfferBasis`](crate::store::OfferBasis)): a version flip with an
+    /// unchanged conversation still changes what may be offered.
+    pub capture_ownership_version: i64,
     /// The working directory correlation actually uses — resolved, not as
     /// the user spelled it. Exposed so the symlink and dot-path tests can
     /// assert the resolution happened rather than inferring it from a
@@ -4574,10 +4623,20 @@ pub struct Supervisor {
     /// item 8, rescheduled by PLAN_M6_75.md item 1). See
     /// [`CaptureCoordination`].
     pub(super) capture: CaptureCoordination,
-    /// Serializes each Codex session's report/refresh capture transaction.
-    /// Separate from lifecycle claims: a pre-publication hook must not wait
-    /// for the launch operation that is itself waiting for that hook.
-    codex_capture_locks: Arc<KeyedLocks>,
+    /// Serializes each session's report/refresh capture transaction, across
+    /// every kind and every capture mutation/readiness path.
+    ///
+    /// One registry keyed by session id, not per-kind registries: kind is
+    /// immutable for a session, so separate registries would only guard
+    /// the same state differently. Separate from lifecycle claims: a
+    /// pre-publication hook must not wait for the launch operation that
+    /// is itself waiting for that hook. Lock order is one-directional —
+    /// lifecycle work may briefly take the capture claim while
+    /// resetting/publishing capture state (released before spawning or
+    /// waiting on hooks), while report/capture work never takes a
+    /// lifecycle claim — and claim waits are bounded by the admission
+    /// deadline rather than held open.
+    pub(super) capture_locks: Arc<KeyedLocks>,
 }
 
 /// The refusal every lifecycle verb returns for an UNRECOGNIZED foreign
@@ -4664,6 +4723,21 @@ async fn remove_stale_socket(path: &Path) -> anyhow::Result<()> {
         Err(error) => Err(error)
             .with_context(|| format!("removing stale supervisor socket {}", path.display())),
     }
+}
+
+/// The doorway-validated contents of one `ReportConversation` wire
+/// message, traveling as one value from the doorway through every
+/// admission branch. One struct rather than seven positional parameters:
+/// the fields are validated as a unit at the doorway (discriminator, raw
+/// identity evidence, bounded source), and no call site may reorder, drop,
+/// or substitute one of them on the way to the proof that consumes it.
+pub(crate) struct ReportedConversation {
+    pub(crate) vendor: farhelm_proto::ReportVendor,
+    pub(crate) conversation: String,
+    pub(crate) source: String,
+    pub(crate) transcript_path: Option<serde_json::Value>,
+    pub(crate) hook_event_name: Option<serde_json::Value>,
+    pub(crate) peer: Option<crate::procs::ProcessIdentity>,
 }
 
 impl Supervisor {
@@ -5340,7 +5414,7 @@ impl Supervisor {
                 lock: Mutex::new(()),
                 history: std::sync::Mutex::new(CaptureHistory::default()),
             },
-            codex_capture_locks: Arc::new(KeyedLocks::default()),
+            capture_locks: Arc::new(KeyedLocks::default()),
         });
         // Capture runs on the reload passes as well as the list path
         // (PLAN_M3.md item 8), and not merely for symmetry: a session whose
@@ -5974,6 +6048,7 @@ impl Supervisor {
             // reported row. Were that pair ever allowed to coexist, this
             // branch order would silently downgrade an exact answer to a
             // refusal across every restart.
+            let ownership_version = row.capture_ownership_version;
             let capture = if row.capture_ambiguous {
                 CaptureState::Ambiguous { durable: true }
             } else {
@@ -5981,7 +6056,10 @@ impl Supervisor {
                     row.captured_conversation,
                     row.conversation_source.as_deref(),
                 ) {
-                    (Some(conversation), Some("hook")) => CaptureState::Reported { conversation },
+                    (Some(conversation), Some("hook")) => CaptureState::Reported {
+                        conversation,
+                        ownership_version,
+                    },
                     (Some(conversation), _) => CaptureState::Captured {
                         conversation,
                         record: row.captured_record.map(PathBuf::from).unwrap_or_default(),
@@ -5993,7 +6071,10 @@ impl Supervisor {
                     (None, _) => CaptureState::Unclaimed,
                 }
             };
-            let restart_offer = snapshot.restart_offer(capture.committed_conversation());
+            let restart_offer = snapshot.restart_offer(
+                capture.committed_conversation(),
+                capture.committed_ownership_version().unwrap_or(0),
+            );
             // Derived before `row.id` is moved into the entry's `info`.
             let scope = launch_scope_unit(&row.id, row.generation, row.launch_scoped);
             sessions.insert(
@@ -6226,11 +6307,23 @@ impl Supervisor {
             resume_template: row.resume_template,
         };
         let captured = row.captured_conversation;
+        let restart_offer =
+            snapshot.restart_offer(captured.as_deref(), row.capture_ownership_version);
+        // The filled argv is data the offer promises: it exists exactly
+        // when the offer is Resume, so a gated-out binding cannot leave a
+        // resume command behind for a manual request to pick up. The
+        // mode/offer matrix remains the enforcement; this keeps the data
+        // from contradicting it.
+        let resume_argv = (restart_offer == RestartOffer::Resume)
+            .then(|| {
+                captured
+                    .as_deref()
+                    .and_then(|conversation| snapshot.filled_resume_argv(conversation))
+            })
+            .flatten();
         Ok(Some(SessionSnapshot {
-            restart_offer: snapshot.restart_offer(captured.as_deref()),
-            resume_argv: captured
-                .as_deref()
-                .and_then(|conversation| snapshot.filled_resume_argv(conversation)),
+            restart_offer,
+            resume_argv,
             kind: snapshot.kind,
             resume_template: snapshot.resume_template,
             captured_conversation: captured,
@@ -6238,6 +6331,7 @@ impl Supervisor {
             first_input_at: row.first_input_at,
             capture_ambiguous: row.capture_ambiguous,
             canonical_cwd: row.canonical_cwd,
+            capture_ownership_version: row.capture_ownership_version,
         }))
     }
 
@@ -6250,7 +6344,30 @@ impl Supervisor {
         if row.agent_kind != AgentKind::Codex {
             return Ok(true);
         }
-        let _capture_claim = self.codex_capture_locks.claim(&row.id).await;
+        // The claim is taken HERE rather than by the caller: `session_snapshot`
+        // and the restart replay read through the store with no other
+        // serialization, and the row must be reloaded under the claim because
+        // a report may have replaced it since the caller read it. Callers
+        // that already hold this session's capture claim (the refresh pass)
+        // use `refresh_codex_capture_claimed` instead: the per-key mutex is
+        // not reentrant, so claiming a held key parks the holder against
+        // itself and the pass never completes.
+        let _capture_claim = self.capture_locks.claim(&row.id).await;
+        self.refresh_codex_capture_claimed(row).await
+    }
+
+    /// `refresh_codex_capture` for a caller already holding this session's
+    /// capture claim (see above for why the claim cannot be taken twice).
+    /// The reload below is still correct under the caller's claim — it
+    /// re-reads the row the claim serializes, so a report that landed
+    /// between the caller's read and this one is observed, not overwritten.
+    pub(super) async fn refresh_codex_capture_claimed(
+        &self,
+        row: &mut StoredSession,
+    ) -> anyhow::Result<bool> {
+        if row.agent_kind != AgentKind::Codex {
+            return Ok(true);
+        }
         // The caller may have loaded its row before a report took the claim.
         // Verify the current binding, not an earlier conversation whose file is
         // still valid after a clear. A new launch requires the caller to retry.
@@ -6261,6 +6378,17 @@ impl Supervisor {
             return Ok(false);
         }
         *row = current;
+        // Provenance this build does not recognize is preserved byte for
+        // byte and never promoted: verification below would otherwise
+        // acquire a thread for an unknown-version binding and durably
+        // rewrite a contract it cannot read. Version 0 flows through
+        // deliberately — the v1-token exception keeps pre-column tokens
+        // resumable through the existing verifier — and 1 is the version
+        // admission writes. Anything else returns before any verify or
+        // write; the offer gate independently serves these rows FreshOnly.
+        if !matches!(row.capture_ownership_version, 0 | 1) {
+            return Ok(true);
+        }
         let Some(stored) = row.captured_conversation.as_deref() else {
             return Ok(true);
         };
@@ -8178,7 +8306,10 @@ impl Supervisor {
                 });
                 let info = SessionInfo {
                     parent: row.parent,
-                    restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
+                    restart_offer: snapshot.restart_offer(
+                        row.captured_conversation.as_deref(),
+                        row.capture_ownership_version,
+                    ),
                     id: row.id,
                     title: row.title,
                     created_at: row.created_at,
@@ -8592,6 +8723,7 @@ impl Supervisor {
             // identity to the intent key.
             let row = StoredSession {
                 conversation_source: None,
+                capture_ownership_version: 0,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -8733,6 +8865,7 @@ impl Supervisor {
             };
             let mut row = StoredSession {
                 conversation_source: None,
+                capture_ownership_version: 0,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -9118,7 +9251,7 @@ impl Supervisor {
             // explicit placeholder-free template already has a real
             // fallback to offer, and reporting `FreshOnly` for it would
             // understate what restart could do from the very first reply.
-            restart_offer: snapshot.restart_offer(None),
+            restart_offer: snapshot.restart_offer(None, 0),
             // A brand-new session has no tabs; real tab creation lands in
             // PLAN_M4.md step 4.
             tabs: Vec::new(),
@@ -10149,6 +10282,7 @@ impl Supervisor {
                 crate::store::OfferBasis {
                     captured_conversation: snapshot.captured_conversation.clone(),
                     capture_ambiguous: snapshot.capture_ambiguous,
+                    capture_ownership_version: snapshot.capture_ownership_version,
                 },
                 reset_capture,
                 // Re-evaluated here rather than inherited from the run
@@ -10830,15 +10964,15 @@ impl Supervisor {
             // The new window has captured nothing yet, so the only offer
             // this session can honestly make is what its snapshot alone
             // supports — which is also how a stale ambiguity stops being
-            // reported the moment the relaunch clears it.
-            entry.snapshot.restart_offer(None)
+            // reported the moment the relaunch clears it. The reset also
+            // cleared the provenance column back to 0, so 0 is the honest
+            // version here, not a placeholder.
+            entry.snapshot.restart_offer(None, 0)
         } else {
+            let capture = entry.capture.lock().expect("capture mutex poisoned");
             entry.snapshot.restart_offer(
-                entry
-                    .capture
-                    .lock()
-                    .expect("capture mutex poisoned")
-                    .committed_conversation(),
+                capture.committed_conversation(),
+                capture.committed_ownership_version().unwrap_or(0),
             )
         };
         let info = SessionInfo {
@@ -12612,7 +12746,10 @@ impl Supervisor {
                 name: profile.name,
                 existence: ProfileExistence::Present,
             }),
-            restart_offer: snapshot.restart_offer(row.captured_conversation.as_deref()),
+            restart_offer: snapshot.restart_offer(
+                row.captured_conversation.as_deref(),
+                row.capture_ownership_version,
+            ),
             github_repo: None,
             working_copy: None,
         };
@@ -12625,6 +12762,7 @@ impl Supervisor {
             ) {
                 (Some(conversation), Some("hook")) => CaptureState::Reported {
                     conversation: conversation.to_string(),
+                    ownership_version: row.capture_ownership_version,
                 },
                 (Some(conversation), _) => CaptureState::Captured {
                     conversation: conversation.to_string(),
@@ -12935,14 +13073,45 @@ impl Supervisor {
     /// restart's whole-process-tree sweep before the replacement runs.
     /// Codex additionally requires the peer to remain attributable to the
     /// current pane's foreground process around transcript verification.
+    /// How long a report waits for the session's capture claim before
+    /// giving up with a `Conflict` rejection.
+    ///
+    /// Bounded because the reporter holds a two-second budget for the
+    /// whole round trip: parking past it converts contention into a hook
+    /// error the vendor shows the user, while a prompt rejection is a
+    /// no-op the next lifecycle event retries. One second leaves room
+    /// for the two attributions, the root-evidence check, and the reply
+    /// inside that budget on an unloaded host; on a loaded one the report
+    /// loses rather than wedges, and the refresh pass converges the row.
+    const CAPTURE_CLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+    /// Admit one conversation-identity report through the five-step
+    /// ownership contract (SPEC_impl's admission ordering):
+    ///
+    /// 1. Cheap envelope/kind/generation gating, no vendor I/O — the
+    ///    doorway has already authenticated, bounded, and
+    ///    discriminator-checked, and this re-checks against the
+    ///    generation-fenced resolution.
+    /// 2. The bounded capture claim, then a reload comparing
+    ///    kind/generation and the complete prior binding.
+    /// 3. Mutation-free runtime ownership and vendor root proofs, with
+    ///    repeat attribution around the evidence.
+    /// 4. The atomic generation-plus-complete-binding
+    ///    CAS committing identity, locator, provenance, source,
+    ///    readiness, and ambiguity reset together.
+    /// 5. The mirror into the matching current-generation in-memory
+    ///    entry under the same claim, then the ack.
+    ///
+    /// Rejection at any pre-write step is a no-op for durable capture,
+    /// in-memory state, ambiguity, pending state, and resume
+    /// availability. Kinds whose proof is not yet implemented keep their
+    /// existing acceptance behind the discriminator gate (the legacy
+    /// path); kinds with an implemented proof go through the
+    /// prover path, which denies by default.
     pub(crate) async fn report_conversation(
         &self,
         id: &str,
-        mut conversation: String,
-        source: String,
-        transcript_path: Option<serde_json::Value>,
-        hook_event_name: Option<serde_json::Value>,
-        peer: Option<crate::procs::ProcessIdentity>,
+        report: ReportedConversation,
     ) -> Result<(), RequestError> {
         let entry = self.sessions.lock().await.get(id).cloned();
         // The same gate every scan write honours. A supervisor that is not
@@ -12973,7 +13142,7 @@ impl Supervisor {
                 }
                 Err(e) => {
                     warn!(
-                        session = %id, conversation = %conversation, source = %source,
+                        session = %id, conversation = %report.conversation, source = %report.source,
                         error = %format!("{e:#}"),
                         "could not read the session row a report arrived for before its \
                          entry was published; the report is discarded"
@@ -12985,92 +13154,261 @@ impl Supervisor {
                 }
             },
         };
-        let mut codex_snapshot = None;
-        let mut _codex_capture_claim = None;
-        if kind == AgentKind::Codex {
-            if !matches!(source.as_str(), "startup" | "resume" | "clear" | "compact") {
-                return Err(RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    "Codex reported an unsupported foreground transition",
-                ));
-            }
-            let peer = peer.ok_or_else(|| {
-                RequestError::new(
-                    ErrorKind::Conflict,
-                    "the Codex report has no kernel-attributed local process",
-                )
-            })?;
-            if let Some(gate) = &self.seams.codex_report_gate {
-                gate().await;
-            }
-            // Read the binding only after excluding refresh. A readiness change
-            // in the previous conversation must neither discard a legitimate
-            // clear nor let a repeated report forget a newly established thread.
-            _codex_capture_claim = Some(self.codex_capture_locks.claim(id).await);
-            let row = self
-                .store
-                .session(id)
-                .await
-                .map_err(|_| {
-                    RequestError::new(ErrorKind::Internal, "could not verify the Codex launch")
-                })?
-                .ok_or_else(|| {
-                    RequestError::new(ErrorKind::NotFound, "the Codex session no longer exists")
-                })?;
-            if row.generation != generation || row.agent_kind != kind {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    "this session has moved on to another launch",
-                ));
-            }
-            let mut locator = crate::agent_kind::codex::CodexLocator::reported(
-                conversation,
-                transcript_path,
-                hook_event_name,
-            )
-            .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
-            // Repeating a report is not permission to rebind an already-known
-            // file to another persistent thread. Keep that expectation even
-            // after refresh has withdrawn readiness; a legitimate clear/new
-            // names a different runtime or path and can establish a new binding.
-            if let Some(previous) = row
-                .captured_conversation
-                .as_deref()
-                .and_then(|value| crate::agent_kind::codex::CodexLocator::parse(value).ok())
-                && previous.runtime_session_id == locator.runtime_session_id
-                && previous.session_file == locator.session_file
-            {
-                locator.thread_id = previous.thread_id;
-            }
-            let emitter = self.codex_foreground(&row, peer).await?;
-            locator.verify().await.map_err(|error| {
-                RequestError::new(
-                    ErrorKind::InvalidRequest,
-                    format!("the Codex report's exact record could not be verified: {error}"),
-                )
-            })?;
-            if !locator.resumable && source != "clear" {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    "the Codex report has no persisted root record; the current foreground identity was not changed",
-                ));
-            }
-            if self.codex_foreground(&row, peer).await? != emitter {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    "the Codex foreground changed during verification",
-                ));
-            }
-            info!(
-                session = %id, generation, emitter_pid = emitter.pid,
-                runtime_session = %locator.runtime_session_id,
-                persistent_thread = ?locator.thread_id, resumable = locator.resumable,
-                "attributed a Codex foreground conversation report"
+        // Step 1 tail: the authoritative discriminator check, against the
+        // generation-fenced kind rather than the doorway's preliminary
+        // read. Cheap parsing, still no vendor I/O.
+        if crate::agent_kind::agent_kind_of_vendor(report.vendor) != kind {
+            warn!(
+                session = %id,
+                kind = ?kind,
+                vendor = ?report.vendor,
+                "refused a reported conversation identity that does not match this session's \
+                 durable agent kind"
             );
-            conversation = locator
-                .encode()
-                .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
-            codex_snapshot = Some(row);
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the reported conversation identity does not match this session's agent kind",
+            ));
+        }
+        if crate::agent_kind::ownership_proof_implemented(kind) {
+            return self
+                .report_conversation_proven(id, report, kind, generation, entry)
+                .await;
+        }
+        return self
+            .report_conversation_legacy(
+                id,
+                report.conversation,
+                report.source,
+                kind,
+                generation,
+                entry,
+            )
+            .await;
+    }
+
+    /// The framework admission path for kinds with an implemented
+    /// ownership proof: deny by default, with one explicit branch per
+    /// proven kind. A kind the predicate names but no branch handles is
+    /// refused rather than routed anywhere — adding a proof means adding
+    /// its branch in the same change that flips the predicate, never
+    /// inheriting another kind's.
+    async fn report_conversation_proven(
+        &self,
+        id: &str,
+        report: ReportedConversation,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        match kind {
+            AgentKind::Codex => {
+                self.report_codex_conversation(id, report, kind, generation, entry)
+                    .await
+            }
+            _ => Err(RequestError::new(
+                ErrorKind::Conflict,
+                "no foreground ownership proof is implemented for this session's agent kind",
+            )),
+        }
+    }
+
+    /// Codex admission, unchanged from the completed two-proof design: live
+    /// foreground native-runtime attribution excluding nested runtimes,
+    /// then exact root record validation excluding same-process vendor
+    /// threads — wired through the shared claim, CAS, and mirror
+    /// discipline rather than its own.
+    async fn report_codex_conversation(
+        &self,
+        id: &str,
+        report: ReportedConversation,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        let ReportedConversation {
+            vendor: _,
+            mut conversation,
+            source,
+            transcript_path,
+            hook_event_name,
+            peer,
+        } = report;
+        if !crate::agent_kind::codex::is_foreground_source(&source) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Codex reported an unsupported foreground transition",
+            ));
+        }
+        let peer = peer.ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "the Codex report has no kernel-attributed local process",
+            )
+        })?;
+        if let Some(gate) = &self.seams.codex_report_gate {
+            gate().await;
+        }
+        // Step 2: the bounded capture claim, then the authoritative
+        // reload. A readiness change in the previous conversation must
+        // neither discard a legitimate clear nor let a repeated report
+        // forget a newly established thread, which is why the binding
+        // below is read only after the claim excludes refresh.
+        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's capture is being updated; the report was not recorded",
+                )
+            })?;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| {
+                RequestError::new(ErrorKind::Internal, "could not verify the Codex launch")
+            })?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the Codex session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
+        }
+        let mut locator = crate::agent_kind::codex::CodexLocator::reported(
+            conversation,
+            transcript_path,
+            hook_event_name,
+        )
+        .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        // Repeating a report is not permission to rebind an already-known
+        // file to another persistent thread. Keep that expectation even
+        // after refresh has withdrawn readiness; a legitimate clear/new
+        // names a different runtime or path and can establish a new binding.
+        if let Some(previous) = row
+            .captured_conversation
+            .as_deref()
+            .and_then(|value| crate::agent_kind::codex::CodexLocator::parse(value).ok())
+            && previous.runtime_session_id == locator.runtime_session_id
+            && previous.session_file == locator.session_file
+        {
+            locator.thread_id = previous.thread_id;
+        }
+        let emitter = self.codex_foreground(&row, peer).await?;
+        locator.verify().await.map_err(|error| {
+            RequestError::new(
+                ErrorKind::InvalidRequest,
+                format!("the Codex report's exact record could not be verified: {error}"),
+            )
+        })?;
+        if !locator.resumable && source != "clear" {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Codex report has no persisted root record; the current foreground identity was not changed",
+            ));
+        }
+        if self.codex_foreground(&row, peer).await? != emitter {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Codex foreground changed during verification",
+            ));
+        }
+        info!(
+            session = %id, generation, emitter_pid = emitter.pid,
+            runtime_session = %locator.runtime_session_id,
+            persistent_thread = ?locator.thread_id, resumable = locator.resumable,
+            "attributed a Codex foreground conversation report"
+        );
+        conversation = locator
+            .encode()
+            .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        // Step 4: the atomic CAS over the COMPLETE prior binding —
+        // generation plus exact locator plus proof version — committing
+        // identity, locator, provenance 1, source, readiness, and the
+        // ambiguity reset together. Only this transaction may
+        // establish version 1.
+        //
+        // The injected failure STANDS IN for the store call rather than
+        // preceding it, so a test can exercise this function's own failure
+        // path without a store that is genuinely broken.
+        let injected = self
+            .seams
+            .capture_store_fault
+            .as_ref()
+            .map(|fault| fault(super::capture::CaptureWrite::Report, id));
+        let written = match injected {
+            Some(Err(e)) => Err(e),
+            // The capture claim excludes refresh/report interleavings, while
+            // the durable precondition also fences lifecycle changes and
+            // preserves the exact binding that authorized verification.
+            _ => {
+                self.store
+                    .admit_ownership_proven_conversation(
+                        id,
+                        generation,
+                        row.captured_conversation.as_deref(),
+                        row.capture_ownership_version,
+                        &conversation,
+                    )
+                    .await
+            }
+        };
+        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+    }
+
+    /// Legacy admission for kinds whose ownership proof is not yet
+    /// implemented: today's acceptance (credential, shape, generation
+    /// fence, unconditional replace within the generation) behind the new
+    /// discriminator gate, under the shared claim discipline.
+    ///
+    /// The write deliberately does NOT touch `capture_ownership_version`:
+    /// these rows stay at 0 — ownership not established under this
+    /// contract — until their kind's PR wires proof, writes 1, and flips
+    /// the predicate. Preserved, not re-blessed.
+    async fn report_conversation_legacy(
+        &self,
+        id: &str,
+        conversation: String,
+        source: String,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        // Step 2: the bounded capture claim, then the authoritative
+        // reload and kind/generation comparison. Refresh and reconciling
+        // passes hold the same claim, so the row below is the binding the
+        // write below will be fenced on rather than one a racing pass has
+        // since replaced.
+        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's capture is being updated; the report was not recorded",
+                )
+            })?;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| RequestError::new(ErrorKind::Internal, "could not verify the launch"))?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
         }
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             warn!(
@@ -13095,27 +13433,38 @@ impl Supervisor {
             .map(|fault| fault(super::capture::CaptureWrite::Report, id));
         let written = match injected {
             Some(Err(e)) => Err(e),
-            _ => match codex_snapshot {
-                // The capture claim excludes refresh/report interleavings, while
-                // the durable precondition also fences lifecycle changes and
-                // preserves the exact binding that authorized verification.
-                Some(row) => {
-                    self.store
-                        .replace_reported_conversation_if_current(
-                            id,
-                            generation,
-                            row.captured_conversation.as_deref(),
-                            &conversation,
-                        )
-                        .await
-                }
-                None => {
-                    self.store
-                        .record_reported_conversation(id, generation, &conversation)
-                        .await
-                }
-            },
+            _ => {
+                self.store
+                    .record_reported_conversation(id, generation, &conversation)
+                    .await
+            }
         };
+        Self::finish_reported_admission(
+            id,
+            written,
+            &conversation,
+            &source,
+            generation,
+            entry,
+            row.capture_ownership_version,
+        )
+    }
+
+    /// Step 4b (write-result handling) and step 5 (the current-generation
+    /// mirror under the same claim), shared by the proven and legacy
+    /// paths. A failed CAS, a failed write, a timeout, or a rejection
+    /// changes neither durable nor in-memory capture: the `Ok(false)` arm
+    /// is a concurrent relaunch or binding change invalidating the
+    /// evidence, not a malfunction.
+    fn finish_reported_admission(
+        id: &str,
+        written: anyhow::Result<bool>,
+        conversation: &str,
+        source: &str,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+        ownership_version: i64,
+    ) -> Result<(), RequestError> {
         match written {
             Ok(true) => {}
             // A relaunch/delete or a concurrently established Codex binding
@@ -13166,10 +13515,15 @@ impl Supervisor {
         let displaced = {
             let mut state = entry.capture.lock().expect("capture mutex poisoned");
             let previous = state.committed_conversation().map(str::to_string);
+            // Step 5: mirror ONLY the committed result, into the matching
+            // current-generation entry, under the same capture claim —
+            // carrying the provenance the write committed so offers read
+            // one binding, not two disagreeing halves.
             state.advance(CaptureState::Reported {
-                conversation: conversation.clone(),
+                conversation: conversation.to_string(),
+                ownership_version,
             });
-            previous.filter(|was| was != &conversation)
+            previous.filter(|was| was != conversation)
         };
         info!(
             session = %id, conversation = %conversation, source = %source,
@@ -13665,6 +14019,7 @@ pub(crate) mod tests {
             first_input_at: None,
             capture_ambiguous: false,
             canonical_cwd: None,
+            capture_ownership_version: 0,
         }
     }
 
@@ -14470,6 +14825,26 @@ pub(crate) mod tests {
     /// the entry-replacement tests below and the classification tests in
     /// `service::status` — which are about how those two inputs combine,
     /// and need no tmux, no store, and no session at all.
+    /// Build the doorway-validated report shape the admission tests feed
+    /// `report_conversation` directly: most tests report without vendor
+    /// evidence or a peer, so the struct literal would repeat four `None`
+    /// fields at every call site. Tests that need evidence or a peer
+    /// construct [`ReportedConversation`] inline instead.
+    fn reported(
+        vendor: farhelm_proto::ReportVendor,
+        conversation: String,
+        source: &str,
+    ) -> ReportedConversation {
+        ReportedConversation {
+            vendor,
+            conversation,
+            source: source.to_string(),
+            transcript_path: None,
+            hook_event_name: None,
+            peer: None,
+        }
+    }
+
     pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
@@ -14529,6 +14904,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: entry.info.id.clone(),
                     parent: None,
                     title: title.to_string(),
@@ -14928,6 +15304,7 @@ pub(crate) mod tests {
             CaptureState::Ambiguous { durable: true },
             CaptureState::Reported {
                 conversation: "conv-reported".to_string(),
+                ownership_version: 1,
             },
         ] {
             let old = entry_with(Some(a_terminal()), LastOutcome::Running);
@@ -14977,6 +15354,7 @@ pub(crate) mod tests {
         old.first_input.lock().unwrap().at = Some(1_700_000_000);
         *old.capture.lock().unwrap() = CaptureState::Reported {
             conversation: "conv-reported".to_string(),
+            ownership_version: 1,
         };
 
         let relaunched = relaunched_entry(
@@ -14991,7 +15369,7 @@ pub(crate) mod tests {
         assert!(
             matches!(
                 &*relaunched.capture.lock().unwrap(),
-                CaptureState::Reported { conversation } if conversation == "conv-reported"
+                CaptureState::Reported { conversation, .. } if conversation == "conv-reported"
             ),
             "a resume must carry the reported identity onto the launch that resumes it"
         );
@@ -15186,6 +15564,7 @@ pub(crate) mod tests {
                 .insert_session(
                     StoredSession {
                         conversation_source: None,
+                        capture_ownership_version: 0,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -15334,6 +15713,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: "error row".to_string(),
@@ -15490,6 +15870,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: scoped_id.clone(),
                     parent: None,
                     title: "scoped".to_string(),
@@ -15559,6 +15940,362 @@ pub(crate) mod tests {
     ///
     /// Driven through the real `reload_sessions`, like its siblings above,
     /// because the row-to-state mapping only exists inside that pass.
+    /// Seed one Codex row the way history leaves them: an optional
+    /// pre-contract identity, never ownership-proven, with a launchable
+    /// template so reload has no unrelated reason to refuse it.
+    async fn seed_codex_row(
+        sup: &Arc<Supervisor>,
+        id: &str,
+        captured: Option<&str>,
+        source: Option<&str>,
+        version: i64,
+    ) {
+        let integration =
+            IntegrationSnapshot::resolve(&["codex".to_string()], None, None).expect("codex");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: source.map(str::to_string),
+                    capture_ownership_version: version,
+                    id: id.to_string(),
+                    parent: None,
+                    title: "codex".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "codex".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Codex,
+                    resume_template: integration.resume_template.clone(),
+                    canonical_cwd: None,
+                    captured_conversation: captured.map(str::to_string),
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert codex fixture row");
+    }
+
+    /// A report from an unattributable process against a pristine row is
+    /// refused and records nothing when the owned pane is absent.
+    ///
+    /// A shape-valid report cannot establish an identity without an owned
+    /// pane, even when no earlier binding exists. This covers missing-pane
+    /// refusal; the live Codex e2e fixture separately covers child-first
+    /// ancestry with a real foreground and a valid child transcript.
+    #[farhelm_testtrace::test]
+    async fn a_codex_report_without_an_owned_pane_changes_nothing() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        seed_codex_row(&sup, &id, None, None, 0).await;
+        // The test process itself: live, but its image is not a Codex
+        // runtime and no pane hosts it as this session's foreground. The
+        // report is shape-valid (a foreground SessionStart) so the
+        // refusal below comes from the foreground proof, not from shape
+        // validation — that distinction is the point: an unattributable
+        // reporter must fail the proof even against a pristine row.
+        let peer = crate::procs::ProcessIdentity::read(std::process::id())
+            .expect("the test process is live");
+
+        let error = sup
+            .report_conversation(
+                &id,
+                ReportedConversation {
+                    vendor: farhelm_proto::ReportVendor::Codex,
+                    conversation: "child-conv".to_string(),
+                    source: "startup".to_string(),
+                    transcript_path: None,
+                    hook_event_name: Some(serde_json::json!("SessionStart")),
+                    peer: Some(peer),
+                },
+            )
+            .await
+            .expect_err("an unattributable reporter must be refused");
+        assert_eq!(
+            error.kind,
+            farhelm_proto::ErrorKind::Conflict,
+            "a failed proof is a conflict, never a partial write"
+        );
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .expect("read refused row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_conversation, None,
+            "the report without a pane must not establish an identity"
+        );
+        assert_eq!(
+            row.capture_ownership_version, 0,
+            "the report without a pane must not touch provenance"
+        );
+        assert!(
+            !sup.sessions.lock().await.contains_key(&id),
+            "no in-memory mirror may be installed for a refused report"
+        );
+    }
+
+    /// A capture pass over a hook-reported Codex row must complete and
+    /// converge its mirror: the refresh path holds the session's capture
+    /// claim while re-verifying, and the per-key mutex is not reentrant,
+    /// so taking the claim a second time inside the re-verification
+    /// parked the pass against itself — no pass over such a row ever
+    /// finished, and the supervisor wedged on the first post-handoff
+    /// capture of the e2e journey. This pins completion AND convergence,
+    /// not just the absence of an error.
+    ///
+    /// The fileless locator keeps the fixture to the store and the mirror:
+    /// verification with no attributed file is pending-but-bound, so the
+    /// pass must still converge the exact saved target with its provenance.
+    /// The pass itself is bounded by a timeout so this regression fails
+    /// with a message rather than parking the suite the way the bug did.
+    #[farhelm_testtrace::test]
+    async fn a_capture_pass_over_a_hook_reported_codex_row_completes() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        let token = crate::agent_kind::codex::CodexLocator::reported(
+            "codex-runtime-1".to_string(),
+            None,
+            Some(serde_json::json!("SessionStart")),
+        )
+        .expect("fileless codex fixture locator")
+        .encode()
+        .expect("encode the fixture locator");
+        seed_codex_row(&sup, &id, Some(&token), Some("hook"), 1).await;
+        let integration =
+            IntegrationSnapshot::resolve(&["codex".to_string()], None, None).expect("codex");
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        tokio::time::timeout(std::time::Duration::from_secs(30), sup.capture_now())
+            .await
+            .expect("a capture pass over a hook-reported Codex row must finish");
+        // Read out from under the guard: it is a synchronous mutex and
+        // must not be held across the store round trip below.
+        let (mirrored, provenance) = {
+            let mirror = entry.capture.lock().expect("capture mutex readable");
+            (
+                mirror.committed_conversation().map(str::to_string),
+                mirror.committed_ownership_version(),
+            )
+        };
+        assert_eq!(
+            mirrored,
+            Some(token.clone()),
+            "the pass must converge the mirror on the proven binding"
+        );
+        assert_eq!(
+            provenance,
+            Some(1),
+            "the mirror must carry the binding's provenance beside the identity"
+        );
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .expect("read converged row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_conversation,
+            Some(token),
+            "the pass must not rewrite a verified binding"
+        );
+        assert_eq!(
+            row.capture_ownership_version, 1,
+            "the pass must not touch a verified binding's provenance"
+        );
+    }
+
+    /// A historical Codex row — a bare id admitted before the ownership
+    /// contract, at version 0 — reloads with no Resume offer and no
+    /// resume command, through the real reload path.
+    ///
+    /// Why this test matters: the deliberate v1-token exception keeps
+    /// validated tokens resumable, but bare IDs were never verifiable
+    /// and must stay excluded after the upgrade exactly as before. This
+    /// exercises reload, the refresh pass it triggers, and the public
+    /// offer computation — the surfaces a historical row actually meets
+    /// — rather than only the pure offer function the unit tests pin.
+    #[farhelm_testtrace::test]
+    async fn a_historical_codex_row_without_provenance_offers_no_resume_after_reload() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        seed_codex_row(&sup, &id, Some("historical-thread"), Some("hook"), 0).await;
+
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("reload historical row")
+            .expect("row survives");
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some("historical-thread"),
+            "history is preserved, not cleared, by the gate"
+        );
+        assert_eq!(
+            snapshot.capture_ownership_version, 0,
+            "the reload carries the row's unproven version"
+        );
+        assert_eq!(
+            snapshot.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "a bare historical id offers no exact Resume"
+        );
+        assert_eq!(
+            snapshot.resume_argv, None,
+            "a gated-out binding leaves no resume command behind"
+        );
+    }
+
+    /// An unknown ownership version is preserved byte for byte with no
+    /// Resume, even against a valid record: verification would acquire a
+    /// persistent thread for the binding and durably rewrite a provenance
+    /// contract this build cannot read. Version 0 keeps the deliberate
+    /// v1-token exception and 1 is what admission writes; anything else
+    /// returns before any verify or write, on both the snapshot and the
+    /// refresh paths.
+    ///
+    /// The record is genuinely valid — matching runtime, attributable
+    /// source, exact path — so that only the version gate can explain the
+    /// lack of promotion: a record that fails verification would leave
+    /// the bytes alone for an unrelated reason.
+    #[farhelm_testtrace::test]
+    async fn an_unknown_provenance_version_is_preserved_with_no_resume() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        let file = state.path().join("codex session.jsonl");
+        std::fs::write(
+            &file,
+            "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\
+             \"payload\":{\"id\":\"codex-thread-9\",\"session_id\":\"codex-runtime-9\",\
+             \"source\":\"cli\",\"cwd\":\"/tmp\",\"timestamp\":\"2026-01-01T00:00:00Z\"}}\n",
+        )
+        .unwrap();
+        let token = crate::agent_kind::codex::CodexLocator::reported(
+            "codex-runtime-9".to_string(),
+            Some(serde_json::json!(file.to_str().unwrap())),
+            Some(serde_json::json!("SessionStart")),
+        )
+        .expect("pending codex fixture locator")
+        .encode()
+        .expect("encode the fixture locator");
+        seed_codex_row(&sup, &id, Some(&token), Some("hook"), 2).await;
+
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("reload unknown-version row")
+            .expect("row survives");
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some(token.as_str()),
+            "refresh must not acquire a thread for an unknown version"
+        );
+        assert_eq!(
+            snapshot.capture_ownership_version, 2,
+            "the reload carries the row's version, never a normalized one"
+        );
+        assert_eq!(
+            snapshot.restart_offer,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "an unknown version offers no exact Resume"
+        );
+        assert_eq!(
+            snapshot.resume_argv, None,
+            "an unpromoted binding leaves no resume command behind"
+        );
+
+        let integration =
+            IntegrationSnapshot::resolve(&["codex".to_string()], None, None).expect("codex");
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        tokio::time::timeout(std::time::Duration::from_secs(30), sup.capture_now())
+            .await
+            .expect("a capture pass over an unknown-version row must finish");
+        let (mirrored, provenance) = {
+            let mirror = entry.capture.lock().expect("capture mutex readable");
+            (
+                mirror.committed_conversation().map(str::to_string),
+                mirror.committed_ownership_version(),
+            )
+        };
+        assert_eq!(
+            mirrored,
+            Some(token.clone()),
+            "the refresh mirror must carry the preserved bytes"
+        );
+        assert_eq!(
+            provenance,
+            Some(2),
+            "the mirror must carry the unknown version beside the identity"
+        );
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .expect("read preserved row")
+            .expect("row survives");
+        assert_eq!(
+            row.captured_conversation,
+            Some(token),
+            "neither snapshot nor refresh may rewrite unknown provenance"
+        );
+        assert_eq!(
+            row.capture_ownership_version, 2,
+            "neither path may normalize the version either"
+        );
+    }
+
     #[farhelm_testtrace::test]
     async fn reload_distinguishes_a_reported_identity_from_a_scanned_one() {
         let state = StateDir::new();
@@ -15576,6 +16313,7 @@ pub(crate) mod tests {
                 .insert_session(
                     StoredSession {
                         conversation_source: source,
+                        capture_ownership_version: 0,
                         id: id.clone(),
                         parent: None,
                         title: "identity".to_string(),
@@ -15631,7 +16369,7 @@ pub(crate) mod tests {
         assert!(
             matches!(
                 &reported,
-                CaptureState::Reported { conversation } if *conversation == format!("conv-{reported_id}")
+                CaptureState::Reported { conversation, .. } if *conversation == format!("conv-{reported_id}")
             ),
             "a row whose identity came from the agent's own hook must reload as Reported, \
              not back under the scan's authority: {reported:?}"
@@ -15711,15 +16449,19 @@ pub(crate) mod tests {
                     launch_scoped: false,
                     source_profile: None,
                     conversation_source: None,
+                    capture_ownership_version: 0,
                 },
                 None,
             )
             .await
             .unwrap();
         assert!(!sup.sessions.lock().await.contains_key(&id));
-        sup.report_conversation(&id, token.clone(), "startup".into(), None, None, None)
-            .await
-            .unwrap();
+        sup.report_conversation(
+            &id,
+            reported(farhelm_proto::ReportVendor::Pi, token.clone(), "startup"),
+        )
+        .await
+        .unwrap();
         let mut entry = entry_with(
             None,
             LastOutcome::Exited {
@@ -15825,6 +16567,7 @@ pub(crate) mod tests {
                     launch_scoped: false,
                     source_profile: None,
                     conversation_source: None,
+                    capture_ownership_version: 0,
                 },
                 None,
             )
@@ -15845,18 +16588,21 @@ pub(crate) mod tests {
         )
         .unwrap();
         let error = sup
-            .report_conversation(&id, pi_token, "startup".into(), None, None, None)
+            .report_conversation(
+                &id,
+                reported(farhelm_proto::ReportVendor::Omp, pi_token, "startup"),
+            )
             .await
             .expect_err("a Pi locator cannot report for an OMP session");
         assert_eq!(error.kind, ErrorKind::InvalidRequest);
 
         sup.report_conversation(
             &id,
-            encode("omp-exact", Some(&file)),
-            "startup".into(),
-            None,
-            None,
-            None,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                encode("omp-exact", Some(&file)),
+                "startup",
+            ),
         )
         .await
         .unwrap();
@@ -15897,11 +16643,11 @@ pub(crate) mod tests {
         let mismatched = encode("omp-exact", Some(&other));
         sup.report_conversation(
             &id,
-            mismatched.clone(),
-            "agent_end".into(),
-            None,
-            None,
-            None,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                mismatched.clone(),
+                "agent_end",
+            ),
         )
         .await
         .unwrap();
@@ -15932,11 +16678,11 @@ pub(crate) mod tests {
         let invalid_token = encode("omp-exact", Some(&invalid_source));
         sup.report_conversation(
             &id,
-            invalid_token.clone(),
-            "agent_end".into(),
-            None,
-            None,
-            None,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                invalid_token.clone(),
+                "agent_end",
+            ),
         )
         .await
         .unwrap();
@@ -15959,9 +16705,16 @@ pub(crate) mod tests {
         // A refreshed file for the SAME id puts the offer back, now pointing
         // at the new path — the fileless withdrawal is a state, not a tombstone.
         let refreshed = encode("omp-exact", Some(&file));
-        sup.report_conversation(&id, refreshed.clone(), "agent_end".into(), None, None, None)
-            .await
-            .unwrap();
+        sup.report_conversation(
+            &id,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                refreshed.clone(),
+                "agent_end",
+            ),
+        )
+        .await
+        .unwrap();
         sup.capture_now().await;
         assert_eq!(
             super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
@@ -16048,6 +16801,7 @@ pub(crate) mod tests {
                     launch_scoped: false,
                     source_profile: None,
                     conversation_source: None,
+                    capture_ownership_version: 0,
                 },
                 None,
             )
@@ -16071,11 +16825,11 @@ pub(crate) mod tests {
         // 1. Conversation A, persisted: the offer is Resume for A.
         sup.report_conversation(
             &id,
-            encode("conv-a", Some(&file_a)),
-            "session_start".into(),
-            None,
-            None,
-            None,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                encode("conv-a", Some(&file_a)),
+                "session_start",
+            ),
         )
         .await
         .unwrap();
@@ -16091,11 +16845,11 @@ pub(crate) mod tests {
         // report path's own work.
         sup.report_conversation(
             &id,
-            encode("conv-b", None),
-            "session_switch:new".into(),
-            None,
-            None,
-            None,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                encode("conv-b", None),
+                "session_switch:new",
+            ),
         )
         .await
         .unwrap();
@@ -16131,11 +16885,11 @@ pub(crate) mod tests {
         .unwrap();
         sup.report_conversation(
             &id,
-            encode("conv-b", Some(&file_b)),
-            "agent_end".into(),
-            None,
-            None,
-            None,
+            reported(
+                farhelm_proto::ReportVendor::Omp,
+                encode("conv-b", Some(&file_b)),
+                "agent_end",
+            ),
         )
         .await
         .unwrap();
@@ -16197,6 +16951,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: doomed.to_string(),
                     parent: None,
                     title: "hooked".to_string(),
@@ -16290,6 +17045,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: id.to_string(),
                     parent: None,
                     title: "unhooked".to_string(),
@@ -16369,6 +17125,7 @@ pub(crate) mod tests {
                 .insert_session(
                     StoredSession {
                         conversation_source: None,
+                        capture_ownership_version: 0,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -16468,6 +17225,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -16560,6 +17318,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -16649,6 +17408,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "s1".to_string(),
                     parent: None,
                     title: "pending archive".to_string(),
@@ -17478,7 +18238,8 @@ pub(crate) mod tests {
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                19
+                20,
+                "the v17 fixture migrates through archive removal and ownership provenance"
             );
             assert_eq!(
                 conn.query_row(
@@ -17705,6 +18466,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -18596,6 +19358,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -18682,6 +19445,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "ended".to_string(),
                     parent: None,
                     title: "ended".to_string(),
@@ -19211,6 +19975,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -19306,6 +20071,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -19731,6 +20497,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -19840,6 +20607,7 @@ pub(crate) mod tests {
         let cwd = state.path().to_string_lossy().to_string();
         let stranded = StoredSession {
             conversation_source: None,
+            capture_ownership_version: 0,
             id: "stranded".to_string(),
             parent: None,
             title: "as created".to_string(),
@@ -20008,6 +20776,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -20230,6 +20999,7 @@ pub(crate) mod tests {
             .insert_session(
                 StoredSession {
                     conversation_source: None,
+                    capture_ownership_version: 0,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),

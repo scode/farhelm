@@ -244,7 +244,11 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// Version 27 adds Cursor to the structured launch vocabulary. Older peers
 /// cannot decode that harness, even though it uses the existing Generic runtime.
 ///
-/// `protocol_version_is_pinned_at_27` (renamed at every bump since `_at_4`)
+/// Version 28 requires a vendor discriminator on conversation reports and
+/// adds optional subagent identity evidence.
+/// Exact-version negotiation prevents older peers from bypassing that contract.
+///
+/// `protocol_version_is_pinned_at_28` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -254,9 +258,10 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// `lore/2026-08-20-protocol-version-changelog.md`; that file is frozen at
 /// the moment it was written (`lore/AGENTS.md`) and is not extended for
 /// version 12 or later — see [`ControlMsg::ReportConversation`] for what
-/// version 12 added, [`ControlMsg::AgentRequest`] for version 13, and
-/// [`ControlMsg::SessionList`] for version 14.
-pub const PROTOCOL_VERSION: u32 = 27;
+/// version 12 added, [`ControlMsg::AgentRequest`] for version 13,
+/// [`ControlMsg::SessionList`] for version 14, and
+/// [`ControlMsg::ReportConversation`]'s required fields for version 28.
+pub const PROTOCOL_VERSION: u32 = 28;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -2193,6 +2198,35 @@ pub struct AgentSession {
 /// `channel` instead, so a demultiplexer must route them by channel
 /// rather than treating a missing `req_id` as an error.
 ///
+/// Which vendor adapter produced a [`ControlMsg::ReportConversation`].
+///
+/// This names the private entry point the report arrived through — the
+/// injected hook command, the Goose helper, or the shipped asset — so the
+/// supervisor can reject a report addressed to a session of another kind
+/// before spending any vendor I/O on it. It is an adapter identifier,
+/// not a secret and not an ownership proof: a shell child can copy argv
+/// as easily as it inherits environment, so admission still requires the
+/// per-kind foreground-runtime and root-conversation proofs. There is
+/// deliberately no `Generic` or `Unknown` variant: generic sessions
+/// accept no reports at all, and an untagged report is refused rather
+/// than inferred.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportVendor {
+    /// Anthropic's Claude Code CLI, via the injected `--settings` hook.
+    Claude,
+    /// OpenAI's Codex CLI, via the injected hooks-config entry.
+    Codex,
+    /// The Goose agent, via the persisted credential-free MCP reporter
+    /// (`internal goose-hook` supplies this value internally; it is never
+    /// a flag on a stored command).
+    Goose,
+    /// The Pi coding agent, via the shipped extension asset.
+    Pi,
+    /// Oh-my-pi, via the shipped extension asset.
+    Omp,
+}
+
 /// Compatibility posture: within one protocol version the set of messages
 /// is fixed; anything incompatible bumps `PROTOCOL_VERSION` rather than
 /// negotiating per-message.
@@ -2766,6 +2800,16 @@ pub enum ControlMsg {
     /// also requires ancestry reaching the current owned pane.
     ReportConversation {
         req_id: u64,
+        /// Which vendor adapter produced this report (version 28). The
+        /// supervisor rejects a mismatch against the destination session's
+        /// durable kind before any vendor I/O: without it a plain id
+        /// addressed to any id-reporting kind is accepted on shape alone,
+        /// which is exactly the confusion a credential-holding child
+        /// exploits. Required, never defaulted — an untagged report is
+        /// refused rather than inferred, and old senders that predate the
+        /// field fail closed at decode. See [`ReportVendor`] for why this
+        /// is an adapter identifier rather than an ownership proof.
+        vendor: ReportVendor,
         /// The conversation id as the agent's own hook reported it.
         /// Treated as an opaque, untrusted string until the supervisor's
         /// plausibility check accepts it — see this variant's own "Trust
@@ -2781,6 +2825,15 @@ pub enum ControlMsg {
         /// Codex requires a root `SessionStart`, not an internal-agent event.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hook_event_name: Option<serde_json::Value>,
+        /// The vendor hook's own subagent identity, carried VERBATIM as
+        /// JSON (version 28). The hook never interprets it: a typed
+        /// subagent marker must reach the supervisor intact so admission
+        /// can reject it BEFORE diagnostic sanitation could normalize an
+        /// invalid value into an allowed word. Absent or null means the
+        /// payload named no subagent; any other shape is validated, not
+        /// coerced, downstream.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<serde_json::Value>,
     },
     /// Acknowledges a durable foreground identity report. A pending Codex
     /// conversation is recorded but is not resumable until its exact file is
@@ -4464,7 +4517,8 @@ mod tests {
     /// messages and the optional `CreateSession::github_checkout` payload;
     /// version 25 adds the agent restart tag and its discovery capability;
     /// version 26 removes session archive state and operations. Version 27
-    /// adds the Cursor harness variant. These changes need a handshake
+    /// adds the Cursor harness variant; version 28 requires the conversation
+    /// report's vendor discriminator. These changes need a handshake
     /// refusal rather than silent tolerance. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
@@ -4473,33 +4527,34 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test and the literal-26 skew check below are
+    /// an edit per bump; this test and the literal-27 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_27() {
-        assert_eq!(PROTOCOL_VERSION, 27);
+    fn protocol_version_is_pinned_at_28() {
+        assert_eq!(PROTOCOL_VERSION, 28);
     }
 
-    /// Pins the skew direction the Cursor harness bump exists to create, in
+    /// Pins the skew direction the ownership report bump exists to create, in
     /// BOTH directions, against the LITERAL previous version rather than the
     /// constant-relative ± 1 the `io.rs` skew test uses:
     ///
-    /// - A peer still speaking v26 is refused by this build's handshake with
+    /// - A peer still speaking v27 is refused by this build's handshake with
     ///   the explicit skew error and the connection torn down — never
-    ///   tolerated into receiving a harness variant it cannot decode.
-    /// - A v27 hello is refused by a hand-rolled v26 receiver, which sees a
+    ///   tolerated into sending reports without the required ownership evidence.
+    /// - A v28 hello is refused by a hand-rolled v27 receiver, which sees a
     ///   version it does not know and hangs up. This test models the old
     ///   receiver with its refusal rule: accept
-    ///   exactly 26, refuse anything else. It is what keeps this test
+    ///   exactly 27, refuse anything else. It is what keeps this test
     ///   honest about the old side instead of asserting only the new side's
     ///   opinion.
     ///
     /// The ± 1 skew tests in `io.rs` follow the constant, so they would keep
     /// passing if the constant were ever reverted without the accompanying
     /// rename; this test is the one that fails when the constant and the
-    /// version history disagree.
+    /// version history disagree. Each bump renames this test and moves both
+    /// literals with it so both directions exercise the previous version.
     #[farhelm_testtrace::test]
-    async fn v26_and_v27_peers_refuse_each_other() {
+    async fn v27_and_v28_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4508,7 +4563,7 @@ mod tests {
             auth: None,
         };
 
-        // A literal-v26 peer against THIS build's handshake.
+        // A literal-v27 peer against THIS build's handshake.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
@@ -4519,7 +4574,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(26)).await.unwrap();
+        w.write_control(&stale_hello(27)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4535,22 +4590,22 @@ mod tests {
         let err = receiver.await.unwrap().unwrap_err();
         assert!(
             err.to_string().contains("protocol version mismatch"),
-            "a literal v26 peer must be refused: {err}"
+            "a literal v27 peer must be refused: {err}"
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 26);
-        assert_eq!(skew.our_protocol, 27);
+        assert_eq!(skew.peer_protocol, 27);
+        assert_eq!(skew.our_protocol, 28);
 
-        // The reverse direction: a v26 receiver (the refusal rule itself,
-        // modeled by its exact-version check) meets a v27 hello and hangs up.
+        // The reverse direction: a v27 receiver (the refusal rule itself,
+        // modeled by its exact-version check) meets a v28 hello and hangs up.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
-        let v26_receiver = tokio::spawn(async move {
+        let v27_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(26)).await.unwrap();
+            w.write_control(&stale_hello(27)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4559,7 +4614,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 26 {
+            if protocol_version != 27 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4569,7 +4624,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-                Err("refused a v27 peer".to_string())
+                Err("refused a v28 peer".to_string())
             } else {
                 Ok(())
             }
@@ -4579,11 +4634,11 @@ mod tests {
         w.write_control(&stale_hello(PROTOCOL_VERSION))
             .await
             .unwrap();
-        // Hellos cross first; the v26 peer's hello precedes its refusal.
+        // Hellos cross first; the v27 peer's hello precedes its refusal.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
         assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
-        assert!(v26_receiver.await.unwrap().is_err());
+        assert!(v27_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -6545,8 +6600,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn report_conversation_json_shapes_are_pinned() {
         let report = ControlMsg::ReportConversation {
+            vendor: ReportVendor::Claude,
             transcript_path: None,
             hook_event_name: None,
+            agent_id: None,
             req_id: 21,
             conversation: "abc123def456".to_string(),
             source: "startup".to_string(),
@@ -6555,6 +6612,7 @@ mod tests {
             serde_json::to_value(&report).unwrap(),
             serde_json::json!({
                 "type": "report_conversation",
+                "vendor": "claude",
                 "req_id": 21,
                 "conversation": "abc123def456",
                 "source": "startup",
@@ -6571,6 +6629,53 @@ mod tests {
         );
     }
 
+    /// A version-27 report — the exact shape this build's predecessors
+    /// sent, with no `vendor` field — must FAIL to decode rather than be
+    /// accepted as an untagged report. That is the upgrade fail-closed
+    /// rule: an old long-running hook or asset keeps its credential after
+    /// an upgrade, and silently inferring its vendor would let it keep
+    /// setting capture under the new contract without ever passing the
+    /// new gate. `agent_id` stays optional for the opposite reason: it is
+    /// purely additive evidence, and its absence means "no subagent named"
+    /// rather than a different protocol.
+    #[farhelm_testtrace::test]
+    fn report_conversation_without_vendor_fails_decode() {
+        let untagged = serde_json::json!({
+            "type": "report_conversation",
+            "req_id": 21,
+            "conversation": "abc123def456",
+            "source": "startup",
+        });
+        assert!(
+            serde_json::from_value::<ControlMsg>(untagged).is_err(),
+            "a vendorless v27 report decoded under v28"
+        );
+        let unknown_vendor = serde_json::json!({
+            "type": "report_conversation",
+            "vendor": "fax",
+            "req_id": 21,
+            "conversation": "abc123def456",
+            "source": "startup",
+        });
+        assert!(
+            serde_json::from_value::<ControlMsg>(unknown_vendor).is_err(),
+            "an unknown vendor decoded under a closed enum"
+        );
+        for vendor in ["claude", "codex", "goose", "pi", "omp"] {
+            let tagged = serde_json::json!({
+                "type": "report_conversation",
+                "vendor": vendor,
+                "req_id": 21,
+                "conversation": "abc123def456",
+                "source": "startup",
+            });
+            assert!(
+                serde_json::from_value::<ControlMsg>(tagged).is_ok(),
+                "the {vendor} discriminator must decode"
+            );
+        }
+    }
+
     /// `ReportConversation`/`ConversationReported` round-tripped through the
     /// real encode/decode path, matching `stop_and_delete_roundtrip_through_frames`'s
     /// treatment of the M2 additions — this is what would catch a drift
@@ -6581,8 +6686,10 @@ mod tests {
     fn report_conversation_roundtrip_through_frames() {
         for msg in [
             ControlMsg::ReportConversation {
+                vendor: ReportVendor::Codex,
                 transcript_path: None,
                 hook_event_name: None,
+                agent_id: None,
                 req_id: 1,
                 conversation: "abc123def456".to_string(),
                 source: "resume".to_string(),
@@ -6625,8 +6732,10 @@ mod tests {
 
         for msg in [
             ControlMsg::ReportConversation {
+                vendor: ReportVendor::Pi,
                 transcript_path: None,
                 hook_event_name: None,
+                agent_id: None,
                 req_id: 2,
                 conversation: "abc123def456".to_string(),
                 source: "clear".to_string(),
@@ -7579,8 +7688,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn report_conversation_pair_is_classified_as_request_and_reply() {
         let request = ControlMsg::ReportConversation {
+            vendor: ReportVendor::Omp,
             transcript_path: None,
             hook_event_name: None,
+            agent_id: None,
             req_id: 21,
             conversation: "abc123def456".to_string(),
             source: "startup".to_string(),

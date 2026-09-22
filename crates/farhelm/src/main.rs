@@ -530,6 +530,32 @@ enum SupervisorCmd {
     },
 }
 
+/// The `--vendor` flag's spelling: exactly the wire enum's five adapters,
+/// so the CLI-to-wire mapping is total and cannot drift one variant at a
+/// time. Injection installs only four of these (`internal goose-hook`
+/// supplies Goose internally); the fifth exists so the flag mirrors the
+/// closed wire enum rather than maintaining a second, narrower one.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum HookVendor {
+    Claude,
+    Codex,
+    Goose,
+    Pi,
+    Omp,
+}
+
+impl HookVendor {
+    fn report_vendor(self) -> farhelm_proto::ReportVendor {
+        match self {
+            HookVendor::Claude => farhelm_proto::ReportVendor::Claude,
+            HookVendor::Codex => farhelm_proto::ReportVendor::Codex,
+            HookVendor::Goose => farhelm_proto::ReportVendor::Goose,
+            HookVendor::Pi => farhelm_proto::ReportVendor::Pi,
+            HookVendor::Omp => farhelm_proto::ReportVendor::Omp,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum InternalCmd {
     /// Proxy stdio to the local supervisor's unix socket. This is the
@@ -567,6 +593,15 @@ enum InternalCmd {
         /// on the injected command line is what pins it to the launch.
         #[arg(long)]
         announce: bool,
+        /// Which vendor adapter this hook invocation is: the report
+        /// envelope's discriminator, sourced from the installed entry
+        /// point rather than inferred from the payload. Required, so an
+        /// old hook command that predates the flag fails closed at CLI
+        /// parse instead of reporting untagged. The Goose helper never
+        /// takes this flag — `internal goose-hook` supplies its value
+        /// internally, keeping the persisted declaration unchanged.
+        #[arg(long, value_enum)]
+        vendor: HookVendor,
     },
     /// The credential-free MCP reporter Goose retains in session metadata.
     GooseHook,
@@ -1005,11 +1040,16 @@ fn main() -> anyhow::Result<()> {
                             "session_id": goose_id,
                             "source": "goose"
                         }))?;
+                        // The discriminator comes from the entry point
+                        // itself — this helper IS the Goose adapter — so
+                        // the persisted MCP declaration keeps invoking the
+                        // same command with no new stored flag.
                         hook::run_with(
                             credential,
                             std::io::Cursor::new(payload),
                             std::time::Duration::from_secs(2),
                             hook_log,
+                            farhelm_proto::ReportVendor::Goose,
                         );
                     }
                 }
@@ -1025,7 +1065,7 @@ fn main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
-            InternalCmd::Hook { announce } => {
+            InternalCmd::Hook { announce, vendor } => {
                 // No tracing init, and this one is necessity rather than
                 // belt and braces: init_tracing logs to stderr at `info`,
                 // and this process's stderr is the AGENT's terminal. A
@@ -1094,7 +1134,13 @@ fn main() -> anyhow::Result<()> {
                 // Well under the timeout the injected hook config gives
                 // the vendor, so the vendor never gets to time us out.
                 const BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
-                hook::run_with(credential, std::io::stdin(), BUDGET, hook_log);
+                hook::run_with(
+                    credential,
+                    std::io::stdin(),
+                    BUDGET,
+                    hook_log,
+                    vendor.report_vendor(),
+                );
 
                 // AFTER the report, never before. The identity round trip
                 // is the part the session's correctness depends on, and it
