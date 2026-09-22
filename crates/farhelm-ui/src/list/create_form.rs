@@ -151,17 +151,23 @@ fn draft_reconciliation_reason(
 ///
 /// Search is only a picker. Keeping its result application in one helper
 /// makes Enter and pointer activation replace the same fields and clear the
-/// same idempotency binding. A returned path means this was the explicit
-/// browse action; the caller starts the shared guarded request after closing
-/// the search surface.
+/// same idempotency binding. Name and host actions therefore have the same
+/// no-launch contract as other results. A returned path means this was the
+/// explicit browse action; the caller starts the shared guarded request after
+/// closing the search surface.
 #[expect(
     clippy::too_many_arguments,
     reason = "the signals are independent reactive ownership handles; bundling them would obscure which draft fields a search action may replace"
 )]
 fn apply_composer_search_result(
     result: crate::launch_composer::ComposerSearchResult,
+    mut title: Signal<String>,
+    mut title_edited: Signal<bool>,
+    mut chosen_host: Signal<Option<HostId>>,
+    hosts: &[HostOption],
+    mut clone_host_state: Signal<CloneHostState>,
     history_target: Option<CreateTarget>,
-    live_destination: Signal<Option<CreateTarget>>,
+    mut live_destination: Signal<Option<CreateTarget>>,
     mut remembered_destination: Signal<Option<CreateTarget>>,
     history_activation_attempts: Signal<u64>,
     mut destination_draft: Signal<DestinationDraft>,
@@ -205,6 +211,24 @@ fn apply_composer_search_result(
         remembered_destination.set(None);
     }
     match result {
+        ComposerSearchResult::Name(name) => {
+            title.set(name);
+            // A cloned title may have an escaped display seed. This action
+            // is the user's new text, so submit and checkout preview must
+            // read it rather than replay the clone's raw title.
+            title_edited.set(true);
+        }
+        ComposerSearchResult::Host(host) => {
+            // A host action has the same authority effects as the selector:
+            // it takes over clone defaults and retires the old destination
+            // before a queued history callback or submit can observe it.
+            if hosts.iter().any(|offered| offered.id == host.id) {
+                chosen_host.set(Some(host.id));
+                live_destination.set(self::history_target(hosts, Some(host.id)));
+                remembered_destination.set(None);
+                clone_host_state.set(CloneHostState::UserTookOver);
+            }
+        }
         ComposerSearchResult::Command => {
             // Search is a picker, including for the command mode. It never
             // turns its query into an invocation; the existing command draft
@@ -2739,6 +2763,17 @@ pub(super) fn CreateSessionForm(
         Some(Err(message)) => Some(message.clone()),
         None => None,
     };
+    // Search and the visible host selector must offer the same registry
+    // snapshot; the helper owns no separate host cache or name resolution.
+    let composer_hosts = hosts
+        .iter()
+        .map(|host| crate::launch_composer::ComposerHost {
+            id: host.id,
+            name: host.name.clone(),
+            label: host.label(),
+            local: host.local,
+        })
+        .collect::<Vec<_>>();
     let mut search_rows = crate::launch_composer::search_results(
         &recent_history,
         &catalog_models,
@@ -2746,6 +2781,10 @@ pub(super) fn CreateSessionForm(
         active_search_harness,
         active_search_model.as_deref(),
     );
+    search_rows.extend(crate::launch_composer::name_host_search_results(
+        &composer_search(),
+        &composer_hosts,
+    ));
     if search_scope == crate::launch_composer::SearchScope::Github {
         let discovered = repository_result
             .as_ref()
@@ -2759,6 +2798,7 @@ pub(super) fn CreateSessionForm(
     }
     let search_result_groups = crate::launch_composer::grouped_search_results(search_rows);
     let catalog_models_for_search_input = catalog_models.clone();
+    let composer_hosts_for_search_input = composer_hosts.clone();
     let search_results_for_keys = search_result_groups
         .iter()
         .flat_map(|(_, results)| results.iter().cloned())
@@ -2778,6 +2818,8 @@ pub(super) fn CreateSessionForm(
     // reply is checked against `browse_target`, which stays live while the
     // request is in flight.
     let browse_hosts = hosts.clone();
+    let action_hosts_for_search_key = hosts.clone();
+    let action_hosts_for_search_click = hosts.clone();
     let browse_target = create_target;
     let browse_cwd = cwd;
     let browse_cwd_raw_seed = cwd_raw_seed;
@@ -3655,7 +3697,7 @@ pub(super) fn CreateSessionForm(
                         aria_controls: "launch-composer-search-results",
                         aria_activedescendant: (composer_search_open() && !search_results_for_keys.is_empty())
                             .then(|| format!("launch-composer-search-option-{}", composer_active_index)),
-                        placeholder: "search folders, harnesses, models, efforts…",
+                        placeholder: "search names, hosts, folders, harnesses, models…",
                         autocomplete: "off",
                         // Search includes literal host paths and model IDs;
                         // browser text correction would change the query's meaning.
@@ -3714,15 +3756,18 @@ pub(super) fn CreateSessionForm(
                                 == CreationSurface::Structured)
                                 .then(&*structured_model)
                                 .flatten();
-                            let groups = crate::launch_composer::grouped_search_results(
-                                crate::launch_composer::search_results(
-                                    &promoted_history,
-                                    &catalog_models_for_search_input,
-                                    &evt.value(),
-                                    active_harness,
-                                    active_model.as_deref(),
-                                ),
+                            let mut rows = crate::launch_composer::search_results(
+                                &promoted_history,
+                                &catalog_models_for_search_input,
+                                &evt.value(),
+                                active_harness,
+                                active_model.as_deref(),
                             );
+                            rows.extend(crate::launch_composer::name_host_search_results(
+                                &evt.value(),
+                                &composer_hosts_for_search_input,
+                            ));
+                            let groups = crate::launch_composer::grouped_search_results(rows);
                             composer_search_index.set(
                                 crate::launch_composer::default_search_index(&groups, &evt.value()),
                             );
@@ -3731,6 +3776,7 @@ pub(super) fn CreateSessionForm(
                             let catalog = catalog_for_search.clone();
                             let browse_base = browse_base.clone();
                             let browse_hosts = browse_hosts.clone();
+                            let action_hosts = action_hosts_for_search_key.clone();
                             let history_target = current_history_target.clone();
                             move |evt| {
                             match evt.key() {
@@ -3820,6 +3866,11 @@ pub(super) fn CreateSessionForm(
                                         );
                                         let browse_path = apply_composer_search_result(
                                             result,
+                                            title,
+                                            title_edited,
+                                            chosen_host,
+                                            &action_hosts,
+                                            clone_host_state,
                                             history_target.clone(),
                                             live_destination,
                                             remembered_destination,
@@ -3918,6 +3969,7 @@ pub(super) fn CreateSessionForm(
                                                         let catalog = catalog_for_search.clone();
                                                         let browse_base = browse_base.clone();
                                                         let browse_hosts = browse_hosts.clone();
+                                                        let action_hosts = action_hosts_for_search_click.clone();
                                                         let history_target = current_history_target.clone();
                                                         move |_| {
                                                             if !draft_transition_allowed(ops) {
@@ -3933,7 +3985,8 @@ pub(super) fn CreateSessionForm(
                                                                 offered_history, create_target, fetched_history,
                                                             );
                                                             let browse_path = apply_composer_search_result(
-                                                                result.clone(), history_target.clone(),
+                                                                result.clone(), title, title_edited, chosen_host, &action_hosts, clone_host_state,
+                                                                history_target.clone(),
                                                                 live_destination, remembered_destination,
                                                                 history_activation_attempts, destination_draft, preview_revision, cwd, cwd_raw_seed, cwd_edited,
                                                                 creation_surface,
@@ -3960,6 +4013,8 @@ pub(super) fn CreateSessionForm(
                                                         }
                                                     },
                                                     match &result {
+                                                        crate::launch_composer::ComposerSearchResult::Name(name) => rsx! { "Set session name: {display_peer(name)}" },
+                                                        crate::launch_composer::ComposerSearchResult::Host(host) => rsx! { "Host: {host.label}" },
                                                         // Folder actions alter only cwd; a recent
                                                         // setup visibly names every choice it owns.
                                                         crate::launch_composer::ComposerSearchResult::UsePath(folder)

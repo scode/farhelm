@@ -9,7 +9,7 @@
 //! boundary; neither refresh nor promotion may make a selection for the user.
 
 use crate::api::{LaunchCatalogModel, LaunchHistory, LaunchHistoryEntry};
-use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// A stable display order prevents catalog entry order from moving buttons.
 const EFFORT_ORDER: &[LaunchEffort] = &[
@@ -139,6 +139,10 @@ pub(crate) struct ComposerFilter {
 /// hidden launch input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ComposerSearchResult {
+    /// Apply the entire value of one leading `name:` label as the session name.
+    Name(String),
+    /// Select one currently offered host without touching the agent draft.
+    Host(ComposerHost),
     Harness(LaunchHarness),
     /// Switch the shared composer to its profile-or-raw-command controls.
     Command,
@@ -159,6 +163,20 @@ pub(crate) enum ComposerSearchResult {
     /// Explicitly request a new checkout, preserving the agent selection.
     Github(crate::github_checkout::GithubRepo),
     Recent(LaunchHistoryEntry),
+}
+
+/// The host facts search needs without taking ownership of list-view state.
+///
+/// `name` is the registry's matching word, while `label` is already escaped
+/// for display and includes a phase warning when the host is disconnected.
+/// The local bit gives `host:local` a stable meaning even when that row has an
+/// alias; its numeric id is only the action payload, never a search word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ComposerHost {
+    pub(crate) id: HostId,
+    pub(crate) name: String,
+    pub(crate) label: String,
+    pub(crate) local: bool,
 }
 
 /// One actionable row in the model combobox's stable keyboard order.
@@ -306,6 +324,8 @@ pub(crate) fn model_options(
 /// query is open, irrespective of history or catalog ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComposerSearchGroup {
+    Names,
+    Hosts,
     Harnesses,
     Models,
     /// Reasoning-effort words valid for the selected harness and model.
@@ -320,6 +340,8 @@ impl ComposerSearchGroup {
     /// Return the accessible heading for this stable result group.
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::Names => "Session name",
+            Self::Hosts => "Hosts",
             Self::Harnesses => "Harnesses",
             Self::Models => "Models",
             Self::Efforts => "Efforts",
@@ -339,6 +361,8 @@ impl ComposerSearchGroup {
 pub(crate) fn grouped_search_results(
     results: Vec<ComposerSearchResult>,
 ) -> Vec<(ComposerSearchGroup, Vec<ComposerSearchResult>)> {
+    let mut names = Vec::new();
+    let mut hosts = Vec::new();
     let mut harnesses = Vec::new();
     let mut models = Vec::new();
     let mut efforts = Vec::new();
@@ -348,6 +372,8 @@ pub(crate) fn grouped_search_results(
     let mut recents = Vec::new();
     for result in results {
         match result {
+            ComposerSearchResult::Name(_) => names.push(result),
+            ComposerSearchResult::Host(_) => hosts.push(result),
             ComposerSearchResult::Harness(_) => harnesses.push(result),
             ComposerSearchResult::Command => harnesses.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
@@ -361,6 +387,8 @@ pub(crate) fn grouped_search_results(
         }
     }
     [
+        (ComposerSearchGroup::Names, names),
+        (ComposerSearchGroup::Hosts, hosts),
         (ComposerSearchGroup::Harnesses, harnesses),
         (ComposerSearchGroup::Models, models),
         (ComposerSearchGroup::Efforts, efforts),
@@ -476,9 +504,13 @@ pub(crate) const RECENT_ALL_DEFAULTS: &str = "defaults";
 /// All preserves the existing unlabelled search surface. The GitHub scope
 /// is recognized here so the renderer can reserve that query for independently
 /// fetched repository suggestions without allowing local rows to leak into it.
+/// Name and host actions use the same split but are added from the form's
+/// current host snapshot, which this renderer-free module does not own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SearchScope {
     All,
+    Name,
+    Host,
     Harness,
     Model,
     Effort,
@@ -499,7 +531,11 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
         return (SearchScope::All, query);
     };
     let (label, value) = query.split_at(colon);
-    let scope = if label.eq_ignore_ascii_case("harness") {
+    let scope = if label.eq_ignore_ascii_case("name") {
+        SearchScope::Name
+    } else if label.eq_ignore_ascii_case("host") {
+        SearchScope::Host
+    } else if label.eq_ignore_ascii_case("harness") {
         SearchScope::Harness
     } else if label.eq_ignore_ascii_case("model") {
         SearchScope::Model
@@ -519,6 +555,43 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
     (scope, value[1..].trim())
 }
 
+/// Offer one action for a name and filtered host rows for their leading labels.
+///
+/// The actions remain inert until clicked or accepted with Enter. In
+/// particular, the query's value is never a hidden title or host on submit.
+/// A local row is selected by kind before name matching, so `host:local`
+/// still finds it when an alias replaces the ordinary display name.
+pub(crate) fn name_host_search_results(
+    query: &str,
+    hosts: &[ComposerHost],
+) -> Vec<ComposerSearchResult> {
+    let (scope, value) = scoped_query(query);
+    match scope {
+        SearchScope::Name if !value.is_empty() => {
+            vec![ComposerSearchResult::Name(value.to_string())]
+        }
+        SearchScope::Host if value.eq_ignore_ascii_case("local") => hosts
+            .iter()
+            .filter(|host| host.local)
+            .cloned()
+            .map(ComposerSearchResult::Host)
+            .collect(),
+        SearchScope::Host => {
+            let folded = value.to_ascii_lowercase();
+            hosts
+                .iter()
+                .filter(|host| {
+                    host.name.to_ascii_lowercase().contains(&folded)
+                        || host.label.to_ascii_lowercase().contains(&folded)
+                })
+                .cloned()
+                .map(ComposerSearchResult::Host)
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Find composer choices whose visible value matches a deliberate query.
 ///
 /// The server owns history ordering, so the result preserves it. This does
@@ -529,6 +602,7 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
 /// harness, model ownership remains discoverable and effort words are absent.
 /// A recognized leading label limits the result kinds to its scope, while
 /// unlabelled input retains the combined search surface for compatibility.
+/// The form appends name and host actions from its own live host snapshot.
 pub(crate) fn search_results(
     history: &LaunchHistory,
     catalog: &[LaunchCatalogModel],
@@ -668,8 +742,9 @@ pub(crate) fn search_results(
 /// group order. Efforts outrank exact model ids, which outrank exact harness
 /// names; this keeps medium from landing on a model such as medium-context,
 /// and keeps a model id from losing to a harness substring. A recognized label
-/// narrows exact matching to its corresponding group; paths, recent setup
-/// descriptions, and the GitHub scope do not participate.
+/// narrows exact matching to its corresponding group; an exact host name wins
+/// within host results. Paths, names, recent descriptions, and GitHub
+/// suggestions use their offered order.
 pub(crate) fn default_search_index(
     grouped_results: &[(ComposerSearchGroup, Vec<ComposerSearchResult>)],
     query: &str,
@@ -689,6 +764,8 @@ pub(crate) fn default_search_index(
             ComposerSearchGroup::Models,
             ComposerSearchGroup::Harnesses,
         ],
+        SearchScope::Name => vec![ComposerSearchGroup::Names],
+        SearchScope::Host => vec![ComposerSearchGroup::Hosts],
         SearchScope::Harness => vec![ComposerSearchGroup::Harnesses],
         SearchScope::Model => vec![ComposerSearchGroup::Models],
         SearchScope::Effort => vec![ComposerSearchGroup::Efforts],
@@ -709,9 +786,9 @@ pub(crate) fn default_search_index(
 /// Return the group of a result whose visible word IS the (lowercase,
 /// trimmed) query, or `None` when the result is not an exact word match.
 ///
-/// Only harness, model, and effort rows have a single word a person types
-/// deliberately; paths, folders, and recent setups are descriptions, and an
-/// exact match on those would be a coincidence rather than an intent. Each
+/// Harness, model, effort, trust, and host rows have a deliberate matching
+/// word; paths, folders, and recent setups are descriptions, and an exact
+/// match on those would be a coincidence rather than an intent. Each
 /// kind compares by the same spelling the search offered it under —
 /// [`harness_word`], the model id, [`effort_value`] — so a row that matched
 /// as a substring can always also match exactly.
@@ -720,6 +797,12 @@ fn exact_word_group(
     folded_query: &str,
 ) -> Option<ComposerSearchGroup> {
     match result {
+        ComposerSearchResult::Host(host)
+            if host.name.eq_ignore_ascii_case(folded_query)
+                || (host.local && folded_query == "local") =>
+        {
+            Some(ComposerSearchGroup::Hosts)
+        }
         ComposerSearchResult::Harness(harness) if harness_word(*harness) == folded_query => {
             Some(ComposerSearchGroup::Harnesses)
         }
@@ -1129,6 +1212,48 @@ mod tests {
     use super::*;
     use crate::api::{FolderHistoryEntry, LaunchCatalogModel};
     use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission};
+
+    /// A leading label remains one deliberate action: later colons belong to
+    /// the name, while `host:local` identifies the local row even when an
+    /// alias has replaced its ordinary display name.
+    #[test]
+    fn name_and_host_labels_offer_only_their_intended_actions() {
+        let hosts = vec![
+            ComposerHost {
+                id: 1,
+                name: "workstation alias".into(),
+                label: "workstation alias".into(),
+                local: true,
+            },
+            ComposerHost {
+                id: 2,
+                name: "build.example".into(),
+                label: "build.example (unreachable)".into(),
+                local: false,
+            },
+        ];
+        assert_eq!(
+            name_host_search_results("NAME:  fix: parser  ", &hosts),
+            vec![ComposerSearchResult::Name("fix: parser".into())]
+        );
+        assert!(name_host_search_results("name:", &hosts).is_empty());
+        assert_eq!(
+            name_host_search_results("host:local", &hosts),
+            vec![ComposerSearchResult::Host(hosts[0].clone())]
+        );
+        let remote = name_host_search_results("host:BUILD", &hosts);
+        assert_eq!(remote, vec![ComposerSearchResult::Host(hosts[1].clone())]);
+        assert_eq!(
+            default_search_index(&grouped_search_results(remote), "host:build.example"),
+            0
+        );
+        assert_eq!(
+            name_host_search_results("host:", &hosts).len(),
+            hosts.len(),
+            "an empty host filter lists the selectable registry rows"
+        );
+        assert!(name_host_search_results("host:missing", &hosts).is_empty());
+    }
 
     /// The typed trust action is available only where the UI can compile a
     /// real per-launch workspace choice; unsupported harnesses cannot offer

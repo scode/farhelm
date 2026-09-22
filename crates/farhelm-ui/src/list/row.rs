@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+use crate::hosts::gui_host_name;
 use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, LocalHostIcon, PermissionGlyph,
     PermissionIcon, QualifierGlyph, QualifierIcon, RemoteHostIcon,
@@ -962,6 +963,12 @@ pub(super) fn SessionRow(
         HostLocality::Remote => "remote",
         HostLocality::Unknown => "unknown",
     };
+    // Only a registry-confirmed local row earns the GUI's local wording.
+    // Legacy rows and rows waiting for the hosts read keep their supplied name.
+    let shown_host_name = session
+        .host_name
+        .as_deref()
+        .map(|name| gui_host_name(name, locality == HostLocality::Local));
     let open_session = session.clone();
     let stop_id = session.id.clone();
     let delete_target = DeleteTarget {
@@ -1591,12 +1598,12 @@ pub(super) fn SessionRow(
                     // stays missing: locality can establish an icon, never
                     // an invented machine name.
                     span { class: "session-row-line session-row-meta",
-                        if let Some(host_name) = &session.host_name {
+                        if let Some(host_name) = &shown_host_name {
                             span {
                                 class: "session-host peer-value",
                                 dir: "ltr",
-                                title: "{display_peer(host_name)}",
-                                "{display_peer(host_name)}"
+                                title: "{host_name}",
+                                "{host_name}"
                             }
                             span { class: "session-host-separator", ":" }
                         }

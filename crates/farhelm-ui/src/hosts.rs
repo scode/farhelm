@@ -71,6 +71,18 @@ use crate::provisioning::{
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
+/// Name a confirmed local host consistently across the GUI without changing its registry name.
+///
+/// An alias stays the name the user chose. Callers with only an unconfirmed
+/// session host must pass `false`, even if its name happens to be `this machine`.
+pub(crate) fn gui_host_name(name: &str, local: bool) -> String {
+    if local && name == "this machine" {
+        "local (this machine)".to_string()
+    } else {
+        display_peer(name)
+    }
+}
+
 // ---------------------------------------------------------------------
 // The phase vocabulary
 // ---------------------------------------------------------------------
@@ -1641,7 +1653,7 @@ fn HostRow(
         .map(|reported| format!("adopt {}", display_peer(reported)));
     let remedy = state_remedy(&host.state);
     let detail = state_detail(&host.state);
-    let shown_name = display_peer(&host.name);
+    let shown_name = gui_host_name(&host.name, host.kind == HostKind::Local);
     let edit_start = (
         id,
         EditField::Destination,
