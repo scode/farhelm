@@ -1551,6 +1551,10 @@ the exact destination, without writing it. Responses include the configuration r
 claim, never the hook. Naming scans refuse incomplete results after 100,000 entries. Create verifies this binding and
 uses atomic mkdir as the collision authority. Known intent keys reconcile their original snapshot before current
 configuration or profile resolution; replacement identities additionally bind the source session and preserve its veto.
+The composer reads its checkout folder field from that accepted preview, or from the original binding while reconciling
+an ambiguous create. It leaves the field read-only until an explicit existing-folder action changes the destination
+draft; the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures leave the path empty
+with an error state rather than displaying the old seed.
 
 The serving future owns one serial three-second revision observer, initialized before readiness and HTTP serving.
 Changed revisions publish existing fleet invalidations; failed reads preserve the last observation. Launch history

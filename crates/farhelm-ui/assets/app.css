@@ -3704,6 +3704,20 @@ samp {
   padding: 0 12px;
 }
 
+/* A checkout preview is read-only until this explicit escape returns to an
+   existing folder. Place the escape by the path it changes, outside the
+   recent-folders group so it does not read as another history entry. */
+.launch-composer-existing-folder {
+  justify-self: start;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline dotted;
+}
+
 /* One path per cell, two cells across. Paths of different lengths line up
    in two columns where an inline run wrapped raggedly. Two explicit columns
    and not `auto-fill` over a `ch` minimum: the destination column is about
