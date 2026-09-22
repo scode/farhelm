@@ -3193,10 +3193,12 @@ test("hostile identity and host text stay contained with simultaneous qualifiers
 /**
  * Fixed status/locality tracks, right-aligned ages, and menu reservations hold
  * at an adversarial 280px sidebar width. The fixtures deliberately mix live,
- * ended, and unknown states plus short and long agent badges. One age exceeds
- * four characters: unbounded day counts must keep the same right edge without
- * overlapping the adjacent badge. A legacy row without a host name must retain
- * its directory without inventing either a host label or a dangling colon.
+ * ended, and unknown states plus short and long agent badges, and rows with
+ * and without a permission lock so the harness mark's column is checked
+ * against both badge widths. One age exceeds four characters: unbounded day
+ * counts must keep the same right edge without overlapping the adjacent
+ * badge. A legacy row without a host name must retain its directory without
+ * inventing either a host label or a dangling colon.
  */
 test("narrow rows align fixed facts and reserve only control-sized menu gutters", async ({
   page,
@@ -3318,7 +3320,13 @@ test("narrow rows align fixed facts and reserve only control-sized menu gutters"
   async function left(target: Locator, selector: string) {
     return (await target.locator(selector).boundingBox())!.x;
   }
-  for (const selector of [".session-status-slot", ".session-locality-slot"] as const) {
+  // The harness mark is in this list on purpose: the fixture mixes rows with
+  // a permission lock (`--yolo`, `--dangerously-skip-permissions`) and rows
+  // without one, and the mark must sit in the same column either way. The
+  // badge used to be a right-aligned flex group, so a lockless row's mark
+  // drifted into the lock's column; a fleet where every row is unattended
+  // never shows that, which is why only a mixed fixture can pin it.
+  for (const selector of [".session-status-slot", ".session-locality-slot", ".session-agent .harness-glyph"] as const) {
     const positions = await Promise.all(rows.map((target) => left(target, selector)));
     expect(Math.max(...positions) - Math.min(...positions), `${selector} must align`).toBeLessThanOrEqual(2);
   }
