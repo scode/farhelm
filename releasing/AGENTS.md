@@ -130,10 +130,13 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    HackMD's API exposes a note's text but not its comments, so feedback left as comments has to be pasted into the
    session; edits made to the note's text come back with `export`.
 3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
-   internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Append each
-   such rule to `releasing/EDITORIAL_GUIDANCE.md` in the same changelog PR, with the example that prompted it, so the
-   next draft (fragment or section) starts from it instead of repeating the correction. Feedback that only fixes the one
-   entry is applied and not recorded.
+   internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Two ways a
+   rule gets into `releasing/EDITORIAL_GUIDANCE.md`, and only two: the maintainer states it as a rule in so many words
+   ("X is internal jargon, use Y"), in which case record it; or the agent infers a generalization from the edits, in
+   which case ASK, naming the rule it would write, and record it only on a yes. Never write an inferred rule on the
+   agent's own judgment; the file is the maintainer's opinions, and a guessed one would steer every future draft. Record
+   each rule in the same changelog PR, with the example that prompted it. Feedback that only fixes the one entry is
+   applied and not recorded.
 4. Make the changelog PR: the new `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
    `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), any guidance gathered in
    step 3, `dprint fmt`, and `python3 releasing/check-changelog.py format` passing. Merge it before going on.
