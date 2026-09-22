@@ -8,7 +8,7 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 #### The session launcher looks like the rest of Farhelm
 
-Previously the session launcher had a considerably different look and feel from the rest of Farhelm. It now uses the same colors, corners, and selection style as the main window, and its list of recent setups shows only what each one changes from the defaults. (#819, #820)
+Previously the session launcher had a considerably different look and feel from the rest of Farhelm. It now uses the same colors, corners, and selection style as the main window, and its "recent-setup" rows, which show recent launches, only show what those launches explicitly override relative to default values. (#819, #820)
 
 ### 🔄 Changed
 

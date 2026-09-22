@@ -17,8 +17,8 @@ not a dist failure. It runs in the release gate on every tag.
 `fragments` answers "did every user-facing change since the last stable release leave a changelog fragment". It walks
 the commits since the merge base with the last stable tag, picks out the Conventional Commit types the process says
 must have an entry (`feat`, `fix`, `perf`, `style`, `revert`, and any type marked `!`), and reports which of them
-added a fragment, which are claimed by a fragment's `pr:` line, and which are missing. It is the release-time sweep's
-input, not a gate: the maintainer decides what a missing entry means.
+added or edited a fragment, which are claimed by a fragment's `pr:` line, and which are missing. It is the release-time
+sweep's input, not a gate: the maintainer decides what a missing entry means.
 
 `announce` compares what cargo-dist computed for a tag (its manifest's `announcement_title` and
 `announcement_changelog`) with what this file's own reading of `CHANGELOG.md` says the tag should get. A stable tag must
@@ -381,12 +381,17 @@ class CommitCoverage:
     required: bool
     pr: int | None
     added: list[str]
+    modified: list[str]
     deleted: list[str]
     claimed_by: list[str]
 
     @property
     def covered(self) -> bool:
-        return bool(self.added or self.claimed_by or (self.subject.startswith("revert") and self.deleted))
+        """A commit is covered when it touched the fragments deliberately: added one, edited one (a follow-up to
+        unreleased work amends the original's entry), deleted one as a revert, or is claimed by a fragment's `pr:`."""
+        return bool(
+            self.added or self.modified or self.claimed_by or (self.subject.startswith("revert") and self.deleted)
+        )
 
 
 def sweep(repo: Path, since: str | None = None) -> tuple[str, list[CommitCoverage], list[str]]:
@@ -415,7 +420,7 @@ def sweep(repo: Path, since: str | None = None) -> tuple[str, list[CommitCoverag
         required = bool(match and (match.group("type") in REQUIRED_TYPES or match.group("bang")))
         pr_match = SUBJECT_PR_RE.search(subject)
         pr = int(pr_match.group(1)) if pr_match else None
-        added, deleted = [], []
+        added, modified, deleted = [], [], []
         status = _git(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", "--root", sha, "--", str(FRAGMENTS_DIR))
         for line in filter(None, status.split("\n")):
             code, _tab, name = line.partition("\t")
@@ -423,12 +428,14 @@ def sweep(repo: Path, since: str | None = None) -> tuple[str, list[CommitCoverag
                 continue
             if code.startswith("A"):
                 added.append(name)
+            elif code.startswith("M"):
+                modified.append(name)
             elif code.startswith("D"):
                 deleted.append(name)
             elif code.startswith("R"):
                 # A rename lists `old\tnew`; the new name is what exists now.
                 added.append(name.split("\t")[-1])
-        commits.append(CommitCoverage(sha, subject, required, pr, added, deleted, claims.get(pr or -1, [])))
+        commits.append(CommitCoverage(sha, subject, required, pr, added, modified, deleted, claims.get(pr or -1, [])))
 
     stale: list[str] = []
     for path in fragment_files(repo):
@@ -452,7 +459,7 @@ def report_sweep(tag: str, commits: list[CommitCoverage], stale: list[str], prob
                     print(f"         removes {name}")
             continue
         if commit.covered:
-            evidence = commit.added or commit.claimed_by or commit.deleted
+            evidence = commit.added or commit.modified or commit.claimed_by or commit.deleted
             print(f"  ok   {commit.sha[:9]} {commit.subject}")
             for name in evidence:
                 print(f"         {name}")
@@ -658,6 +665,7 @@ def self_test() -> int:
         _run_git(repo, "tag", "v0.1.0")
         _run_git(repo, "checkout", "-q", "main")
         _commit(repo, "feat: with fragment (#2)", {"b.txt": "b", f"{fragments}/with-fragment.md": "---\nkind: added\n---\n\nB.\n"})
+        _commit(repo, "fix: amends unreleased work (#10)", {f"{fragments}/with-fragment.md": "---\nkind: added\n---\n\nB, amended.\n"})
         _commit(repo, "fix: without fragment (#3)", {"c.txt": "c"})
         _commit(repo, "docs: not required (#4)", {"d.txt": "d"})
         _commit(repo, "refactor!: breaking by bang (#5)", {"e.txt": "e"})
@@ -671,6 +679,7 @@ def self_test() -> int:
         expect(1 not in by_pr, "commits before the release's merge base are outside the range")
         expect(by_pr[2].covered and by_pr[2].added == [f"{fragments}/with-fragment.md"], "a commit that adds a fragment is covered")
         expect(by_pr[3].covered and by_pr[3].claimed_by == [f"{fragments}/late.md"], "a later fragment's pr: claim covers an earlier commit")
+        expect(by_pr[10].covered and by_pr[10].modified == [f"{fragments}/with-fragment.md"], "a follow-up that edits an existing fragment is covered")
         expect(not by_pr[4].required, "a docs commit is not required to have a fragment")
         expect(by_pr[5].required and not by_pr[5].covered, "a bang commit of a non-required type is required and reported missing")
         expect(stale == [], "fragments added inside the range are not stale")

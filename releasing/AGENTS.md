@@ -23,9 +23,10 @@ The layout is stipulated, not suggested. The checker refuses deviations, so read
 
 - The file opens with `# Changelog` and a short paragraph of prose. Nothing else sits above the first release.
 - Each release is `## vX.Y.Z - YYYY-MM-DD`: the version first, with its `v`, then the date the section was written.
-  dist's parser reads the version off the front of the heading, so nothing may precede it, and everything after it
-  becomes part of the GitHub release name. There is no `Unreleased` section; pending changes live in fragments (below),
-  which is what keeps a prerelease tag from picking up half-written notes.
+  dist's parser accepts nothing before the version except a `v`, `Version`, or `Release` prefix, so an emoji or any
+  other word there hides the section from it, and everything after the version becomes part of the GitHub release name.
+  There is no `Unreleased` section; pending changes live in fragments (below), which is what keeps a prerelease tag from
+  picking up half-written notes.
 - Inside a release, categories appear in this order and with these emoji, each omitted when it has nothing:
 
   | Heading             | Holds                                                                       |
@@ -70,9 +71,11 @@ it at curation time and nothing else has to happen.
 ## Fragments: what a PR leaves behind
 
 `releasing/changelog.d/` holds one file per pending change. A PR whose title has a required type adds one in the same
-commit as the change, without asking; the agent writes it. Anything else may add one when it has a user-facing effect.
-The file name is a free mnemonic (`cursor-launch.md`, `fix-detach-notification.md`), nothing parses it, and `README.md`
-there is not a fragment.
+commit as the change, without asking; the agent writes it. A PR of any other type adds one when its change has a
+user-facing effect, and otherwise nothing. A `fix` or `feat` that amends work not yet released (a follow-up to an
+unreleased PR) edits that PR's fragment instead of adding a second entry; the sweep counts an edited fragment as
+coverage. The file name is a free mnemonic (`cursor-launch.md`, `fix-detach-notification.md`), nothing parses it, and
+`README.md` there is not a fragment.
 
 ```
 ---
@@ -105,8 +108,10 @@ it. When the draft rests on a guess (a PR with no description, say), say so in t
   it belongs in the validation of any PR that touches either.
 - `fragments` walks the commits since the merge base with the last stable `vX.Y.Z` tag (stable releases are tagged on a
   release branch that never merges, so the merge base is the honest "since"), reports each required commit as covered by
-  a fragment it added or one that claims its PR, or as `MISSING`, and lists `STALE` fragments whose adding commit
-  predates the range: those are ones a previous curation forgot to consume. It needs the tags fetched.
+  a fragment it added or changed, or one that claims its PR, or as `MISSING`, and lists `STALE` fragments whose adding
+  commit predates the range. A stale fragment means a change that shipped without notes: either a previous curation
+  forgot to consume it, or its PR merged between the changelog PR and the release branch cut (which step 5 below exists
+  to prevent). Bring it to the user; it is not automatically material for the next release. It needs the tags fetched.
 - `announce --tag vX.Y.Z` compares what dist computes for the tag (`announcement_title` and `announcement_changelog` in
   its manifest, obtained by running `dist plan` locally or read from `--manifest`/`--manifest-env` in the gate) with the
   checker's own reading of the file. A stable tag must land on the newest section exactly; a prerelease must land on
@@ -121,14 +126,16 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
 
 1. Fetch tags, then run `python3 releasing/check-changelog.py fragments`. Go through its report with the user: every
    required commit since the last stable release is included unless the user explicitly excludes it, `MISSING` ones get
-   an entry written now from the commit and PR, and `STALE` ones are curated or deleted. This is the sweep the fragment
-   rule exists to make cheap.
+   an entry written now from the commit and PR, `kind: none` fragments are shown to the user as proposed exclusions (the
+   fragment author's judgment is not the user's decision), and `STALE` ones are raised as described under the checker.
+   This is the sweep the fragment rule exists to make cheap.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
    agent agree on in conversation, following that guidance. Decide which items earn a highlight. Publish the draft as an
-   owner-only HackMD note through the `skillette-hackmd` mechanics and iterate there and inline in the session until the
-   user is satisfied; the note is the review surface, not a record, and is deleted once the section is committed.
-   HackMD's API exposes a note's text but not its comments, so feedback left as comments has to be pasted into the
-   session; edits made to the note's text come back with `export`.
+   owner-only HackMD note (the maintainer's setup has the `skillette-hackmd` mechanics for this; any way of publishing
+   and re-reading a note works) and iterate there and inline in the session until the user is satisfied; the note is the
+   review surface, not a record, and is deleted once the section is committed. HackMD's API returns a note's text but
+   not its comments or suggestions, so feedback left that way has to be pasted into the session; edits made to the
+   note's text come back with an export.
 3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
    internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Two ways a
    rule gets into `releasing/EDITORIAL_GUIDANCE.md`, and only two: the maintainer states it as a rule in so many words
@@ -140,9 +147,11 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
 4. Make the changelog PR: the new `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
    `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), any guidance gathered in
    step 3, `dprint fmt`, and `python3 releasing/check-changelog.py format` passing. Merge it before going on.
-5. On a `release-X.Y.Z` branch off the merged main: bump the version to `X.Y.Z` in the root `Cargo.toml`'s
-   `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, refresh `Cargo.lock` (`cargo metadata` suffices),
-   and commit exactly those three files as `chore: release X.Y.Z`.
+5. Start a `release-X.Y.Z` branch at the changelog PR's merge commit EXACTLY, not at whatever main has become since:
+   anything merged after it would ship in X.Y.Z without notes and leave its fragment behind as `STALE`. Confirm
+   `releasing/changelog.d/` holds only `README.md` at that commit. Then bump the version to `X.Y.Z` in the root
+   `Cargo.toml`'s `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, refresh `Cargo.lock`
+   (`cargo metadata` suffices), and commit exactly those three files as `chore: release X.Y.Z`.
 6. Before tagging: the version-parity tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`
    through the recorder), `dist plan --tag vX.Y.Z` naming BOTH packages under the version (a mismatch makes the desktop
    archive silently vanish), and `python3 releasing/check-changelog.py announce --tag vX.Y.Z`, which must print that
@@ -154,7 +163,9 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
 8. Hand the maintainer the ordinary install command and remind them to quit the desktop app before updating.
 
 A failed tag build publishes nothing; fix on main and cut again with the next patch version, since a tag name is never
-reused. The release branch is left as it is, like the earlier ones.
+reused. That means another changelog PR before the new branch: retitle the `## vX.Y.Z` section to the new version (a
+stable `announce` fails unless the newest section names the tag exactly) and fold in the fix commits' fragments. The
+abandoned release branch is left as it is, like the earlier ones.
 
 # Cutting an RC release
 
@@ -195,7 +206,8 @@ With both settled, the process is:
 - Before tagging, sanity-check the announce: the version-parity tests
   (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder) and `dist plan`
   naming the rc version with BOTH packages under it — a version mismatch makes the desktop archive silently vanish from
-  the release.
+  the release. Also `python3 releasing/check-changelog.py format`: the build gate lints every fragment on every tag, so
+  a malformed fragment anywhere in the stack fails the rc build and costs an `rc.N`.
 - Give the bump its own PR like any other commit (stacked on the stack tip, or based on main), but do not merge anything
   for the release's sake: push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
   gate runs the retained Rust targets, pinned shutdown regression, JS, CentOS, and native desktop checks while excluding

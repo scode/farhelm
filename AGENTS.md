@@ -166,9 +166,9 @@ the whole baseline for any ref when a hosted verdict is wanted. PRs are still op
 user asks to publish them, or as part of landing them, never on the agent's own initiative; `pr-base.yml` (the only
 required check) still runs on every PR and only verifies that the base is main.
 
-The RELEASE workflow is not on that list and has nothing to run locally: it is generated, runs on tag pushes only, and
-carries its own gate. `releasing/AGENTS.md` describes it, what about it can be checked locally, and the unsigned-release
-recovery procedure.
+The RELEASE workflow is not on that list: it is generated, runs on tag pushes only, and carries its own gate, which is
+not something to run locally. `releasing/AGENTS.md` describes it, the parts of it that CAN be checked locally (the
+changelog checks above among them), and the unsigned-release recovery procedure.
 
 Browser end-to-end validation follows the same judgment and reuse rules, including at merge time. Its CI job is disabled
 (`if: false` in ci.yml), so CI green does not include browser coverage. Assess whether the change leaves a concrete
@@ -186,8 +186,9 @@ when the intervening diff leaves their coverage intact; see `docs/test-run-evide
 # Releases and the changelog
 
 `releasing/AGENTS.md` is the procedure for cutting a stable, RC, or dev release, and the full rules for `CHANGELOG.md`
-and its fragments. Read it before any of those. The one rule that applies to ordinary PRs lives here because every
-PR-making agent has to follow it without being asked:
+and its fragments. Read it before any of those; in short, no release tag is pushed before its base and its version are
+settled with the maintainer per that file, a tag name is never reused, and a tag is never deleted. The one rule that
+applies to ordinary PRs lives here because every PR-making agent has to follow it without being asked:
 
 A PR whose title type is `feat`, `fix`, `perf`, `style`, or `revert`, or whose type carries `!`, adds a changelog
 fragment under `releasing/changelog.d/` in the same commit as the change. The file name is a free mnemonic
