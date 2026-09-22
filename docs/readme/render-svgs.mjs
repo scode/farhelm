@@ -40,6 +40,7 @@ const palettes = {
     dim: "#b8c0cc",
     faint: "#7c8694",
     accent: "#5896e8",
+    accentFill: "#15263d",
     ok: "#7fd88f",
     cursor: "#5CF08A",
     warn: "#d8b45f",
@@ -52,6 +53,7 @@ const palettes = {
     dim: "#59636e",
     faint: "#818b98",
     accent: "#0969da",
+    accentFill: "#ddf4ff",
     ok: "#1a7f37",
     cursor: "#1f883d",
     warn: "#9a6700",
@@ -228,6 +230,172 @@ function pillarsSvg(p) {
 `;
 }
 
+// "How it works" at a glance: the helm on a laptop, remote boxes over ssh,
+// and one session shown on both ends. The laptop's screen is a miniature of
+// the real UI (host list, session list, one terminal pane) drawn on the
+// app's own dark ground in both themes, because the app has no light mode
+// and a dark screen on a light page reads as a screenshot, which is the
+// point. Each remote box lists its sessions as chips; the sidebar lists the
+// same titles; and the selected session carries the accent in all three
+// places (chip, row, pane) so the reader can see that the pane IS that
+// chip. Terminal contents are drawn as bars rather than text: at this size
+// real text would be unreadable and invite squinting at invented output.
+//
+// Everything here is invented: host names, session titles, statuses. None
+// of it is a capture.
+const screen = {
+  bg: "#05070a",
+  raised: "#141920",
+  edge: "#242c37",
+  fg: "#e6ebf1",
+  dim: "#8b95a3",
+  bar: "#3a4450",
+  accentFill: "#15263d",
+  accent: "#5896e8",
+  ok: "#7fd88f",
+  warn: "#d8b45f",
+  danger: "#e47a72",
+  idle: "#5a6472",
+  cursor: "#5CF08A",
+};
+
+// Sessions per host. `mark` is the status glyph's colour; the selected one
+// is the session the pane shows. Order in the sidebar is by recency, which
+// is why it is not grouped by host, exactly as in the real list.
+const fleet = [
+  { host: "build-box", kind: "remote", sessions: [
+    { title: "fix flaky attach test", mark: screen.ok, selected: true },
+    { title: "port ci to nextest", mark: screen.warn },
+    { title: "release 0.3.1", mark: screen.idle },
+  ] },
+  { host: "gpu-1", kind: "remote", sessions: [
+    { title: "readme rewrite", mark: screen.warn },
+    { title: "bench tokenizer", mark: screen.ok },
+  ] },
+];
+const localSessions = [{ title: "migrate auth tokens", mark: screen.danger }];
+const sidebar = [
+  fleet[0].sessions[0], localSessions[0], fleet[1].sessions[0],
+  fleet[1].sessions[1], fleet[0].sessions[1], fleet[0].sessions[2],
+];
+
+function statusDot(x, y, colour) {
+  return `<circle cx="${x}" cy="${y}" r="3" fill="${colour}"/>`;
+}
+
+// The miniature UI inside the laptop's screen. (x, y) is the screen's top
+// left; the screen is 376 by 226.
+function screenContent(x, y) {
+  const sbw = 138;
+  let out = `<rect x="${x}" y="${y}" width="376" height="226" fill="${screen.bg}"/>
+    <rect x="${x}" y="${y}" width="${sbw}" height="226" fill="${screen.raised}"/>
+    <text x="${x + 10}" y="${y + 18}" font-family="${mono}" font-size="8" fill="${screen.dim}" letter-spacing="1">HOSTS</text>`;
+  const hosts = ["this mac", ...fleet.map((h) => h.host)];
+  hosts.forEach((h, i) => {
+    const yy = y + 34 + i * 15;
+    out += `${statusDot(x + 14, yy - 3, screen.ok)}<text x="${x + 24}" y="${yy}" font-family="${mono}" font-size="9" fill="${screen.fg}">${h}</text>`;
+  });
+  out += `<text x="${x + 10}" y="${y + 92}" font-family="${mono}" font-size="8" fill="${screen.dim}" letter-spacing="1">SESSIONS</text>`;
+  sidebar.forEach((s, i) => {
+    const yy = y + 100 + i * 19;
+    if (s.selected) {
+      out += `<rect x="${x}" y="${yy}" width="${sbw}" height="19" fill="${screen.accentFill}"/>
+      <rect x="${x}" y="${yy}" width="2" height="19" fill="${screen.accent}"/>`;
+    }
+    out += `${statusDot(x + 14, yy + 10, s.mark)}<text x="${x + 24}" y="${yy + 13}" font-family="${mono}" font-size="9" fill="${screen.fg}">${s.title}</text>`;
+  });
+  // The pane: a title line naming the session and its host, then terminal
+  // output as bars, ending in the block cursor.
+  const px = x + sbw + 12;
+  const sel = fleet[0].sessions[0];
+  out += `<text x="${px}" y="${y + 20}" font-family="${mono}" font-size="9" font-weight="700" fill="${screen.fg}">${sel.title}</text>
+    <text x="${px}" y="${y + 33}" font-family="${mono}" font-size="8" fill="${screen.accent}">${fleet[0].host}</text>
+    <line x1="${px}" y1="${y + 42}" x2="${x + 366}" y2="${y + 42}" stroke="${screen.edge}"/>`;
+  const widths = [150, 90, 200, 120, 60, 180, 100, 140, 30, 170];
+  widths.forEach((w, i) => {
+    const yy = y + 54 + i * 15;
+    const indent = i % 3 === 0 ? 0 : 12;
+    out += `<rect x="${px + indent}" y="${yy}" width="${w}" height="6" rx="3" fill="${screen.bar}"/>`;
+  });
+  out += `<rect x="${px}" y="${y + 204}" width="7" height="12" fill="${screen.cursor}"/>`;
+  return out;
+}
+
+// A laptop: screen with bezel, then a base drawn as a flat trapezoid. The
+// screen interior comes from screenContent.
+function laptop(p, x, y) {
+  return `<rect x="${x}" y="${y}" width="400" height="250" rx="12" fill="${p.raised}" stroke="${p.edge}" stroke-width="1.5"/>
+    ${screenContent(x + 12, y + 12)}
+    <path d="M${x - 20} ${y + 250} H${x + 420} L${x + 440} ${y + 268} H${x - 40} Z" fill="${p.raised}" stroke="${p.edge}" stroke-width="1.5"/>
+    <rect x="${x + 160}" y="${y + 250}" width="80" height="4" fill="${p.edge}"/>`;
+}
+
+// A remote box: a chassis with a server glyph and its host name, then one
+// chip per session. The selected session's chip carries the accent.
+function remoteBox(p, x, y, host) {
+  const w = 250;
+  const h = 44 + host.sessions.length * 32;
+  let out = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${p.raised}" stroke="${p.edge}" stroke-width="1.5"/>
+    <g stroke="${p.faint}" stroke-width="2" stroke-linecap="round">
+      <line x1="${x + 16}" y1="${y + 14}" x2="${x + 34}" y2="${y + 14}"/>
+      <line x1="${x + 16}" y1="${y + 20}" x2="${x + 34}" y2="${y + 20}"/>
+      <line x1="${x + 16}" y1="${y + 26}" x2="${x + 34}" y2="${y + 26}"/>
+    </g>
+    <text x="${x + 44}" y="${y + 24}" font-family="${mono}" font-size="13" font-weight="700" fill="${p.fg}">${host.host}</text>
+    <text x="${x + w - 12}" y="${y + 24}" text-anchor="end" font-family="${sans}" font-size="11" fill="${p.faint}">supervisor</text>`;
+  host.sessions.forEach((s, i) => {
+    const yy = y + 38 + i * 32;
+    const stroke = s.selected ? p.accent : p.edge;
+    const fill = s.selected ? p.accentFill : "none";
+    out += `<rect x="${x + 12}" y="${yy}" width="${w - 24}" height="26" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="${s.selected ? 2 : 1}"/>
+      <rect x="${x + 22}" y="${yy + 8}" width="12" height="10" rx="2" fill="none" stroke="${p.faint}" stroke-width="1.5"/>
+      <path d="M${x + 25} ${yy + 11}l2 2-2 2" fill="none" stroke="${p.faint}" stroke-width="1.2"/>
+      ${statusDot(x + 46, yy + 13, s.mark)}
+      <text x="${x + 56}" y="${yy + 17}" font-family="${sans}" font-size="12" fill="${p.fg}">${s.title}</text>`;
+  });
+  return out;
+}
+
+// An ssh link between the laptop and a box: a line with a padlock on it and
+// the word ssh, no arrowheads, because the connection is the helm's to make
+// but the traffic goes both ways.
+function sshLink(p, x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${p.faint}" stroke-width="2"/>
+    <rect x="${mx - 22}" y="${my - 11}" width="44" height="22" rx="11" fill="${p.raised}" stroke="${p.edge}"/>
+    <rect x="${mx - 14}" y="${my - 2}" width="9" height="7" rx="1.5" fill="${p.faint}"/>
+    <path d="M${mx - 12} ${my - 2}v-2.5a2.5 2.5 0 0 1 5 0v2.5" fill="none" stroke="${p.faint}" stroke-width="1.5"/>
+    <text x="${mx - 1}" y="${my + 4}" font-family="${mono}" font-size="11" fill="${p.dim}">ssh</text>`;
+}
+
+// Captions are centred under their subject; the laptop's is 50px from the
+// drawing's left edge, so a caption line has to stay under about 400px at
+// 13px sans (roughly 55 characters) or its start gets clipped, which the
+// first draft's second line did.
+function howItWorksSvg(p) {
+  const W = 960;
+  const H = 400;
+  const lapX = 50;
+  const lapY = 30;
+  const boxX = 660;
+  const box1Y = 30;
+  const box2Y = 30 + 44 + 3 * 32 + 30;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" role="img"
+  aria-label="How Farhelm works: the helm runs on your laptop and shows every session from every host in one list; it reaches a supervisor on each remote box over ssh; the selected session's real terminal fills the pane.">
+  ${sshLink(p, lapX + 412, lapY + 110, boxX, box1Y + 60)}
+  ${sshLink(p, lapX + 412, lapY + 170, boxX, box2Y + 50)}
+  ${laptop(p, lapX, lapY)}
+  ${remoteBox(p, boxX, box1Y, fleet[0])}
+  ${remoteBox(p, boxX, box2Y, fleet[1])}
+  <text x="${lapX + 200}" y="${lapY + 300}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">your laptop: the helm, its UI, and a local supervisor</text>
+  <text x="${lapX + 200}" y="${lapY + 320}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">every host's sessions in one list, one real terminal</text>
+  <text x="${boxX + 125}" y="${H - 28}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">any Linux box you can ssh to:</text>
+  <text x="${boxX + 125}" y="${H - 10}" text-anchor="middle" font-family="${sans}" font-size="13" fill="${p.dim}">a supervisor that owns its sessions' terminals</text>
+</svg>
+`;
+}
+
 // The standalone wordmark lives beside the app icon it is drawn to match, so
 // anyone looking for the brand marks finds both in one place.
 const brandDir = join(here, "..", "..", "packaging", "farhelm-desktop");
@@ -235,5 +403,6 @@ const brandDir = join(here, "..", "..", "packaging", "farhelm-desktop");
 for (const [theme, p] of Object.entries(palettes)) {
   writeFileSync(join(here, `header-${theme}.svg`), headerSvg(p));
   writeFileSync(join(here, `pillars-${theme}.svg`), pillarsSvg(p));
+  writeFileSync(join(here, `how-it-works-${theme}.svg`), howItWorksSvg(p));
   writeFileSync(join(brandDir, `wordmark-${theme}.svg`), wordmarkSvg(p));
 }
