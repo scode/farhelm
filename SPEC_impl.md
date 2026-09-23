@@ -1277,17 +1277,18 @@ failure can leave private evidence, but cannot authorize another directory move.
   reach the session's owned live pane and contain exactly one native executable whose basename is `codex`. The pane
   anchor itself is exempt from intermediary classification; additional surviving launch wrappers above Codex are not.
   This deliberately rejects some multi-layer package-manager launchers that older builds accepted. The supported process
-  chains are documented in [the Codex integration](docs/harnesses/codex.md). The reporter must spell the installed hook
-  invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor still accepts older hooks),
-  and every other non-Codex link except the pane anchor must be a narrow shell trampoline directly invoking it
-  (`sh -c '<farhelm> internal
-  hook …'` — the shape vendor hook runners produce) as exactly one simple command: any
-  unquoted control operator, redirection, substitution, or other executable shell syntax refuses even when the hook
-  comes first, while metacharacters inside quoted paths stay literal; another session-hosting runtime or any
-  unclassified intermediary (interactive shell, script, chained command, unreadable argv) refuses. Argv classifies
-  honest trampolines only: a descendant forging the exact hook shape is outside the attribution model. Unavailable
-  process evidence refuses the report without changing the current identity. This is attribution under inherited
-  credentials, not a security boundary against the same Unix user. Renamed native executables are not recognized.
+  chains are documented in [the Codex integration](website/src/content/docs/docs/harnesses/codex.md). The reporter must
+  spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
+  still accepts older hooks), and every other non-Codex link except the pane anchor must be a narrow shell trampoline
+  directly invoking it (`sh -c '<farhelm> internal
+  hook …'` — the shape vendor hook runners produce) as exactly one
+  simple command: any unquoted control operator, redirection, substitution, or other executable shell syntax refuses
+  even when the hook comes first, while metacharacters inside quoted paths stay literal; another session-hosting runtime
+  or any unclassified intermediary (interactive shell, script, chained command, unreadable argv) refuses. Argv
+  classifies honest trampolines only: a descendant forging the exact hook shape is outside the attribution model.
+  Unavailable process evidence refuses the report without changing the current identity. This is attribution under
+  inherited credentials, not a security boundary against the same Unix user. Renamed native executables are not
+  recognized.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -1408,7 +1409,7 @@ failure can leave private evidence, but cannot authorize another directory move.
   injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Claude's scan remains
   the fallback when no report has been accepted; Codex requires attributed reporting and does not infer ownership from
   nearby rollout files. An accepted report dominates scan-derived state, including ambiguity.
-  `docs/agent-hook-injection.md` is the user-facing account of the same mechanism.
+  `website/src/content/docs/docs/concepts/agent-hook-injection.md` is the user-facing account of the same mechanism.
 
   Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
   cannot take a per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each
@@ -1713,14 +1714,14 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit; a
   literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
   upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
-  id it receives, as documented in `docs/harnesses/omp.md`). `--thinking <effort>` carries the seven-level list (`off`
-  through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the YOLO/Approve choices
-  while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO default is rewritten on.
-  SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's
-  "P" at sidebar size. Resolving `SourceProfile` snapshots while draining remote sessions discovers catalog state only:
-  those observations never select the helm-wide remembered default. A successful profile-backed create through the
-  user's REST surface alone writes that default; agent-relay creates and clones do not, so an agent's work cannot change
-  the profile the user's next dialog suggests.
+  id it receives, as documented in `website/src/content/docs/docs/harnesses/omp.md`). `--thinking <effort>` carries the
+  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
+  YOLO/Approve choices while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO
+  default is rewritten on. SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen
+  so it cannot read as Pi's "P" at sidebar size. Resolving `SourceProfile` snapshots while draining remote sessions
+  discovers catalog state only: those observations never select the helm-wide remembered default. A successful
+  profile-backed create through the user's REST surface alone writes that default; agent-relay creates and clones do
+  not, so an agent's work cannot change the profile the user's next dialog suggests.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

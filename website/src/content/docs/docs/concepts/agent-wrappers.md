@@ -1,4 +1,7 @@
-# Agent wrappers
+---
+title: Agent wrappers
+description: Running agents through a wrapper that changes directory and stays resident as the agent's parent.
+---
 
 Some environments do not start agents directly; they start a wrapper — `wrapper run <dir> <agent...>` — that `cd`s into
 the directory, does whatever bookkeeping it manages there, and runs the agent as a child while staying resident as its
@@ -57,9 +60,10 @@ A profile always states its kind — the field is part of the profile, and `gene
 Farhelm never second-guesses it: a generic profile whose invocation happens to start with `claude` stays generic,
 because that is what you picked. Basename derivation is the RAW-create rule, for a session started from a command line
 rather than a profile: the basename of the first word, exact equality, `claude` is Claude, `codex` is Codex, everything
-else generic. It is deliberately dumb rather than clever (see [docs/agent-hook-injection.md](agent-hook-injection.md))
-because the shapes it would have to be clever about — wrappers, `env`, a command buried in a `bash -c` script string —
-cannot be recognized reliably, and the kind field is there so nothing has to try.
+else generic. It is deliberately dumb rather than clever (see
+[Agent hook injection](/docs/concepts/agent-hook-injection/)) because the shapes it would have to be clever about —
+wrappers, `env`, a command buried in a `bash -c` script string — cannot be recognized reliably, and the kind field is
+there so nothing has to try.
 
 A wrapper profile left at generic launches and runs fine — no error, no warning. What it silently does not get is
 conversation-identity capture, the hook flags, per-agent status sharpening, and the resume that follows from them.
@@ -70,12 +74,12 @@ SPEC.md's verbatim fallback, and it is the one thing a generic profile does stil
 ## What the wrapper must pass through
 
 Farhelm appends exactly one thing to the END of the agent command line: the hook flags described in
-[docs/agent-hook-injection.md](agent-hook-injection.md), on a launch whose kind is integrated and whose argv qualifies —
-that document's table lists the shapes that disqualify it (a bare `--` anywhere, an existing `--settings`, codex hook
-configuration of your own), and a wrapper's own arguments are part of the argv those checks look at. A resume is not an
-exception to any of that. The resume invocation is a complete command line in its own right — farhelm replaces its
-`{conversation}` element and runs THAT instead of the launch invocation, which is why the wrapper has to appear in it
-too — and the hook flags go on the end of it exactly as they go on the end of any other qualifying launch.
+[Agent hook injection](/docs/concepts/agent-hook-injection/), on a launch whose kind is integrated and whose argv
+qualifies — that document's table lists the shapes that disqualify it (a bare `--` anywhere, an existing `--settings`,
+codex hook configuration of your own), and a wrapper's own arguments are part of the argv those checks look at. A resume
+is not an exception to any of that. The resume invocation is a complete command line in its own right — farhelm replaces
+its `{conversation}` element and runs THAT instead of the launch invocation, which is why the wrapper has to appear in
+it too — and the hook flags go on the end of it exactly as they go on the end of any other qualifying launch.
 
 So the hook flags are what a wrapper must forward, and one that treats everything after its own arguments as the command
 to run, verbatim, does. A wrapper that parses trailing options as its own eats them first, and the symptom is indirect:
