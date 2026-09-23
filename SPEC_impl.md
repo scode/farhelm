@@ -874,9 +874,10 @@ remote party a direct, unbounded write channel to the operator's own terminal, e
 drains continuously (a full stderr pipe would wedge the child), caps each line, stops logging after a per-connection
 budget while still draining, and Debug-escapes what it does log — the same treatment the supervisor gives tmux's exit
 reasons, for the same reason. Peer-supplied error text is normalized the same way wherever it is logged or retained in a
-host's state, and repeated identical failures stop being logged after a few, with the suppressed count reported by the
-next different one — a host that is down, or a peer that errors on every refresh, must not be able to write the log
-indefinitely.
+host's state. Host-manager diagnostics may be noisy and may repeat indefinitely: every failed attempt and refresh
+remains in the stderr trail, including a peer that returns the same error on every refresh. A collision check still
+emits one summary event for that refresh, rather than one event per colliding row. The SSH stderr relay's separate
+per-connection budget still bounds which child lines it logs while it continues draining the pipe.
 
 The hello's two free-text fields carry generous LENGTH caps checked at handshake decode (256 bytes each): both are
 retained for the connection's whole life by the peer's counterpart, so an unbounded one is a memory cost a peer chooses

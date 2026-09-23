@@ -703,26 +703,6 @@ pub fn peer_text_capped(text: &str, cap: usize) -> String {
     }
 }
 
-/// How many times one repeated failure is logged before this actor falls
-/// silent about it.
-///
-/// A host that is down produces the same failure at every re-probe,
-/// forever; a peer that answers every refresh with an error produces one
-/// every few seconds. Neither is news after the first time, and both would
-/// otherwise be an unbounded log the peer's own behavior is writing. The
-/// count is not lost — the next DIFFERENT failure reports how many were
-/// suppressed — so nothing becomes invisible, it merely stops repeating.
-const REPEATED_FAILURE_LOG_LIMIT: u64 = 3;
-
-/// One failure text and how many times it has repeated since it was last
-/// reported — the state behind [`HostActor::note_failure`].
-#[derive(Default)]
-struct RepeatedFailure {
-    text: String,
-    seen: u64,
-    suppressed: u64,
-}
-
 // ---- Session refresh -------------------------------------------------
 
 /// One host's list as a refresh drained it: the rows, and whether the
@@ -1619,7 +1599,6 @@ impl ConnectionManager {
             cadence: self.cadence.clone(),
             status: Arc::clone(&status),
             destination: Mutex::new(display_destination(&row)),
-            last_failure: Mutex::new(RepeatedFailure::default()),
             cache_lock: Arc::clone(&cache_lock),
             seed_epoch: Arc::clone(&seed_epoch),
             incarnations: Arc::clone(&self.incarnations),
@@ -2722,9 +2701,6 @@ struct HostActor {
     /// attempts were going is not one — while the row itself is owned by
     /// [`Self::run`]'s stack and the logging happens several frames down.
     destination: Mutex<String>,
-    /// The last failure this actor logged, and how many identical ones it
-    /// has swallowed since — see [`Self::note_failure`].
-    last_failure: Mutex<RepeatedFailure>,
     /// Shared with the manager: held across every cache write so a refresh
     /// and a create's seed cannot interleave. See [`ActorHandle::cache_lock`].
     cache_lock: Arc<tokio::sync::Mutex<()>>,
@@ -3121,18 +3097,12 @@ impl HostActor {
             };
             match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
-                    // A host that is down says the same thing at every
-                    // re-probe, forever; the trail wants the failure, not a
-                    // line per probe for the rest of the process's life.
-                    if let Some(suppressed) = self.note_failure(error) {
-                        warn!(
-                            attempt,
-                            destination = %self.destination(),
-                            error = error.as_str(),
-                            suppressed,
-                            "host connection attempt failed"
-                        );
-                    }
+                    warn!(
+                        attempt,
+                        destination = %self.destination(),
+                        error = error.as_str(),
+                        "host connection attempt failed"
+                    );
                     last = Some(outcome);
                 }
                 _ => return outcome,
@@ -3213,16 +3183,12 @@ impl HostActor {
                     .find_map(VersionSkew::cause_of)
                 {
                     // Every PEER-SUPPLIED string here goes through
-                    // `peer_text`, and the whole line through the
-                    // repeated-failure suppressor. Both were missing and
-                    // both mattered: a build version is arbitrary bytes the
+                    // `peer_text`. Bounding and escaping both matter: a
+                    // build version is arbitrary bytes the
                     // far end chose, rendered straight onto an operator's
                     // terminal, so an escape sequence in it could repaint or
                     // hide what the operator was reading — a length cap
-                    // bounds how much, not what. And the re-probe cadence
-                    // repeats this refusal forever, outside the suppression
-                    // every other repeated failure obeys, so one skewed host
-                    // would write the log by itself.
+                    // bounds how much, not what.
                     //
                     // The payload's own `Display` still rides along (escaped
                     // like the rest): it is the refusal exactly as the
@@ -3234,17 +3200,14 @@ impl HostActor {
                     // needs.
                     let peer_build = peer_text(&skew.peer_build);
                     let sentence = peer_text(&skew.to_string());
-                    if let Some(suppressed) = self.note_failure(&sentence) {
-                        warn!(
-                            peer_protocol = skew.peer_protocol,
-                            peer_build = peer_build.as_str(),
-                            our_protocol = skew.our_protocol,
-                            destination = %self.destination(),
-                            skew = sentence.as_str(),
-                            suppressed,
-                            "the host's supervisor refused the hello: protocol version skew"
-                        );
-                    }
+                    warn!(
+                        peer_protocol = skew.peer_protocol,
+                        peer_build = peer_build.as_str(),
+                        our_protocol = skew.our_protocol,
+                        destination = %self.destination(),
+                        skew = sentence.as_str(),
+                        "the host's supervisor refused the hello: protocol version skew"
+                    );
                     return AttemptOutcome::Skew(skew.clone());
                 }
                 // An ssh channel that closed before a single byte of
@@ -3642,18 +3605,14 @@ impl HostActor {
                 // one is both logged and retained in the connected state
                 // until the next refresh replaces it. Bounded and escaped
                 // once, here, so neither copy carries megabytes or control
-                // bytes (see `peer_text`), and rate-limited so a host
-                // erroring on every tick cannot write the log itself.
+                // bytes (see `peer_text`).
                 let error = peer_text(&format!("{error:#}"));
-                if let Some(suppressed) = self.note_failure(&error) {
-                    warn!(
-                        error = error.as_str(),
-                        supervisor_internal = internal,
-                        destination = %self.destination(),
-                        suppressed,
-                        "refreshing the host's session list failed; keeping the previous cache"
-                    );
-                }
+                warn!(
+                    error = error.as_str(),
+                    supervisor_internal = internal,
+                    destination = %self.destination(),
+                    "refreshing the host's session list failed; keeping the previous cache"
+                );
                 return RefreshStep {
                     health: RefreshHealth::Failed { error },
                     end_connection: None,
@@ -3755,28 +3714,17 @@ impl HostActor {
                 let CacheReplacement { contested, changed } = replacement;
                 debug!(sessions, changed, "replaced the host's cached session list");
                 if let Some(sample) = contested.first() {
-                    // ONE bounded line per refresh, not one per colliding
-                    // row per tick: a host reporting a thousand ids that
-                    // another host owns would otherwise write a thousand
-                    // warnings every few seconds, which is a log a peer
-                    // gets to compose. Routed through the same suppressor
-                    // every other repeated failure obeys, and the sample is
+                    // ONE summary line per refresh, not one per colliding
+                    // row: a host reporting a thousand ids that another
+                    // host owns still produces one event. The sample is
                     // escaped because it is the peer's text.
-                    let summary = format!(
-                        "{} session id(s) claimed by another host, e.g. {}",
-                        contested.len(),
-                        peer_text(sample)
+                    warn!(
+                        collisions = contested.len(),
+                        sample = peer_text(sample).as_str(),
+                        destination = %self.destination(),
+                        "this host reports session ids another host's cache already claims; \
+                         the first claim holds and these rows were dropped"
                     );
-                    if let Some(suppressed) = self.note_failure(&summary) {
-                        warn!(
-                            collisions = contested.len(),
-                            sample = peer_text(sample).as_str(),
-                            destination = %self.destination(),
-                            suppressed,
-                            "this host reports session ids another host's cache already claims; \
-                             the first claim holds and these rows were dropped"
-                        );
-                    }
                 }
                 RefreshStep {
                     health: RefreshHealth::Ok { sessions },
@@ -3796,15 +3744,12 @@ impl HostActor {
                 // failure string is easier to reason about than two, and a
                 // store error can quote an identity the peer supplied.
                 let error = peer_text(&format!("{error:#}"));
-                if let Some(suppressed) = self.note_failure(&error) {
-                    warn!(
-                        error = error.as_str(),
-                        identity_superseded = superseded,
-                        destination = %self.destination(),
-                        suppressed,
-                        "caching the host's session list failed; keeping the previous cache"
-                    );
-                }
+                warn!(
+                    error = error.as_str(),
+                    identity_superseded = superseded,
+                    destination = %self.destination(),
+                    "caching the host's session list failed; keeping the previous cache"
+                );
                 RefreshStep {
                     health: RefreshHealth::Failed { error },
                     end_connection: superseded
@@ -4089,36 +4034,6 @@ impl HostActor {
         self.wait_or_nudge(nudge, wait)
             .await
             .is_some_and(|nudge| nudge.fresh_window)
-    }
-
-    /// Whether this failure is worth a log line, and how many identical
-    /// ones were suppressed since the last one that was.
-    ///
-    /// `Some(suppressed)` means log it; `None` means stay quiet. The
-    /// suppression is deliberately keyed on the TEXT rather than on a
-    /// timer: a host that is down repeats one message forever, a peer
-    /// erroring on every refresh repeats one message every few seconds, and
-    /// in both cases the fourth identical line has told the operator
-    /// nothing the first three did not. A CHANGED failure always logs, and
-    /// carries the count of what it displaced, so a run of suppressed lines
-    /// is visible as a number rather than as a silence.
-    fn note_failure(&self, text: &str) -> Option<u64> {
-        let mut last = self.last_failure.lock().expect("failure mutex poisoned");
-        if last.text == text {
-            last.seen += 1;
-            if last.seen <= REPEATED_FAILURE_LOG_LIMIT {
-                return Some(0);
-            }
-            last.suppressed += 1;
-            return None;
-        }
-        let suppressed = last.suppressed;
-        *last = RepeatedFailure {
-            text: text.to_string(),
-            seen: 1,
-            suppressed: 0,
-        };
-        Some(suppressed)
     }
 
     /// This actor's current destination, for the log line being written.
@@ -8135,17 +8050,14 @@ mod tests {
         );
     }
 
-    /// A peer's own error text is BOUNDED and ESCAPED before it is logged
-    /// or retained, and a peer that repeats itself cannot write the log.
+    /// Preserve the diagnostic trail for a peer that returns the same hostile error on every refresh.
     ///
     /// The wire's frame cap is measured in megabytes and a connected host
-    /// refreshes every few seconds, so an unfiltered `Error.message` is
-    /// three problems at once: a per-host retention leak (the state holds
-    /// it until the next refresh), a log flood, and — since a log line
-    /// lands in an operator's terminal emulator — a way for a remote party
-    /// to emit escape sequences into it.
+    /// refreshes every few seconds. This test checks both independent
+    /// boundaries: retained and logged peer text stays safe to display, and
+    /// every repeated failure remains available in the diagnostic trail.
     #[farhelm_testtrace::test(start_paused = true)]
-    async fn a_hostile_error_message_is_bounded_escaped_and_not_repeated() {
+    async fn a_hostile_error_message_is_bounded_escaped_and_logged_repeatedly() {
         let captured = crate::test_capture::current();
         let fixture = fixture(Cadence::default(), |store, transport| async move {
             let host = store
@@ -8199,17 +8111,68 @@ mod tests {
             "a cut message must say so: {error:?}"
         );
 
-        // Many more failing refreshes, all identical: the log must not
-        // grow with them.
-        tokio::time::advance(REFRESH_INTERVAL * 20).await;
-        tokio::task::yield_now().await;
-        let logged = crate::test_capture::matching(&captured, "refreshing the host's session list")
-            .into_iter()
-            .filter(|event| event.field("destination") == Some("shouty.example"))
-            .count() as u64;
-        assert!(
-            logged <= REPEATED_FAILURE_LOG_LIMIT,
-            "an identical failure must stop being logged, got {logged} lines"
+        // A failed refresh publishes the actor status after logging its
+        // error. Wait for that publication before advancing the next tick:
+        // one scheduler yield cannot prove the scripted peer answered.
+        let mut status = {
+            let actors = fixture
+                .manager
+                .actors
+                .lock()
+                .expect("actor map mutex poisoned");
+            actors
+                .actors
+                .get(&host)
+                .expect("the host actor is running")
+                .status
+                .subscribe()
+        };
+        for completed in 1..=5 {
+            status.mark_unchanged();
+            tokio::time::advance(REFRESH_INTERVAL).await;
+            tokio::time::timeout(Duration::from_secs(1), status.changed())
+                .await
+                .expect("the next failed refresh must finish")
+                .expect("the host actor must keep publishing");
+            assert!(
+                matches!(
+                    &status.borrow_and_update().state,
+                    HostState::Connected {
+                        last_refresh: RefreshHealth::Failed { .. },
+                        ..
+                    }
+                ),
+                "the subscribed publication must be a failed refresh"
+            );
+            let logged =
+                crate::test_capture::matching(&captured, "refreshing the host's session list")
+                    .into_iter()
+                    .filter(|event| event.field("destination") == Some("shouty.example"))
+                    .count();
+            assert_eq!(logged, completed + 1, "each completed refresh logs once");
+        }
+        let refresh_events =
+            crate::test_capture::matching(&captured, "refreshing the host's session list")
+                .into_iter()
+                .filter(|event| event.field("destination") == Some("shouty.example"))
+                .collect::<Vec<_>>();
+        for event in &refresh_events {
+            let error = event
+                .field("error")
+                .expect("refresh diagnostics include error text");
+            assert!(
+                error.len() < PEER_TEXT_CAP * 2,
+                "logged peer text must be bounded"
+            );
+            assert!(
+                !error.contains('\u{1b}'),
+                "logged peer text must escape control bytes"
+            );
+        }
+        assert_eq!(
+            refresh_events.len(),
+            6,
+            "every failing refresh must be logged"
         );
     }
 

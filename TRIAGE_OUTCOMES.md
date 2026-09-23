@@ -27,7 +27,8 @@
 - Completion criteria: update the logging specification, remove the suppressor and its obsolete tests/comments, preserve
   safety bounds and meaningful diagnostic fields, and remove this feedback file and its index entry in the execution
   change.
-- Execution: `pending`.
+- Execution: implemented in change `qmvpwnuqnyswyztnzmqmlzyyvrxtkpvt` on bookmark `pr/triage-failure-diagnostics`;
+  [draft PR #887](https://github.com/scode/farhelm/pull/887/changes).
 
 ## folder-history-rename-unique-failure.md
 
