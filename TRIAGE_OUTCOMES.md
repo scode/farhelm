@@ -89,7 +89,8 @@
 - Completion criteria: malformed separator-free output reaches the fallback path, valid and empty-shell records retain
   their current behavior, focused parser coverage is added, and this feedback file and its index entry are removed in
   the execution change.
-- Execution: `pending`.
+- Execution: implemented in change `xtvwxywv` on bookmark `pr/getent-shell-fallback`;
+  [draft PR #896](https://github.com/scode/farhelm/pull/896/changes).
 
 ## helm-upload-fast-path-spin.md
 

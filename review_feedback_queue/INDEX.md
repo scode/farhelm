@@ -56,7 +56,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `getent-colonless-line-accepted-as-shell.md` — malformed colon-less getent output accepted as the login shell.
 - `normal-teardown-waits-unboundedly-on-detach.md` — ordinary teardown awaits detach with no timeout, parking ~60s on a
   wedged connection.
 - `quarantine-sweep-silently-aborts.md` — the quarantine sweep silently stops at the first unreadable entry.
