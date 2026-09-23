@@ -2450,7 +2450,7 @@ pub(crate) fn ListView(
                                 crate::LaunchPermission::Chat => "chat".to_string(),
                             });
                             preferences.0.write().remembered_permissions = word;
-                            if matches!(launch.harness, crate::LaunchHarness::Muse | crate::LaunchHarness::Pi)
+                            if matches!(launch.harness, crate::LaunchHarness::Codex | crate::LaunchHarness::Muse | crate::LaunchHarness::Pi)
                                 && let Some(trust) = launch.workspace_trust
                             {
                                 preferences.0.write().remembered_workspace_trust = Some(trust);

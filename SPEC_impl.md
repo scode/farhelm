@@ -102,11 +102,11 @@ permissions and workspace-trust choices are one preference the HELM keeps, in a 
 (`preferences`: `list_sort`, `last_selected`, `compact`, `remembered_permissions`, `remembered_workspace_trust`) behind
 `GET`/`PUT /api/preferences`, device-authenticated like every other route. The two remembered launch fields are written
 by the helm after a successful user structured launch; no shipped client PUTs them. Workspace trust changes only after
-an explicit Muse or Pi choice. An agent-originated create and an unsupported harness leave it alone. This makes the
-remembered values facts of accepted launches rather than claims from one client. Both clients read the row once after
-authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the sort
-control and the auto-select effect see the remembered values on their first run and no frame shows a default that is
-then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
+an explicit Codex, Muse, or Pi choice. An agent-originated create and an unsupported harness leave it alone. This makes
+the remembered values facts of accepted launches rather than claims from one client. Both clients read the row once
+after authentication — `PreferencesGate` holds the authenticated tree, rendering nothing, until the read lands, so the
+sort control and the auto-select effect see the remembered values on their first run and no frame shows a default that
+is then corrected. On desktop the IPC authentication gate already holds the tree and the read is one loopback hop, so
 nothing is visible; in the browser the first paint deliberately waits on that one round trip to the helm — a page with a
 valid credential used to paint its sidebar synchronously from localStorage — so the list never appears in an order that
 then changes. A write is a sparse patch naming only the field the user changed, merged per-field by the helm (an absent
@@ -1615,11 +1615,14 @@ complete selection, independently of their previous ephemeral cwd. Adoption purg
 suggestions with its other history; ordinary history rows retain their existing semantics.
 
 Schema 30 adds nullable `remembered_workspace_trust` to the preference row. The helm updates it in the same admitted
-create transaction as structured launch history, only for an explicit Muse or Pi choice from a user-originated create.
-Muse true adds `--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor
-settings. Pi true adds `--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. Unsupported
-harnesses reject an explicit trust value. The composer clears that value on a switch to an unsupported harness and
-restores it from the preference row on a fresh open or reset. Older selection JSON decodes without a trust choice.
+create transaction as structured launch history, only for an explicit Codex, Muse, or Pi choice from a user-originated
+create. Codex true and false compile to a whole-argv config marker. The supervisor fills it at the shared spawn seam,
+after any GitHub checkout has fixed the final cwd, with one `projects.<cwd>.trust_level` override set to `trusted` or
+`untrusted`. The cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse
+true adds `--trust-workspace`; Muse false adds no trust flag and cannot undo trust from `--yolo` or vendor settings. Pi
+true adds `--approve` and Pi false adds `--no-approve`, independent of Pi's YOLO tool mode. Unsupported harnesses reject
+an explicit trust value. The composer clears that value on a switch to an unsupported harness and restores it from the
+preference row on a fresh open or reset. Older selection JSON decodes without a trust choice.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order

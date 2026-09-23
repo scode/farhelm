@@ -327,22 +327,23 @@ checkout; the agent choice is independent of that destination:
   harness. A shared known model retains a selected owning harness, while an unselected ambiguous id asks for one.
   Replacing a harness clears only choices that are incompatible with it. An invalid combination cannot launch. New
   normally preselects no harness or model. The permissions mode remembers the last successful structured launch,
-  helm-wide across every client; an explicit workspace-trust choice on Muse or Pi is remembered separately after a
-  successful user launch. `trust:true` and `trust:false` are single search actions on those harnesses. Muse true uses
-  `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. The choice grants or declines
-  whether Muse bypasses its workspace prompt or Pi approves project-local content for one launch; it never writes vendor
-  trust state. Codex and Claude can still ask for directory trust; Farhelm does not silently answer their prompts.
-  Codex's per-run project override needs the final resolved working directory, which a fresh checkout does not have when
-  the helm compiles launch argv. Other harnesses have no supported interactive workspace-trust switch. "reset choices"
-  returns both segments to their remembered values rather than to harness defaults, and a recent-setup row's own saved
-  choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by the
-  chosen harness, effort words offered by that harness and model, supported trust actions, host and name actions,
-  folders, and recent setups. `name:foo` applies the entire value as the session name. `host:foo` filters host choices,
-  and `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI is
-  `local (this machine)`. Accepting a result applies it and clears the box while keeping focus there. Enter on an empty
-  box launches only a complete, valid selection through the ordinary Launch path; Enter on a non-empty query with no
-  result never launches, and Escape closes the result list without clearing the query, so Enter after Escape does
-  nothing until the box is emptied.
+  helm-wide across every client; an explicit workspace-trust choice on Codex, Muse, or Pi is remembered separately after
+  a successful user launch. `trust:true` and `trust:false` are single search actions on those harnesses. Codex true and
+  false set that launch's exact working directory to `trusted` and `untrusted` through its per-run project
+  configuration; a fresh checkout's path is filled only after the supervisor has resolved it. Muse true uses
+  `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. Each setting applies to one
+  launch and never writes vendor trust state; Muse false adds no flag and cannot revoke trust from YOLO or vendor
+  settings. Without a choice, the harness retains its own trust behavior; Codex, Muse, and Claude may still ask for
+  directory trust. Farhelm does not silently answer their prompts. Claude, Goose, OMP, and Cursor have no supported
+  interactive workspace-trust switch. "reset choices" returns both segments to their remembered values rather than to
+  harness defaults, and a recent-setup row's own saved choice overrides it when used. The launch-composer search matches
+  harnesses, `other / command`, models scoped by the chosen harness, effort words offered by that harness and model,
+  supported trust actions, host and name actions, folders, and recent setups. `name:foo` applies the entire value as the
+  session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias.
+  The default local host label in the GUI is `local (this machine)`. Accepting a result applies it and clears the box
+  while keeping focus there. Enter on an empty box launches only a complete, valid selection through the ordinary Launch
+  path; Enter on a non-empty query with no result never launches, and Escape closes the result list without clearing the
+  query, so Enter after Escape does nothing until the box is emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
   replaces only the model, effort, permissions, and workspace-trust controls with the profile picker and raw invocation
   field. Existing callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not

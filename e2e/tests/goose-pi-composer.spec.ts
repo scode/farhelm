@@ -92,11 +92,11 @@ test("Goose and Pi permission transitions update the rendered draft", async ({ p
 
 /**
  * Workspace trust is a separate draft choice from Pi's YOLO tool mode. Search
- * and buttons must agree, and changing to Codex must hide and clear the
- * project-content choice before a later launch can submit it. Muse must also
- * explain that false cannot reverse the trust implied by YOLO.
+ * and buttons must agree across Pi and Codex. Changing to Claude must clear
+ * the choice before a later launch can submit it. Muse must also explain that
+ * false cannot reverse the trust implied by YOLO.
  */
-test("workspace trust stays explicit and scoped to Muse and Pi", async ({ page, request }) => {
+test("workspace trust stays explicit and scoped to supported harnesses", async ({ page, request }) => {
   await patchPreferences(request, { remembered_workspace_trust: false });
   try {
     await page.goto("/");
@@ -118,6 +118,13 @@ test("workspace trust stays explicit and scoped to Muse and Pi", async ({ page, 
     await expect(permissions.getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
 
     await harnesses.getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(trust.getByRole("button", { name: "true", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(trust.locator(".launch-composer-choice-help")).toContainText("false runs it as untrusted");
+    await search.fill("trust:false");
+    await form.getByRole("option", { name: "Trust workspace: false", exact: true }).click();
+    await expect(trust.getByRole("button", { name: "false", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+    await harnesses.getByRole("button", { name: "Claude", exact: true }).click();
     await expect(trust).toHaveCount(0);
     await search.fill("trust:false");
     await expect(form.getByRole("option", { name: "Trust workspace: false", exact: true })).toHaveCount(0);

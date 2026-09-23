@@ -4762,7 +4762,7 @@ impl HelmStore {
     /// piggyback on this same admitted-create transaction: when `entry` is
     /// a structured launch, its permissions choice (one of the released
     /// permission words, or absent) becomes the helm-wide
-    /// `preferences.remembered_permissions` memory. An explicit Muse or Pi
+    /// `preferences.remembered_permissions` memory. An explicit Codex, Muse, or Pi
     /// trust choice updates `remembered_workspace_trust` as well
     /// (SPEC.md's launch-composer carve-out). The caller passes `false` for
     /// an agent-relay-originated create (`sessions::CreateOrigin::Agent`):
@@ -5045,7 +5045,9 @@ impl HelmStore {
                 });
                 let workspace_trust = if matches!(
                     selection.harness,
-                    farhelm_proto::LaunchHarness::Muse | farhelm_proto::LaunchHarness::Pi
+                    farhelm_proto::LaunchHarness::Codex
+                        | farhelm_proto::LaunchHarness::Muse
+                        | farhelm_proto::LaunchHarness::Pi
                 ) {
                     selection.workspace_trust
                 } else {
@@ -6810,8 +6812,8 @@ mod tests {
             (
                 "unsupported",
                 3,
-                farhelm_proto::LaunchHarness::Codex,
-                None,
+                farhelm_proto::LaunchHarness::Claude,
+                Some(true),
                 true,
                 Some(false),
             ),
@@ -6824,8 +6826,16 @@ mod tests {
                 Some(false),
             ),
             (
-                "accept",
+                "codex",
                 5,
+                farhelm_proto::LaunchHarness::Codex,
+                Some(true),
+                true,
+                Some(true),
+            ),
+            (
+                "accept",
+                6,
                 farhelm_proto::LaunchHarness::Muse,
                 Some(true),
                 true,
