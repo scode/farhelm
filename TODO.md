@@ -60,6 +60,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - Bring the README overview/splash content into the main documentation.
 - Document the harness support feature matrix so supported and unsupported features are clear.
+- Answer "Is it vibe coded?" with a clear explanation.
 
 ## Tricky bugs
 
