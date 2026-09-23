@@ -41,6 +41,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Surface an `old version` status for hosts even when the supervisor and helm have no protocol version skew; reserve `needs update` for the incompatible-supervisor case.
 - Add an `update all` action that updates all remote hosts in one operation; details are TBD.
 - Modernize the interrupted-session view shown after the host running the supervisor or agents restarts. Make clear that the session must be restarted intentionally, then offer clean, Farhelm-styled `Restart` and `Replace` buttons instead of making the state look like a failure.
+- Restyle the typical session header's `Restart` button to match Farhelm's visual style. Consider moving the status indicator and session actions — Restart, Replace, Clone, Clone with, and related buttons — to a more visible bottom area while keeping the interface consistent; exact layout is TBD.
 
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each
   time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently
