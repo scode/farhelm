@@ -1103,7 +1103,7 @@ test("a row with unbroken oversized fields stays contained and stacked in the si
     // The second line names the rendered host even when locality is local;
     // the icon and text answer different questions and remain independently
     // truthful.
-    await expect(target.locator(".session-host")).toHaveText("this machine");
+    await expect(target.locator(".session-host")).toHaveText("local (this machine)");
     await expect(target.locator(".session-host-separator")).toHaveText(":");
     await expect(target).toHaveAttribute("data-host-locality", "local");
     await expect(target.locator(".host-kind-icon")).toHaveCount(1);
@@ -1152,7 +1152,7 @@ test("the host/directory line aligns under the title as one continuous string", 
     await page.goto("/");
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
-    await expect(target.locator(".session-host")).toHaveText("this machine");
+    await expect(target.locator(".session-host")).toHaveText("local (this machine)");
 
     const dot = (await target.locator(".session-status-slot").boundingBox())!;
     const title = (await target.locator(".session-title").boundingBox())!;
@@ -2882,7 +2882,7 @@ test("the host list counts every host, humanizes phases, and clips long names", 
   const entries = page.locator(".host-row");
   await expect(entries).toHaveCount(2, { timeout: 20_000 });
   await expect(page.locator(".host-count")).toHaveText("2 hosts");
-  await expect(entries.nth(0).locator(".host-name")).toHaveText("this machine");
+  await expect(entries.nth(0).locator(".host-name")).toHaveText("local (this machine)");
   await expect(entries.nth(0).locator(".host-status-label")).toHaveCount(0);
   await expect(entries.nth(1).locator(".host-status-label")).toHaveText(
     "unreachable, retrying",
@@ -2973,7 +2973,7 @@ test("a local session's host line is provisional until the registry confirms it"
     const target = row(page, session.id);
     await expect(target).toBeVisible({ timeout: 20_000 });
     await expect(target.locator(".session-host")).toBeVisible();
-    await expect(target.locator(".session-host")).toContainText("this machine");
+    await expect(target.locator(".session-host")).toHaveText("this machine");
     // Unconfirmed: the row names the host it already has, but draws no
     // locality glyph at all — asserting the local glyph here would be
     // exactly the invented claim `session_locality`'s `Unknown` case
@@ -2982,7 +2982,7 @@ test("a local session's host line is provisional until the registry confirms it"
     await expect(target.locator(".host-kind-icon")).toHaveCount(0);
 
     releaseHosts();
-    await expect(target.locator(".session-host")).toContainText("this machine");
+    await expect(target.locator(".session-host")).toHaveText("local (this machine)");
     // Confirmed: the name stays on the second line and the locality slot
     // gains the local glyph.
     await expect(target).toHaveAttribute("data-host-locality", "local");
@@ -5485,7 +5485,7 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
     // selection carries none.
     const permission = entry.selection.permissions ?? "default";
     const harness = entry.selection.harness === "claude" ? "Claude" : "Codex";
-    const expected = `${entry.cwd} · this machine · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
+    const expected = `${entry.cwd} · local (this machine) · ${harness} · model: ${entry.selection.model} · effort: High · permissions: ${permission}`;
     await expect(row).toHaveAttribute("title", expected);
     await expect(row).toHaveAccessibleName(expected);
     await expect(row.locator(".launch-composer-recent-harness")).toHaveText(harness);
@@ -5500,7 +5500,7 @@ test("composer recent slots appear only with matches, at fixed row geometry", as
   // Truncating the folder must not cost the host: it is its own cell, and a
   // clipped host would name the wrong machine.
   const host = firstRow.locator(".launch-composer-recent-destination .launch-composer-recent-host");
-  await expect(host).toHaveText("this machine");
+  await expect(host).toHaveText("local (this machine)");
   expect(await host.evaluate((span) => span.scrollWidth <= span.clientWidth), "the host cell must show its whole name beside a truncated folder").toBe(true);
   const rowBox = await firstRow.boundingBox();
   const harnessBox = await firstRow.locator(".launch-composer-recent-harness").boundingBox();
@@ -5628,8 +5628,8 @@ test("composer recent rows lead with the harness", async ({ page, request }) => 
   await expect(rows).toHaveCount(2);
   await expect(rows.locator(".launch-composer-recent-harness")).toHaveText(["Codex", "Claude"]);
   await expect(rows.locator(".launch-composer-recent-destination")).toHaveText([
-    `${cwd} · this machine`,
-    `${cwd} · this machine`,
+    `${cwd} · local (this machine)`,
+    `${cwd} · local (this machine)`,
   ]);
 });
 
@@ -5675,10 +5675,10 @@ test("composer recent rows list only explicit choices, in aligned columns", asyn
   // The complete description survives where it always was.
   await expect(rows.nth(1)).toHaveAttribute(
     "title",
-    `${cwd} · this machine · Claude · model: default · effort: default · permissions: default`,
+    `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: default`,
   );
   await expect(rows.nth(1)).toHaveAccessibleName(
-    `${cwd} · this machine · Claude · model: default · effort: default · permissions: default`,
+    `${cwd} · local (this machine) · Claude · model: default · effort: default · permissions: default`,
   );
 
   for (const cell of [".launch-composer-recent-folder", ".launch-composer-recent-host", ".launch-composer-recent-selection"]) {
@@ -5710,7 +5710,7 @@ test("composer recent rows list only explicit choices, in aligned columns", asyn
  * the same string in every row. A grid hands its fixed-maximum tracks their
  * width before a flexible one gets any, so the folder on a flexible track was
  * the first cell to reach zero width in a narrow window, leaving rows that
- * read "Codex   this machine   …" with no folder at all. The phone layout
+ * read "Codex   local (this machine)   …" with no folder at all. The phone layout
  * drops the host cell by hiding it, which must not change the destination's
  * TEXT: other tests and the accessible description rely on "folder · host". */
 test("a phone-width recent row shows its folder and hides its host", async ({ page, request }) => {
@@ -5737,7 +5737,7 @@ test("a phone-width recent row shows its folder and hides its host", async ({ pa
   expect(folderBox!.width, "the folder must keep real width, not collapse behind the fixed tracks").toBeGreaterThan(40);
 
   await expect(recent.locator(".launch-composer-recent-host")).toBeHidden();
-  await expect(recent.locator(".launch-composer-recent-destination")).toHaveText(`${cwd} · this machine`);
+  await expect(recent.locator(".launch-composer-recent-destination")).toHaveText(`${cwd} · local (this machine)`);
   const rowBox = (await recent.boundingBox())!;
   const selectionBox = (await recent.locator(".launch-composer-recent-selection").boundingBox())!;
   expect(selectionBox.x + selectionBox.width, "the choices cell must end inside the row").toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
@@ -5767,7 +5767,7 @@ test("composer search recents keep complete 44px two-line rows", async ({ page, 
     await expect(recents.nth(index).locator(".launch-composer-search-recent-destination")).toHaveCSS("display", "block");
     await expect(recents.nth(index).locator(".launch-composer-search-recent-selection")).toHaveCSS("display", "block");
     const suffix = index ? "two" : "one";
-    const expected = `${cwd}${suffix} · this machine · Codex · model: model-${suffix} · effort: High · permissions: yolo`;
+    const expected = `${cwd}${suffix} · local (this machine) · Codex · model: model-${suffix} · effort: High · permissions: yolo`;
     await expect(recents.nth(index)).toHaveAttribute("title", expected);
     await expect(recents.nth(index)).toHaveAccessibleName(`Recent setup: ${expected}`);
   }
@@ -5838,7 +5838,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   const recentSlots = form.locator(".launch-composer-recent-slots > button");
   const allConflictRecent = recentSlots.filter({ hasText: "fixture-codex-all-conflict" });
   const savedHighEffortRecent = form.locator(".launch-composer-recent-slots").getByTitle(
-    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: High · permissions: yolo",
+    "/composer-reset · local (this machine) · Codex · model: fixture-codex-low-only · effort: High · permissions: yolo",
     { exact: true },
   );
   // With only the harness selected, remembered explicit values are candidates.
@@ -5855,7 +5855,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(custom).toHaveValue("harness default");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · local (this machine) · /composer-reset");
   await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
   await expect(form.locator(".launch-composer-summary .launch-composer-danger")).toHaveText("yolo");
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
@@ -5869,7 +5869,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveCount(0);
   const ordinaryRecent = form.locator(".launch-composer-recent-slots").getByTitle(
-    "/composer-reset · this machine · Codex · model: fixture-codex-low-only · effort: Low · permissions: yolo",
+    "/composer-reset · local (this machine) · Codex · model: fixture-codex-low-only · effort: Low · permissions: yolo",
     { exact: true },
   );
   await expect(ordinaryRecent, "the Codex recent remains available while its notice is visible").toBeVisible();
@@ -5879,7 +5879,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator("select.create-session-host")).toHaveValue("1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
-  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
+  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("local (this machine)");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /low$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -5902,7 +5902,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(custom).toHaveValue("harness default");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · this machine · /composer-reset");
+  await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · local (this machine) · /composer-reset");
   await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
 
   await refill();
@@ -5912,7 +5912,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(status).toContainText("not in Farhelm's offering for that model or harness");
   await expect(custom).toHaveValue("harness default");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: default · permissions: yolo · trust: default");
 
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
@@ -5942,7 +5942,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator("select.create-session-host")).toHaveValue("1");
   await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/composer-reset");
-  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("this machine");
+  await expect(form.locator(".launch-composer-launch-context .peer-value").nth(0)).toHaveText("local (this machine)");
   await expect(form.locator(".launch-composer-launch-context .peer-value").nth(1)).toHaveText("/composer-reset");
   await expect(custom).toHaveValue("restored-custom");
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
@@ -7019,7 +7019,7 @@ test("aliasing the local host shows it in the host panel", async ({ page, reques
   // stable across the very rename this test performs.
   const hostRow = page.locator(`[data-host-id="${localId}"]`);
   await expect(hostRow).toBeVisible({ timeout: 20_000 });
-  await expect(hostRow.locator(".host-name")).toHaveText("this machine");
+  await expect(hostRow.locator(".host-name")).toHaveText("local (this machine)");
 
   await openHostMenu(hostRow);
   await hostRow.locator(".host-alias").click();

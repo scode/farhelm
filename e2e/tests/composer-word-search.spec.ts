@@ -127,6 +127,57 @@ test("composer word search drives a structured launch", async ({ page, request }
 });
 
 /**
+ * Name and host labels are picker actions, so accepting them must change the
+ * visible draft without sending a create. The host action uses the same
+ * selector and focus contract by pointer and keyboard. The aliased-local
+ * identity case lives in the Rust search test; this browser fixture keeps
+ * the local row's default name.
+ */
+test("name and host labels apply one draft choice without launching", async ({ page }) => {
+  let creates = 0;
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() === "POST") creates += 1;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator('.create-session-form[role="dialog"]');
+  const search = form.locator('.launch-composer-search input[role="combobox"]');
+  const host = form.locator(".create-session-host");
+  const local = host.locator("option").filter({ hasText: "local (this machine)" });
+  const localId = await local.getAttribute("value");
+  expect(localId, "the local row must have a stable selector value").toBeTruthy();
+  const remote = host.locator("option").filter({ hasNotText: "local (this machine)" }).first();
+  const remoteId = await remote.getAttribute("value");
+  const remoteLabel = (await remote.textContent())?.trim();
+  expect(remoteId, "the fixture must offer another host to filter").toBeTruthy();
+  expect(remoteLabel).toBeTruthy();
+
+  await search.fill("name:fix: parser");
+  await expect(form.getByRole("option", { name: "Set session name: fix: parser", exact: true, selected: true }))
+    .toBeVisible();
+  await search.press("Enter");
+  await expect(form.getByLabel("name (optional)")).toHaveValue("fix: parser");
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+
+  await search.fill(`host:${remoteLabel}`);
+  await form.getByRole("option", { name: `Host: ${remoteLabel}`, exact: true }).click();
+  await expect(host).toHaveValue(remoteId!);
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+
+  await search.fill("host:local");
+  await expect(form.getByRole("option", { name: "Host: local (this machine)", exact: true, selected: true }))
+    .toBeVisible();
+  await search.press("Enter");
+  await expect(host).toHaveValue(localId!);
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  expect(creates, "search acceptance must not submit the form").toBe(0);
+});
+
+/**
  * An empty search is a launch shortcut only after the dialog has a valid
  * complete selection; an incomplete draft must keep the dialog open and make
  * no create request. The launch itself is asynchronous on the page side (the

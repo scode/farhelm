@@ -4110,9 +4110,10 @@ samp {
      setups apart (the host is the same string in every row). Hence its 12ch
      floor: host and choices shrink together first, and both are in the row's
      title. Below 560px there is no room for four cells at all and the host
-     goes; see the phone block. */
+     goes; see the phone block. The host cap must fit the GUI's unaliased
+     `local (this machine)` label at ordinary dialog width. */
   display: grid;
-  grid-template-columns: 9ch minmax(12ch, 1fr) minmax(0, 16ch) minmax(0, 34ch) 9ch;
+  grid-template-columns: 9ch minmax(12ch, 1fr) minmax(0, 22ch) minmax(0, 34ch) 9ch;
   align-items: center;
   column-gap: 2ch;
   font-size: 13px;

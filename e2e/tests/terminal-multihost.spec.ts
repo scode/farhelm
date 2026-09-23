@@ -661,7 +661,7 @@ test.describe("multi-host", () => {
     // The local row: named as itself, never as an address, and with no
     // management affordances — SPEC.md's "never a ghost, never needing
     // registration" is also a promise that it cannot be removed.
-    const local = hostRowByName(page, "this machine");
+    const local = hostRowByName(page, "local (this machine)");
     await expect(local).toHaveAttribute("data-host-phase", "connected");
     await expect(local).toHaveAttribute("data-host-kind", "local");
     // The host panel draws the same locality glyphs as the session row
@@ -1582,7 +1582,7 @@ test.describe("multi-host", () => {
 
     await page.goto("/");
     await openHostsPanel(page);
-    const local = hostRowByName(page, "this machine");
+    const local = hostRowByName(page, "local (this machine)");
     await expect(local).toHaveAttribute(
       "data-host-phase",
       "unreachable-reprobing",
@@ -3184,7 +3184,7 @@ test.describe("multi-host", () => {
       moved = true;
       feed.notify(2);
       await expect(page.locator(`[data-host-id="${local.id}"] .host-name`)).toHaveText(
-        "this machine",
+        "local (this machine)",
         { timeout: 15_000 },
       );
       await expect

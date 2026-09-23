@@ -415,6 +415,14 @@ activated item can leave the row's inside-focus bookkeeping populated — the te
 identity in the same pass, so its `onfocusout` never runs to clear it — and the dismissal must retire its toggle return
 for the transfer instead of issuing it after the composer's own search focus and stealing it back.
 
+The leading `name:` label offers one action carrying its whole value, including later colons. `host:` filters the same
+registry rows as the GUI selector; `host:local` uses the row's local kind rather than its mutable display name.
+Accepting either action does not launch and keeps search as the focus target. A host action also takes over a clone's
+inferred host and retires the old history destination and idempotency key, just as changing the host selector does. The
+GUI labels an unaliased local row `local (this machine)` in the selector, Hosts page, and confirmed-local session rows,
+while preserving aliases and the registry's own `this machine` name. A session row without confirmed locality retains
+the name supplied by the helm; the GUI does not infer locality from its text.
+
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
 client cannot currently confirm is left at the ordinary host default with a note explaining why, rather than risking a

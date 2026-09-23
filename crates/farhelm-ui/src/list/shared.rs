@@ -4,8 +4,7 @@
 //! row state and host identity.
 
 use crate::activity::ActivityStamp;
-use crate::hosts::{host_incarnation, is_connected, phase_display_label};
-use crate::peer::display_peer;
+use crate::hosts::{gui_host_name, host_incarnation, is_connected, phase_display_label};
 use crate::{Host, HostId, HostKind, Session, SessionStatus};
 
 /// The subset of `Session` `view::ListView`'s `on_delete` actually needs:
@@ -228,14 +227,15 @@ pub(super) struct HostOption {
 
 impl HostOption {
     /// What the `<option>` reads: the host's name, with its phase appended
-    /// when there is one to warn about.
+    /// when there is one to warn about. The unaliased local row uses the
+    /// `host:local` search word beside its familiar machine name.
     ///
     /// The name is [`display_peer`]'d for the reason every other rendering
     /// of a destination is — an option label is exactly the place where a
     /// directional override could make one host's row read as another's, and
     /// the choice made there is which machine a command runs on.
     pub(super) fn label(&self) -> String {
-        let name = display_peer(&self.name);
+        let name = gui_host_name(&self.name, self.local);
         match &self.phase {
             Some(phase) => format!("{name} ({phase})"),
             None => name,
@@ -796,15 +796,21 @@ pub(super) mod tests {
         );
     }
 
-    /// A non-connected option must SAY so in its label, and a connected one
-    /// must not be decorated.
+    /// A non-connected option names its phase, while local wording requires confirmed kind.
     ///
     /// Every host is selectable now, so the label is what keeps that from
     /// being a trap. The option uses humanized wording while the host row's
-    /// data attribute keeps the stable wire token used by selectors.
+    /// data attribute keeps the stable wire token used by selectors. An
+    /// aliased local row keeps its alias; a matching name without local
+    /// identity must not acquire the GUI's local prefix.
     #[farhelm_testtrace::test]
     fn an_option_label_names_the_phase_only_when_there_is_one_to_warn_about() {
-        assert_eq!(option(1, "this machine", true).label(), "this machine");
+        assert_eq!(
+            option(1, "this machine", true).label(),
+            "local (this machine)"
+        );
+        assert_eq!(option(1, "My Laptop", true).label(), "My Laptop");
+        assert_eq!(gui_host_name("this machine", false), "this machine");
         assert_eq!(
             option_in(2, "user@box", false, "unreachable, retrying").label(),
             "user@box (unreachable, retrying)"
