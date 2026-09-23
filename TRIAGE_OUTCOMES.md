@@ -920,6 +920,109 @@
   if it is deferred.
 - Execution: `pending`.
 
+## pane-pid-recycled-before-sweep-binds-identity.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Session delete, archive, stop, and restart
+  teardown paths pass a bare pane PID through asynchronous work before `reap_process_tree` captures its start time. If
+  the original pane exits and the operating system reuses that PID during the gap, the sweep can bind and terminate an
+  unrelated process tree. The downstream start-time checks then validate the replacement process's identity, so they do
+  not prevent this initial misbinding. The race is extremely rare, but its consequence is loss of unrelated user work on
+  the host.
+- Decision: the user chose the bounded code fix. Capture `(PID, start time)` at the initial pane liveness check, carry
+  that identity through delete, archive, stop, and restart teardown, and reject the pane root if the identity changes
+  before sweeping. Preserve the existing marker discovery and per-signal validation. This remains a simple localized
+  fix; defer it with a documented TODO blocker if implementation requires broader lifecycle redesign or scope creep.
+- Completion criteria: all affected teardown paths carry and validate the original process identity; a PID-reuse race
+  cannot make the sweep adopt an unrelated pane root; focused regression coverage proves both matching and changed
+  identities; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change, or
+  retain/narrow it with the documented deferral if the simplicity gate is reached.
+- Execution: `pending`.
+
+## refused-delete-discards-in-flight-upload.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Session Delete cancels and joins in-flight
+  uploads before its pane-ownership and checkout preflights. If one of those checks refuses the delete, the session row
+  survives but the upload has already been destroyed, so a refused operation can still lose user data.
+- Decision: the user chose the bounded code fix. Move upload cancellation below all refusal-prone read-only preflights
+  but keep it before destructive teardown. Preserve the existing cancellation behavior for successful deletion.
+- Completion criteria: a refused Delete preserves an in-flight upload; a successful Delete still cancels uploads before
+  removing the session; focused regression coverage proves both paths; remove this feedback file and its
+  `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## refused-retry-strands-credential-spec.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. A failed create can leave a 0600
+  Supervisor-side launch spec containing the full agent command, the per-session Supervisor credential, and any
+  user-supplied command-line secrets. A refused keyed retry removes the durable launch row and intent but leaves that
+  generation's spec until startup cleanup, extending retention after the failed launch is gone.
+- Decision: the user chose the bounded code fix. Reuse the existing per-generation launch-artifact cleanup after the
+  retry row removal, preserving the private permissions and ordinary retry behavior. No Helm credential is involved in
+  this finding, and no new lifecycle state is needed.
+- Completion criteria: refused retries remove the corresponding launch spec and sentinel; valid retries and ordinary
+  launch recovery retain their current behavior; focused regression coverage proves cleanup; remove this feedback file
+  and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## restart-kills-tabs-reports-present.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection. When the recorded agent pane is gone but its tmux session remains,
+  fresh-terminal restart calls `kill-session`, destroying the session's extra tabs and their processes, then publishes
+  the pre-kill tab list and leaves tab attachments watching dead panes. This violates the user-facing restart contract
+  and can destroy unsaved tab work.
+- Decision: the user chose the proper code fix: preserve the existing tmux session and replace only the agent window,
+  leaving extra tabs and their processes intact. The rough implementation shape is a third launch mode alongside pane
+  reuse and new-session creation: create and mark a replacement agent window, confirm it, then remove the old agent
+  window; if creation or marking fails, clean up only the replacement and retain the existing session. The existing
+  `new_window` and `kill_window` primitives should support this without a lifecycle redesign.
+- Completion criteria: fresh-terminal restart replaces only the agent window; tabs and their attachments survive;
+  failure after replacement creation cleans up without stranding an unowned window or losing tabs; focused lifecycle
+  coverage proves success and failure paths; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in
+  the execution change. Gate execution on the solution remaining within the bounded, moderate-complexity shape above. If
+  implementation requires materially more lifecycle state, recovery machinery, or design scope, defer it during
+  execution with the blocker and proposed follow-up documented in TODO.md, retaining or narrowing the queue item.
+- Execution: `pending`.
+
+## stale-dial-outcome-publishes-over-retarget-nudge.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. A host destination edit can race a
+  connection attempt completing; settled outcomes are published without checking the pending retarget nudge, so the old
+  client and its state can temporarily become active again and route operations to the old machine. The trigger is
+  ordinary host editing during an in-flight dial, and the consequence is a brief integrity/security failure in routing.
+- Decision: the user chose the bounded code fix, with especially strong regression coverage because the race is hard to
+  trigger in production. After a settled connection outcome returns, consume and honor a pending retarget nudge before
+  publishing; discard the old result, including its client, and continue with the fresh-window semantics already used by
+  interrupted attempts. Preserve ordinary connected, mismatch, unverified, and failed handling when no nudge is pending.
+- Completion criteria: no settled old-destination outcome can publish after a retarget nudge; focused deterministic
+  tests cover the pending-nudge boundary for connected, mismatch, unverified, and failed outcomes, plus ordinary
+  no-nudge behavior; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
+- Execution: `pending`.
+
+## stripped-agent-marker-forges-killable-tab.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. A same-account process with access to the
+  private tmux server can remove the mutable agent-window marker and add a forged tab marker, causing Farhelm to offer
+  the agent window as a tab. Closing or automatically reaping that tab can then kill the agent process tree and destroy
+  its window. The mechanism is real, but it requires local process access plus a user action or tab-exit cleanup.
+- Decision: the user chose a simple code guard and a specification clarification. Tab discovery and close/reap paths
+  must positively exclude the window containing the session's recorded agent pane, even when its marker is missing or
+  malformed. The specification should state that processes the user runs on the target host are trusted and Farhelm does
+  not provide strong same-account isolation against deliberate interference with agents or the private tmux session.
+  Farhelm should still add simple protections against accidental interference when they are local and low-complexity, as
+  this pane-based exclusion is; do not grow a significant security-hardening subsystem for this threat model.
+- Completion criteria: update the authoritative security/threat-model wording; add the pane-based exclusion at listing,
+  close, and automatic dead-tab-reap discovery; focused tests cover a removed agent marker, a forged tab marker, and
+  each destructive path; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
+  change. If the code or spec work requires materially more complexity than this bounded guard and clarification, defer
+  with the blocker documented in TODO.md instead of expanding scope.
+- Execution: `pending`.
+
 ## discard-quarantined-hangs-response.md
 
 - Outcome: `other`.
