@@ -45,7 +45,8 @@
   ordering rules; focused regression coverage proves cleanup and subsequent successful refinement; remove this feedback
   file and its index entry in the execution change, or document the deferral and retain/narrow the item if the
   simplicity gate is reached.
-- Execution: `pending`.
+- Execution: implemented in change `rsuwmxnppkqkpnooszsprtxykmoxywmy` on bookmark `pr/folder-history-duplicate-aliases`;
+  [draft PR #889](https://github.com/scode/farhelm/pull/889/changes).
 
 ## folder-merge-drops-newer-alias-into-proven.md
 
