@@ -2477,6 +2477,26 @@ pub(super) fn CreateSessionForm(
             |preview| display_peer(&preview.cwd),
         ),
     };
+    // The editable `cwd` seed belongs to existing-folder mode. A fresh
+    // checkout gets its path only from an accepted preview (or the retained
+    // retry binding), so the destination field must not echo that old seed.
+    let (folder_field_value, folder_placeholder, checkout_mode) = match destination_draft() {
+        DestinationDraft::Existing { .. } => (cwd(), "", false),
+        DestinationDraft::Github { preview_state, .. } => (
+            displayed_preview
+                .as_ref()
+                .map(|preview| display_peer(&preview.cwd))
+                .unwrap_or_default(),
+            if displayed_preview.is_some() {
+                ""
+            } else if matches!(*preview_state, PreviewState::Failed { .. }) {
+                "checkout preview unavailable"
+            } else {
+                "waiting for checkout preview"
+            },
+            true,
+        ),
+    };
     let summary_model = structured_model()
         .map(|model| display_peer(&model))
         .unwrap_or_else(|| "default".to_string());
@@ -4218,10 +4238,11 @@ pub(super) fn CreateSessionForm(
                                 button {
                                     r#type: "button",
                                     disabled: busy || selected.is_none(),
-                                    // The accessible name stays "browse this path"
-                                    // while the visible text names the host, so the
-                                    // control reads as one thing to every client.
-                                    aria_label: "browse this path",
+                                    // A proposed checkout path may not exist
+                                    // yet, so Browse starts from the retained
+                                    // existing folder rather than "this path"
+                                    // while checkout mode is active.
+                                    aria_label: if checkout_mode { "browse existing folders" } else { "browse this path" },
                                     onclick: move |_| {
                                         if !draft_transition_allowed(ops) { return; }
                                         request_directory_browse(
@@ -4243,17 +4264,23 @@ pub(super) fn CreateSessionForm(
                             {host_notes.clone()}
                             input {
                                 r#type: "text",
-                                required: matches!(destination_draft(), DestinationDraft::Existing { .. }),
+                                required: !checkout_mode,
+                                readonly: checkout_mode,
                                 autocomplete: "off",
                                 autocorrect: "off",
                                 autocapitalize: "none",
                                 spellcheck: "false",
                                 dir: "ltr",
-                                value: "{cwd}",
+                                value: "{folder_field_value}",
+                                placeholder: "{folder_placeholder}",
                                 disabled: busy,
                                 aria_label: "folder",
                                 oninput: move |evt| {
                                     if !draft_transition_allowed(ops) { return; }
+                                    // A checkout path is evidence from the helm,
+                                    // never an editable suggestion. The explicit
+                                    // action below is the only way back to typing.
+                                    if matches!(destination_draft(), DestinationDraft::Github { .. }) { return; }
                                     promote_fetched_history_snapshot(
                                         offered_history, create_target, fetched_history,
                                     );
@@ -4266,6 +4293,35 @@ pub(super) fn CreateSessionForm(
                                     );
                                     intent_key.set(None);
                                 },
+                            }
+                            if checkout_mode {
+                                // The preview path may not exist yet. An
+                                // existing-folder edit resumes from the prior
+                                // editable seed, never from that proposal.
+                                button {
+                                    r#type: "button",
+                                    class: "launch-composer-existing-folder",
+                                    disabled: busy,
+                                    onclick: move |_| {
+                                        if !draft_transition_allowed(ops) { return; }
+                                        remembered_destination.set(None);
+                                        promote_fetched_history_snapshot(
+                                            offered_history, create_target, fetched_history,
+                                        );
+                                        invalidate_directory_browse(
+                                            browse_generation, browse_request, browse_result, browse_error,
+                                        );
+                                        let previous = submitted_field(
+                                            &cwd(), cwd_edited(), cwd_raw_seed.peek().as_deref(),
+                                        );
+                                        select_existing_directory(
+                                            &mut destination_draft, &mut cwd, &mut cwd_raw_seed,
+                                            &mut cwd_edited, &previous,
+                                        );
+                                        intent_key.set(None);
+                                    },
+                                    "use existing folder"
+                                }
                             }
                             // Recent folders are destination shortcuts, rendered as
                             // text links rather than chips so they read as history

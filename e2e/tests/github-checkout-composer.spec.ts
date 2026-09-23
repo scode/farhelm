@@ -108,7 +108,9 @@ async function unaccepted(route: Route) {
 }
 
 /** Invalid gh text cannot submit the dormant folder, and a first proven
- * refusal refreshes the offer without automatically sending another create. */
+ * refusal refreshes the offer without automatically sending another create.
+ * The displayed path follows that offer until an explicit existing-folder
+ * choice restores the editable directory. */
 test("manual checkout needs selection and explicit resubmit after a proven refusal", async ({ page, request }) => {
   const host = await localHost(request);
   await unavailableDiscovery(page, host);
@@ -132,15 +134,64 @@ test("manual checkout needs selection and explicit resubmit after a proven refus
   expect(creates).toHaveLength(0);
   await selectRepo(page);
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-1");
+  const folder = form.getByLabel("folder", { exact: true });
+  await expect(folder).toHaveJSProperty("readOnly", true);
+  await expect(folder).toHaveValue("/checkout-fixture/bar-1");
+  await expect(form.getByRole("button", { name: "browse existing folders" })).toBeEnabled();
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await form.locator(".create-session-submit").click();
   await expect(form.locator(".create-session-error")).toContainText("nothing was accepted");
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-2");
+  await expect(folder).toHaveValue("/checkout-fixture/bar-2");
   expect(creates).toHaveLength(1);
   expect(creates[0]).toMatchObject({ github_checkout: { repo: "acme/bar" }, launch: { harness: "codex" } });
-  await form.getByLabel("folder", { exact: true }).fill("/tmp");
+  await form.getByRole("button", { name: "use existing folder" }).click();
+  await expect(folder).toHaveJSProperty("readOnly", false);
+  await folder.fill("/tmp");
   await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
   await expect(form.locator(".create-session-submit")).toContainText("/tmp");
+});
+
+/** A preview can be slow or fail after checkout mode has replaced an editable
+ * folder. Until the helm supplies an accepted path, the folder control must
+ * disclose that absence instead of showing the unrelated old `cwd` seed. */
+test("checkout folder shows pending and failed preview states without a stale path", async ({ page, request }) => {
+  const host = await localHost(request);
+  await unavailableDiscovery(page, host);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let started = false;
+  await page.route("**/api/github-checkout-preview", async (route) => {
+    started = true;
+    await gate;
+    try {
+      await fulfill(route, { status: 503, json: { error: "fixture preview unavailable" } });
+    } catch (error) {
+      if (!route.request().failure()) throw error;
+    }
+  });
+  try {
+    const form = await openComposer(page, host);
+    const priorFolder = await form.getByLabel("folder", { exact: true }).inputValue();
+    expect(priorFolder, "the existing-folder seed must be present before checkout mode hides it").not.toBe("");
+    await selectRepo(page);
+    await expect.poll(() => started).toBe(true);
+    const folder = form.getByLabel("folder", { exact: true });
+    await expect(folder).toHaveJSProperty("readOnly", true);
+    await expect(folder).toHaveValue("");
+    await expect(folder).toHaveAttribute("placeholder", "waiting for checkout preview");
+    await expect(form.locator(".create-session-submit")).toBeDisabled();
+    release();
+    await expect(folder).toHaveAttribute("placeholder", "checkout preview unavailable");
+    await expect(form.locator(".launch-composer-checkout-preview .create-session-error")).toBeVisible();
+    await expect(folder).toHaveValue("");
+    await form.getByRole("button", { name: "use existing folder" }).click();
+    await expect(folder).toHaveJSProperty("readOnly", false);
+    await expect(folder).toHaveValue(priorFolder);
+    await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);
+  } finally {
+    release();
+  }
 });
 
 /** A lost reply followed by a Conflict is still ambiguous. Even a newer
@@ -163,6 +214,7 @@ test("ambiguous checkout retries retain the exact original body after a later re
   });
   const form = await openComposer(page, host);
   await selectRepo(page);
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
   await expect(form.locator(".create-session-submit")).toBeEnabled();
   await form.locator(".create-session-submit").click();
   await expect(form.locator(".create-session-error")).toContainText("original request is retained");
@@ -173,6 +225,7 @@ test("ambiguous checkout retries retain the exact original body after a later re
   await expect.poll(() => previews).toBeGreaterThan(before);
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("retry reconciles the original request");
   await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-1");
+  await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-1");
   for (const count of [2, 3]) {
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     await form.locator(".create-session-submit").click();
@@ -250,6 +303,7 @@ test("a late checkout preview cannot overwrite a newer title or steal focus", as
     await expect(name).toBeFocused();
     await expect.poll(() => currentFinished).toBe(true);
     await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/checkout-fixture/bar-new-title");
+    await expect(form.getByLabel("folder", { exact: true })).toHaveValue("/checkout-fixture/bar-new-title");
     await expect(form.locator(".create-session-submit")).toBeEnabled();
     releaseOld();
     await expect.poll(() => oldFinished).toBe(true);
@@ -294,6 +348,11 @@ test("a late checkout preview cannot replace an existing folder destination", as
     await expect.poll(() => started).toBe(true);
     await expect(form.locator(".create-session-submit")).toBeDisabled();
     const folder = form.getByLabel("folder", { exact: true });
+    await expect(folder).toHaveJSProperty("readOnly", true);
+    await expect(folder).toHaveValue("");
+    await expect(folder).toHaveAttribute("placeholder", "waiting for checkout preview");
+    await form.getByRole("button", { name: "use existing folder" }).click();
+    await expect(folder).toHaveJSProperty("readOnly", false);
     await folder.fill("/tmp");
     await expect(folder).toBeFocused();
     await expect(form.locator(".launch-composer-checkout-preview")).toHaveCount(0);

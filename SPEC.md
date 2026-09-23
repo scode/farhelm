@@ -428,6 +428,11 @@ that prevents this key from allocating later. That refusal resolves even an earl
 the preview and requires another explicit submission. An ordinary conflict without that proof retains the original
 request and key.
 
+In fresh-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
+or error state while no path is available. An ambiguous retry keeps displaying the original request's path. Browse and
+recent folders remain available; `use existing folder` deliberately leaves checkout mode and restores an editable path.
+Typing into the checkout path cannot turn a fresh checkout into an existing-folder launch.
+
 An interruption after mkdir but before durable identity capture leaves ownership unestablished. Recovery retains a
 visible error session and refuses to adopt or prepare the unknown directory. Explicit Delete may retire that unresolved
 session and plan, with a diagnostic naming the preserved path; the directory remains untouched for manual inspection.
