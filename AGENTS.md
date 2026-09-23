@@ -318,6 +318,17 @@ creation. Read `review_feedback_queue/AGENTS.md`, the index, root `TRIAGE_OUTCOM
 bucket in `TODO.md`. Work through items in index order unless the user chooses another order, skipping items with a
 recorded decision unless asked to revisit them.
 
+This is a persistent triage flow, not an execution flow. Once the session is working through review feedback, remain in
+triage mode across turns until the user explicitly starts a separate execution step. Every short command or agreement —
+including “fix this”, “fix code”, “update the spec”, “let’s do that”, “agreed”, and “yes” — is a triage decision to
+record, not permission to edit code, specifications, TODO entries, or queue files. The human must not repeat that this
+is “just triage” or otherwise police the boundary on every item.
+
+Execution requires a separate, unmistakable command that names the action, such as “execute the recorded triage
+outcomes”, “implement the approved fixes now”, or “start the execution phase”. Contextual agreement with a
+recommendation never starts execution. When execution is explicitly started, apply only the recorded scope and stop for
+the documented complexity or scope gate rather than silently expanding it.
+
 For each item, complete these steps before asking the user for an outcome:
 
 1. Understand the feedback. Read the whole feedback file, trace the relevant current code paths, and read the
@@ -340,10 +351,16 @@ implement it, broaden its scope, or create another TODO merely because the same 
 is covered, bring the uncovered part to the user. Briefly report skipped items and their basis, then continue to the
 next undecided item. This is an exception to the per-item decision question below.
 
-Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Name the feedback
-filename and explain the affected feature or operation, the triggering scenario, expected versus actual behavior, and
-the practical consequence. Give enough context to understand the assessment without opening the file or knowing internal
-symbols; explain implementation details only where they are needed to understand the issue.
+Assume the user knows Farhelm as a tool but has read neither the feedback nor the relevant code. Begin every item with
+plain-language context for the thing under discussion: name the user-facing feature or operation before describing any
+internal details. If the finding does not map cleanly to a user-facing feature, name the architectural part of Farhelm
+instead (for example, the helm's payload cache, the supervisor's session lifecycle, or the host registry) and explain
+its role. Then state the reported bug explicitly in user-facing terms: what goes wrong, under what trigger, and what the
+user observes or loses. Only after that context and bug statement, name the feedback filename and assess the finding's
+correctness with its expected versus actual behavior and practical consequence. Give enough context to understand the
+assessment without opening the file or knowing internal symbols. Prefer the user's visible behavior throughout. Do not
+lead with terms such as “proven”, “unproven”, “refinement”, or other storage and implementation labels; translate them
+into what the user sees first, and introduce an internal term only when it is needed to support the assessment.
 
 Then recommend an outcome with its reason and ask the user to decide before recording an outcome or moving to the next
 item. A recommendation is not a decision; unresolved items stay undecided. The outcomes are:

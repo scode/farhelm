@@ -1243,6 +1243,14 @@ serving other hosts. Requests involving the affected host may fail or remain pen
 continue to function. This allowance concerns filesystem errors and hangs, not ordinary cancellation or disconnection
 while the filesystem is healthy.
 
+### Evidence after resumability is withdrawn
+
+Conversation resume is a core feature while Farhelm can safely identify the session's conversation. Once the current
+restart offer is already `FreshOnly` or `FallbackTemplate`, Farhelm is not required to preserve every remaining capture
+field through a definitive failed restart or other recovery transition. A later retry may therefore have less capture
+evidence when preserving it would add meaningful complexity. This allowance does not permit turning a valid `Resume`
+offer into a fresh launch, or silently substituting another conversation.
+
 ### Desktop Quit
 
 Quit must close the desktop app promptly, without waiting for in-flight uploads or other requests to finish.
