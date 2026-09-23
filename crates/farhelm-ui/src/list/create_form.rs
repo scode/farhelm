@@ -119,20 +119,6 @@ fn initial_structured_permissions(preferences: &api::Preferences) -> Option<Laun
     }
 }
 
-/// Name the explicit-model requirement in terms of the selected harness.
-fn missing_model_error(harness: LaunchHarness) -> Option<&'static str> {
-    match harness {
-        LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
-        LaunchHarness::Goose => Some("choose a Goose model before launching"),
-        LaunchHarness::Pi => Some("choose a Pi model before launching"),
-        LaunchHarness::Omp => Some("choose an OMP model before launching"),
-        LaunchHarness::Codex
-        | LaunchHarness::Claude
-        | LaunchHarness::Muse
-        | LaunchHarness::Cursor => None,
-    }
-}
-
 /// Describe reconciliation without promoting a passive remembered mode into
 /// an explicit user choice.
 fn draft_reconciliation_reason(
@@ -2314,9 +2300,8 @@ pub(super) fn CreateSessionForm(
     let model_option_count = model_options.len();
     // The closed field shows the current SELECTION, whatever its history: a
     // chosen model (escaped from its raw seed while untouched, raw once
-    // edited), otherwise "harness default" — or nothing for OpenCode, whose
-    // placeholder says a model is required. The edited flag only decides how a
-    // present model is spelled, never whether an absent one reads as default.
+    // edited), otherwise "harness default". The edited flag only decides how
+    // a present model is spelled, never whether absence reads as default.
     let model_display = if model_open() {
         model_draft()
     } else {
@@ -2326,18 +2311,6 @@ pub(super) fn CreateSessionForm(
                 .as_deref()
                 .map(display_peer)
                 .unwrap_or(model),
-            None if matches!(
-                structured_harness(),
-                Some(
-                    LaunchHarness::OpenCode
-                        | LaunchHarness::Goose
-                        | LaunchHarness::Pi
-                        | LaunchHarness::Omp
-                )
-            ) =>
-            {
-                String::new()
-            }
             None => "harness default".to_string(),
         }
     };
@@ -2365,15 +2338,9 @@ pub(super) fn CreateSessionForm(
             permissions: structured_permissions(),
             workspace_trust: crate::launch_composer::normalized_workspace_trust(harness, structured_workspace_trust()),
         };
-        if selection.model.is_none()
-            && let Some(message) = missing_model_error(harness)
-        {
-            Some(message)
-        } else {
-            (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
-                "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
-            )
-        }
+        (!crate::launch_composer::selection_is_compatible(&selection, &catalog_models)).then_some(
+            "this saved choice is no longer supported by the current catalog; choose a compatible model or effort",
+        )
     });
     // Peer-owned values remain separate directional runs. The launch context
     // isolates its host and folder, while the summary isolates its model, so a
@@ -3268,10 +3235,6 @@ pub(super) fn CreateSessionForm(
                 // An accepted request replays its recorded launch snapshot.
                 // New requests still validate against today's catalog.
                 if !replaying_fresh && let LaunchIntent::Structured(selection) = &binding.agent {
-                    if selection.model.is_none() && let Some(message) = missing_model_error(selection.harness) {
-                        error.set(Some(message.to_string()));
-                        return;
-                    }
                     if !crate::launch_composer::selection_is_compatible(selection, &catalog_for_submit) {
                         error.set(Some("this saved choice is no longer supported by the current catalog; choose a compatible model or effort".into()));
                         return;
@@ -4517,7 +4480,6 @@ pub(super) fn CreateSessionForm(
                                     spellcheck: false,
                                     dir: "ltr",
                                     disabled: busy,
-                                    placeholder: matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp)).then_some("model required"),
                                     value: "{model_display}",
                                     onfocus: move |_| {
                                         if !draft_transition_allowed(ops) {

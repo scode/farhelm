@@ -319,6 +319,8 @@ pub(crate) struct CompiledLaunch {
 /// The result contains no user-provided shell syntax. A custom model is one
 /// argv element after validation, and `shell_words::join` does the only
 /// quoting at the boundary where the supervisor later splits the invocation.
+/// An absent model adds no provider or model flags, leaving the installed
+/// harness's configured default in charge.
 pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, String> {
     // Pi has no vendor approval mode. Its only offered safety label records
     // that absence, so make an omitted Pi choice durable before history and
@@ -466,26 +468,15 @@ fn program(harness: LaunchHarness) -> &'static str {
     }
 }
 
+/// Reject unsupported explicit choices without inventing a required model.
+///
+/// The catalog constrains an entered model and effort; an omitted model is
+/// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
     if selection.workspace_trust.is_some()
         && !matches!(selection.harness, LaunchHarness::Muse | LaunchHarness::Pi)
     {
         return Err("workspace trust is not offered by this harness".to_string());
-    }
-    if selection.model.is_none() {
-        let message = match selection.harness {
-            LaunchHarness::OpenCode => Some("choose an OpenCode model before launching"),
-            LaunchHarness::Goose => Some("choose a Goose model before launching"),
-            LaunchHarness::Pi => Some("choose a Pi model before launching"),
-            LaunchHarness::Omp => Some("choose an OMP model before launching"),
-            LaunchHarness::Codex
-            | LaunchHarness::Claude
-            | LaunchHarness::Muse
-            | LaunchHarness::Cursor => None,
-        };
-        if let Some(message) = message {
-            return Err(message.to_string());
-        }
     }
     if let Some(model) = &selection.model {
         validate_model_id(model)?;
@@ -748,15 +739,15 @@ mod tests {
         );
     }
 
-    /// OpenCode launches must name Zen explicitly. This prevents a changed
-    /// local OpenCode configuration from silently choosing a model Farhelm's
-    /// durable selection never recorded.
+    /// An omitted OpenCode model leaves the vendor's configured choice in
+    /// charge; explicitly entered Zen ids retain their argv qualification.
     #[test]
-    fn opencode_requires_a_zen_model_and_normalizes_only_its_argv() {
-        assert!(
-            compile(selection(LaunchHarness::OpenCode))
-                .unwrap_err()
-                .contains("choose an OpenCode model")
+    fn opencode_default_and_explicit_zen_model_keep_distinct_argv() {
+        let default = compile(selection(LaunchHarness::OpenCode)).expect("OpenCode default");
+        assert_eq!(default.selection.model, None);
+        assert_eq!(
+            shell_words::split(&default.invocation).unwrap(),
+            ["opencode"]
         );
 
         let bare = LaunchSelection {
@@ -1127,9 +1118,10 @@ mod tests {
     }
 
     /// OMP's effort list stops at max (the enum's `ultra` is not offered),
-    /// a model is required, and Goose-only permission labels are refused.
+    /// while its model may defer to the configured default. Goose-only
+    /// permission labels remain refused.
     #[test]
-    fn omp_vocabulary_is_closed_and_model_required() {
+    fn omp_vocabulary_is_closed_and_model_optional() {
         for row in super::catalog()
             .iter()
             .filter(|row| row.harness == LaunchHarness::Omp)
@@ -1165,10 +1157,9 @@ mod tests {
             ]
         );
 
-        assert_eq!(
-            compile(selection(LaunchHarness::Omp)).unwrap_err(),
-            "choose an OMP model before launching"
-        );
+        let default = compile(selection(LaunchHarness::Omp)).expect("OMP default");
+        assert_eq!(default.selection.model, None);
+        assert_eq!(shell_words::split(&default.invocation).unwrap(), ["omp"]);
         // OMP's own effort vocabulary is OMP_EFFORTS: `ultra` (the shared
         // enum's extra level) is refused; every listed level compiles.
         for effort in super::OMP_EFFORTS {
@@ -1212,24 +1203,23 @@ mod tests {
         }
     }
 
-    /// Every explicit-model harness names itself in the refusal. OpenCode's
-    /// established wording remains stable while Goose and Pi avoid claiming
-    /// the wrong catalog.
+    /// Omitted models must leave provider and model configuration to each
+    /// harness, including Goose's session subcommand. Pi's mandatory YOLO
+    /// label is retained as metadata without adding model or provider flags.
     #[test]
-    fn missing_model_errors_name_the_selected_harness() {
+    fn omitted_models_use_vendor_default_argv() {
         for (harness, expected) in [
-            (
-                LaunchHarness::OpenCode,
-                "choose an OpenCode model before launching",
-            ),
-            (
-                LaunchHarness::Goose,
-                "choose a Goose model before launching",
-            ),
-            (LaunchHarness::Pi, "choose a Pi model before launching"),
-            (LaunchHarness::Omp, "choose an OMP model before launching"),
+            (LaunchHarness::OpenCode, vec!["opencode"]),
+            (LaunchHarness::Goose, vec!["goose", "session"]),
+            (LaunchHarness::Pi, vec!["pi"]),
+            (LaunchHarness::Omp, vec!["omp"]),
         ] {
-            assert_eq!(compile(selection(harness)).unwrap_err(), expected);
+            let compiled = compile(selection(harness)).expect("model omission is valid");
+            assert_eq!(compiled.selection.model, None);
+            assert_eq!(shell_words::split(&compiled.invocation).unwrap(), expected);
+            if harness == LaunchHarness::Pi {
+                assert_eq!(compiled.selection.permissions, Some(LaunchPermission::Yolo));
+            }
         }
     }
 

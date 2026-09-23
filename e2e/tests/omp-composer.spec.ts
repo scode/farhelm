@@ -1,9 +1,8 @@
 import { expect, test } from "./helpers/evidence";
 
 /**
- * OMP's composer is Pi's neighbor, not Pi's twin: the model is required, the
- * effort list is OMP's closed vocabulary, and the three permission choices
- * include a REAL harness default — an omitted OMP permission must survive as
+ * OMP can use its configured model while keeping its own effort and permission
+ * vocabularies. Its permission default is real: an omitted choice survives as
  * absent, never be displayed as Pi's rewritten yolo. The composer half pins
  * the serialized POST selection; argv compilation belongs to the helm tests
  * and stored-selection decoding to the supervisor test, so a composer that
@@ -44,19 +43,16 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
     "true",
   );
 
-  // The model-required rule: no harness default, the placeholder names the
-  // rule, the refusal names OMP, and the submit stays disabled.
+  // OMP can defer to its configured model without changing its effort or
+  // permission vocabulary.
   const model = form.getByRole("combobox", { name: "model", exact: true });
-  await expect(model).toHaveAttribute("placeholder", "model required");
-  await expect(model).toHaveValue("");
-  await expect(form.getByText("choose an OMP model before launching", { exact: true })).toBeVisible();
-  await expect(form.locator(".create-session-submit")).toBeDisabled();
+  await expect(model).toHaveValue("harness default");
   await model.focus();
   await expect(
     form
       .locator("#launch-composer-model-results")
       .getByRole("option", { name: "harness default", exact: true }),
-  ).toHaveCount(0);
+  ).toBeVisible();
 
   // OMP's effort vocabulary is the closed seven-level list: OMP's `auto`
   // mode and the shared enum's `ultra` are deliberately absent.
@@ -102,6 +98,7 @@ test("the OMP composer offers OMP's own vocabulary and the row shows the effecti
     model: "x-ai/grok-4.6",
     effort: "max",
     permissions: "approve",
+    workspace_trust: null,
   });
   await expect(form).toContainText("fixture captured launch");
 });

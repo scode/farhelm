@@ -1,13 +1,13 @@
 import { expect, test } from "./helpers/evidence";
 
 /**
- * The explicit-model exception must stay inside the existing composer rows.
+ * OpenCode's optional model must stay inside the existing composer rows.
  * RSX accepts a misplaced conditional as valid nesting, so compilation cannot
- * prove that hiding one default button preserved the command escape and
- * model layout. Use the real catalog and rendered controls; intercept only
+ * prove that adding the default row preserved the command escape and model
+ * layout. Use the real catalog and rendered controls; intercept only
  * history and the final create so no vendor executable or credential is used.
  */
-test("OpenCode keeps composer controls while requiring a suggested or custom Zen model", async ({ page, request }) => {
+test("OpenCode keeps composer controls while offering default and explicit Zen models", async ({ page, request }) => {
   const response = await request.get("/api/launch-catalog");
   expect(response.ok()).toBe(true);
   const build = response.headers()["x-farhelm-build"];
@@ -33,14 +33,14 @@ test("OpenCode keeps composer controls while requiring a suggested or custom Zen
   await expect(harness.locator(".launch-composer-model-choice")).toHaveCount(0);
   await expect(form.locator(".launch-composer-effort-choice")).toHaveCount(0);
   await expect(harness.getByRole("button", { name: "other / command", exact: true })).toBeVisible();
-  await expect(form.getByText("choose an OpenCode model before launching", { exact: true })).toBeVisible();
-  await expect(form.locator(".create-session-submit")).toBeDisabled();
+  await expect(form.locator(".create-session-submit")).toBeEnabled();
   const model = modelRow.getByRole("combobox", { name: "model", exact: true });
+  await expect(model).toHaveValue("harness default");
   await model.focus();
-  // Premise: focusing opened the list (its toggle row is present), so the
-  // missing default row below is an omission, not an unopened listbox.
+  // Focusing opens the list; the default row shares the same model field and
+  // explicit Zen suggestions without displacing the command escape.
   await expect(modelRow.locator("#launch-composer-model-results").getByRole("option", { name: "show every harness's models", exact: true })).toBeVisible();
-  await expect(modelRow.getByRole("option", { name: "harness default", exact: true })).toHaveCount(0);
+  await expect(modelRow.getByRole("option", { name: "harness default", exact: true })).toBeVisible();
   for (const id of ids) {
     await model.fill(id);
     await modelRow.getByRole("option", { name: id, exact: true }).click();
@@ -67,6 +67,7 @@ test("OpenCode keeps composer controls while requiring a suggested or custom Zen
   await form.locator(".create-session-submit").click();
   expect((await submitted).postDataJSON().launch).toEqual({
     harness: "open_code", model: "custom'42;$literal", effort: null, permissions: null,
+    workspace_trust: null,
   });
   await expect(form).toContainText("fixture captured launch");
   await harness.getByRole("button", { name: "other / command", exact: true }).click();

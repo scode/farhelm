@@ -1,5 +1,10 @@
 # Goose
 
+## Model choice
+
+You can leave the model unset in Farhelm. Goose then uses its configured provider and model; Farhelm does not add
+`--provider` or `--model`. Choosing a model explicitly keeps Farhelm's OpenRouter launch arguments for that choice.
+
 ## Resuming outside Farhelm still needs Farhelm installed
 
 Farhelm starts a small helper alongside Goose to learn which conversation you are in. When you type `/new` in Goose to

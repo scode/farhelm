@@ -26,6 +26,9 @@ OMP itself can silently start a new conversation when given a missing session fi
 
 ## How your model id is resolved
 
+You can leave the model unset in Farhelm. OMP then uses its configured provider and model, without a Farhelm
+`--provider` or `--model` override. The rules below apply when you choose a model explicitly.
+
 Farhelm stores the model id you enter verbatim and emits the command shown below, with `<id>` preserved as one argv
 element. What Farhelm does not do is guarantee that OMP hands that exact string to OpenRouter: OMP's own model
 resolution runs after Farhelm's argv, and it is deliberately fuzzy. OMP resolves provider-qualified ids through an exact
