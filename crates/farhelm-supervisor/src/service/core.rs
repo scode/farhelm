@@ -780,6 +780,16 @@ pub struct SupervisorSeams {
     /// promote the previous record before the report reads its binding.
     /// `None` in production.
     pub codex_report_gate: Option<CaptureGate>,
+    /// Pause a Goose report after its store evidence is validated but
+    /// before the closing process attribution. Tests change the live
+    /// process identity in that window and require the report to
+    /// refuse without recording. `None` in production.
+    pub goose_evidence_gate: Option<CaptureGate>,
+    /// Pause a Goose resume verification after its store read fails
+    /// but before it demotes the binding. Tests interleave a
+    /// same-ID re-proof in that window and require the newer proof
+    /// to survive. `None` in production.
+    pub goose_verify_gate: Option<CaptureGate>,
     /// See [`SinkReservationGate`]. `None` in production.
     pub sink_reservation_gate: Option<SinkReservationGate>,
     /// See [`SinkLookupGate`]. `None` in production.
@@ -949,6 +959,8 @@ impl Default for SupervisorSeams {
             capture_store_fault: None,
             capture_gate: None,
             codex_report_gate: None,
+            goose_evidence_gate: None,
+            goose_verify_gate: None,
             sink_reservation_gate: None,
             sink_lookup_gate: None,
             sink_candidate_wait_gate: None,
@@ -2462,7 +2474,7 @@ fn with_hook_argv_using(
         );
     };
     if snapshot.kind == AgentKind::Goose {
-        let Some(shape) = goose_launch_shape(&argv) else {
+        let Some(shape) = crate::agent_kind::goose::goose_launch_shape(&argv) else {
             skip("Goose invocation is a utility command or is ambiguous");
             return (argv, false);
         };
@@ -2641,83 +2653,6 @@ fn with_hook_argv_using(
         "conversation hook flags injected"
     );
     (argv, true)
-}
-
-#[derive(Clone, Copy)]
-/// Facts needed to inject once on fresh Goose launches and reuse its saved
-/// reporter on resume without overriding a user-supplied reporter of that name.
-struct GooseLaunchShape {
-    resuming: bool,
-    reporter_collision: bool,
-    needs_session_subcommand: bool,
-}
-
-/// Recognize only Goose's interactive command, including the structured
-/// launcher's leading `env NAME=value ...` prefix.
-fn goose_launch_shape(argv: &[String]) -> Option<GooseLaunchShape> {
-    let program = effective_program_index(argv)?;
-    if Path::new(&argv[program]).file_name()?.to_str()? != "goose" {
-        return None;
-    }
-    let args = &argv[program + 1..];
-    if !args.is_empty() && args.first().map(String::as_str) != Some("session") {
-        return None;
-    }
-    let mut resuming = false;
-    let mut reporter_collision = false;
-    let mut index = usize::from(args.first().map(String::as_str) == Some("session"));
-    while index < args.len() {
-        let argument = &args[index];
-        if matches!(
-            argument.as_str(),
-            "--help" | "-h" | "--version" | "-V" | "--"
-        ) {
-            return None;
-        }
-        if matches!(argument.as_str(), "--resume" | "-r" | "--fork" | "--edit") {
-            resuming = true;
-            index += 1;
-            continue;
-        }
-        let takes_value = matches!(
-            argument.as_str(),
-            "--name"
-                | "-n"
-                | "--session-id"
-                | "--id"
-                | "--path"
-                | "--provider"
-                | "--model"
-                | "--system"
-                | "--max-turns"
-                | "--with-extension"
-                | "--with-builtin"
-                | "--with-streamable-http-extension"
-                | "--mode"
-        );
-        if takes_value {
-            let value = args.get(index + 1)?;
-            if argument == "--with-extension" && value.starts_with("farhelm-reporter:") {
-                reporter_collision = true;
-            }
-            index += 2;
-            continue;
-        }
-        if argument.starts_with("--with-extension=")
-            && argument["--with-extension=".len()..].starts_with("farhelm-reporter:")
-        {
-            reporter_collision = true;
-        }
-        if !argument.starts_with('-') {
-            return None;
-        }
-        index += 1;
-    }
-    Some(GooseLaunchShape {
-        resuming,
-        reporter_collision,
-        needs_session_subcommand: args.is_empty(),
-    })
 }
 
 /// Keep Pi's utility commands untouched and treat option values as opaque.
@@ -6344,6 +6279,131 @@ impl Supervisor {
         .into())
     }
 
+    /// Re-verify a Goose resume offer against the live vendor store
+    /// before relaunching into it: re-open the SAVED store locator
+    /// through the same read-only reader admission uses, and require
+    /// the saved id to still read as a foreground root
+    /// (`user`, NULL parent) in schema 16.
+    ///
+    /// The verifier owns its read — it reloads the row and fences on
+    /// the session's current generation plus kind plus captured id, so
+    /// no snapshot-struct change carries a locator nobody else needs.
+    /// Anything unverifiable refuses with `Conflict` and NOTHING is
+    /// relaunched; the failure then compare-replaces version 1 → 0
+    /// under CAS (same id, same generation) — the Goose analog of
+    /// Pi/OMP fileless demotion: the id is kept, the offer is
+    /// withdrawn, and a later attributed report re-proves under the
+    /// usual CAS. A binding that moved under the snapshot refuses
+    /// WITHOUT demoting: the newer binding is not this verifier's to
+    /// withdraw.
+    ///
+    /// The whole verdict runs under this session's shared capture
+    /// claim — taken BEFORE the authoritative reload and held
+    /// through any demotion — so a same-ID re-proof that lands
+    /// mid-verification commits either fully before this verdict or
+    /// fully after it, never underneath a demotion aimed at the
+    /// older binding (every CAS field would still match that newer
+    /// proof, including the locator, which the demotion does not
+    /// compare). Bounded acquisition: a contended claim refuses
+    /// without mutating rather than parking the restart.
+    async fn verify_goose_resume(
+        &self,
+        session_id: &str,
+        snapshot: &SessionSnapshot,
+    ) -> anyhow::Result<()> {
+        let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "this Goose session's restart offer changed while the restart was being prepared; \
+                 nothing was relaunched — refresh the session and re-present the offer",
+            )
+        })?;
+        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(session_id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this Goose session's capture is being updated; \
+                     nothing was relaunched — refresh the session and re-present the offer",
+                )
+            })?;
+        let row = self
+            .store
+            .session(session_id)
+            .await
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this Goose session's saved conversation could not be verified; \
+                     nothing was relaunched",
+                )
+            })?
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this Goose session's restart offer changed while the restart was being prepared; \
+                     nothing was relaunched — refresh the session and re-present the offer",
+                )
+            })?;
+        if row.agent_kind != AgentKind::Goose
+            || row.generation != snapshot.generation
+            || row.captured_conversation.as_deref() != Some(stored)
+            || row.capture_ownership_version != 1
+        {
+            // The binding moved under the snapshot (or never verified
+            // at all): refuse, and leave the newer binding alone.
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this Goose session's restart offer changed while the restart was being prepared; \
+                 nothing was relaunched — refresh the session and re-present the offer",
+            )
+            .into());
+        }
+        let verified = match row.captured_record.as_deref() {
+            Some(locator) => {
+                match crate::goose_store::read_reported_session(locator, stored).await {
+                    Ok(metadata) => crate::agent_kind::goose::is_foreground_session_type(
+                        Some(metadata.session_type.as_str()),
+                        metadata.parent_session_id.as_deref(),
+                    ),
+                    Err(_) => false,
+                }
+            }
+            None => false,
+        };
+        if verified {
+            return Ok(());
+        }
+        // Still under the claim: the seam below is the test hook for
+        // the window where a same-ID re-proof used to land between
+        // the failed read above and the demotion below.
+        if let Some(gate) = &self.seams.goose_verify_gate {
+            gate().await;
+        }
+        if let Err(error) = self
+            .store
+            .demote_goose_resume_provenance(session_id, snapshot.generation, Some(stored))
+            .await
+        {
+            warn!(
+                session = %session_id,
+                error = %format!("{error:#}"),
+                "could not withdraw an unverifiable Goose resume offer; \
+                 the restart is still refused"
+            );
+        }
+        Err(RequestError::new(
+            ErrorKind::Conflict,
+            "this Goose session's saved conversation no longer verifies as a foreground root; \
+             nothing was relaunched and the resume offer was withdrawn — refresh the session \
+             and re-present the offer",
+        )
+        .into())
+    }
+
     /// Whether this supervisor holds its state directory's claim (see
     /// [`StateDirOwnership`]) — that is, whether it may migrate the schema,
     /// write reconciliation, and serve at all.
@@ -8567,6 +8627,7 @@ impl Supervisor {
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
                 omp_launch_program: None,
+                goose_launch_program: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -8711,6 +8772,7 @@ impl Supervisor {
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
                 omp_launch_program: None,
+                goose_launch_program: None,
                 id: id.clone(),
                 parent: parent.clone(),
                 title: title.clone(),
@@ -9900,6 +9962,9 @@ impl Supervisor {
         {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
+        }
+        if mode == RestartMode::Resume && snapshot.kind == AgentKind::Goose {
+            self.verify_goose_resume(session_id, &snapshot).await?;
         }
         ensure_cwd_usable(&entry.info.cwd).await?;
         // The VERIFIED path travels with the relaunch rather than being
@@ -12348,6 +12413,30 @@ impl Supervisor {
                 );
             }
         }
+        // Launch provenance for the Goose ownership proof, recorded for
+        // EVERY Goose launch beside OMP's: the classification of the
+        // argv this generation actually starts, published pre-spawn for
+        // the same ordering reason — no report of this generation can
+        // arrive ahead of its program. Best-effort and
+        // generation-fenced like OMP's; a failed write leaves the
+        // column unknown (the relaunch cleared it when it opened this
+        // generation) and admission fails closed rather than stale.
+        if snapshot.kind == AgentKind::Goose {
+            let program =
+                crate::agent_kind::goose::classify_goose_launch(&spec.argv).column_value();
+            if let Err(error) = self
+                .store
+                .record_goose_launch_provenance(id, generation, program)
+                .await
+            {
+                warn!(
+                    session = %id,
+                    error = %format!("{error:#}"),
+                    "could not record this launch's Goose provenance; \
+                     the session stays runnable without capture"
+                );
+            }
+        }
 
         let shell = self.launch_shell().await;
         // The scope wrapper, or nothing at all. Note the asymmetry with the
@@ -13106,6 +13195,10 @@ impl Supervisor {
                 self.report_omp_conversation(id, report, kind, generation, entry)
                     .await
             }
+            AgentKind::Goose => {
+                self.report_goose_conversation(id, report, kind, generation, entry)
+                    .await
+            }
             _ => Err(RequestError::new(
                 ErrorKind::Conflict,
                 "no foreground ownership proof is implemented for this session's agent kind",
@@ -13255,6 +13348,7 @@ impl Supervisor {
                         row.captured_conversation.as_deref(),
                         row.capture_ownership_version,
                         &conversation,
+                        None,
                     )
                     .await
             }
@@ -13403,6 +13497,7 @@ impl Supervisor {
                         row.captured_conversation.as_deref(),
                         row.capture_ownership_version,
                         &conversation,
+                        None,
                     )
                     .await
             }
@@ -13578,6 +13673,224 @@ impl Supervisor {
                         row.captured_conversation.as_deref(),
                         row.capture_ownership_version,
                         &conversation,
+                        None,
+                    )
+                    .await
+            }
+        };
+        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+    }
+
+    /// Goose admission: launch provenance plus foreground process
+    /// attribution, then exact store-metadata validation of the
+    /// reported id in the attributed runtime's OWN store — wired
+    /// through the shared claim, CAS, and mirror discipline rather
+    /// than its own.
+    ///
+    /// Both proofs are required within the same 1 s admission budget
+    /// from branch entry — the claim wait, the process checks, and
+    /// the store read all count against it, and the budget is
+    /// re-enforced before the commit. The store read happens exactly
+    /// once, BRACKETED by two attributions that must name the same
+    /// emitter: the second covers the process evidence only and
+    /// never re-reads vendor state, and it runs AFTER the
+    /// environment and store reads so a PID reuse or exec between
+    /// the evidence and the recheck refuses instead of authorizing
+    /// the wrong process's store.
+    async fn report_goose_conversation(
+        &self,
+        id: &str,
+        report: ReportedConversation,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        let branch_entry = tokio::time::Instant::now();
+        let admission_deadline = branch_entry + Duration::from_secs(1);
+        let ReportedConversation {
+            vendor: _,
+            conversation,
+            source,
+            transcript_path: _,
+            hook_event_name: _,
+            peer,
+        } = report;
+        // `transcript_path` and `hook_event_name` are IGNORED for
+        // Goose — never consulted, never a rejection signal — because
+        // the helper sends neither.
+        if !crate::agent_kind::goose::is_goose_foreground_source(&source) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Goose reported an unsupported foreground transition",
+            ));
+        }
+        // Step 1 tail: the cheap shape gate before any process or
+        // vendor I/O — a bare id, exactly as the legacy path checks.
+        if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "the reported conversation identity does not match this session's agent kind",
+            ));
+        }
+        // Step 2: the bounded capture claim — capped by the admission
+        // budget, so a contended claim consumes the budget instead of
+        // borrowing past it — then the authoritative reload and
+        // kind/generation comparison.
+        let claim_deadline = std::cmp::min(
+            tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT,
+            admission_deadline,
+        );
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's capture is being updated; the report was not recorded",
+                )
+            })?;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| {
+                RequestError::new(ErrorKind::Internal, "could not verify the Goose launch")
+            })?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the Goose session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
+        }
+        let peer = peer.ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "the Goose report has no kernel-attributed local process",
+            )
+        })?;
+        // Step 3a: launch provenance. The row must name a supported
+        // program for the CURRENT launch — NULL (pre-proof, or a
+        // publish that never landed), stale (a superseded generation,
+        // fenced above), and `unknown` all refuse BEFORE any process
+        // is inspected. The resume template is a future resume's
+        // command and is never consulted here: a supported direct
+        // launch with an independent resume override still proves
+        // what it runs.
+        let program = crate::agent_kind::goose::GooseLaunchProgram::from_column_value(
+            row.goose_launch_program.as_deref(),
+        );
+        if !matches!(
+            program,
+            crate::agent_kind::goose::GooseLaunchProgram::Goose
+                | crate::agent_kind::goose::GooseLaunchProgram::Shell
+        ) {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session's launch has no supported Goose runtime recorded; \
+                 the report was not recorded",
+            ));
+        }
+        // Step 3b: the live runtime proof — the FIRST of two
+        // attributions bracketing the vendor evidence. The second
+        // (step 3d) covers the process evidence only and never
+        // re-reads vendor state; both must name the same emitter.
+        let emitter = self.goose_foreground(&row, peer, program).await?;
+        // Step 3c: exact store-metadata validation in the attributed
+        // runtime's OWN store — resolved from the emitter's
+        // environment, never the supervisor's — read once, through
+        // the read-only bounded reader.
+        let environ = crate::procs::read_environ(emitter.pid).ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "the Goose runtime's environment could not be read; \
+                 the report was not recorded",
+            )
+        })?;
+        let store_path =
+            crate::agent_kind::goose::resolve_goose_store(&environ).ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "the Goose runtime's store could not be resolved; \
+                     the report was not recorded",
+                )
+            })?;
+        let metadata = crate::goose_store::read_reported_session(&store_path, &conversation)
+            .await
+            .map_err(|refusal| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    format!("the Goose store refused the report: {refusal}"),
+                )
+            })?;
+        if !crate::agent_kind::goose::is_foreground_session_type(
+            Some(metadata.session_type.as_str()),
+            metadata.parent_session_id.as_deref(),
+        ) {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the reported Goose session is not a foreground root; \
+                 the report was not recorded",
+            ));
+        }
+        // Step 3d: the bracket closes — the runtime must still
+        // attribute to the SAME emitter after the evidence was read.
+        // A PID reuse or exec between step 3b and now names a
+        // different process (or no live runtime at all), and its
+        // environment would have authorized the wrong store. The
+        // seam below is the test hook for exactly that window.
+        if let Some(gate) = &self.seams.goose_evidence_gate {
+            gate().await;
+        }
+        if self.goose_foreground(&row, peer, program).await? != emitter {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Goose foreground changed during verification",
+            ));
+        }
+        info!(
+            session = %id, generation, emitter_pid = emitter.pid,
+            conversation = %conversation, source = %source,
+            "attributed a Goose foreground conversation report"
+        );
+        // The budget is re-enforced before the commit: evidence
+        // gathered past the deadline blesses nothing, however valid
+        // it was when read.
+        if tokio::time::Instant::now() >= admission_deadline {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Goose report overran its admission budget; \
+                 the report was not recorded",
+            ));
+        }
+        // Step 4: the atomic CAS over the COMPLETE prior binding,
+        // committing identity, the proven store locator, provenance 1,
+        // source, readiness, and ambiguity reset. The locator rides
+        // the commit as a verification hint; the CAS compares the id
+        // alone, so a legitimate store move cannot wedge the binding.
+        //
+        // The injected failure STANDS IN for the store call rather than
+        // preceding it, so a test can exercise this function's own failure
+        // path without a store that is genuinely broken.
+        let injected = self
+            .seams
+            .capture_store_fault
+            .as_ref()
+            .map(|fault| fault(super::capture::CaptureWrite::Report, id));
+        let written = match injected {
+            Some(Err(e)) => Err(e),
+            _ => {
+                self.store
+                    .admit_ownership_proven_conversation(
+                        id,
+                        generation,
+                        row.captured_conversation.as_deref(),
+                        row.capture_ownership_version,
+                        &conversation,
+                        Some(&store_path),
                     )
                     .await
             }
@@ -13874,6 +14187,31 @@ impl Supervisor {
             RequestError::new(
                 ErrorKind::Internal,
                 "OMP process attribution could not complete",
+            )
+        })?
+        .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
+    }
+
+    /// Attribute a Goose report to the one live `goose` runtime under
+    /// the session's owned pane that the launch installed. The pane
+    /// read is async (it may shell out to tmux); the walk itself runs
+    /// on a blocking worker, like every other foreground attribution,
+    /// for the same reason as [`Supervisor::codex_foreground`].
+    async fn goose_foreground(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+        program: crate::agent_kind::goose::GooseLaunchProgram,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        let pid = self.owned_pane_pid(row, "Goose").await?;
+        tokio::task::spawn_blocking(move || {
+            crate::procs::foreground_goose_emitter(peer, pid, &program)
+        })
+        .await
+        .map_err(|_| {
+            RequestError::new(
+                ErrorKind::Internal,
+                "Goose process attribution could not complete",
             )
         })?
         .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
@@ -15183,6 +15521,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: entry.info.id.clone(),
                     parent: None,
                     title: title.to_string(),
@@ -15845,6 +16184,7 @@ pub(crate) mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        goose_launch_program: None,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -15996,6 +16336,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: "error row".to_string(),
@@ -16155,6 +16496,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: scoped_id.clone(),
                     parent: None,
                     title: "scoped".to_string(),
@@ -16243,6 +16585,7 @@ pub(crate) mod tests {
                     capture_ownership_version: version,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: "codex".to_string(),
@@ -16290,6 +16633,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 1,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: "grok".to_string(),
@@ -16752,6 +17096,7 @@ pub(crate) mod tests {
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        goose_launch_program: None,
                         id: id.clone(),
                         parent: None,
                         title: "identity".to_string(),
@@ -16890,6 +17235,7 @@ pub(crate) mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                 },
                 None,
             )
@@ -17427,6 +17773,7 @@ exit 0
                         capture_ownership_version: 0,
                         omp_reporter_asset: marker.map(str::to_string),
                         omp_launch_program: program.map(str::to_string),
+                        goose_launch_program: None,
                     },
                     None,
                 )
@@ -18674,6 +19021,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                 },
                 None,
             )
@@ -18832,6 +19180,2010 @@ exit 0
         );
     }
 
+    /// Live-process Goose admission fixture, mirroring `OmpAdmission`:
+    /// a real supervisor with a fake tmux prelude, a real native
+    /// `goose` runtime image, a hook-shaped reporter beneath it, and
+    /// schema-16 Goose stores planted at the resolved paths, with
+    /// reports driven down the real admission path.
+    ///
+    /// What is real and what stands in: the runtime image is a copy
+    /// of the shell binary named `goose` — a REAL executable image,
+    /// pinned by magic bytes to never be a script, so the image
+    /// descriptor matches by `exe` basename exactly as it would for
+    /// the vendor binary; the store layout is the pinned DDL shared
+    /// with the reader's own tests; and the process relationships,
+    /// environ resolution, kernel peer attribution, and durable
+    /// writes are all genuine. The full production path with the
+    /// vendor binary itself is covered by the e2e Goose test instead.
+    /// Every runtime group a [`GooseAdmission`] fixture has spawned,
+    /// shared with the gates a test installs: a gate fires inside
+    /// the admission it interrupts, where the fixture itself is
+    /// borrowed, so the kill list — and not the owned children —
+    /// is what a gate can reach.
+    type KillRegistry = Arc<std::sync::Mutex<Vec<u32>>>;
+
+    struct GooseAdmission {
+        state: StateDir,
+        scratch: farhelm_teststate::TestDir,
+        sup: Option<Arc<Supervisor>>,
+        runtimes: Vec<OwnedRuntime>,
+        kills: KillRegistry,
+    }
+
+    impl GooseAdmission {
+        /// The whole fixture: state dir, scratch `bin/` with the
+        /// `goose` image and its two scripts, a fake tmux prelude,
+        /// and a real supervisor behind it.
+        async fn launch() -> Self {
+            Self::launch_with(|_, _| {}).await
+        }
+
+        /// [`launch`](Self::launch) with seam access: `adjust` runs
+        /// after the fake tmux is written and before the supervisor
+        /// is constructed, so a test can install gates that observe
+        /// the registry — which exists by then — without rebuilding
+        /// the fixture around them.
+        async fn launch_with(adjust: impl FnOnce(&KillRegistry, &mut SupervisorSeams)) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let state = StateDir::new();
+            let scratch = farhelm_teststate::tempdir().expect("scratch dir");
+            let bin = scratch.path().join("bin");
+            std::fs::create_dir(&bin).expect("bin dir");
+            // The runtime image: whatever `sh` resolves to, copied
+            // under the `goose` name. A copy, never a symlink: the
+            // kernel reports the copy's own path (and basename) as
+            // the image, exactly what the descriptor matches.
+            let shell = Self::find_shell();
+            let image = bin.join("goose");
+            std::fs::copy(&shell, &image).expect("copy the shell to the goose image");
+            std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755))
+                .expect("the image is executable");
+            let magic = std::fs::read(&image).expect("the image reads");
+            assert!(
+                magic.starts_with(b"\x7fELF")
+                    || magic.starts_with(b"\xfe\xed\xfa\xce")
+                    || magic.starts_with(b"\xfe\xed\xfa\xcf")
+                    || magic.starts_with(b"\xce\xfa\xed\xfe")
+                    || magic.starts_with(b"\xcf\xfa\xed\xfe")
+                    || magic.starts_with(b"\xca\xfe\xba\xbe"),
+                "the runtime image ({}) is a real executable, never a script",
+                shell.display(),
+            );
+            // The `session` script: what the image interprets when
+            // spawned with session-shaped argv. It spawns the
+            // hook-shaped reporter beneath itself, publishes the
+            // reporter's pid, then idles WITHOUT exec — so this
+            // process keeps its session-shaped argv and `goose` image
+            // for the walk to find.
+            std::fs::write(
+                bin.join("session"),
+                format!(
+                    "#!/bin/sh\n\
+                     PATH=\"{bin}:/usr/bin:/bin\"\n\
+                     sh internal goose-hook &\n\
+                     echo $! > \"{bin}/reporter.pid\"\n\
+                     sleep 25\n",
+                    bin = bin.display(),
+                ),
+            )
+            .expect("session script");
+            std::fs::write(bin.join("internal"), "#!/bin/sh\nsleep 25\n").expect("sleeper");
+            for path in [bin.join("session"), bin.join("internal")] {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                    .expect("fixture executable");
+            }
+            let fake_tmux = scratch.path().join("fake-tmux");
+            std::fs::write(
+                &fake_tmux,
+                r#"#!/bin/sh
+# Fake tmux for the Goose admission tests. Version probes answer with the
+# pinned shape; pane queries answer from files beside this script, written
+# per test with the fixture's own live pids; everything else succeeds.
+here=$(dirname "$0")
+# The driver prefixes every invocation with `-S <socket> -f <config>`,
+# so the command word is found by scanning, never positionally.
+cmd=""
+for arg in "$@"; do
+  case "$arg" in
+    -V) echo "tmux 3.7c"; exit 0;;
+    *version*) echo "3.7c"; exit 0;;
+    list-panes|display-message) cmd="$arg";;
+  esac
+done
+if [ "$cmd" = "list-panes" ]; then cat "$here/panes_answer"; exit 0; fi
+if [ "$cmd" = "display-message" ]; then cat "$here/pane_answer"; exit 0; fi
+exit 0
+"#,
+            )
+            .expect("fake tmux");
+            std::fs::set_permissions(&fake_tmux, std::fs::Permissions::from_mode(0o755))
+                .expect("fake tmux executable");
+            let kills: KillRegistry = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut seams = SupervisorSeams {
+                tmux_program: fake_tmux,
+                ..SupervisorSeams::default()
+            };
+            adjust(&kills, &mut seams);
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                seams,
+            )
+            .await
+            .expect("supervisor");
+            Self {
+                state,
+                scratch,
+                sup: Some(sup),
+                runtimes: Vec::new(),
+                kills,
+            }
+        }
+
+        /// Whatever `sh` resolves to on this machine, for the runtime
+        /// image copy. `sh` is guaranteed on every Unix under test;
+        /// a missing shell is a broken substrate, and panicking names
+        /// it rather than skipping the whole proof.
+        fn find_shell() -> std::path::PathBuf {
+            std::env::var_os("PATH")
+                .and_then(|paths| {
+                    std::env::split_paths(&paths)
+                        .map(|dir| dir.join("sh"))
+                        .find(|candidate| candidate.is_file())
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from("/bin/sh"))
+        }
+
+        /// Point the fake pane answer at one live pid under one session.
+        fn write_pane_answer(&self, pid: u32, tmux_name: &str) {
+            std::fs::write(
+                self.scratch.path().join("pane_answer"),
+                format!("{pid} 0 {tmux_name}\n"),
+            )
+            .expect("pane answer");
+        }
+
+        /// Answer a `list-panes` sweep with one live pane for the
+        /// publication-gap path, which recovers the pane from tmux.
+        fn write_panes_list(&self, tmux_name: &str) {
+            std::fs::write(
+                self.scratch.path().join("panes_answer"),
+                format!("%0 @0 0 0 s {tmux_name}\n"),
+            )
+            .expect("panes answer");
+        }
+
+        /// Spawn the session-shaped runtime and wait for its
+        /// hook-shaped reporter, returning the reporter's
+        /// kernel-attributed identity. The pane answer names the
+        /// runtime under `id`'s session. `home` is the runtime's
+        /// `HOME`; `extra` carries per-test environ overrides
+        /// (`GOOSE_PATH_ROOT`, `XDG_DATA_HOME`).
+        async fn spawn_runtime(
+            &mut self,
+            id: &str,
+            home: &std::path::Path,
+            extra: &[(&str, &str)],
+        ) -> crate::procs::ProcessIdentity {
+            let peer = self.spawn_one(home, extra).await;
+            let runtime_pid = self.runtimes.last().expect("runtime child").child.id();
+            self.write_pane_answer(runtime_pid, &format!("fh-{id}"));
+            peer
+        }
+
+        /// A second live chain for the same fixture — a separately
+        /// launched runtime whose reporter passes the shape gate but
+        /// must fail process attribution. Both chains stay owned: the
+        /// sibling's runtime is appended beside the parent's, so
+        /// teardown reaps every tree it started and the parent remains
+        /// owned and live while the sibling's rejection is measured.
+        /// The pane answer is left naming the first runtime: this
+        /// chain's ancestry can never reach it.
+        async fn spawn_sibling(
+            &mut self,
+            home: &std::path::Path,
+            extra: &[(&str, &str)],
+        ) -> crate::procs::ProcessIdentity {
+            let pid_file = self.scratch.path().join("bin/reporter.pid");
+            std::fs::remove_file(&pid_file).ok();
+            self.spawn_one(home, extra).await
+        }
+
+        /// Spawn one runtime, premise-assert its reporter's parentage,
+        /// and return the reporter's kernel-attributed identity. The
+        /// runtime's process group is owned from spawn — before the
+        /// readiness wait and the premise assertions — so a timeout, a
+        /// failed assertion, or a cancelled wait still leaves every
+        /// started process owned, including reporters whose pid was
+        /// never published. The premise comes before any measurement
+        /// that depends on it: the reporter must be alive AND parented
+        /// under the runtime, or the chain the walk must find does not
+        /// exist and the test would refuse for the wrong reason.
+        async fn spawn_one(
+            &mut self,
+            home: &std::path::Path,
+            extra: &[(&str, &str)],
+        ) -> crate::procs::ProcessIdentity {
+            let (runtime_pid, pid_file) = self.start_runtime(home, extra);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            let Some(reporter_pid) = OmpAdmission::await_reporter(&pid_file, deadline).await else {
+                let runtime = self.runtimes.last_mut().expect("the owned runtime");
+                panic!("{}", reporter_timeout_diagnostic(&mut runtime.child));
+            };
+            let (ppid, _, liveness) = crate::procs::read_process(reporter_pid)
+                .expect("read the reporter")
+                .expect("the reporter is alive");
+            assert_eq!(
+                liveness,
+                crate::procs::ProcessState::Running,
+                "the reporter must be running when the report is measured"
+            );
+            assert_eq!(
+                ppid, runtime_pid,
+                "the reporter must be parented under the runtime, or the walked chain does not exist"
+            );
+            crate::procs::ProcessIdentity::read(reporter_pid)
+                .expect("the reporter must have a kernel-attributed identity")
+        }
+
+        /// Spawn the session-shaped `goose` image in its own process
+        /// group and register the guard immediately, before any wait:
+        /// the readiness wait and premise assertions can time out,
+        /// panic, or be cancelled, and an unregistered child would
+        /// leak past teardown on exactly those paths. Returns the
+        /// runtime pid and the pid-file path the caller awaits.
+        ///
+        /// The group is the cleanup boundary, not the pid file: the
+        /// runtime spawns its reporter before the pid file exists, so
+        /// pid registration can never own the pre-publication window —
+        /// the group owned here does.
+        fn start_runtime(
+            &mut self,
+            home: &std::path::Path,
+            extra: &[(&str, &str)],
+        ) -> (u32, std::path::PathBuf) {
+            let bin = self.scratch.path().join("bin");
+            let mut command = std::process::Command::new(bin.join("goose"));
+            command
+                .arg("session")
+                .arg("--with-extension")
+                .arg("farhelm-reporter:sh -c 'exec farhelm internal goose-hook'")
+                // The image interprets its `session` script from ITS cwd:
+                // `sh script` opens the script relative to the cwd, never
+                // via `PATH`, so the child runs rooted at `bin/`. A
+                // fixture-only concern — the vendor binary is exec'd by
+                // path and needs no cwd trick — and invisible to the
+                // proof, which reads image, argv, and environ only.
+                .current_dir(&bin)
+                .env_clear()
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("HOME", home)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            for (name, value) in extra {
+                command.env(name, value);
+            }
+            // Its OWN process group. That is what makes teardown own the
+            // reporter before its pid is published: the runtime spawns the
+            // reporter first and publishes second, and every descendant
+            // inherits the group — one kill reaches the whole tree no
+            // matter where in that window the wait stops.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                command.process_group(0);
+            }
+            let child = command.spawn().expect("spawn the goose runtime");
+            let runtime_pid = child.id();
+            // Owned from the first instruction after the spawn.
+            // `process_group(0)` makes the leader's pid the group id.
+            self.runtimes.push(OwnedRuntime {
+                child,
+                group: runtime_pid,
+            });
+            // Published beside the owned child, for the gates: a
+            // gate fires inside the admission while the fixture is
+            // borrowed, so it kills through this list.
+            self.kills
+                .lock()
+                .expect("kill registry poisoned")
+                .push(runtime_pid);
+            (runtime_pid, bin.join("reporter.pid"))
+        }
+
+        /// Kill every owned runtime tree without dropping the
+        /// supervisor: the durable capture must outlive the processes
+        /// that reported it. Idempotent — owned runtimes are drained, so
+        /// a later teardown finds nothing left to kill. Each teardown
+        /// signals the runtime's whole process group — covering
+        /// reporters the fixture never learned the pid of — then kills
+        /// and reaps the direct child.
+        fn kill_owner(&mut self) {
+            for runtime in std::mem::take(&mut self.runtimes) {
+                runtime.teardown();
+            }
+        }
+
+        /// A [`SupervisorSeams::goose_evidence_gate`] that reaps every
+        /// runtime spawned so far and waits for the deaths to land:
+        /// installed for the identity-change window between the store
+        /// evidence and the closing attribution, so the recheck must
+        /// refuse. Signal delivery is async, so the gate polls the
+        /// group leaders until they are gone — the recheck that
+        /// follows has to observe the post-kill identity, not a
+        /// still-dying process, or the test would prove nothing on a
+        /// slow scheduler.
+        fn kill_gate(kills: &KillRegistry) -> CaptureGate {
+            let kills = Arc::clone(kills);
+            let gate: CaptureGate = Arc::new(move || {
+                let kills = Arc::clone(&kills);
+                Box::pin(async move {
+                    let groups = kills.lock().expect("kill registry poisoned").clone();
+                    assert!(
+                        !groups.is_empty(),
+                        "the kill gate needs a spawned runtime to reap"
+                    );
+                    for group in &groups {
+                        kill_process_group(*group);
+                    }
+                    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+                    for group in &groups {
+                        loop {
+                            // A SIGKILLed group leader stays a zombie
+                            // until the fixture reaps it at teardown;
+                            // `Zombie` counts as gone here (as it does
+                            // for the sweep), because the walk the
+                            // recheck runs only follows `Running`
+                            // edges — a zombie leader can never
+                            // attribute.
+                            let gone = !matches!(
+                                crate::procs::read_process(*group),
+                                Ok(Some((_, _, crate::procs::ProcessState::Running)))
+                            );
+                            if gone {
+                                break;
+                            }
+                            assert!(
+                                tokio::time::Instant::now() < deadline,
+                                "the reaped runtime stays observable past 10 s"
+                            );
+                            // sleep-ok: scheduling stimulus for signal delivery to the reaped tree (no kernel oracle).
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                    }
+                })
+            });
+            gate
+        }
+
+        /// Seed one Goose session row: the program carries the launch
+        /// provenance (`None` for a pre-upgrade launch), the pane
+        /// selects direct recovery (`%0`) or the publication-gap path
+        /// (`""`), and the template is the future resume command —
+        /// never the launch program, which is what `program` seeds.
+        async fn seed_goose_session(
+            &self,
+            id: &str,
+            program: Option<&str>,
+            pane: &str,
+            template: Vec<String>,
+        ) {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .insert_session(
+                    StoredSession {
+                        id: id.to_string(),
+                        parent: None,
+                        title: "Goose".into(),
+                        created_at: now_unix(),
+                        last_activity_at: now_unix(),
+                        last_work_started_at: 0,
+                        creation_seq: 0,
+                        cwd: self.state.path().to_str().unwrap().into(),
+                        invocation: "goose session".into(),
+                        launch: None,
+                        tmux_name: format!("fh-{id}"),
+                        pane: pane.into(),
+                        outcome: LastOutcome::Exited {
+                            exit_code: Some(0),
+                            annotation: None,
+                        },
+                        agent_kind: farhelm_proto::AgentKind::Goose,
+                        resume_template: Some(template),
+                        canonical_cwd: None,
+                        captured_conversation: None,
+                        captured_record: None,
+                        capture_ambiguous: false,
+                        first_input_at: None,
+                        generation: 0,
+                        launch_scoped: false,
+                        source_profile: None,
+                        conversation_source: None,
+                        capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
+                        goose_launch_program: program.map(str::to_string),
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        /// One schema-16 Goose store at the `HOME`-default layout
+        /// under `home`, with `rows` of `(id, session_type, parent)`.
+        /// The layout is the pinned DDL shared with the reader's own
+        /// tests, so the vendor shape has one spelling in the tree.
+        fn plant_store(
+            &self,
+            home: &std::path::Path,
+            rows: &[(&str, &str, Option<&str>)],
+        ) -> std::path::PathBuf {
+            self.plant_store_at(&home.join(".local/share/goose/sessions"), rows)
+        }
+
+        /// One schema-16 Goose store at a `GOOSE_PATH_ROOT` layout
+        /// under `root`.
+        fn plant_store_at_root(
+            &self,
+            root: &std::path::Path,
+            rows: &[(&str, &str, Option<&str>)],
+        ) -> std::path::PathBuf {
+            self.plant_store_at(&root.join("data/sessions"), rows)
+        }
+
+        /// One schema-16 Goose store at an explicit sessions dir.
+        fn plant_store_at(
+            &self,
+            sessions: &std::path::Path,
+            rows: &[(&str, &str, Option<&str>)],
+        ) -> std::path::PathBuf {
+            std::fs::create_dir_all(sessions).expect("sessions dir");
+            let path = sessions.join("sessions.db");
+            let writer = rusqlite::Connection::open(&path).expect("plant the store");
+            crate::goose_store::plant_goose_schema_16(&writer);
+            for (id, session_type, parent) in rows {
+                crate::goose_store::plant_goose_session(&writer, id, session_type, *parent);
+            }
+            path
+        }
+
+        /// One external report down the real admission path.
+        async fn report(
+            &self,
+            id: &str,
+            conversation: &str,
+            source: &str,
+            peer: Option<crate::procs::ProcessIdentity>,
+        ) -> Result<(), RequestError> {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .report_conversation(
+                    id,
+                    ReportedConversation {
+                        vendor: farhelm_proto::ReportVendor::Goose,
+                        conversation: conversation.to_string(),
+                        source: source.to_string(),
+                        transcript_path: None,
+                        hook_event_name: None,
+                        peer,
+                    },
+                )
+                .await
+        }
+
+        /// The exact durable binding: conversation plus ownership
+        /// version, asserted together because neither alone is the
+        /// contract.
+        async fn binding(&self, id: &str) -> (Option<String>, i64) {
+            let row = self
+                .sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session(id)
+                .await
+                .unwrap()
+                .unwrap();
+            (row.captured_conversation, row.capture_ownership_version)
+        }
+
+        /// The future resume command — a template, never the launch
+        /// program, which is what the provenance seeds.
+        fn resume_template() -> Vec<String> {
+            vec![
+                "goose".into(),
+                "session".into(),
+                "--resume".into(),
+                "--session-id".into(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+            ]
+        }
+
+        /// The saved store locator beside the binding.
+        async fn record(&self, id: &str) -> Option<String> {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .store
+                .session(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .captured_record
+        }
+
+        /// The public restart offer through the real offer path.
+        async fn offer(&self, id: &str) -> farhelm_proto::RestartOffer {
+            self.sup
+                .as_ref()
+                .expect("supervisor")
+                .session_snapshot(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .restart_offer
+        }
+    }
+
+    impl Drop for GooseAdmission {
+        /// Reap every owned runtime, including failure paths: each
+        /// direct child is killed and waited on, and its whole process
+        /// group is signaled first — so reporters spawned before their
+        /// pid was ever published, and runtimes whose readiness wait
+        /// timed out or was cancelled, are still covered. Panic and
+        /// cancellation paths land here too, since every runtime is
+        /// registered before any fallible wait. Grandchildren are
+        /// signaled, never waited (this process cannot wait on them),
+        /// under their bounded `sleep 25`, which caps any linger if a
+        /// signal lands late.
+        fn drop(&mut self) {
+            self.kill_owner();
+        }
+    }
+
+    /// PRE-FIX REPRODUCTION (goal `foreground-capture`, Goose): before
+    /// the ownership proof, a child report OVERWROTE its parent's
+    /// binding — the bare id carried no foreground evidence, so the
+    /// last report won regardless of which session it named. This test
+    /// failed on the pre-proof tree with the binding at the child's
+    /// id; with the proof, the same-process racing child (a
+    /// `sub_agent` row with a NULL parent — the creation race made
+    /// visible) refuses and the parent's version-1 binding stands.
+    ///
+    /// Why this test matters: it is the hole the Goose proof closes,
+    /// kept as the regression that reopens it if either leg ever
+    /// weakens.
+    #[farhelm_testtrace::test]
+    async fn goose_child_reports_after_parent_leave_the_binding() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(
+            &home,
+            &[("parent-1", "user", None), ("child-1", "sub_agent", None)],
+        );
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        fixture
+            .report(&id, "child-1", "goose", Some(peer))
+            .await
+            .expect_err("the racing child report refuses");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the child's report leaves the parent's binding alone"
+        );
+    }
+
+    /// An unknown transition refuses with `InvalidRequest` before any
+    /// evidence is consulted: no peer is needed, because the
+    /// vocabulary check precedes the claim, the reload, and every
+    /// process or store read.
+    ///
+    /// Why this test matters: the helper's single word is the whole
+    /// contract — a future vendor tag must arrive as a deliberate
+    /// allowlist addition with evidence, never by falling through.
+    #[farhelm_testtrace::test]
+    async fn goose_unknown_transition_is_refused_before_any_evidence() {
+        let fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let error = fixture
+            .report(&id, "parent-1", "session_start", None)
+            .await
+            .expect_err("an unknown transition must be refused");
+        assert!(
+            error.kind == ErrorKind::InvalidRequest,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+    }
+
+    /// A report for a launch with no recorded program fails closed
+    /// with `Conflict`: NULL provenance (a pre-proof launch, or a
+    /// publish that never landed) is unknown authority, not a
+    /// default-allow. The offer stays `FreshOnly` — Goose takes no
+    /// historical exception, so version 0 never offers resume no
+    /// matter what the row remembers.
+    ///
+    /// Why this test matters: every pre-upgrade launch lands here,
+    /// and runnable-without-capture is the contract for all of them.
+    #[farhelm_testtrace::test]
+    async fn goose_report_for_a_launch_without_provenance_fails_closed() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, None, "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        let error = fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("a program-less launch must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "without provenance there is no resume offer"
+        );
+    }
+
+    /// An `unknown` launch program refuses: the classifier found no
+    /// supported shape in the launch argv, so there is no installation
+    /// descriptor for the corridor to bind the live chain to.
+    #[farhelm_testtrace::test]
+    async fn goose_unknown_launch_program_refuses() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(
+                &id,
+                Some("unknown"),
+                "%0",
+                GooseAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        let error = fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("an unknown launch program must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report establishes nothing"
+        );
+    }
+
+    /// A report without a kernel-attributed peer refuses: attribution
+    /// is the process leg of the proof, and there is no process to
+    /// attribute.
+    #[farhelm_testtrace::test]
+    async fn goose_report_without_a_peer_refuses() {
+        let fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let error = fixture
+            .report(&id, "parent-1", "goose", None)
+            .await
+            .expect_err("a peer-less report must be refused");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+    }
+
+    /// Mixed destinations refuse on both halves of the discriminator:
+    /// a Goose report addressed to a non-Goose row, and a foreign
+    /// vendor's token addressed to a Goose row. The row's kind stays
+    /// authoritative; the token's prefix is part of its identity.
+    #[farhelm_testtrace::test]
+    async fn goose_mixed_destinations_refuse() {
+        let mut fixture = GooseAdmission::launch().await;
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        // A Goose report to an OMP row: the discriminator compares
+        // the vendor's kind against the row's before any vendor I/O.
+        let omp_id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .store
+            .insert_session(
+                StoredSession {
+                    id: omp_id.clone(),
+                    parent: None,
+                    title: "Omp".into(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: fixture.state.path().to_str().unwrap().into(),
+                    invocation: "omp".into(),
+                    launch: None,
+                    tmux_name: format!("fh-{omp_id}"),
+                    pane: "%0".into(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Omp,
+                    resume_template: Some(vec![
+                        "omp".into(),
+                        "--resume".into(),
+                        crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
+                    ]),
+                    canonical_cwd: None,
+                    captured_conversation: None,
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                    conversation_source: None,
+                    capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
+                    goose_launch_program: None,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let peer = fixture.spawn_runtime(&omp_id, &home, &[]).await;
+        let error = fixture
+            .report(&omp_id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("a Goose report to an OMP row must be refused");
+        assert!(
+            error.kind == ErrorKind::InvalidRequest,
+            "unexpected refusal: {error:#}"
+        );
+        // Foreign tokens to a Goose row: the shape gate admits bare
+        // ids only, so a prefixed locator refuses as a shape
+        // violation without consulting any process or store.
+        let goose_id = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_goose_session(
+                &goose_id,
+                Some("goose"),
+                "%0",
+                GooseAdmission::resume_template(),
+            )
+            .await;
+        for token in [
+            "pi:{\"version\":1,\"session_id\":\"x\"}",
+            "omp:{\"version\":1,\"session_id\":\"x\"}",
+            "codex:{\"version\":1,\"session_id\":\"x\"}",
+        ] {
+            let error = fixture
+                .report(&goose_id, token, "goose", None)
+                .await
+                .expect_err(&format!("{token} must be refused"));
+            assert!(
+                error.kind == ErrorKind::InvalidRequest,
+                "{token}: unexpected refusal: {error:#}"
+            );
+        }
+        assert_eq!(
+            fixture.binding(&goose_id).await,
+            (None, 0),
+            "the refused reports establish nothing"
+        );
+    }
+
+    /// Pre-proof rows offer `FreshOnly` until their first proven
+    /// report: a legacy identity (version 0, however captured) never
+    /// offers resume — unlike Pi/OMP, Goose takes no historical
+    /// exception — and the first report against published provenance
+    /// establishes version 1 normally. This is the upgrade path for
+    /// every row the migration left behind.
+    ///
+    /// Why this test matters: the migration adopts NULL provenance
+    /// for old launches, and this pins what that means in public:
+    /// runnable, fresh-only, and one proven report away from resume.
+    #[farhelm_testtrace::test]
+    async fn goose_pre_proof_rows_offer_fresh_only_until_first_proven_report() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, None, "%0", GooseAdmission::resume_template())
+            .await;
+        // The legacy identity the old binary left behind: captured
+        // under no proof, version 0.
+        fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .store
+            .replace_reported_conversation_if_current(&id, 0, None, "legacy-id")
+            .await
+            .unwrap();
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "a legacy identity never offers resume"
+        );
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("no provenance still refuses");
+        // The launch's provenance publishes (a fresh launch under the
+        // new binary), and the first proven report establishes the
+        // version-1 binding over the legacy identity.
+        fixture
+            .sup
+            .as_ref()
+            .expect("supervisor")
+            .store
+            .record_goose_launch_provenance(&id, 0, "goose")
+            .await
+            .unwrap();
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the first proven report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the proven report replaces the legacy identity at version 1"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "version 1 offers resume"
+        );
+    }
+
+    /// A proven parent report admits at version 1 with a `Resume`
+    /// offer and the proven store locator beside the binding: process
+    /// attribution plus exact store-metadata validation, no tool call
+    /// anywhere in the fixture — the startup report alone carries
+    /// the proof.
+    ///
+    /// Why this test matters: it is the primary supported path, and
+    /// the locator it saves is what pre-resume verification re-opens.
+    #[farhelm_testtrace::test]
+    async fn goose_proven_parent_report_admits_version_1_with_resume() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the parent binds at version 1"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(store.to_str().expect("fixture paths are UTF-8")),
+            "the proven store locator commits beside the identity"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "version 1 offers resume"
+        );
+    }
+
+    /// The runtime dying between the store evidence and the closing
+    /// attribution refuses WITHOUT recording: the second attribution
+    /// brackets the evidence, so a process identity that changed
+    /// after the environment was read cannot authorize the report —
+    /// neither the durable binding nor the public offer moves.
+    ///
+    /// Why this test matters: a PID reuse (or an exec) in that
+    /// window would let a different process's environment authorize
+    /// the wrong store. Killing the tree in the seam window is the
+    /// deterministic stand-in: death is the identity change a test
+    /// can produce on demand, and the recheck must refuse it exactly
+    /// as it must refuse a reused PID naming a live stranger. Without
+    /// the bracket the commit proceeds and the binding lands.
+    #[farhelm_testtrace::test]
+    async fn goose_runtime_lost_before_closing_attribution_records_nothing() {
+        let mut fixture = GooseAdmission::launch_with(|kills, seams| {
+            seams.goose_evidence_gate = Some(GooseAdmission::kill_gate(kills));
+        })
+        .await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("a runtime lost before the closing attribution refuses");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the refused report binds nothing"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the refused report offers no resume"
+        );
+    }
+
+    /// A failed resume verification racing a successful same-ID
+    /// re-proof keeps the newer proof: verification holds the
+    /// session's capture claim from its reload through any demotion,
+    /// so the re-proof commits strictly after the verdict instead of
+    /// underneath a demotion aimed at the older binding — every CAS
+    /// field would still match that newer proof.
+    ///
+    /// Why this test matters: without the claim, a transiently
+    /// unreadable store fails verification, the store recovers, a
+    /// re-proof commits version 1, and the stale verifier demotes it
+    /// back to fresh-only. The deleted-then-restored row below is
+    /// the deterministic stand-in for the transiently busy store. A
+    /// second phase re-verifies against the restored row, covering
+    /// the other order (re-proof first): the fresh proof verifies
+    /// cleanly with no demotion.
+    #[farhelm_testtrace::test]
+    async fn goose_failed_verify_then_same_id_reproof_keeps_the_proof() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_notify = Arc::new(tokio::sync::Notify::new());
+        let release_notify = Arc::new(tokio::sync::Notify::new());
+        let mut fixture = GooseAdmission::launch_with({
+            let fired = Arc::clone(&fired);
+            let fired_notify = Arc::clone(&fired_notify);
+            let release_notify = Arc::clone(&release_notify);
+            move |_, seams| {
+                let gate: CaptureGate = Arc::new(move || {
+                    let fired = Arc::clone(&fired);
+                    let fired_notify = Arc::clone(&fired_notify);
+                    let release_notify = Arc::clone(&release_notify);
+                    Box::pin(async move {
+                        // Register the release waiter BEFORE
+                        // announcing: `notify_one` without a waiter
+                        // is lost, and the test releases as soon as
+                        // it sees the flag (the same ceremony
+                        // `claims_reached_for_test` documents).
+                        let release = release_notify.notified();
+                        tokio::pin!(release);
+                        release.as_mut().enable();
+                        fired.store(true, Ordering::SeqCst);
+                        fired_notify.notify_one();
+                        release.await;
+                    })
+                });
+                seams.goose_verify_gate = Some(gate);
+            }
+        })
+        .await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store_path = fixture.plant_store(&home, &[("conv-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "conv-1", "goose", Some(peer))
+            .await
+            .expect("the proving report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("conv-1".to_string()), 1),
+            "the proving report binds at version 1"
+        );
+        // The transient outage: the proven row disappears from the
+        // vendor store, so verification is about to fail against a
+        // binding that was valid when it was made.
+        {
+            let writer = rusqlite::Connection::open(&store_path).expect("reopen the vendor store");
+            writer
+                .execute("DELETE FROM sessions WHERE id = 'conv-1'", [])
+                .expect("delete the proven row");
+        }
+        let sup = Arc::clone(fixture.sup.as_ref().expect("supervisor"));
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot reads")
+            .expect("the session survives");
+        let verify = tokio::spawn({
+            let sup = Arc::clone(&sup);
+            let id = id.clone();
+            async move { sup.verify_goose_resume(&id, &snapshot).await }
+        });
+        // Parked between the failed read and the demotion: the
+        // loop (not a bare notified) cannot miss the flag even if
+        // the verifier announced before this first poll.
+        loop {
+            let arrived = fired_notify.notified();
+            tokio::pin!(arrived);
+            arrived.as_mut().enable();
+            if fired.load(Ordering::SeqCst) {
+                break;
+            }
+            arrived.await;
+        }
+        assert!(
+            sup.capture_locks.claimed_for_test(&id),
+            "the parked verifier holds the session's capture claim"
+        );
+        // The store recovers before the verdict lands.
+        {
+            let writer = rusqlite::Connection::open(&store_path).expect("reopen the vendor store");
+            crate::goose_store::plant_goose_session(&writer, "conv-1", "user", None);
+        }
+        // The verdict first (it demotes the stale binding), then the
+        // same-ID re-proof: the claim serializes them, so the order
+        // is verdict-then-proof whatever the scheduler does.
+        release_notify.notify_one();
+        verify
+            .await
+            .expect("the verify task joins")
+            .expect_err("the unverifiable offer refuses the restart");
+        fixture
+            .report(&id, "conv-1", "goose", Some(peer))
+            .await
+            .expect("the same-ID re-proof after the verdict admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("conv-1".to_string()), 1),
+            "the newer proof survives the stale verifier's demotion"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the surviving proof offers resume"
+        );
+        // The other order needs no protection: against the restored
+        // row the fresh proof verifies cleanly.
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot rereads")
+            .expect("the session survives");
+        sup.verify_goose_resume(&id, &snapshot)
+            .await
+            .expect("the restored proof verifies");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("conv-1".to_string()), 1),
+            "a clean verification demotes nothing"
+        );
+    }
+
+    /// A shell-wrapped launch with a manually declared reporter
+    /// admits: injection skipped (the argv is not native `goose`), the
+    /// operator declared the reporter by hand, and the corridor's S+G
+    /// shape proves rather than silently failing. The fixture never
+    /// runs injection — the declaration is manual by construction —
+    /// and the wrapper shell exec'd away, leaving the direct shape.
+    ///
+    /// Why this test matters: the corridor accepts S+G, so a launch
+    /// the injector deliberately skipped must still prove. Silently
+    /// failing here would strand every shell-wrapped Goose session
+    /// without capture and without an error.
+    #[farhelm_testtrace::test]
+    async fn goose_shell_launch_with_manual_declaration_admits() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("shell"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the manually declared shell launch admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+        );
+    }
+
+    /// An absolute custom root wins outright: the runtime's
+    /// `GOOSE_PATH_ROOT` resolves the store, and the HOME-default
+    /// store — planted here with the SAME id as a `sub_agent`, so
+    /// falling through would refuse rather than admit — is never
+    /// consulted. The committed locator is the resolved custom path.
+    ///
+    /// Why this test matters: the resolver's precedence is unit-pinned,
+    /// but only this proves admission reads the winner's store rather
+    /// than the default's.
+    #[farhelm_testtrace::test]
+    async fn goose_absolute_custom_root_admits_from_the_resolved_store() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let root = fixture.scratch.path().join("custom-root");
+        // The decoy: same id, hostile metadata. Admission from the
+        // default layout would refuse; admission from the custom
+        // root admits. The verdict names the store that was read.
+        fixture.plant_store(&home, &[("parent-1", "sub_agent", Some("parent-0"))]);
+        let store = fixture.plant_store_at_root(&root, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture
+            .spawn_runtime(&id, &home, &[("GOOSE_PATH_ROOT", root.to_str().unwrap())])
+            .await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the custom-root report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the custom-root report binds at version 1"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(store.to_str().expect("fixture paths are UTF-8")),
+            "the committed locator is the resolved custom path"
+        );
+    }
+
+    /// Proven transitions replace under CAS in report order: a new
+    /// foreground row (`/new`), a switch back (resume), and a repeat
+    /// report each commit the reported id at version 1 with the store
+    /// it was proven against. A foreground fork is a NEW `user` row
+    /// admitted as a legitimate transition — lineage is never
+    /// evidence, so there is nothing to accept beyond the row itself.
+    #[farhelm_testtrace::test]
+    async fn goose_proven_transitions_report_in_order() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(
+            &home,
+            &[
+                ("parent-1", "user", None),
+                ("parent-2", "user", None),
+                ("forked", "user", None),
+            ],
+        );
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        for conversation in ["parent-1", "parent-2", "forked", "parent-1", "parent-1"] {
+            fixture
+                .report(&id, conversation, "goose", Some(peer))
+                .await
+                .unwrap_or_else(|error| panic!("{conversation} admits in order: {error:#}"));
+            assert_eq!(
+                fixture.binding(&id).await,
+                (Some(conversation.to_string()), 1),
+                "{conversation} replaces the binding at version 1"
+            );
+            assert_eq!(
+                fixture.record(&id).await.as_deref(),
+                Some(store.to_str().expect("fixture paths are UTF-8")),
+                "every transition re-saves the store it proved against"
+            );
+        }
+    }
+
+    /// A child report arriving BEFORE any parent report establishes
+    /// nothing: the binding stays pristine, and the parent's later
+    /// report admits normally. Report order must not matter to the
+    /// verdict — only the evidence each report carries.
+    #[farhelm_testtrace::test]
+    async fn goose_child_report_before_parent_establishes_nothing() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(
+            &home,
+            &[("parent-1", "user", None), ("child-1", "sub_agent", None)],
+        );
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        let error = fixture
+            .report(&id, "child-1", "goose", Some(peer))
+            .await
+            .expect_err("the child-first report refuses");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the child-first report establishes nothing"
+        );
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the parent still admits afterwards");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+        );
+    }
+
+    /// The remaining child shapes leave the binding alone: a linked
+    /// same-process child (type plus parentage), a separate root
+    /// child in the SAME store (attribution fails — its chain cannot
+    /// reach the pane), and a separate root child in its OWN store
+    /// (attribution fails before any store is read). Together with
+    /// the racing-child regression, every row of the child matrix is
+    /// covered.
+    #[farhelm_testtrace::test]
+    async fn goose_linked_and_sibling_children_leave_the_binding() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(
+            &home,
+            &[
+                ("parent-1", "user", None),
+                ("child-1", "sub_agent", Some("parent-1")),
+                ("other-root", "user", None),
+            ],
+        );
+        let sibling_home = fixture.scratch.path().join("sibling-home");
+        fixture.plant_store(&sibling_home, &[("sibling-root", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        // A linked same-process child: delegation evidence on both
+        // halves of the metadata.
+        let error = fixture
+            .report(&id, "child-1", "goose", Some(peer))
+            .await
+            .expect_err("the linked child refuses");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        // A separate root in the same store, from a sibling chain:
+        // foreground metadata, unattributable process.
+        let sibling = fixture.spawn_sibling(&home, &[]).await;
+        let error = fixture
+            .report(&id, "other-root", "goose", Some(sibling))
+            .await
+            .expect_err("the same-store sibling refuses");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        // A separate root in its own store, from a sibling chain with
+        // its own HOME: unattributable before any store is read.
+        let foreign = fixture.spawn_sibling(&sibling_home, &[]).await;
+        let error = fixture
+            .report(&id, "sibling-root", "goose", Some(foreign))
+            .await
+            .expect_err("the own-store sibling refuses");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "no child shape disturbs the parent's binding"
+        );
+    }
+
+    /// Concurrent child and parent reports resolve to the parent: the
+    /// claim serializes the two admissions, the child's metadata
+    /// refuses under either order, and the parent's proof commits.
+    /// The `join!` runs both reports genuinely concurrently — no
+    /// sleep, no sequencing — so an ordering assumption would flake
+    /// instead of passing.
+    #[farhelm_testtrace::test]
+    async fn goose_concurrent_child_and_parent_reports_resolve_to_the_parent() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(
+            &home,
+            &[("parent-1", "user", None), ("child-1", "sub_agent", None)],
+        );
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let parent = sup.report_conversation(
+            &id,
+            ReportedConversation {
+                vendor: farhelm_proto::ReportVendor::Goose,
+                conversation: "parent-1".to_string(),
+                source: "goose".to_string(),
+                transcript_path: None,
+                hook_event_name: None,
+                peer: Some(peer),
+            },
+        );
+        let child = sup.report_conversation(
+            &id,
+            ReportedConversation {
+                vendor: farhelm_proto::ReportVendor::Goose,
+                conversation: "child-1".to_string(),
+                source: "goose".to_string(),
+                transcript_path: None,
+                hook_event_name: None,
+                peer: Some(peer),
+            },
+        );
+        let (parent_outcome, child_outcome) = tokio::join!(parent, child);
+        parent_outcome.expect("the parent admits through the race");
+        let error = child_outcome.expect_err("the child refuses through the race");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the race resolves to the parent's binding"
+        );
+    }
+
+    /// A proven parent report succeeds down the publication-gap path:
+    /// a pane-less row recovers its pane from tmux, attributes, and
+    /// admits exactly like the direct-pane path.
+    #[farhelm_testtrace::test]
+    async fn goose_publication_gap_parent_report_succeeds() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "", GooseAdmission::resume_template())
+            .await;
+        fixture.write_panes_list(&format!("fh-{id}"));
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the gap-path parent report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+        );
+    }
+
+    /// An accepted capture survives its owner's exit and a supervisor
+    /// reload: the binding, the version, the locator, and the offer
+    /// are all durable, and killing the processes that reported them
+    /// changes none of it.
+    #[farhelm_testtrace::test]
+    async fn goose_accepted_capture_survives_owner_exit_and_reload() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        fixture.kill_owner();
+        fixture.sup = None;
+        let sup = Supervisor::new_with_seams(
+            fixture.state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams::default(),
+        )
+        .await
+        .expect("the supervisor reloads");
+        fixture.sup = Some(sup);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the binding survives the reload"
+        );
+        assert_eq!(
+            fixture.record(&id).await.as_deref(),
+            Some(store.to_str().expect("fixture paths are UTF-8")),
+            "the locator survives the reload"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the offer survives the reload"
+        );
+    }
+
+    /// Admission re-validates on every report: a row mutated between
+    /// two admissions reports its new metadata on the second, so a
+    /// delegation that landed after the first proof cannot ride it.
+    /// Nothing is cached across admissions — not the row, not the
+    /// verdict.
+    #[farhelm_testtrace::test]
+    async fn goose_readmissions_see_vendor_mutations() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the first admission commits");
+        // The vendor delegates the session out from under the
+        // binding: same id, no longer a foreground root.
+        let writer = rusqlite::Connection::open(&store).expect("the vendor reopens its store");
+        writer
+            .execute(
+                "UPDATE sessions SET session_type = 'sub_agent', parent_session_id = 'p' WHERE id = 'parent-1'",
+                [],
+            )
+            .expect("the vendor mutates the row");
+        drop(writer);
+        let error = fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("the mutated row refuses on re-report");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        // The refusal invalidates nothing by itself: the binding
+        // stands until a resume attempt re-verifies it (or a newer
+        // report replaces it), exactly as the demotion contract says.
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "a refused re-report leaves the binding for resume verification to judge"
+        );
+    }
+
+    /// A migrated store authorizes at admission: the version history
+    /// carries both the older migration row and 16 — the shape Goose
+    /// 1.50.1's own migration writes — and the gate reads the
+    /// maximum, not the row count. The reader pins the gate; this
+    /// pins that admission inherits it.
+    #[farhelm_testtrace::test]
+    async fn goose_migrated_store_with_version_history_admits() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        // The older migration's row, appended the way Goose's own
+        // migration chain appends one row per applied version.
+        let writer = rusqlite::Connection::open(&store).expect("the store reopens");
+        writer
+            .execute("INSERT INTO schema_version(version) VALUES(15)", [])
+            .expect("append the older migration row");
+        drop(writer);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the migrated-store report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the migrated-store report binds at version 1"
+        );
+    }
+
+    /// A `user` row with a populated parent link refuses: parentage
+    /// is delegation evidence on ANY type, not only on `sub_agent`.
+    /// The allowlist unit-pins the predicate; this pins that a live
+    /// admission enforces it and leaves the binding alone.
+    #[farhelm_testtrace::test]
+    async fn goose_user_row_with_a_parent_link_refuses() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(
+            &home,
+            &[
+                ("parent-1", "user", None),
+                ("linked-user", "user", Some("parent-1")),
+            ],
+        );
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        let error = fixture
+            .report(&id, "linked-user", "goose", Some(peer))
+            .await
+            .expect_err("a parented user row must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "the parented row leaves the parent's binding alone"
+        );
+    }
+
+    /// Pre-resume verification passes a still-root row and touches
+    /// nothing: the binding, the version, and the public offer are
+    /// identical before and after, because a pass has no write leg.
+    #[farhelm_testtrace::test]
+    async fn goose_resume_verifies_against_the_live_store() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        sup.verify_goose_resume(&id, &snapshot)
+            .await
+            .expect("the live row verifies");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "a passing verification writes nothing"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::Resume,
+            "the offer survives verification"
+        );
+    }
+
+    /// A resume the store no longer verifies demotes instead of
+    /// authorizing: the row deleted out from under the binding
+    /// refuses with `Conflict`, the version drops 1 → 0 while the id
+    /// is kept, and the public offer becomes `FreshOnly`. A flipped
+    /// role demotes the same way, and a later attributed report
+    /// re-proves under the usual CAS.
+    ///
+    /// Why this test matters: the read→commit window in admission can
+    /// only be caught here, so this is the backstop the residual
+    /// admits to — and the demote fence (same id, same generation)
+    /// is what keeps it from withdrawing a newer binding.
+    #[farhelm_testtrace::test]
+    async fn goose_unverifiable_resume_demotion_withdraws_the_offer() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+
+        // The vendor deletes the row out from under the binding.
+        let writer = rusqlite::Connection::open(&store).expect("the vendor reopens its store");
+        writer
+            .execute("DELETE FROM sessions WHERE id = 'parent-1'", [])
+            .expect("the vendor deletes the row");
+        drop(writer);
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        let error = sup
+            .verify_goose_resume(&id, &snapshot)
+            .await
+            .expect_err("a deleted row must refuse the resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 0),
+            "the id is kept, the version is withdrawn"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the withdrawn offer reads fresh-only"
+        );
+
+        // The row comes back as a root again and a later report
+        // re-proves under the usual CAS; then a role flip demotes
+        // the same way the deletion did.
+        let writer = rusqlite::Connection::open(&store).expect("the vendor reopens its store");
+        crate::goose_store::plant_goose_session(&writer, "parent-1", "user", None);
+        drop(writer);
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the re-proven report admits");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 1),
+            "a later attributed report re-proves"
+        );
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        let writer = rusqlite::Connection::open(&store).expect("the vendor reopens its store");
+        writer
+            .execute(
+                "UPDATE sessions SET session_type = 'sub_agent' WHERE id = 'parent-1'",
+                [],
+            )
+            .expect("the vendor flips the role");
+        drop(writer);
+        let error = sup
+            .verify_goose_resume(&id, &snapshot)
+            .await
+            .expect_err("a flipped role must refuse the resume");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 0),
+            "a role flip demotes like a deletion"
+        );
+    }
+
+    /// A real `restart_session` Resume refuses an unverifiable row
+    /// before relaunching anything: the verifier runs inside the
+    /// public restart path, the generation never advances, and the
+    /// offer withdraws — the refusal names `Conflict`, never a
+    /// relaunch failure.
+    #[farhelm_testtrace::test]
+    async fn goose_restart_refuses_resume_for_an_unverifiable_row() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        // The restart path reads its entry from the in-memory map,
+        // which seeding alone does not populate.
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot =
+            IntegrationSnapshot::resolve(&["goose".into(), "session".into()], None, None)
+                .expect("a goose argv resolves");
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::new(entry));
+
+        let writer = rusqlite::Connection::open(&store).expect("the vendor reopens its store");
+        writer
+            .execute("DELETE FROM sessions WHERE id = 'parent-1'", [])
+            .expect("the vendor deletes the row");
+        drop(writer);
+        let error = sup
+            .restart_session(&id, RestartMode::Resume, true)
+            .await
+            .expect_err("an unverifiable row must refuse the restart");
+        assert_eq!(error_kind(&error), ErrorKind::Conflict);
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .unwrap()
+            .expect("the row survives");
+        assert_eq!(
+            row.generation, 0,
+            "no relaunch began: the generation never advanced"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 0),
+            "the restart-path refusal demotes like a direct one"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the offer withdraws on the public path"
+        );
+    }
+
+    /// A child report after the owner exited establishes nothing:
+    /// the dead peer cannot attribute, so a bound session keeps its
+    /// parent's binding and an unbound one stays pristine. Process
+    /// death is the ordinary end of a launch, not a capture event.
+    #[farhelm_testtrace::test]
+    async fn goose_child_report_after_owner_exit_establishes_nothing() {
+        let mut fixture = GooseAdmission::launch().await;
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(
+            &home,
+            &[("parent-1", "user", None), ("child-1", "sub_agent", None)],
+        );
+
+        // Bound first: the parent's binding survives the processes
+        // that reported it, and the late child cannot touch it.
+        let bound = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_goose_session(
+                &bound,
+                Some("goose"),
+                "%0",
+                GooseAdmission::resume_template(),
+            )
+            .await;
+        let peer = fixture.spawn_runtime(&bound, &home, &[]).await;
+        fixture
+            .report(&bound, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        fixture.kill_owner();
+        let error = fixture
+            .report(&bound, "child-1", "goose", Some(peer))
+            .await
+            .expect_err("the post-exit child must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&bound).await,
+            (Some("parent-1".to_string()), 1),
+            "the post-exit child leaves the parent's binding alone"
+        );
+
+        // Never bound: the child-first report after the owner's exit
+        // establishes nothing, and the session stays pristine.
+        let pristine = uuid::Uuid::new_v4().to_string();
+        fixture
+            .seed_goose_session(
+                &pristine,
+                Some("goose"),
+                "%0",
+                GooseAdmission::resume_template(),
+            )
+            .await;
+        // The pid file still names the reaped runtime's reporter;
+        // remove it so the next spawn's readiness wait cannot read
+        // the stale pid and premise-assert against a dead process.
+        std::fs::remove_file(fixture.scratch.path().join("bin/reporter.pid")).ok();
+        let peer = fixture.spawn_runtime(&pristine, &home, &[]).await;
+        fixture.kill_owner();
+        let error = fixture
+            .report(&pristine, "child-1", "goose", Some(peer))
+            .await
+            .expect_err("the post-exit child-first report must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&pristine).await,
+            (None, 0),
+            "the post-exit child-first report establishes nothing"
+        );
+    }
+
+    /// A report from the previous generation refuses after a
+    /// relaunch: the relaunch opens a new generation with cleared
+    /// provenance, so the surviving old chain's report fails closed
+    /// on the new row and the new generation's binding stays
+    /// untouched. The old runtime is deliberately left ALIVE — a
+    /// dead chain would refuse for the wrong reason.
+    #[farhelm_testtrace::test]
+    async fn goose_old_generation_report_after_relaunch_refuses() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let decision = sup
+            .store
+            .begin_relaunch(
+                &id,
+                crate::store::OfferBasis {
+                    captured_conversation: Some("parent-1".to_string()),
+                    capture_ambiguous: false,
+                    capture_ownership_version: 1,
+                },
+                true,
+                false,
+            )
+            .await
+            .expect("the relaunch opens");
+        assert!(
+            matches!(decision, crate::store::RelaunchDecision::Claimed(_)),
+            "the relaunch must claim, not observe a changed offer"
+        );
+        let row = sup
+            .store
+            .session(&id)
+            .await
+            .unwrap()
+            .expect("the row survives");
+        assert_eq!(row.generation, 1, "the relaunch opens generation 1");
+        assert_eq!(
+            row.goose_launch_program, None,
+            "the relaunch clears the launch provenance"
+        );
+
+        let error = fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("the old generation's report must refuse");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (None, 0),
+            "the new generation's binding stays untouched"
+        );
+    }
+
+    /// A withdrawn offer stays withdrawn across refresh: after
+    /// demotion, the capture ticker's pass changes nothing — no
+    /// version, no identity, no offer — and a repeat report against
+    /// the still-absent row refuses without resurrecting. The
+    /// ticker never opens the vendor store; only a fresh attributed
+    /// report can re-prove.
+    #[farhelm_testtrace::test]
+    async fn goose_refresh_never_resurrects_a_withdrawn_offer() {
+        let mut fixture = GooseAdmission::launch().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        let home = fixture.scratch.path().join("home");
+        let store = fixture.plant_store(&home, &[("parent-1", "user", None)]);
+        fixture
+            .seed_goose_session(&id, Some("goose"), "%0", GooseAdmission::resume_template())
+            .await;
+        let peer = fixture.spawn_runtime(&id, &home, &[]).await;
+        fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect("the proven parent report admits");
+        let sup = fixture.sup.as_ref().expect("supervisor").clone();
+        let writer = rusqlite::Connection::open(&store).expect("the vendor reopens its store");
+        writer
+            .execute("DELETE FROM sessions WHERE id = 'parent-1'", [])
+            .expect("the vendor deletes the row");
+        drop(writer);
+        let snapshot = sup
+            .session_snapshot(&id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        sup.verify_goose_resume(&id, &snapshot)
+            .await
+            .expect_err("the deleted row demotes");
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 0),
+            "the demotion premise holds"
+        );
+
+        sup.capture_now().await;
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 0),
+            "the ticker pass changes no durable state"
+        );
+        assert_eq!(
+            fixture.offer(&id).await,
+            farhelm_proto::RestartOffer::FreshOnly,
+            "the offer stays withdrawn across refresh"
+        );
+        let error = fixture
+            .report(&id, "parent-1", "goose", Some(peer))
+            .await
+            .expect_err("the still-absent row refuses on re-report");
+        assert!(
+            error.kind == ErrorKind::Conflict,
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            fixture.binding(&id).await,
+            (Some("parent-1".to_string()), 0),
+            "a refused re-report resurrects nothing"
+        );
+    }
+
     /// Deleting a session removes its conversation-hook trace, at the path
     /// [`hook_log_path`] names — and removes that one only.
     ///
@@ -18872,6 +21224,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: doomed.to_string(),
                     parent: None,
                     title: "hooked".to_string(),
@@ -18968,6 +21321,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: "unhooked".to_string(),
@@ -19050,6 +21404,7 @@ exit 0
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
                         omp_launch_program: None,
+                        goose_launch_program: None,
                         id: id.to_string(),
                         parent: None,
                         title: id.to_string(),
@@ -19152,6 +21507,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -19247,6 +21603,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -19339,6 +21696,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "pending archive".to_string(),
@@ -20169,8 +22527,9 @@ exit 0
             assert_eq!(
                 conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
-                22,
-                "the v17 fixture now migrates through the provenance, OMP asset, and OMP program migrations too"
+                23,
+                "the v17 fixture now migrates through the provenance, OMP asset, OMP program, and Goose \
+                 launch-program migrations too"
             );
             assert_eq!(
                 conn.query_row(
@@ -20401,6 +22760,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -21295,6 +23655,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -21384,6 +23745,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "ended".to_string(),
                     parent: None,
                     title: "ended".to_string(),
@@ -21916,6 +24278,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -22014,6 +24377,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -22442,6 +24806,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -22554,6 +24919,7 @@ exit 0
             capture_ownership_version: 0,
             omp_reporter_asset: None,
             omp_launch_program: None,
+            goose_launch_program: None,
             id: "stranded".to_string(),
             parent: None,
             title: "as created".to_string(),
@@ -22725,6 +25091,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -22950,6 +25317,7 @@ exit 0
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: "stranded".to_string(),
                     parent: None,
                     title: "stranded".to_string(),
@@ -23308,6 +25676,31 @@ exit 0
         );
         assert!(!hooked);
         assert_eq!(result, env_long_option);
+    }
+
+    /// Hooks-off for Goose leaves a fresh launch byte-for-byte
+    /// untouched: no `--with-extension` is appended, `hooked` is
+    /// false, and — unlike a hooks-off RESUME, which appends the
+    /// disabled controls to switch off the persisted declaration —
+    /// not even the env prefix is added, because a fresh launch has
+    /// no declaration to switch off. Nothing reports, so no target
+    /// is ever gained.
+    #[farhelm_testtrace::test]
+    fn goose_injection_skips_fresh_launches_when_hooks_exclude_goose() {
+        let fresh = ["goose", "session", "--model", "model-1"]
+            .map(str::to_string)
+            .to_vec();
+        let (injected, hooked) = with_hook_argv_using(
+            fresh.clone(),
+            &hook_snapshot(AgentKind::Goose),
+            &crate::agent_kind::AgentHooks::None,
+            crate::agent_kind::AgentInstructions::On,
+            Some("/opt/farhelm"),
+            None,
+            "session-1",
+        );
+        assert!(!hooked, "hooks-off disables the fresh reporter");
+        assert_eq!(injected, fresh);
     }
 
     /// Pi injects the static extension and pointer as one unit. Either the

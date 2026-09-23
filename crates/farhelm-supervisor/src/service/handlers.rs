@@ -3531,6 +3531,24 @@ pub(crate) async fn handle_restricted_control(
                 .await;
                 return;
             }
+            // Goose's vocabulary is the single word the helper sends:
+            // anything else refuses at the doorway, before the
+            // discriminator's second check and long before any vendor
+            // I/O — admission re-checks against the same predicate.
+            if vendor == farhelm_proto::ReportVendor::Goose
+                && !crate::agent_kind::goose::is_goose_foreground_source(&source)
+            {
+                send_reply(
+                    tx,
+                    &ControlMsg::Error {
+                        req_id,
+                        message: "Goose reported an unsupported foreground transition".to_string(),
+                        kind: ErrorKind::InvalidRequest,
+                    },
+                )
+                .await;
+                return;
+            }
             // Bounded and stripped of control characters HERE, at the
             // doorway, so nothing downstream has to remember that this
             // field is attacker-chosen: `report_conversation` puts it in
@@ -4086,6 +4104,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4153,6 +4172,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -4956,6 +4976,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: session_id.to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -6973,6 +6994,7 @@ mod tests {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),

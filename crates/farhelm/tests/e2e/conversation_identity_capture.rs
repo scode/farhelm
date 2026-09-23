@@ -1076,6 +1076,7 @@ async fn capture_considers_sessions_beyond_the_list_reply_cap() {
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
                     omp_launch_program: None,
+                    goose_launch_program: None,
                     id: format!("extra-{i}"),
                     parent: None,
                     title: format!("extra-{i}"),
@@ -1423,4 +1424,231 @@ async fn a_session_resuming_an_old_conversation_is_not_captured() {
         listed(&h.client, &session.id).await.restart_offer,
         farhelm_proto::RestartOffer::FreshOnly
     );
+}
+
+// ---------------------------------------------------------------------
+// Native Goose foreground proof
+//
+// The supervisor-level `GooseAdmission` tests pin the proof's logic
+// against a faithful fixture runtime; what is here is the one thing
+// no fixture can show — that the VENDOR's own binary, store, and
+// extension spawning satisfy the proof end to end. Unlike the
+// `#[ignore]`-marked audits in `real_agent_capture`, this test needs
+// no credentials and no network: the session idles at its prompt
+// behind a dummy provider and is never asked to complete anything,
+// so it runs wherever a `goose` binary exists and skips honestly
+// where none does.
+// ---------------------------------------------------------------------
+
+/// The vendor `goose` binary when this host has one, by the same
+/// `PATH` lookup a login shell would do. `None` is the honest skip,
+/// not a failure: CI has no Goose, and a failure there would be
+/// about the substrate rather than the proof.
+fn native_goose_binary() -> Option<std::path::PathBuf> {
+    let goose = std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join("goose"))
+            .find(|candidate| candidate.is_file())
+    })?;
+    // A bare `goose --version` that answers also establishes the
+    // binary executes on this host rather than merely existing.
+    let version = std::process::Command::new(&goose)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !version.status.success() {
+        return None;
+    }
+    println!(
+        "native goose under test: {}",
+        String::from_utf8_lossy(&version.stdout).trim()
+    );
+    Some(goose)
+}
+
+/// A real Goose session captures its own conversation through the
+/// shipped proof: the vendor binary under a real tmux pane, the
+/// injected MCP reporter declaration, the real `internal
+/// goose-hook` helper over the real socket, a real Goose-written
+/// store, and kernel pane attribution — asserting the exact durable
+/// binding, ownership version 1, and the public resume offer.
+///
+/// What is real and what stands in: the `goose` image, its session
+/// row, its extension-manager spawn of the reporter, the helper,
+/// the socket report, the `/proc` walk, the store read, and the
+/// durable write are all genuine. Stood in are the launch
+/// environment (a `goose`-named wrapper script exporting scratch
+/// `HOME`/`GOOSE_PATH_ROOT` plus a dummy provider, so the vendor
+/// never touches the real home or the network), the telemetry
+/// answer (pre-seeded `GOOSE_TELEMETRY_ENABLED: false`, so the TUI
+/// reaches its prompt unattended), and the tmux→pane mapping's own
+/// server (private socket, like every e2e test). The wrapper execs
+/// the vendor binary, leaving no link of its own in the walked
+/// chain — the corridor sees reporter, runtime, and pane only.
+///
+/// Why this test matters: the supervisor suite proves the proof
+/// accepts the DESCRIBED vendor shapes, but only the vendor can say
+/// whether those descriptions are the shapes it actually produces —
+/// the exec-collapsed reporter parentage, the `AGENT_SESSION_ID`
+/// the helper reports, the `user`/NULL row behind it, and the
+/// `GOOSE_PATH_ROOT` layout the resolver binds. A version bump
+/// changing any of them fails here, loudly, instead of silently
+/// stopping capture.
+#[farhelm_testtrace::test]
+async fn a_real_goose_session_captures_its_conversation_through_the_proof() {
+    let Some(goose) = native_goose_binary() else {
+        println!(
+            "SKIPPED a_real_goose_session_captures_its_conversation_through_the_proof: \
+             no working goose on PATH"
+        );
+        return;
+    };
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let work = farhelm_teststate::tempdir().expect("workdir");
+    let home = farhelm_teststate::tempdir().expect("agent home");
+    let root = farhelm_teststate::tempdir().expect("goose root");
+    let bin = farhelm_teststate::tempdir().expect("wrapper bin");
+
+    // The vendor's config tree under the custom root, with the
+    // telemetry prompt answered the way a declined onboarding
+    // answers it — observed from a real run, not invented — so the
+    // TUI reaches its prompt with no input from the test.
+    std::fs::create_dir_all(root.path().join("config")).expect("goose config dir");
+    std::fs::write(
+        root.path().join("config").join("config.yaml"),
+        "GOOSE_TELEMETRY_ENABLED: false\n",
+    )
+    .expect("seed the telemetry answer");
+
+    // The `goose`-named wrapper: kind derivation and the launch
+    // classifier see the `goose` basename, while the scratch
+    // environment keeps the vendor off the real home and network.
+    // `HOME` rides along because `agent_home` is the scan's root,
+    // not the launch's environment — without it the vendor would
+    // inherit this process's home.
+    let wrapper = bin.path().join("goose");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nexport HOME={} GOOSE_PATH_ROOT={} GOOSE_PROVIDER=openai \
+             OPENAI_API_KEY=farhelm-e2e-dummy-key GOOSE_MODEL=gpt-4o\nexec {} \"$@\"\n",
+            shell_words::quote(&home.path().to_string_lossy()),
+            shell_words::quote(&root.path().to_string_lossy()),
+            shell_words::quote(&goose.to_string_lossy()),
+        ),
+    )
+    .expect("write the wrapper");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
+            .expect("the wrapper is executable");
+    }
+
+    // The real socket, not only the in-process pipe: the reporter is
+    // a genuine child process, so only an accepting supervisor can
+    // receive it.
+    let (sup, client, accepting) =
+        crate::real_agent_capture::serving_supervisor(state.path(), home.path().to_path_buf())
+            .await;
+    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
+
+    // Bare, the way a user types it: injection inserts `session`
+    // and appends the reporter declaration.
+    let invocation = shell_words::quote(&wrapper.to_string_lossy()).into_owned();
+    let session = client
+        .create_session(&work.path().to_string_lossy(), &invocation, None, 100, 30)
+        .await
+        .unwrap_or_else(|error| panic!("launching the real goose: {error:#}"));
+
+    // Goose loads extensions in the background after its TUI is up,
+    // so the report lands on the vendor's schedule, not the
+    // launch's: poll the durable snapshot until the binding lands.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+    let conversation = loop {
+        let snapshot = sup
+            .session_snapshot(&session.id)
+            .await
+            .expect("snapshot")
+            .expect("present");
+        if let Some(conversation) = snapshot.captured_conversation {
+            break conversation;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the real goose never captured; pane so far:\n{}",
+            pane_text(state.path(), &session.id).await
+        );
+        // sleep-ok: poll the durable snapshot for the vendor-scheduled background extension report.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    };
+
+    let snapshot = sup
+        .session_snapshot(&session.id)
+        .await
+        .expect("snapshot")
+        .expect("present");
+    assert_eq!(
+        snapshot.kind,
+        farhelm_proto::AgentKind::Goose,
+        "the session derives as the integrated kind"
+    );
+    assert_eq!(
+        snapshot.capture_ownership_version, 1,
+        "the vendor report proves ownership, not merely arrival"
+    );
+    assert_eq!(
+        snapshot.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "version 1 offers resume on the public path"
+    );
+    let resume = snapshot
+        .resume_argv
+        .expect("a Resume offer has a filled argv");
+    assert!(
+        resume.iter().any(|element| element == &conversation),
+        "the captured identity's resumable target must land in the resume argv: {resume:?}"
+    );
+    assert!(
+        !resume.iter().any(|element| element == "{conversation}"),
+        "no placeholder may survive substitution: {resume:?}"
+    );
+
+    // The helper's own log acknowledges the conversation it was
+    // answered for: only a real reporter child reaching the real
+    // socket could have put that line there.
+    let hook_log = state
+        .path()
+        .join("hook-log")
+        .join(format!("{}.log", session.id));
+    let log = std::fs::read_to_string(&hook_log)
+        .unwrap_or_else(|error| panic!("no owned hook log at {}: {error}", hook_log.display()));
+    assert!(
+        log.lines()
+            .any(|line| line.ends_with(&format!(" acked {conversation} goose"))),
+        "the helper must have been acked for the captured conversation, not merely connected:\n{log}"
+    );
+
+    // The store the proof read is the vendor's own file at the
+    // resolved custom-root layout — the binding above proves it
+    // verified, this proves it is the file the layout names.
+    assert!(
+        root.path().join("data/sessions/sessions.db").is_file(),
+        "the vendor store exists at the resolved custom-root path"
+    );
+
+    accepting.stop().await;
+}
+
+/// The pane's current text for a timeout diagnosis, bounded so a
+/// wedged tmux fails the test instead of hanging it past the
+/// deadline.
+async fn pane_text(state: &std::path::Path, session_id: &str) -> String {
+    let sock = state.join("tmux.sock");
+    let tmux_name = format!("fh-{session_id}");
+    let args = ["capture-pane", "-p", "-t", &tmux_name];
+    match tokio::time::timeout(Duration::from_secs(15), tmux_query(&sock, &args)).await {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(_) => format!("<tmux did not answer capture-pane for {tmux_name}>"),
+    }
 }
