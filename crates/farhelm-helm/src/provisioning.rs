@@ -2429,6 +2429,115 @@ mod tests {
         assert!(timeout.context.contains("timed out"));
     }
 
+    /// Remote byte growth keeps a transfer alive beyond one idle interval,
+    /// while slow control setup cannot time out before a remote file exists.
+    #[farhelm_testtrace::test]
+    async fn sftp_capture_uses_remote_bytes_after_slow_setup() {
+        let root = tempfile::tempdir().unwrap();
+        let remote = root.path().join("upload");
+        let script = format!(
+            "sleep 0.45; for i in a b c d e f g h i j; do printf x >> {}; sleep 0.08; done",
+            shell_words::quote(remote.to_str().unwrap())
+        );
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &script]);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let child = command.spawn().unwrap();
+
+        let result = capture_sftp_child(
+            child,
+            10,
+            || async {
+                tokio::fs::metadata(&remote)
+                    .await
+                    .ok()
+                    .map(|meta| meta.len())
+            },
+            Duration::from_millis(400),
+            Duration::from_millis(10),
+        )
+        .await
+        .expect("verified remote growth must renew the idle deadline");
+        assert_eq!(result.code, Some(0));
+        assert_eq!(tokio::fs::read(&remote).await.unwrap(), b"xxxxxxxxxx");
+    }
+
+    /// Wait for a child-created file without assuming that spawn implies
+    /// readiness. This keeps process-cleanup assertions tied to a descendant
+    /// known to have started, and returns false within the fixture bound.
+    async fn wait_for_fixture_file(path: &Path, within: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            if path.exists() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            // sleep-ok: poll the child-owned startup marker until readiness or the fixture bound.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Output activity without remote bytes cannot keep a transfer alive;
+    /// the stalled child's process group must stop before it can mutate the
+    /// remote path after the timeout has been reported.
+    #[farhelm_testtrace::test]
+    async fn sftp_capture_stall_kills_descendants_despite_output() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("late-marker");
+        let started = root.path().join("descendant-started");
+        let script = format!(
+            "sh -c 'sleep 1.2; touch {}' & echo $! > {}; while :; do printf noise; sleep 0.02; done",
+            shell_words::quote(marker.to_str().unwrap()),
+            shell_words::quote(started.to_str().unwrap())
+        );
+        let mut command = tokio::process::Command::new("sh");
+        command.args(["-c", &script]);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        isolate_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        if !wait_for_fixture_file(&started, Duration::from_secs(2)).await {
+            terminate_child(&mut child).await;
+            panic!("descendant startup marker was absent before the fixture deadline");
+        }
+        let descendant_pid: i32 = std::fs::read_to_string(&started)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // SAFETY: kill(pid, 0) only checks whether the fixture's child exists.
+        if unsafe { libc::kill(descendant_pid, 0) } != 0 {
+            terminate_child(&mut child).await;
+            panic!("the descendant exited before the stall observation");
+        }
+        let failure = capture_sftp_child(
+            child,
+            10,
+            || async { Some(0) },
+            Duration::from_millis(300),
+            Duration::from_millis(10),
+        )
+        .await
+        .expect_err("pipe noise cannot renew a stalled transfer");
+        assert!(failure.context.contains("stalled"), "{failure:?}");
+        // sleep-ok: let a surviving descendant reach its delayed marker write.
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        assert!(
+            !marker.exists(),
+            "the timed-out child left a mutating descendant"
+        );
+    }
+
     /// Probe diagnostics stop retaining bytes at the cap but keep draining,
     /// so an oversized producer reaches EOF and a later marker is observed.
     #[farhelm_testtrace::test]
@@ -3953,17 +4062,11 @@ mod tests {
     /// stall-timeout shape `uploads.rs`'s `CLIENT_UPLOAD_STALL_TIMEOUT`
     /// already uses for the same reason.
     ///
-    /// Sized to clear the LONGEST phase that legitimately holds one step at
-    /// `Running` with no externally visible change, with scheduling margin
-    /// on top. That phase is not `attach-supervisor`'s `ATTACH_TIMEOUT`
-    /// (30s, `provisioning/service.rs`) but an SSH payload install, whose
-    /// sub-operations each carry their own budget (`provisioning/backend.rs`:
-    /// inspect and remove under `COMMAND_TIMEOUT` 30s each, the transfer
-    /// under `TRANSFER_TIMEOUT` 60s, verify-and-install under
-    /// `COMMAND_TIMEOUT` 30s) and can sum to about 150s of silence while
-    /// every one of them is healthy. Both real-run tests share this wait —
-    /// the ssh-to-localhost one exercises exactly that path — so the window
-    /// must not mistake a slow install for a wedge.
+    /// This is a bound on the test's wait for a step transition, not the
+    /// transfer. An SSH payload install can remain `Running` while remote
+    /// bytes advance because the step view reports action transitions, not
+    /// byte counts. Transfers longer than this test window need their own
+    /// focused observation instead of treating this wait as a product limit.
     const STEP_STALL_TIMEOUT: Duration = Duration::from_secs(240);
 
     /// Absolute bound on how long [`wait_real_run`] keeps polling, on top
