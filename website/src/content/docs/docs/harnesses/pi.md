@@ -1,4 +1,7 @@
-# Pi
+---
+title: Pi
+description: Model choice, the YOLO-only permission mode, and conversation reporting for Pi.
+---
 
 ## Model choice
 

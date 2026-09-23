@@ -31,6 +31,8 @@ export default defineConfig({
       customCss: ['./src/styles/farhelm.css'],
       sidebar: [
         { label: 'Overview', slug: 'docs' },
+        { label: 'Concepts', autogenerate: { directory: 'docs/concepts' } },
+        { label: 'Harnesses', autogenerate: { directory: 'docs/harnesses' } },
       ],
     }),
   ],
