@@ -35,7 +35,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each
   time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently
   connected displays and falling back safely when the display layout changes so the window never reopens off-screen or
-  unusably large.
+  unusably large. The current native API boundary is recorded in
+  [docs/window-restoration-investigation.md](docs/window-restoration-investigation.md).
 - Investigate suppressing the Claude and Codex startup prompts that ask whether to trust the working directory, using
   supported per-session mechanisms where available without weakening their trust boundaries; keep the warning when
   Farhelm cannot establish directory trust safely.
