@@ -329,6 +329,18 @@ outcomes”, “implement the approved fixes now”, or “start the execution p
 recommendation never starts execution. When execution is explicitly started, apply only the recorded scope and stop for
 the documented complexity or scope gate rather than silently expanding it.
 
+Every queued finding also has a triage priority bucket, recorded in `review_feedback_queue/INDEX.md`:
+
+- `highest`: security-impacting bugs or bugs that can lose user data, credentials, processes, or other user-owned work.
+- `high`: bugs that materially degrade the user experience, either through severe rare failures or moderate common ones.
+- `other`: everything else, including correctness, diagnostics, cleanup, and convenience issues without those impacts.
+
+Assign the bucket from the user-visible consequence, not from implementation difficulty or reviewer confidence. A rare
+security or data-loss consequence remains `highest`; uncertainty about whether a consequence crosses that boundary must
+be surfaced to the user before finalizing the bucket. Keep the index grouped by bucket, with the highest bucket first,
+and preserve index order within each bucket. Explain the chosen bucket when presenting an item for triage, and revisit
+it if the user supplies a different severity judgment.
+
 For each item, complete these steps before asking the user for an outcome:
 
 1. Understand the feedback. Read the whole feedback file, trace the relevant current code paths, and read the
