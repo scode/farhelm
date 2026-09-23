@@ -5,14 +5,12 @@ One line per open item. This file must always match the feedback files in this d
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
 - `directory-source-staging-leak.md` — crash-orphaned extraction staging files are never pruned.
-- `discard-quarantined-hangs-response.md` — post-delete quarantine discard hangs the response on a wedged disk.
 - `duplicate-freeze-clobbers-retarget-nudge.md` — retargeting a duplicate-frozen host loses the edit until a second
   edit.
 - `failed-delete-strands-attachments-in-quarantine.md` — failed delete strands attachments in quarantine until startup
   destroys them.
 - `failed-forwarder-wedges-delete-until-restart.md` — one failed output-forwarder join wedges delete and archive until
   restart.
-- `failed-restart-discards-capture.md` — failed restart permanently discards the session's conversation-capture state.
 - `failure-suppressor-never-resets.md` — failure-log suppressor never resets and mixes unrelated failure kinds.
 - `folder-history-rename-unique-failure.md` — folder-history rename fails the whole refinement on duplicate spellings.
 - `folder-merge-drops-newer-alias-into-proven.md` — folder merge deletes a newer alias without transferring it to a

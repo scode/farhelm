@@ -1,5 +1,133 @@
 # Triage outcomes
 
+## ambiguous-restart-misattributes-exit.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. After an ambiguous restart, a live listing
+  can treat the old dead pane as the new launch's exit and persist that exit, while supervisor reload correctly keeps
+  the launch unknown. The same session can therefore report different outcomes across supervisor restarts and attribute
+  the old run's exit code to the new generation.
+- Decision: the user chose the bounded code fix. Treat `Launching` with a dead pane as `Unknown` and do not offer an
+  observed-exit transition. Preserve the existing sentinel-first classification for genuine launch errors.
+- Completion criteria: update both live status and observation paths, add focused regression coverage for the ambiguous
+  dead-pane case, preserve genuine launch-error and ordinary exited-session behavior, and remove this feedback file and
+  its index entry in the execution change.
+- Execution: `pending`.
+
+## failure-suppressor-never-resets.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. A host actor keeps one text-keyed failure
+  suppressor for its entire lifetime, shared by connection, protocol, refresh, collision, and cache-write diagnostics.
+  After the limit is reached, identical warnings can disappear indefinitely, and suppression counts can be attributed to
+  an unrelated failure after recovery or a change of failure kind.
+- Decision: the user chose to state in the authoritative specification that diagnostic output on stderr may be noisy and
+  may repeat indefinitely. Remove the suppressor and the state and call-site complexity it introduced. Keep bounded,
+  escaped peer text and the existing one-line collision summary shape.
+- Completion criteria: update the logging specification, remove the suppressor and its obsolete tests/comments, preserve
+  safety bounds and meaningful diagnostic fields, and remove this feedback file and its index entry in the execution
+  change.
+- Execution: `pending`.
+
+## folder-history-rename-unique-failure.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed by current-code inspection and the reported SQLite constraint behavior. Folder-history
+  refinement can encounter multiple unproven rows with the same display spelling; the bulk canonical-key update can then
+  violate the unique canonical-path constraint and roll back the whole convenience-history refinement. The duplicate
+  alias precondition is uncommon and was not observed in ordinary data. Browsing and session creation still work, but
+  stale duplicate suggestions remain and later visits repeat the warning.
+- Decision: the user chose the narrow code fix, conditional on it remaining simple. Keep one deterministic alias, remove
+  the remaining same-display aliases in the same transaction, and do not redesign folder-history semantics. If the fix
+  requires significant complexity or scope creep, defer it with the blocker documented in TODO.md instead.
+- Completion criteria: duplicate-display aliases no longer make refinement fail; the retained row follows the existing
+  ordering rules; focused regression coverage proves cleanup and subsequent successful refinement; remove this feedback
+  file and its index entry in the execution change, or document the deferral and retain/narrow the item if the
+  simplicity gate is reached.
+- Execution: `pending`.
+
+## folder-merge-drops-newer-alias-into-proven.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection, not runtime reproduction. When two saved folder suggestions resolve to the
+  same directory, browsing can delete the newer suggestion without carrying its newer name and recency onto the row that
+  remains. The folder operation still succeeds, but the recent-folder list can show stale suggestion text or ordering.
+- Decision: the user chose a code fix only if it remains easy and local. Preserve the newer suggestion's visible name
+  and recency while retaining the existing canonical-directory identity; do not redesign folder history. If that is not
+  a simple change, defer it and document the blocker in TODO.md.
+- Completion criteria: browsing cannot discard a newer folder suggestion in this case; focused regression coverage
+  proves the visible name and ordering survive; remove this feedback file and its index entry in the execution change,
+  or retain and narrow it if the simplicity gate requires deferral.
+- Execution: `pending`.
+
+## generic-session-accepts-placeholder-template.md
+
+- Outcome: `fix spec+code`.
+- Assessment: confirmed by code inspection. A generic session can accept a configured restart command that needs a
+  conversation ID, even though Farhelm has no way to obtain that ID for the session. The command is then never usable;
+  restart silently falls back to a fresh conversation. The current specification has conflicting wording about generic
+  fallback commands and needs the rule made explicit.
+- Decision: the user agreed to reject such a command for generic sessions and clarify the specification. A generic
+  restart command may be accepted only when it can run without Farhelm-supplied conversation identity.
+- Completion criteria: update the authoritative specification, reject the invalid configuration at the existing
+  validation boundary with an actionable error, add focused validation coverage, and remove this feedback file and its
+  index entry in the execution change.
+- Execution: `pending`.
+
+## getent-colonless-line-accepted-as-shell.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed by code inspection. The login-shell parser accepts a separator-free account lookup line
+  as the shell path, so malformed lookup output can bypass the existing direct-account fallback and make every launch
+  fail with a nonexistent shell. The malformed response is hypothetical, but the parser behavior is verified.
+- Decision: the user agreed to the narrow parser fix. Reject malformed lines that lack the expected separator, retain
+  the warning, and let the existing fallback lookup run.
+- Completion criteria: malformed separator-free output reaches the fallback path, valid and empty-shell records retain
+  their current behavior, focused parser coverage is added, and this feedback file and its index entry are removed in
+  the execution change.
+- Execution: `pending`.
+
+## helm-upload-fast-path-spin.md
+
+- Outcome: `fix code`.
+- Assessment: unresolved as a production trigger, but the loop defect is confirmed by inspection. Repeated immediately
+  ready empty upload chunks can bypass both waiting and deadline checks and keep the helm at full CPU indefinitely. The
+  review did not establish that Hyper's production body stream can produce this shape.
+- Decision: the user chose the small defensive code fix despite the reachability uncertainty. Empty fast-path items must
+  go through the normal deadline-driven wait instead of immediately restarting the loop.
+- Completion criteria: the relay cannot busy-loop on repeated empty chunks, the existing upload progress and stall
+  behavior remains intact, focused regression coverage exercises the shape, and this feedback file and its index entry
+  are removed in the execution change.
+- Execution: `pending`.
+
+## normal-teardown-waits-unboundedly-on-detach.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection. Normal terminal teardown waits for the detach enqueue without the
+  five-second bound already used by forced teardown paths, so a wedged connection retains the local teardown handler and
+  attachment bookkeeping for the connection's roughly 60-second writer-stall window. The browser tab is already gone;
+  the impact is delayed local cleanup and possible accumulation during repeated closures.
+- Decision: the user chose to use the existing bounded detach helper in the normal path. Keep the distinct graceful and
+  forced lifecycle paths, but remove the stale unbounded wait left behind after detach sends became independently owned.
+- Completion criteria: normal close stops waiting after the existing teardown grace, the independent detach send remains
+  active, forced teardown behavior is unchanged, focused teardown coverage passes, and this feedback file and its index
+  entry are removed in the execution change.
+- Execution: `pending`.
+
+## orphaned-install-temps-on-managed-hosts.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code inspection. An interrupted managed-host install can leave a payload-sized hidden
+  temporary file behind, and each retry uses a new name that never reaches later cleanup. Repeated interruptions can
+  consume disk space invisibly. The behavior conflicts with provisioning's rerun-and-recovery contract.
+- Decision: the user chose a code fix with an explicit ownership boundary. Temporary artifacts must live in a directory
+  Farhelm clearly owns, or use a narrowly unique Farhelm naming pattern that cannot match unrelated files. Cleanup may
+  remove only artifacts proven to belong to Farhelm in the exact managed destinations.
+- Completion criteria: interrupted-install leftovers converge away on a later run, unrelated files cannot be selected
+  for deletion, cleanup remains best effort and logged, focused interruption/retry coverage proves the boundary, and
+  this feedback file and its index entry are removed in the execution change.
+- Execution: `pending`.
+
 ## abandon-upload-waits-unboundedly.md
 
 - Outcome: `fix spec`.
@@ -710,3 +838,117 @@
   reviewed implementation passes both tests. Browser revocation and supervisor takeover checks are unchanged. Removed
   the feedback and index entry. jj change: `ltqmxvpqpnqvynkxrovoszwmyyvopmpr`; bookmark:
   `triage-preserve-upstream-detach`; draft PR: https://github.com/scode/farhelm/pull/843/changes.
+
+## directory-source-staging-leak.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. The operator-supplied `--payload-dir`
+  source creates a cache below that existing directory, stages archive members and copied binaries through random
+  temporary files, and only prunes completed UUID-named snapshots. A helm crash can therefore leave a staging file in
+  the cache indefinitely; repeated interrupted provisioning can grow the cache. The GitHub download source has first-use
+  housekeeping for its fixed staging names, so this finding is specific to the directory source. No current
+  specification accepts unbounded orphaned staging files.
+- Decision: the user chose a code fix and added a naming requirement. Sweep stale directory-source staging files at a
+  defined reuse point, with an age guard that cannot remove an active materialization. Rename the cache directory from
+  the generic `.extracted` to a Farhelm-specific hidden name such as `.farhelm_extract_tmp`, reducing the chance that
+  cleanup touches unrelated contents inside the operator-supplied parent. The implementation must manage only entries
+  matching its own staging and snapshot patterns; an existing legacy `.extracted` directory must not be recursively
+  deleted merely because the cache name changes.
+- Completion criteria: clean crash-orphaned staging files on the next applicable directory-payload use (or earlier
+  first-use housekeeping if that is the chosen implementation), preserve concurrent and active staging files, keep
+  completed payload snapshots usable, use the Farhelm-specific cache name consistently, and verify the cleanup and
+  collision boundary with focused tests. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the
+  execution change.
+- Execution: `pending`.
+
+## failed-restart-discards-capture.md
+
+- Outcome: `fix spec`.
+- Assessment: the implementation can clear capture fields during a non-`Resume` restart and fail before spawning the
+  replacement, confirmed by code inspection rather than runtime reproduction. The finding's immediate user-facing
+  consequence is limited: `FreshOnly` and `FallbackTemplate` already mean the requested restart cannot safely resume the
+  captured conversation. Later re-verification of temporarily unavailable evidence could have less information, but some
+  withdrawal of unsafe evidence is intentional and no concrete ordinary-user workflow requiring its preservation was
+  established.
+- Decision: the user chose to state the underlying simplicity principle in SPEC.md. Resumability remains a core feature
+  while a safe Resume offer exists, but once the current offer is already non-resumable, Farhelm need not preserve every
+  remaining capture field through a definitive failed restart or recovery transition when doing so adds complexity. The
+  rule does not permit demoting a valid Resume offer or silently choosing another conversation.
+- Completion criteria: add the general principle to SPEC.md, remove this feedback file and its
+  `review_feedback_queue/INDEX.md` entry immediately under the accepted-spec triage rule, and make no code or TODO
+  change.
+- Execution: `complete`; the specification rule was added and queue cleanup performed.
+
+## failed-forwarder-wedges-delete-until-restart.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed by current-code inspection, not runtime reproduction. The session Delete and owned
+  checkout cleanup feature records a failed terminal-output forwarder join as a permanent `Failed` barrier.
+  Whole-session teardown then treats that marker like an unresolved reaper, so a session whose terminal is already gone
+  cannot be deleted or finish checkout cleanup until the supervisor restarts. The fail-closed barrier remains
+  appropriate for replacement attachment, but the permanent teardown refusal is not part of the user-facing lifecycle
+  contract.
+- Decision: the user chose a bounded code fix, provided it does not introduce significant complexity or scope creep.
+  Preserve failed barriers for attach and replacement safety, while allowing whole-session teardown to distinguish a
+  completed-but-failed forwarder cleanup from an active `Reaping` entry and proceed with terminal destruction. Keep the
+  failure diagnostic visible.
+- Completion criteria: Delete and owned-checkout cleanup can retry after a failed forwarder join without supervisor
+  restart; replacement attachment still refuses while cleanup is unconfirmed; focused tests cover both boundaries. If
+  implementation requires significant new lifecycle state, recovery machinery, or broader design changes, defer the item
+  with the blocker documented in TODO.md instead of expanding scope. Remove the feedback file and its
+  `review_feedback_queue/INDEX.md` entry only when the bounded fix is complete; retain or narrow it if deferred.
+- Execution: `pending`.
+
+## failed-delete-strands-attachments-in-quarantine.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Session Delete first moves the attachment
+  directory into quarantine, then performs checkout safety checks and the final row-removal transaction. Any later
+  refusal or failure can retain the session row while losing the attachment directory's reachable path; a later startup
+  quarantine sweep can then delete those attachments even though the session survives. Triggers include deliberate
+  owned-checkout safety refusals as well as database failures, so this is broader than an SQLite I/O failure. The
+  behavior conflicts with the delete contract and the quarantine invariant that a retained session keeps its files.
+- Decision: the user chose a code fix with good focused test coverage. On any failure after quarantine, restore the
+  attachment directory to its session path when possible, preserving the row-and-files-together invariant. Keep the
+  existing fail-closed behavior for the operation and log loudly if restoration itself fails. If implementing this
+  requires a broader lifecycle redesign, new durable state, or other scope creep, defer the item instead: document the
+  blocker and proposed follow-up in the relevant TODO item rather than expanding this change.
+- Completion criteria: exercise the deliberate post-quarantine refusal and the recovery path, verify that a retained
+  session's attachments remain reachable and are not removed by startup reconciliation, preserve successful deletion and
+  quarantine-crash recovery, and stop for documented deferral if the simplicity gate is reached. Remove the feedback
+  file and its `review_feedback_queue/INDEX.md` entry only when the bounded fix is complete; retain or narrow the item
+  if it is deferred.
+- Execution: `pending`.
+
+## discard-quarantined-hangs-response.md
+
+- Outcome: `other`.
+- Assessment: confirmed by current-code inspection, not runtime reproduction. Session Delete commits the row removal,
+  then awaits best-effort removal of the quarantined attachment directory. A wedged supervisor filesystem can therefore
+  leave the delete response pending even though the session is already gone. No cross-host or helm-wide blocking effect
+  was established.
+- Decision: skipped because the behavior is explicitly accepted by SPEC.md's `Healthy local filesystems` section. A
+  local filesystem hang may halt requests on the affected host; Farhelm does not add recovery or timeout machinery
+  solely to bound that failure. The host-isolation boundary remains: this allowance does not permit the supervisor's
+  filesystem to freeze the helm or other hosts.
+- Completion criteria: remove this feedback file and its `review_feedback_queue/INDEX.md` entry immediately, without
+  code, spec, or TODO changes.
+- Execution: `complete`; queue cleanup performed under the accepted-spec triage rule.
+
+## duplicate-freeze-clobbers-retarget-nudge.md
+
+- Outcome: `fix code`.
+- Assessment: partly confirmed by current-code inspection, not runtime reproduction. The host-management feature lets a
+  user edit a registered host's destination while the entry is frozen as a duplicate. The duplicate recheck and
+  post-attempt duplicate paths can republish the old duplicate state after a retarget nudge has already published the
+  new row as reconnecting. The next loop then freezes again against the old identity, so the new destination is not
+  dialed until another edit or twin change. The exact interleaving remains unverified, but the ordering gap is visible
+  in both publication sites and conflicts with the destination-edit reconnect contract in SPEC_impl.md.
+- Decision: the user chose the narrow code fix. Before either duplicate-state publication, preserve a pending retarget
+  nudge using the existing `taken_nudge` seam, then let the loop reload the edited row and start its fresh connection
+  window. Do not redesign duplicate lifecycle or change the specification.
+- Completion criteria: a retarget that races duplicate rechecking cannot be overwritten by the old duplicate state; the
+  edited destination is retried under the fresh-window rules, ordinary duplicate freezing still works, and a focused
+  regression covers the race. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
+  change.
+- Execution: `pending`.
