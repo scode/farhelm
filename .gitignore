@@ -31,6 +31,9 @@ e2e/.auth/storage-state.json
 # Verified local runner binaries; release jobs install into their temporary directory.
 .ci-nextest/
 
+# Local release-note drafts are review surfaces, not repository content.
+/releasing/drafts/
+
 # Personal use-it-for-real dev-loop script; carries user-specific hostnames
 # and stays out of the repo on purpose.
 /scripts/laptop-dev.sh
