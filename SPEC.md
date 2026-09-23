@@ -829,6 +829,12 @@ existing appearance and gain no drag or zoom behavior. In narrow macOS windows, 
 scrolling panes so horizontal scrolling cannot move application controls underneath native window buttons. Startup,
 authentication errors, and build-mismatch notices also keep their content clear of native controls.
 
+The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
+launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
+centered on a current display. On Wayland, which does not expose reliable global window positions, Farhelm keeps a
+usable saved size and the maximized state while leaving placement to the compositor. Native fullscreen and webview zoom
+are not persisted.
+
 ## Durability and resume
 
 The runtime guarantees below do not establish support for every historical data schema or a downgrade path between

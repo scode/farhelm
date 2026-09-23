@@ -31,13 +31,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `create-runs-inline-on-read-loop.md`; it does not request immediate implementation.
 
 ## Near term
-- Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently connected displays and falling back safely when the display layout changes so the window never reopens off-screen or unusably large. The current native API boundary is recorded in [docs/window-restoration-investigation.md](docs/window-restoration-investigation.md).
-
-- Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each
-  time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently
-  connected displays and falling back safely when the display layout changes so the window never reopens off-screen or
-  unusably large. The current native API boundary is recorded in
-  [docs/window-restoration-investigation.md](docs/window-restoration-investigation.md).
 - **Claude foreground ownership.** Assess whether native or shelled-out Claude children can replace or withdraw the
   foreground conversation's restart target, then define the smallest admission check that preserves legitimate
   clear/new/switch/fork/resume transitions. This is an assessment task, not a claim that every vendor path has been

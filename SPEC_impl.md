@@ -653,6 +653,20 @@ documented pane/window interactions and handles missing objects safely, but does
 after arbitrary same-account changes. This does not relax exact targeting of operations or the helm/GUI's obligation to
 tolerate remote failures; see SPEC.md's maintainer-confirmed decisions.
 
+The native desktop stores a versioned physical-pixel outer-frame rectangle and maximized flag separately from client
+credentials. Bootstrap's already resolved state directory is reused, so persistence cannot silently move to the current
+working directory if path resolution fails again. A missing file keeps the first-run window builder defaults; corrupt,
+unsupported, or display-unsafe state gets a monitor-fitting centered fallback. The geometry check requires the complete
+saved frame to fit one connected monitor and avoids arithmetic overflow. Tao provides monitor rectangles rather than
+work areas, so the fallback caps its size and a real macOS display/decorations check remains necessary. Wayland's raw
+window handle marks positions as unreliable: its move events do not replace the remembered position, and restore keeps a
+usable saved size while preserving maximization while the compositor chooses placement. Restore converts the saved outer
+size through Tao's inner-size API using the current outer-minus-inner decoration extent; a real macOS
+display/decorations check remains necessary. Fullscreen observations never replace the last ordinary frame or maximize
+state. The final state is written through a private sibling file and rename on close, with one best-effort retry at
+event-loop teardown; the rename is atomic for readers but parent-directory durability across a machine crash is best
+effort. Failures warn without preventing startup.
+
 Farhelm requires tmux at or above a version FLOOR that is, by policy, the exact release the output-client teardown
 regression suite (`scripts/test-tmux-pinned-shutdown.sh`) runs against — 3.7c as of this writing, pinned in
 `.github/release/source-pins.env`, with the supervisor's floor constant tested to equal that pin so the two cannot
