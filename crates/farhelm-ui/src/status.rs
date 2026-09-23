@@ -226,6 +226,9 @@ pub(crate) fn status_badge(
 /// dot LOOKS clickable (the CSS hook below), so a caller cannot forget to
 /// keep the two in sync by wiring a live `dot_onclick` behind a `None`
 /// title, or vice versa.
+/// The dot's hover text always starts with the status word. When the dot also
+/// toggles seen state, the action follows it; otherwise the child would hide
+/// the badge's status tooltip behind an action-only tooltip.
 ///
 /// The dot itself stays `aria-hidden="true"` regardless: it is a MOUSE
 /// shortcut only, never a focusable control (`dot_title` sets a `title`
@@ -244,6 +247,10 @@ pub(crate) fn StatusBadgeView(
     // answer, so one shared value is also what keeps the two from being
     // able to drift apart.
     let toggle_offered = dot_title.is_some();
+    let dot_hover = dot_title.as_deref().map_or_else(
+        || badge.text.clone(),
+        |action| format!("{} — {action}", badge.text),
+    );
     rsx! {
         span { class: "status-badge {badge.class}", title: "{badge.text}",
             if badge.visible {
@@ -265,7 +272,7 @@ pub(crate) fn StatusBadgeView(
                 span {
                     class: if toggle_offered { "status-dot status-dot-toggle" } else { "status-dot" },
                     "aria-hidden": "true",
-                    title: dot_title,
+                    title: dot_hover,
                     onclick: move |evt| {
                         // `stop_propagation` is why a dot click does not
                         // also select the row: the row's own open control

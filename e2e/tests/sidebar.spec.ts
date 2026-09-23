@@ -5319,9 +5319,10 @@ test("composer mounted clone generation replaces the prior draft and notice", as
  * The destination block keeps every input that determines where a structured
  * session launches together: host and browse, folder, the recent-folder
  * links with their two resets, then the optional name. This pins that DOM
- * order (the Tab-order test covers keyboard order), proves a seeded folder
- * renders as a pressed link once chosen, and proves the local-home shortcut
- * resets both parts of the destination.
+ * order (the Tab-order test covers keyboard order), checks that the host and
+ * Browse labels stay centered at desktop and phone widths, proves a seeded
+ * folder renders as a pressed link once chosen, and proves the local-home
+ * shortcut resets both parts of the destination.
  */
 test("composer destination block keeps host, browse, folder, and recent links together", async ({ page, request }) => {
   const local = await localHostId(request);
@@ -5345,6 +5346,26 @@ test("composer destination block keeps host, browse, folder, and recent links to
   const hostLabel = await host.locator("option:checked").textContent();
   expect(hostLabel, "the host select must show a selected option before its label is checked").toBeTruthy();
   await expect(browse).toContainText(hostLabel!.trim());
+  // The controls can separate at phone width, but each label must stay
+  // centered in its own control rather than riding the text baseline.
+  for (const width of [1024, 540]) {
+    await page.setViewportSize({ width, height: 900 });
+    const centers = await destination.evaluate((node) => {
+      const selector = node.querySelector("select.create-session-host")!;
+      const button = node.querySelector<HTMLButtonElement>('button[aria-label="browse this path"]')!;
+      const label = button.firstElementChild!;
+      const buttonBox = button.getBoundingClientRect();
+      const labelBox = label.getBoundingClientRect();
+      return {
+        selectorHeight: selector.getBoundingClientRect().height,
+        buttonHeight: buttonBox.height,
+        labelOffset: Math.abs((labelBox.top + labelBox.bottom - buttonBox.top - buttonBox.bottom) / 2),
+      };
+    });
+    expect(centers.selectorHeight).toBe(36);
+    expect(centers.buttonHeight).toBeGreaterThanOrEqual(36);
+    expect(centers.labelOffset).toBeLessThanOrEqual(1);
+  }
   await expect(recentLink, "the seeded folder must render as a recent link").toBeVisible();
   await expect(recentLink).toHaveAttribute("aria-pressed", "false");
   await expect(links.getByText("home", { exact: true })).toBeVisible();
@@ -7345,6 +7366,7 @@ test("the dot click marks a different row read without moving the selection", as
       await expect(rowB.locator(".status-badge.idle.unseen")).toHaveText("idle — new output", {
         timeout: 45_000,
       });
+      await expect(rowB.locator(".status-dot")).toHaveAttribute("title", "idle — new output — mark read");
 
       await rowB.locator(".status-dot").click();
       await expect(rowA).toHaveAttribute("data-session-selected", "true");

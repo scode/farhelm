@@ -2212,6 +2212,15 @@ samp {
   column-gap: 2px;
   color: var(--fg-1);
 }
+/* Each glyph's tooltip wrapper occupies exactly its grid cell. An ordinary
+   inline span would create a line box taller than the 12px mark and could
+   raise the compact row merely to add hover help. */
+.session-agent > span:not(.visually-hidden) {
+  display: flex;
+  align-items: center;
+  width: 10px;
+  height: 12px;
+}
 .session-activity-column {
   grid-column: 5;
   min-width: 0;
@@ -3659,9 +3668,20 @@ samp {
 
 .launch-composer-destination-row .create-session-host {
   min-width: 12em;
+  /* Native select text sits inside the control's own box. Give that box the
+     same fixed height as Browse so the two labels share a vertical center. */
+  box-sizing: border-box;
+  height: 36px;
+  padding-block: 0;
 }
 
 .launch-composer-destination-row > button {
+  /* Browse has a nested host label; centering the whole text wrapper keeps
+     both words together when the destination row wraps at phone width. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   min-height: 36px;
   padding: 0 14px;
   border: 1.5px solid var(--border);

@@ -579,7 +579,10 @@ clients. The working directory and launch command remain abbreviated only where 
 always available on the row (a tooltip on the web and desktop clients); an abbreviation is never the only place a value
 is recorded. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread
 toggle — reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status).
-Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather than here.
+Hovering a live status dot, agent mark, or permission mark explains that mark. A clickable dot also names its mark read
+or mark unread action. The hover text uses the same status and permission meaning the row exposes to assistive
+technology. Exactly how a row lays out its lines and pixels is an implementation choice, covered in SPEC_impl.md rather
+than here.
 
 Per-host connection state is always visible in the host list, which names each host and pins its current phase beside
 it. The host count, its unpersisted details checkbox, and the secondary add action share one header row. Host actions
