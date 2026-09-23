@@ -117,12 +117,18 @@ use std::path::{Path, PathBuf};
 
 mod capture;
 pub(crate) mod codex;
-pub(crate) use capture::read_prefix as read_bounded_regular_file;
+pub(crate) mod grok;
 pub use capture::{
     CAPTURE_PUBLICATION_GRACE, CAPTURE_WINDOW_AFTER, CAPTURE_WINDOW_BEFORE, Candidate,
     CaptureVerdict, CaptureWindow, CaptureWindowBounds, RecordCorrelators, RecordStamp,
     ScanOutcome, choose, format_rfc3339, now_unix, parse_rfc3339, read_record, scan_records,
     stamp_of,
+};
+pub(crate) use capture::{
+    read_complete as read_complete_bounded_regular_file, read_prefix as read_bounded_regular_file,
+};
+pub use grok::{
+    encode_report as encode_grok_report, validate_event_time as validate_grok_event_time,
 };
 
 /// The one argv element a resume template may use to mean "substitute the
@@ -241,6 +247,7 @@ pub fn is_reserved_locator_token(value: &str) -> bool {
     value.starts_with(LocatorVendor::Pi.prefix())
         || value.starts_with(LocatorVendor::Omp.prefix())
         || value.starts_with(codex::PREFIX)
+        || value.starts_with(grok::PREFIX)
 }
 
 /// A vendor's exact durable resume target, carried inside the existing
@@ -500,6 +507,7 @@ fn hook_command(
         farhelm_proto::ReportVendor::Goose => "goose",
         farhelm_proto::ReportVendor::Pi => "pi",
         farhelm_proto::ReportVendor::Omp => "omp",
+        farhelm_proto::ReportVendor::Grok => "grok",
     };
     // The `--vendor` flag is the report envelope's discriminator, sourced
     // from the vendor-specific entry point rather than inferred from the
@@ -528,10 +536,7 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Goose => Some(&GooseIntegration),
         AgentKind::Pi => Some(&PiIntegration),
         AgentKind::Omp => Some(&OmpIntegration),
-        // Grok's hook/report integration is deliberately deferred to the
-        // follow-up capture unit; retaining the kind still keeps snapshots
-        // honest and prevents a silent Generic downgrade.
-        AgentKind::Grok => None,
+        AgentKind::Grok => Some(&GrokIntegration),
         AgentKind::Generic => None,
     }
 }
@@ -554,6 +559,9 @@ struct PiIntegration;
 /// Its session files may open with a rewritable title-slot record before the
 /// session header, which is the one header-shape difference from Pi.
 struct OmpIntegration;
+
+/// Grok is manually hooked and resumes only from an exact verified UUID.
+struct GrokIntegration;
 
 /// Locate the executable behind the launcher's simple `env NAME=value` prefix.
 /// Option-bearing `env` commands have different parsing rules and are deliberately
@@ -653,6 +661,37 @@ impl AgentIntegration for PiIntegration {
             cwd: String::new(),
             created_at: 0,
         }))
+    }
+}
+
+impl AgentIntegration for GrokIntegration {
+    fn default_resume_template(&self, original_argv: &[String]) -> Vec<String> {
+        let mut template = original_argv.to_vec();
+        let program = effective_program_index(&template).unwrap_or(0);
+        if !template[program + 1..]
+            .iter()
+            .any(|argument| argument == "--no-leader")
+        {
+            template.insert(program + 1, "--no-leader".to_string());
+        }
+        template.extend(["--resume".to_string(), CONVERSATION_PLACEHOLDER.to_string()]);
+        template
+    }
+
+    fn record_root(&self, _home: &Path, _canonical_cwd: &str) -> Option<PathBuf> {
+        None
+    }
+
+    fn record_depth(&self) -> usize {
+        0
+    }
+
+    fn is_record_file(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        Ok(None)
     }
 }
 
@@ -843,6 +882,29 @@ pub(crate) fn omp_has_unconsumed_delimiter(args: &[String]) -> bool {
         }
     }
     false
+}
+
+/// Whether appending Grok's exact `--resume <UUID>` selector would be
+/// ambiguous or land after an end-of-options boundary.
+///
+/// The structured Grok launch has neither shape. This check protects the
+/// derived-template path used by custom invocations: it refuses an existing
+/// selector instead of deleting arguments whose vendor meaning may depend on
+/// position, and treats only a whole argv element `--` as the boundary.
+fn grok_has_ambiguous_resume_shape(args: &[String]) -> bool {
+    args.iter().any(|argument| {
+        matches!(
+            argument.as_str(),
+            "--" | "--resume"
+                | "-r"
+                | "--continue"
+                | "-c"
+                | "--session-id"
+                | "-s"
+                | "--fork-session"
+        ) || argument.starts_with("--resume=")
+            || argument.starts_with("--session-id=")
+    })
 }
 
 /// Remove OMP's session-source flags before inserting its verified file.
@@ -2332,6 +2394,13 @@ pub enum SnapshotError {
          resume the captured conversation"
     )]
     OmpAmbiguousResumeBoundary,
+    /// A derived Grok template cannot safely add an exact selector beside
+    /// an existing session selector or beyond `--`.
+    #[error(
+        "a Grok invocation already contains a session selector or end-of-options boundary; \
+         Farhelm cannot append an unambiguous exact --resume target"
+    )]
+    GrokAmbiguousResumeBoundary,
 }
 
 /// This module's stable spelling of a kind for human-facing messages.
@@ -2369,11 +2438,12 @@ impl IntegrationSnapshot {
     /// establishes that precondition before resolution; an empty slice has
     /// no program from which to derive a kind and is therefore invalid.
     ///
-    /// Two validation invariants, and they are the only things that can
-    /// fail here: an integrated kind must end up with a template containing
-    /// the placeholder, and — OMP only — a DERIVED template must not be
-    /// appended behind a GENUINE end-of-options delimiter (see
-    /// [`SnapshotError`] for both).
+    /// Only two classes of validation can fail here: an integrated kind must
+    /// end up with a template containing the placeholder, and a derived
+    /// template must have an unambiguous place for its resume selector. OMP
+    /// refuses a genuine end-of-options delimiter; Grok also refuses an
+    /// existing selector because its derived form owns that argument (see
+    /// [`SnapshotError`] for the exact cases).
     pub fn resolve(
         original_argv: &[String],
         kind_override: Option<AgentKind>,
@@ -2395,6 +2465,12 @@ impl IntegrationSnapshot {
             && omp_has_unconsumed_delimiter(&original_argv[1..])
         {
             return Err(SnapshotError::OmpAmbiguousResumeBoundary);
+        }
+        if kind == AgentKind::Grok
+            && !explicit_override
+            && grok_has_ambiguous_resume_shape(&original_argv[1..])
+        {
+            return Err(SnapshotError::GrokAmbiguousResumeBoundary);
         }
         if integration.is_some() && !template_has_placeholder(resume_template.as_deref()) {
             return Err(SnapshotError::IntegratedTemplateHasNoPlaceholder {
@@ -2455,6 +2531,18 @@ impl IntegrationSnapshot {
             return match captured.and_then(|value| codex::CodexLocator::parse(value).ok()) {
                 Some(locator)
                     if locator.resume_id().is_some() && self.resume_template.is_some() =>
+                {
+                    RestartOffer::Resume
+                }
+                _ => RestartOffer::FreshOnly,
+            };
+        }
+        if self.kind == AgentKind::Grok {
+            return match captured.and_then(|value| grok::GrokLocator::parse(value).ok()) {
+                Some(locator)
+                    if locator.resume_id().is_some()
+                        && locator.selected_at.is_some()
+                        && self.resume_template.is_some() =>
                 {
                     RestartOffer::Resume
                 }
@@ -2530,6 +2618,10 @@ impl IntegrationSnapshot {
                     .ok()?
                     .session_file?
             }
+            AgentKind::Grok => grok::GrokLocator::parse(conversation)
+                .ok()?
+                .resume_id()?
+                .to_string(),
             _ => {
                 if is_reserved_locator_token(conversation)
                     || !is_plausible_conversation_id(conversation)
@@ -2555,18 +2647,16 @@ impl IntegrationSnapshot {
 /// implemented, so its admissions write versioned ownership provenance and
 /// its exact-resume offers require it.
 ///
-/// THE flip each later PR makes: OMP, Goose, Claude, and Pi change their
-/// arm here from `false` to `true` when their proof lands — admission,
-/// the durable writers, the refresh mirror, and every offer surface
-/// consult this one predicate, so no per-site kind match has to change
-/// with it. New framework entry points default to deny; legacy paths are
+/// Codex and Grok have complete proofs. OMP, Goose, Claude, and Pi keep
+/// their arm false until their own proof lands. Admission, durable writers,
+/// the refresh mirror, and every offer surface consult this one predicate,
+/// so a later kind needs one deliberate flip rather than scattered match
+/// changes. New framework entry points default to deny; legacy paths are
 /// preserved, not re-blessed, until their kind flips.
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
-        AgentKind::Codex => true,
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => {
-            false
-        }
+        AgentKind::Codex | AgentKind::Grok => true,
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Omp => false,
         AgentKind::Generic => false,
     }
 }
@@ -2581,6 +2671,7 @@ pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
         farhelm_proto::ReportVendor::Goose => AgentKind::Goose,
         farhelm_proto::ReportVendor::Pi => AgentKind::Pi,
         farhelm_proto::ReportVendor::Omp => AgentKind::Omp,
+        farhelm_proto::ReportVendor::Grok => AgentKind::Grok,
     }
 }
 
@@ -2589,7 +2680,7 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
     match kind {
         AgentKind::Pi => parse_locator(LocatorVendor::Pi, value).is_ok(),
         AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
-        AgentKind::Grok => false,
+        AgentKind::Grok => grok::GrokLocator::parse(value).is_ok(),
         AgentKind::Codex => codex::CodexLocator::parse(value).is_ok(),
         AgentKind::Claude | AgentKind::Goose => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
@@ -2832,6 +2923,10 @@ pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
 /// per-launch identity hook ([`AgentIntegration::hook_argv`]) appended to
 /// their argv at all.
 ///
+/// Grok is deliberately outside this switch because Farhelm does not install
+/// its callbacks per launch. The user controls those entries in Grok's own
+/// hook configuration.
+///
 /// This is a SEAM value, not a live environment lookup.
 /// [`crate::service::SupervisorSeams::agent_hooks`] carries exactly one of
 /// these, set ONCE when the
@@ -2844,7 +2939,8 @@ pub fn ensure_resume_template(template: &[String]) -> Result<(), String> {
 /// process's environment, which this repo's tests never do.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentHooks {
-    /// Every integrated kind gets the hook. The default, and the only
+    /// Every integration with an automatic reporter gets it. The default,
+    /// and the only
     /// value a supervisor started with the environment variable unset (or
     /// set to `all`, or the empty string) ever produces. `#[default]`
     /// spells the same "unconditionally `All`, never a live environment
@@ -2853,10 +2949,12 @@ pub enum AgentHooks {
     /// written `fn default()` could.
     #[default]
     All,
-    /// No integrated kind gets its reporter. Claude and Codex fall back to
-    /// their record scans; Goose, Pi, and OMP gain no new exact target.
+    /// No automatically installed reporter runs. Claude and Codex fall back
+    /// to their record scans; Goose, Pi, and OMP gain no new exact target.
+    /// Manually configured Grok callbacks are unaffected.
     None,
-    /// Exactly these kinds get their reporter. A disabled Claude or Codex
+    /// Exactly these automatically configured kinds get their reporter. A
+    /// disabled Claude or Codex
     /// falls back to scanning; a disabled Goose, Pi, or OMP does not. An
     /// [`AgentKind::Generic`] entry would be inert rather than rejected —
     /// `allows` is never asked about it because the caller skips kinds with
@@ -2871,8 +2969,8 @@ impl AgentHooks {
     /// derives `Eq` but neither `Hash` nor `Ord` (farhelm-proto's `lib.rs`),
     /// and adding either derive to a wire-protocol enum just to back a set
     /// here would be a proto-crate change in service of a supervisor-crate
-    /// convenience. The list is short by construction — only four kinds have
-    /// an integration today — and it is a `Vec`, so a value like
+    /// convenience. The configured list is short by construction, and it is
+    /// a `Vec`, so a value like
     /// `claude,claude` holds a duplicate; `contains` answers the same
     /// either way, which is why the parser does not bother de-duplicating.
     pub fn allows(&self, kind: AgentKind) -> bool {
@@ -2901,7 +2999,8 @@ impl AgentHooks {
 ///   [`AgentHooks::All`].
 /// - `none` maps to [`AgentHooks::None`].
 /// - Anything else is read as a comma-separated list of kind names
-///   (`claude`, `codex`, `goose`, `pi`, `omp` — this module's own canonical
+///   (`claude`, `codex`, `goose`, `pi`, `omp` — the automatically configured
+///   kinds, using this module's own canonical
 ///   spelling, from [`kind_name`], rather than a spelling invented for this
 ///   variable). Whitespace around each token is trimmed, and matching is
 ///   case-insensitive throughout this grammar: this is a value a human
@@ -2918,7 +3017,9 @@ impl AgentHooks {
 /// ## Failure mode: fail open, not partially
 ///
 /// A token outside `all`, `none`, `claude`, `codex`, `goose`, `pi`, and
-/// `omp` invalidates the WHOLE value, not just that token: a `tracing::warn!` names the bad
+/// `omp` invalidates the WHOLE value, not just that token. `grok` is not a
+/// token because this switch cannot remove a manually installed callback. A
+/// `tracing::warn!` names the bad
 /// token and the full offending value, and the result is `All`. The
 /// reasoning is that this variable is an opt-OUT — a typo in it must not
 /// silently turn into "opt out of everything" (which is what an
@@ -2970,7 +3071,8 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
 /// It is deliberately NOT folded into `AgentHooks`. The two answer
 /// different questions and fail in different directions: turning hooks off
 /// costs identity capture (a scan fallback for Claude and Codex, no new
-/// target for Goose, Pi, or OMP), while turning instructions off costs an
+/// target for Goose, Pi, or OMP, and no effect on manual Grok callbacks),
+/// while turning instructions off costs an
 /// agent knowing the CLI exists and nothing else. Someone who wants a silent
 /// launch but working resume must be able to say so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -3051,6 +3153,7 @@ pub fn derive_kind(argv0: &str) -> AgentKind {
         "goose" => AgentKind::Goose,
         "pi" => AgentKind::Pi,
         "omp" => AgentKind::Omp,
+        "grok" => AgentKind::Grok,
         _ => AgentKind::Generic,
     }
 }
@@ -3236,6 +3339,8 @@ mod tests {
         assert_eq!(derive_kind("/opt/bin/pi"), AgentKind::Pi);
         assert_eq!(derive_kind("omp"), AgentKind::Omp);
         assert_eq!(derive_kind("/opt/bin/omp"), AgentKind::Omp);
+        assert_eq!(derive_kind("grok"), AgentKind::Grok);
+        assert_eq!(derive_kind("/opt/bin/grok"), AgentKind::Grok);
         assert_eq!(derive_kind("env"), AgentKind::Generic);
         assert_eq!(derive_kind("claude-wrapper"), AgentKind::Generic);
         assert_eq!(derive_kind("my-claude"), AgentKind::Generic);
@@ -3746,6 +3851,91 @@ mod tests {
                 .map(String::as_str),
             Some(good)
         );
+    }
+
+    /// Grok resume keeps the original argv, establishes a private backend,
+    /// and substitutes only the exact UUID carried by a ready locator.
+    #[farhelm_testtrace::test]
+    fn grok_resume_argv_adds_no_leader_and_the_verified_uuid() {
+        let original =
+            ["env", "GROK_HOME=/tmp/grok", "/opt/bin/grok", "--no-plan"].map(str::to_string);
+        let snapshot = IntegrationSnapshot::resolve(&original, Some(AgentKind::Grok), None)
+            .expect("the native Grok invocation resolves");
+        assert_eq!(snapshot.kind, AgentKind::Grok);
+        let expected_template = [
+            "env",
+            "GROK_HOME=/tmp/grok",
+            "/opt/bin/grok",
+            "--no-leader",
+            "--no-plan",
+            "--resume",
+            "{conversation}",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        assert_eq!(snapshot.resume_template.as_ref(), Some(&expected_template));
+
+        let mut locator = grok::GrokLocator::reported(
+            "grok-session-1".to_string(),
+            Some("/tmp/grok-session-1/updates.jsonl".to_string()),
+            Some("2026-09-22T12:00:00Z"),
+        )
+        .expect("valid locator");
+        locator.resumable = true;
+        let token = locator.encode().expect("ready locator encodes");
+        assert_eq!(
+            snapshot.restart_offer(Some(&token), 1),
+            RestartOffer::Resume
+        );
+        assert_eq!(
+            snapshot
+                .filled_resume_argv(&token)
+                .expect("the exact UUID fills the template"),
+            [
+                "env",
+                "GROK_HOME=/tmp/grok",
+                "/opt/bin/grok",
+                "--no-leader",
+                "--no-plan",
+                "--resume",
+                "grok-session-1",
+            ]
+        );
+    }
+
+    /// Derivation cannot safely append a selector after `--` or beside an
+    /// existing session choice. Explicit templates remain the escape hatch
+    /// because the user supplies their complete argv contract.
+    #[farhelm_testtrace::test]
+    fn grok_derived_resume_refuses_ambiguous_selector_boundaries() {
+        for tail in [
+            vec!["--"],
+            vec!["--resume", "old"],
+            vec!["--resume=old"],
+            vec!["--session-id", "old"],
+            vec!["--continue"],
+            vec!["--fork-session", "old"],
+        ] {
+            let mut argv = vec!["grok".to_string()];
+            argv.extend(tail.into_iter().map(str::to_string));
+            assert_eq!(
+                IntegrationSnapshot::resolve(&argv, None, None),
+                Err(SnapshotError::GrokAmbiguousResumeBoundary),
+                "derived argv must refuse: {argv:?}"
+            );
+        }
+
+        let explicit = IntegrationSnapshot::resolve(
+            &["grok".to_string(), "--".to_string()],
+            None,
+            Some(vec![
+                "wrapper".to_string(),
+                "resume-exact".to_string(),
+                CONVERSATION_PLACEHOLDER.to_string(),
+            ]),
+        )
+        .expect("an explicit complete template bypasses derivation");
+        assert_eq!(explicit.kind, AgentKind::Grok);
     }
 
     /// Goose's derived restart keeps the structured launcher's literal

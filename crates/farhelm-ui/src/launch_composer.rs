@@ -2995,6 +2995,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             },
             &catalog,
         ));
@@ -3004,6 +3005,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: Some(LaunchPermission::Yolo),
+                workspace_trust: None,
             },
             &catalog,
         ));
@@ -3013,6 +3015,7 @@ mod tests {
                 model: Some("experimental-model".into()),
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             },
             &catalog,
         ));
@@ -3022,6 +3025,7 @@ mod tests {
                 model: Some("experimental-model".into()),
                 effort: Some(LaunchEffort::High),
                 permissions: None,
+                workspace_trust: None,
             },
             Some(LaunchHarness::Codex),
             LaunchHarness::Grok,

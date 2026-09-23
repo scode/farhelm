@@ -320,6 +320,21 @@ pub(crate) fn foreground_codex_emitter(
     codex_corridor(&chain)
 }
 
+/// Attribute a manual Grok hook to the one supported native runtime under
+/// the owned pane.
+///
+/// Grok reuses the same bounded ancestry walk and shell-trampoline corridor
+/// as Codex. Its extra proof is argv-specific: the native executable must
+/// carry `--no-leader` before any end-of-options boundary, so the hook runs
+/// inside the owned runtime rather than a shared backend.
+pub(crate) fn foreground_grok_emitter(
+    peer: ProcessIdentity,
+    pane_pid: u32,
+) -> Result<ProcessIdentity, String> {
+    let chain = walk_to_pane(peer, pane_pid)?;
+    grok_corridor(&chain)
+}
+
 /// Whether raw argv spells the supported hook invocation: the installed
 /// hook command's shape (`<farhelm> internal hook ...`), matched
 /// syntactically, never by path — an upgraded supervisor must still
@@ -432,13 +447,16 @@ fn is_hook_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
 }
 
 /// Whether raw `exe` bytes name another integrated agent runtime: a
-/// session-hosting image that is not the Codex emitter this corridor
-/// counts. Such an intermediary means the report traveled through a
+/// session-hosting image other than the emitter this corridor counts.
+/// Such an intermediary means the report traveled through a
 /// different harness, and refuses with its own message so the diagnostic
 /// names the mechanism rather than a generic unclassified intermediary.
 fn is_other_session_runtime(exe: &[u8]) -> bool {
     let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
-    matches!(name, b"claude" | b"goose" | b"pi" | b"omp")
+    matches!(
+        name,
+        b"claude" | b"codex" | b"goose" | b"pi" | b"omp" | b"grok"
+    )
 }
 
 /// Codex's instance of the restrictive corridor, over an already-walked
@@ -496,6 +514,85 @@ fn codex_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
         );
     }
     emitter.ok_or_else(|| "the hook has no attributable Codex executable".to_string())
+}
+
+/// Recognize the native Grok image from the already captured executable
+/// path. Linux appends ` (deleted)` after an in-place upgrade; that suffix
+/// does not change which executable the process is running.
+fn is_grok_image(exe: &[u8]) -> bool {
+    let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    matches!(
+        name.strip_suffix(b" (deleted)").unwrap_or(name),
+        b"grok" | b"grok-linux-x86_64"
+    )
+}
+
+/// Require the private-leader flag in Grok's option region.
+fn grok_has_owned_backend(argv: &[Vec<u8>]) -> bool {
+    let option_end = argv
+        .iter()
+        .position(|argument| argument.as_slice() == b"--")
+        .unwrap_or(argv.len());
+    argv.iter()
+        .take(option_end)
+        .skip(1)
+        .any(|argument| argument.as_slice() == b"--no-leader")
+}
+
+/// Grok's restrictive corridor over the shared bounded ancestry walk.
+fn grok_corridor(chain: &[ChainLink]) -> Result<ProcessIdentity, String> {
+    let reporter = chain
+        .first()
+        .ok_or_else(|| "the hook ancestry is empty".to_string())?;
+    match reporter.argv.as_deref() {
+        Some(argv) if is_hook_invocation_argv(argv) => {}
+        _ => {
+            return Err("the reporting process is not the supported hook invocation".to_string());
+        }
+    }
+
+    let mut emitter = None;
+    for (index, link) in chain.iter().enumerate() {
+        if is_grok_image(&link.exe) {
+            if emitter.is_some() {
+                return Err("a nested Grok process cannot report for the foreground".to_string());
+            }
+            let argv = link.argv.as_deref().ok_or_else(|| {
+                "the native Grok emitter's command line is unavailable".to_string()
+            })?;
+            if !grok_has_owned_backend(argv) {
+                return Err(
+                    "the native Grok emitter was not launched with --no-leader before its option boundary"
+                        .to_string(),
+                );
+            }
+            emitter = Some(ProcessIdentity {
+                pid: link.pid,
+                start: link.start,
+            });
+            continue;
+        }
+        if index == 0 || index + 1 == chain.len() {
+            continue;
+        }
+        if link
+            .argv
+            .as_deref()
+            .is_some_and(|argv| is_hook_trampoline(&link.exe, argv))
+        {
+            continue;
+        }
+        if is_other_session_runtime(&link.exe) {
+            return Err(
+                "another session-hosting runtime sits between the reporter and the foreground"
+                    .to_string(),
+            );
+        }
+        return Err(
+            "an unclassified intermediary sits between the reporter and the foreground".to_string(),
+        );
+    }
+    emitter.ok_or_else(|| "the hook has no attributable Grok executable".to_string())
 }
 
 /// Extract the environment region of a macOS `KERN_PROCARGS2` buffer,
@@ -2340,5 +2437,98 @@ mod tests {
         let refusal =
             codex_corridor(&chain).expect_err("an unreadable intermediary must be refused");
         assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+    }
+
+    /// Grok's supported foreground is one native image with a private
+    /// backend flag in its option region. A flag after `--` is user payload,
+    /// so treating it as ownership evidence would admit the shared leader.
+    #[farhelm_testtrace::test]
+    fn grok_requires_no_leader_before_the_option_boundary() {
+        let admitted = vec![
+            corridor_link(
+                12,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "internal", "hook", "--vendor", "grok"],
+            ),
+            corridor_link(
+                11,
+                "/bin/sh",
+                &[
+                    "sh",
+                    "-c",
+                    "/opt/test/bin/farhelm internal hook --vendor grok",
+                ],
+            ),
+            corridor_link(
+                10,
+                "/home/user/.grok/downloads/grok-linux-x86_64",
+                &["grok", "--no-leader"],
+            ),
+        ];
+        let emitter = grok_corridor(&admitted).expect("the supported Grok corridor is admitted");
+        assert_eq!(emitter.pid, 10);
+
+        for argv in [
+            vec!["grok"],
+            vec!["grok", "--", "--no-leader"],
+            vec!["grok", "--no-leader=false"],
+        ] {
+            let chain = vec![
+                corridor_link(
+                    11,
+                    "/opt/test/bin/farhelm",
+                    &["farhelm", "internal", "hook", "--vendor", "grok"],
+                ),
+                corridor_link(10, "/opt/test/bin/grok", &argv),
+            ];
+            let refusal =
+                grok_corridor(&chain).expect_err("missing exact ownership evidence must refuse");
+            assert!(refusal.contains("--no-leader"), "{refusal}");
+        }
+    }
+
+    /// Another Grok image or another harness in the ancestry means the hook
+    /// cannot be attributed to the one top-level foreground conversation.
+    #[farhelm_testtrace::test]
+    fn grok_rejects_nested_and_foreign_runtime_corridors() {
+        let nested = vec![
+            corridor_link(
+                13,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "internal", "hook", "--vendor", "grok"],
+            ),
+            corridor_link(
+                12,
+                "/home/user/.grok/downloads/grok-linux-x86_64",
+                &["grok", "--no-leader"],
+            ),
+            corridor_link(
+                11,
+                "/home/user/.grok/downloads/grok-linux-x86_64",
+                &["grok", "--no-leader"],
+            ),
+        ];
+        let refusal = grok_corridor(&nested).expect_err("nested Grok must refuse");
+        assert!(refusal.contains("nested Grok"), "{refusal}");
+
+        let foreign = vec![
+            corridor_link(
+                13,
+                "/opt/test/bin/farhelm",
+                &["farhelm", "internal", "hook", "--vendor", "grok"],
+            ),
+            corridor_link(12, "/opt/test/bin/codex", &["codex"]),
+            corridor_link(
+                11,
+                "/home/user/.grok/downloads/grok-linux-x86_64",
+                &["grok", "--no-leader"],
+            ),
+            corridor_link(10, "/bin/bash", &["-bash"]),
+        ];
+        let refusal = grok_corridor(&foreign).expect_err("foreign runtime must refuse");
+        assert!(
+            refusal.contains("another session-hosting runtime"),
+            "{refusal}"
+        );
     }
 }

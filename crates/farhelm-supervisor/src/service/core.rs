@@ -6295,10 +6295,10 @@ impl Supervisor {
         let Some(mut row) = self.store.session(id).await? else {
             return Ok(None);
         };
-        if !self.refresh_codex_capture(&mut row).await? {
+        if !self.refresh_reported_capture(&mut row).await? {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "the Codex conversation changed while its restart offer was being verified; refresh the session",
+                "the reported conversation changed while its restart offer was being verified; refresh the session",
             ).into());
         }
         let snapshot = IntegrationSnapshot {
@@ -6336,11 +6336,11 @@ impl Supervisor {
 
     /// Refresh readiness without searching for another record. The durable
     /// comparison prevents a slow verification of A from replacing a new B.
-    pub(super) async fn refresh_codex_capture(
+    pub(super) async fn refresh_reported_capture(
         &self,
         row: &mut StoredSession,
     ) -> anyhow::Result<bool> {
-        if row.agent_kind != AgentKind::Codex {
+        if !matches!(row.agent_kind, AgentKind::Codex | AgentKind::Grok) {
             return Ok(true);
         }
         // The claim is taken HERE rather than by the caller: `session_snapshot`
@@ -6348,14 +6348,27 @@ impl Supervisor {
         // serialization, and the row must be reloaded under the claim because
         // a report may have replaced it since the caller read it. Callers
         // that already hold this session's capture claim (the refresh pass)
-        // use `refresh_codex_capture_claimed` instead: the per-key mutex is
+        // use `refresh_reported_capture_claimed` instead: the per-key mutex is
         // not reentrant, so claiming a held key parks the holder against
         // itself and the pass never completes.
         let _capture_claim = self.capture_locks.claim(&row.id).await;
-        self.refresh_codex_capture_claimed(row).await
+        self.refresh_reported_capture_claimed(row).await
     }
 
-    /// `refresh_codex_capture` for a caller already holding this session's
+    /// Refresh an exact report-only binding while the caller owns the
+    /// session's shared capture claim.
+    pub(super) async fn refresh_reported_capture_claimed(
+        &self,
+        row: &mut StoredSession,
+    ) -> anyhow::Result<bool> {
+        match row.agent_kind {
+            AgentKind::Codex => self.refresh_codex_capture_claimed(row).await,
+            AgentKind::Grok => self.refresh_grok_capture_claimed(row).await,
+            _ => Ok(true),
+        }
+    }
+
+    /// Refresh a Codex binding for a caller already holding this session's
     /// capture claim (see above for why the claim cannot be taken twice).
     /// The reload below is still correct under the caller's claim — it
     /// re-reads the row the claim serializes, so a report that landed
@@ -6433,24 +6446,107 @@ impl Supervisor {
         Ok(true)
     }
 
+    /// Recheck Grok's exact two-file evidence without changing the selected
+    /// UUID or its durable ordering timestamp.
+    async fn refresh_grok_capture_claimed(&self, row: &mut StoredSession) -> anyhow::Result<bool> {
+        if row.agent_kind != AgentKind::Grok {
+            return Ok(true);
+        }
+        let Some(current) = self.store.session(&row.id).await? else {
+            return Ok(false);
+        };
+        if current.generation != row.generation || current.agent_kind != AgentKind::Grok {
+            return Ok(false);
+        }
+        *row = current;
+        if row.capture_ownership_version != 1 {
+            return Ok(true);
+        }
+        let Some(stored) = row.captured_conversation.as_deref() else {
+            return Ok(true);
+        };
+        let Ok(mut locator) = crate::agent_kind::grok::GrokLocator::parse(stored) else {
+            return Ok(true);
+        };
+        let was_resumable = locator.resumable;
+        locator.verify().await;
+        if was_resumable == locator.resumable {
+            return Ok(true);
+        }
+        if was_resumable && !locator.resumable {
+            warn!(
+                session = %row.id,
+                "the exact Grok record pair is unavailable or inconsistent; withdrawing its resume offer"
+            );
+        }
+        let replacement = locator.encode()?;
+        if !self.may_record() {
+            if !locator.resumable {
+                row.captured_conversation = Some(replacement);
+            }
+            return Ok(true);
+        }
+        if !self
+            .store
+            .replace_reported_conversation_if_current(
+                &row.id,
+                row.generation,
+                Some(stored),
+                &replacement,
+            )
+            .await?
+        {
+            return Ok(false);
+        }
+        row.captured_conversation = Some(replacement);
+        Ok(true)
+    }
+
     /// Verify a locator-reporting session's exact file immediately before a
     /// resume can launch.
     ///
-    /// Both locator vendors (Pi and OMP) treat a missing or malformed resume
-    /// path as a fresh session, so passing an unchecked locator would make a
-    /// Resume request silently lose its meaning. The parser and verifier are
-    /// dispatched from the session's STORED kind — each vendor's session-file
-    /// header has its own shape (OMP may open with a title-slot record), and
-    /// a locator reported under one vendor's prefix is never decoded by the
-    /// other's rules. A failed check replaces only the exact locator and
-    /// generation read by the caller with a fileless token. The request then
-    /// conflicts, and a refresh exposes `FreshOnly`; a concurrent newer
+    /// Pi, OMP, and Grok can silently start fresh when their resume data is
+    /// missing or malformed, so passing an unchecked locator would make a
+    /// Resume request lose its meaning. The parser and verifier are dispatched
+    /// from the session's STORED kind: each vendor's records have their own
+    /// shape, and a locator reported under one vendor's prefix is never decoded
+    /// by another's rules. A failed check replaces only the exact locator and
+    /// generation read by the caller with a non-resumable token. The request
+    /// then conflicts, and a refresh exposes `FreshOnly`; a concurrent newer
     /// report fails the comparison and remains the durable answer.
     async fn verify_report_only_resume(
         &self,
         session_id: &str,
         snapshot: &SessionSnapshot,
     ) -> anyhow::Result<()> {
+        if snapshot.kind == AgentKind::Grok {
+            let stored = snapshot.captured_conversation.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("a Grok resume offer has no durable conversation locator")
+            })?;
+            let mut locator = crate::agent_kind::grok::GrokLocator::parse(stored)
+                .context("decoding the Grok resume locator")?;
+            locator.verify().await;
+            if locator.resume_id().is_some() {
+                return Ok(());
+            }
+            let replacement = locator.encode()?;
+            self.store
+                .replace_reported_conversation_if_current(
+                    session_id,
+                    snapshot.generation,
+                    Some(stored),
+                    &replacement,
+                )
+                .await
+                .context("invalidating a stale Grok resume locator")?;
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session's restart offer changed while the restart was being prepared; its \
+                 exact Grok record pair could not be verified, so nothing was relaunched — \
+                 refresh the session and re-present the offer",
+            )
+            .into());
+        }
         let vendor = match snapshot.kind {
             AgentKind::Pi => crate::agent_kind::LocatorVendor::Pi,
             AgentKind::Omp => crate::agent_kind::LocatorVendor::Omp,
@@ -8282,7 +8378,7 @@ impl Supervisor {
             .context("reading the session this intent key created")?;
         match row {
             Some(mut row) => {
-                if !self.refresh_codex_capture(&mut row).await? {
+                if !self.refresh_reported_capture(&mut row).await? {
                     return Err(RequestError::new(
                         ErrorKind::Conflict,
                         "the Codex restart offer changed; refresh the session",
@@ -10046,7 +10142,12 @@ impl Supervisor {
             ).into());
         }
         let argv = relaunch_argv(mode, &snapshot, &entry.info.invocation)?;
-        if mode == RestartMode::Resume && matches!(snapshot.kind, AgentKind::Pi | AgentKind::Omp) {
+        if mode == RestartMode::Resume
+            && matches!(
+                snapshot.kind,
+                AgentKind::Pi | AgentKind::Omp | AgentKind::Grok
+            )
+        {
             self.verify_report_only_resume(session_id, &snapshot)
                 .await?;
         }
@@ -13070,8 +13171,9 @@ impl Supervisor {
     /// generation: the credential survives relaunch, and the wire message
     /// carries no generation. Ordinary stale reporters are removed by the
     /// restart's whole-process-tree sweep before the replacement runs.
-    /// Codex additionally requires the peer to remain attributable to the
-    /// current pane's foreground process around transcript verification.
+    /// Codex and Grok additionally require the peer to remain attributable
+    /// to the current pane's foreground process around exact-record
+    /// verification.
     /// How long a report waits for the session's capture claim before
     /// giving up with a `Conflict` rejection.
     ///
@@ -13079,7 +13181,7 @@ impl Supervisor {
     /// whole round trip: parking past it converts contention into a hook
     /// error the vendor shows the user, while a prompt rejection is a
     /// no-op the next lifecycle event retries. One second leaves room
-    /// for the two attributions, the root-evidence check, and the reply
+    /// for the process attributions, the exact-record check, and the reply
     /// inside that budget on an unloaded host; on a loaded one the report
     /// loses rather than wedges, and the refresh pass converges the row.
     const CAPTURE_CLAIM_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -13203,6 +13305,10 @@ impl Supervisor {
         match kind {
             AgentKind::Codex => {
                 self.report_codex_conversation(id, report, kind, generation, entry)
+                    .await
+            }
+            AgentKind::Grok => {
+                self.report_grok_conversation(id, report, kind, generation, entry)
                     .await
             }
             _ => Err(RequestError::new(
@@ -13346,6 +13452,154 @@ impl Supervisor {
             // The capture claim excludes refresh/report interleavings, while
             // the durable precondition also fences lifecycle changes and
             // preserves the exact binding that authorized verification.
+            _ => {
+                self.store
+                    .admit_ownership_proven_conversation(
+                        id,
+                        generation,
+                        row.captured_conversation.as_deref(),
+                        row.capture_ownership_version,
+                        &conversation,
+                    )
+                    .await
+            }
+        };
+        Self::finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+    }
+
+    /// Admit one manually configured Grok callback through the shared
+    /// ownership and capture transaction.
+    ///
+    /// `SessionStart` is the only selecting event. Its vendor timestamp is
+    /// compared while the capture claim is held, which keeps a delayed old
+    /// callback from restoring a UUID displaced by `/new`, including after a
+    /// supervisor restart. `UserPromptSubmit` and `Stop` can only enrich the
+    /// UUID already selected in the durable row.
+    async fn report_grok_conversation(
+        &self,
+        id: &str,
+        report: ReportedConversation,
+        kind: AgentKind,
+        generation: i64,
+        entry: Option<Arc<SessionEntry>>,
+    ) -> Result<(), RequestError> {
+        let ReportedConversation {
+            vendor: _,
+            conversation,
+            source,
+            transcript_path,
+            hook_event_name,
+            peer,
+        } = report;
+        if transcript_path.is_some() {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Grok evidence must be carried in its bounded locator",
+            ));
+        }
+        let event = hook_event_name
+            .as_ref()
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::InvalidRequest, "Grok report has no event name")
+            })?;
+        if !matches!(event, "SessionStart" | "UserPromptSubmit" | "Stop") {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Grok reported an unsupported hook event",
+            ));
+        }
+        if event == "SessionStart" && !matches!(source.as_str(), "new" | "load") {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Grok SessionStart requires source new or load",
+            ));
+        }
+        let mut incoming = crate::agent_kind::grok::GrokLocator::parse(&conversation)
+            .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        if (event == "SessionStart") != incoming.selected_at.is_some() {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "Grok selection timestamps belong only to SessionStart reports",
+            ));
+        }
+        let peer = peer.ok_or_else(|| {
+            RequestError::new(
+                ErrorKind::Conflict,
+                "the Grok report has no kernel-attributed local process",
+            )
+        })?;
+
+        let claim_deadline = tokio::time::Instant::now() + Self::CAPTURE_CLAIM_WAIT;
+        let _capture_claim = self
+            .capture_locks
+            .claim_before(id, claim_deadline)
+            .await
+            .ok_or_else(|| {
+                RequestError::new(
+                    ErrorKind::Conflict,
+                    "this session's capture is being updated; the report was not recorded",
+                )
+            })?;
+        let row = self
+            .store
+            .session(id)
+            .await
+            .map_err(|_| {
+                RequestError::new(ErrorKind::Internal, "could not verify the Grok launch")
+            })?
+            .ok_or_else(|| {
+                RequestError::new(ErrorKind::NotFound, "the Grok session no longer exists")
+            })?;
+        if row.generation != generation || row.agent_kind != kind {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "this session has moved on to another launch",
+            ));
+        }
+
+        let previous = match row.captured_conversation.as_deref() {
+            Some(stored) => Some(crate::agent_kind::grok::GrokLocator::parse(stored).map_err(
+                |_| {
+                    RequestError::new(
+                        ErrorKind::Conflict,
+                        "the durable Grok selection cannot be ordered safely",
+                    )
+                },
+            )?),
+            None => None,
+        };
+        incoming = crate::agent_kind::grok::GrokLocator::merge_report(previous, incoming, event)
+            .map_err(|error| RequestError::new(ErrorKind::Conflict, error.to_string()))?;
+
+        let emitter = self.grok_foreground(&row, peer).await?;
+        incoming.verify().await;
+        if self.grok_foreground(&row, peer).await? != emitter {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Grok foreground changed during verification",
+            ));
+        }
+        let conversation = incoming
+            .encode()
+            .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
+        info!(
+            session = %id,
+            generation,
+            emitter_pid = emitter.pid,
+            grok_session = %incoming.session_id,
+            resumable = incoming.resumable,
+            event,
+            "attributed a Grok foreground conversation report"
+        );
+
+        let injected = self
+            .seams
+            .capture_store_fault
+            .as_ref()
+            .map(|fault| fault(super::capture::CaptureWrite::Report, id));
+        let written = match injected {
+            Some(Err(error)) => Err(error),
             _ => {
                 self.store
                     .admit_ownership_proven_conversation(
@@ -13549,11 +13803,45 @@ impl Supervisor {
         row: &StoredSession,
         peer: crate::procs::ProcessIdentity,
     ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        self.foreground_reporter(row, peer, AgentKind::Codex).await
+    }
+
+    /// Grok's wrapper around the shared pane lookup and ancestry walk.
+    async fn grok_foreground(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        self.foreground_reporter(row, peer, AgentKind::Grok).await
+    }
+
+    /// Recover the current owned pane, then apply the selected vendor's
+    /// restrictive corridor to the kernel-attributed hook process.
+    ///
+    /// Pane recovery is shared because publication gaps and lifecycle races
+    /// are supervisor properties. Only the final corridor differs between
+    /// Codex and Grok.
+    async fn foreground_reporter(
+        &self,
+        row: &StoredSession,
+        peer: crate::procs::ProcessIdentity,
+        kind: AgentKind,
+    ) -> Result<crate::procs::ProcessIdentity, RequestError> {
+        let vendor = match kind {
+            AgentKind::Codex => "Codex",
+            AgentKind::Grok => "Grok",
+            _ => {
+                return Err(RequestError::new(
+                    ErrorKind::Internal,
+                    "this agent kind has no foreground reporter corridor",
+                ));
+            }
+        };
         let pane = if row.pane.is_empty() {
             let states = self.tmux.pane_states().await.map_err(|_| {
                 RequestError::new(
                     ErrorKind::Conflict,
-                    "the Codex foreground pane could not be inspected",
+                    format!("the {vendor} foreground pane could not be inspected"),
                 )
             })?;
             agent_pane_from_states(&states, &row.tmux_name, &row.id)
@@ -13561,7 +13849,7 @@ impl Supervisor {
                 .ok_or_else(|| {
                     RequestError::new(
                         ErrorKind::Conflict,
-                        "the Codex foreground pane is unavailable",
+                        format!("the {vendor} foreground pane is unavailable"),
                     )
                 })?
         } else {
@@ -13574,29 +13862,31 @@ impl Supervisor {
             .map_err(|_| {
                 RequestError::new(
                     ErrorKind::Conflict,
-                    "the Codex foreground process could not be inspected",
+                    format!("the {vendor} foreground process could not be inspected"),
                 )
             })?;
         let crate::tmux::PaneProbe::Owned(process) = process else {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "the Codex foreground pane is no longer owned by this session",
+                format!("the {vendor} foreground pane is no longer owned by this session"),
             ));
         };
         if process.dead {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "the Codex foreground process has exited",
+                format!("the {vendor} foreground process has exited"),
             ));
         }
-        tokio::task::spawn_blocking(move || {
-            crate::procs::foreground_codex_emitter(peer, process.pid)
+        tokio::task::spawn_blocking(move || match kind {
+            AgentKind::Codex => crate::procs::foreground_codex_emitter(peer, process.pid),
+            AgentKind::Grok => crate::procs::foreground_grok_emitter(peer, process.pid),
+            _ => unreachable!("kind checked before spawning attribution"),
         })
         .await
         .map_err(|_| {
             RequestError::new(
                 ErrorKind::Internal,
-                "Codex process attribution could not complete",
+                format!("{vendor} process attribution could not complete"),
             )
         })?
         .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))
@@ -15989,6 +16279,51 @@ pub(crate) mod tests {
             .expect("insert codex fixture row");
     }
 
+    /// Seed the durable result of an ownership-proven Grok report without
+    /// manufacturing a process ancestry. Corridor tests own that proof;
+    /// service tests use this seam to exercise reload and publication after
+    /// the report's atomic store transaction has already succeeded.
+    async fn seed_grok_row(sup: &Arc<Supervisor>, id: &str, captured: &str) {
+        let integration =
+            IntegrationSnapshot::resolve(&["grok".to_string()], None, None).expect("grok");
+        sup.store
+            .insert_session(
+                StoredSession {
+                    conversation_source: Some("hook".to_string()),
+                    capture_ownership_version: 1,
+                    id: id.to_string(),
+                    parent: None,
+                    title: "grok".to_string(),
+                    created_at: now_unix(),
+                    last_activity_at: now_unix(),
+                    last_work_started_at: 0,
+                    creation_seq: 0,
+                    cwd: "/tmp".to_string(),
+                    invocation: "grok".to_string(),
+                    launch: None,
+                    tmux_name: format!("fh-{id}"),
+                    pane: String::new(),
+                    outcome: LastOutcome::Exited {
+                        exit_code: Some(0),
+                        annotation: None,
+                    },
+                    agent_kind: farhelm_proto::AgentKind::Grok,
+                    resume_template: integration.resume_template.clone(),
+                    canonical_cwd: None,
+                    captured_conversation: Some(captured.to_string()),
+                    captured_record: None,
+                    capture_ambiguous: false,
+                    first_input_at: None,
+                    generation: 0,
+                    launch_scoped: false,
+                    source_profile: None,
+                },
+                None,
+            )
+            .await
+            .expect("insert Grok fixture row");
+    }
+
     /// A report from an unattributable process against a pristine row is
     /// refused and records nothing when the owned pane is absent.
     ///
@@ -16134,6 +16469,109 @@ pub(crate) mod tests {
         assert_eq!(
             row.capture_ownership_version, 1,
             "the pass must not touch a verified binding's provenance"
+        );
+    }
+
+    /// A ready Grok report that lands before the in-memory entry is published
+    /// must become visible through the ordinary list projection. Later loss
+    /// of either exact file withdraws Resume while preserving the selected
+    /// UUID and its timestamp for reload-time ordering.
+    #[farhelm_testtrace::test]
+    async fn grok_prepublication_binding_reconciles_and_file_loss_withdraws_resume() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let id = uuid::Uuid::new_v4().to_string();
+        let session_dir = state.path().join("grok-session");
+        std::fs::create_dir(&session_dir).expect("create Grok fixture directory");
+        let updates = session_dir.join("updates.jsonl");
+        let summary = session_dir.join("summary.json");
+        std::fs::write(
+            &updates,
+            "{\"method\":\"_x.ai/session/update\",\"params\":{\"sessionId\":\"grok-exact\"}}\n",
+        )
+        .expect("write Grok updates");
+        std::fs::write(&summary, "{\"info\":{\"id\":\"grok-exact\"}}\n")
+            .expect("write Grok summary");
+        let mut locator = crate::agent_kind::grok::GrokLocator::reported(
+            "grok-exact".to_string(),
+            Some(updates.to_string_lossy().into_owned()),
+            Some("2026-09-22T12:00:00.123456789Z"),
+        )
+        .expect("reported Grok locator");
+        locator.verify().await;
+        assert_eq!(
+            locator.resume_id(),
+            Some("grok-exact"),
+            "the fixture must establish ready exact evidence before persistence"
+        );
+        let token = locator.encode().expect("encode ready Grok locator");
+        seed_grok_row(&sup, &id, &token).await;
+        assert!(
+            !sup.sessions.lock().await.contains_key(&id),
+            "the durable report precedes publication in this fixture"
+        );
+
+        let integration =
+            IntegrationSnapshot::resolve(&["grok".to_string()], None, None).expect("grok");
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.clone();
+        entry.snapshot = integration;
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.clone(), Arc::clone(&entry));
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::Resume,
+            "report-only reconciliation must publish the ready offer users list"
+        );
+        let ready = sup
+            .session_snapshot(&id)
+            .await
+            .expect("read ready Grok snapshot")
+            .expect("row survives");
+        assert_eq!(
+            ready
+                .resume_argv
+                .as_deref()
+                .and_then(|argv| argv.last())
+                .map(String::as_str),
+            Some("grok-exact"),
+            "Resume substitutes the verified UUID rather than its file path"
+        );
+
+        std::fs::remove_file(&summary).expect("remove one half of the exact evidence");
+        sup.capture_now().await;
+        assert_eq!(
+            super::super::status::entry_info(&entry, &HashMap::new(), None).restart_offer,
+            RestartOffer::FreshOnly,
+            "losing either exact file must withdraw the public offer"
+        );
+        let pending = sup
+            .session_snapshot(&id)
+            .await
+            .expect("read pending Grok snapshot")
+            .expect("row survives");
+        assert_eq!(pending.restart_offer, RestartOffer::FreshOnly);
+        let persisted = pending
+            .captured_conversation
+            .as_deref()
+            .and_then(|value| crate::agent_kind::grok::GrokLocator::parse(value).ok())
+            .expect("the pending locator remains durable");
+        assert_eq!(persisted.session_id, "grok-exact");
+        assert!(
+            persisted.selected_at.is_some(),
+            "readiness withdrawal must preserve the restart-stable ordering fence"
         );
     }
 

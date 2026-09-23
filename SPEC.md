@@ -689,10 +689,11 @@ profile with agent-specific heuristics. A profile may canonically remove only an
 before output comparison, while retaining the raw bounded screen for approval detection; unfamiliar screens remain raw.
 It may also recognize a current vendor work indicator, but a waiting prompt wins and neither heuristic creates lifecycle
 state. Wrong status must be cosmetic only — status detection must never gate or delay interaction with the terminal.
-Integrations that require configuring the agent itself (e.g. Claude Code hooks) may be supported later but are not part
-of v1 and must never be required. OMP is a stated exception in the other direction: its integration is conversation
-identity only, and Farhelm performs no OMP waiting recognition at all. An OMP approval prompt shows the generic
-running/idle classification, never waiting — a settled scope decision, not a heuristic waiting to be sharpened.
+Farhelm-supplied integration must not make vendor configuration a condition of launching an agent. Grok is the explicit
+opt-in exception for conversation capture: users install its three documented hook entries themselves, while an
+unconfigured Grok still launches normally and remains fresh-only. OMP and Grok both use generic activity only. Their
+approval prompts show the generic running/idle classification, never waiting — a settled scope decision, not a heuristic
+waiting to be sharpened.
 
 Notifications (desktop or otherwise) are explicitly out of v1. The status column is the whole story.
 
@@ -862,7 +863,7 @@ reboot.
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.
 `claude --resume <conversation-id>`) — even when several sessions share a working directory. Claude Code, Codex, Goose,
-and Pi integrations at this level are required in v1. Identity is reported by the agent itself when its kind supports a
+Pi, and Grok integrations at this level are required. Identity is reported by the agent itself when its kind supports a
 launch reporter, and scanned from the outside — the agent's terminal, its own on-disk session records — otherwise; a
 report wins over a scan, because it is the agent's own answer rather than a correlation over what the agent happened to
 leave on disk. What capture never does is write to the agent's own configuration or record directories. A hook passed on
@@ -870,14 +871,15 @@ the command line for one launch is allowed because it writes nothing the vendor 
 conversation record, no trust state — and cannot outlive the launch that carried it. It is not invisible in the
 absolute: the report it delivers lands in farhelm's own database, and every run leaves a line in farhelm's own hook log.
 Vendor-owned state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own
-example — hooks written into the agent's configuration — still stands. Claude retains scanning as its fallback when no
-report has been accepted. Codex, Goose, Pi, and OMP are report-only integrations: Farhelm never selects their
-conversation by scanning vendor state. A reporting credential alone does not establish which Codex conversation is in
-the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses it on resume; Pi
-loads a private static extension from Farhelm's state directory on every launch. A Pi report without a session file
-withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact file without
-following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh and rejects
-the stale Resume request so the user can refresh; it never silently launches fresh under that request.
+example — hooks written into the agent's configuration — still stands. Grok is the documented opt-in exception: the user
+installs its hook entries, and Farhelm itself never writes, edits, or removes them. Claude retains scanning as its
+fallback when no report has been accepted. Codex, Goose, Pi, OMP, and Grok are report-only integrations: Farhelm never
+selects their conversation by scanning vendor state. A reporting credential alone does not establish which Codex
+conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
+it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
+session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
+file without following symlinks and requires its session ID to match. A failed check changes the durable offer to fresh
+and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that request.
 
 Codex reports must come from the foreground native Codex process under the session's owned pane, not a nested Codex
 process that inherited its credential. Farhelm also verifies the exact reported transcript's root-session metadata;
@@ -890,15 +892,33 @@ Compaction preserves the conversation, and a verified new conversation replaces 
 remain stored but are not offered as exact resume targets. Missing or changed transcript evidence refuses Resume rather
 than silently launching fresh or selecting a different historical conversation.
 
+Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
+end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
+trampoline; a nested Grok or another session-hosting runtime cannot replace the parent selection. `SessionStart` with
+source `new` or `load` selects a UUID. `UserPromptSubmit` and `Stop` may add saved-record evidence only for that
+selected UUID, and child-marked callbacks never select a top-level conversation. A selection stores the callback's
+canonical RFC3339 event timestamp in the Grok locator: another UUID must be strictly newer, while repeats for the same
+UUID may advance the timestamp but cannot lower it. Equal or older competing selections fail closed, including after
+supervisor restart, without a general event log or clock-recovery protocol.
+
+The selected UUID is resumable only while the exact reported absolute `updates.jsonl` begins with a supported record
+whose method and `params.sessionId` match, and its sibling `summary.json` is a complete bounded JSON document with the
+same UUID at `info.id`. Farhelm checks that pair during reconciliation and again before Resume. Missing or mismatched
+evidence withdraws the offer while preserving the selected UUID and timestamp; Farhelm never derives a path, scans Grok
+history, or chooses another conversation. A fresh `/new` normally remains pending until a later subscribed event
+supplies its path. If Grok exits or crashes before the replacement `SessionStart` callback arrives, the previous UUID
+can remain Farhelm's last known selection; this accepted delivery race does not weaken validation of callbacks that do
+arrive.
+
 Every conversation-identity report carries a closed vendor discriminator naming the adapter that produced it — the
 injected hook command, the Goose helper, or a shipped asset — and a report addressed to a session of another kind is
-refused before any vendor state is consulted. The discriminator routes; it does not prove. Codex admission requires
-foreground and record proofs, and its exact resume additionally requires versioned proof that the binding was admitted
-under those proofs, with the historical exception described in SPEC_impl.md. OMP, Goose, Claude, and Pi retain their
-existing admission and resume rules; the discriminator alone adds no foreground protection. Old senders that predate the
-discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored identity, no
-offer, no ambiguity verdict, no pending state. Resume is never silently turned into fresh, and historical captures are
-never rewritten to look proven.
+refused before any vendor state is consulted. The discriminator routes; it does not prove. Codex and Grok admission
+require foreground and record proofs, and their exact resume additionally requires versioned proof that the binding was
+admitted under those proofs, with the historical Codex exception described in SPEC_impl.md. OMP, Goose, Claude, and Pi
+retain their existing admission and resume rules; the discriminator alone adds no foreground protection. Old senders
+that predate the discriminator fail closed rather than reporting untagged. A refused report changes nothing: no stored
+identity, no offer, no ambiguity verdict, no pending state. Resume is never silently turned into fresh, and historical
+captures are never rewritten to look proven.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. A launch
 whose program is `omp` gets Farhelm's private extension when the invocation is an interactive-shaped launch; utility
@@ -926,14 +946,17 @@ assistant message.
 When an integrated session has no explicit resume invocation, its resume invocation is derived from the original launch
 argv retained for that session: Claude appends `--resume <conversation-id>`, and Codex appends
 `resume <conversation-id>`, Goose uses `session --resume --session-id <conversation-id>`, Pi uses
-`--session <verified-absolute-file>`, and OMP uses `--resume <verified-absolute-file>`. For Pi and OMP, `{conversation}`
-in a resume template means that verified file path, not Farhelm's internal durable locator; for Codex it means the
-verified persistent thread ID, not the runtime session ID or encoded locator. The original argv is reused as-is,
-including permission and configuration arguments, and is preserved as argv elements rather than rejoined shell text —
-except that OMP's own session selectors are stripped from the retained argv first, so an old resume or fork target
-cannot survive between the user and the verified one. This immediate rule assumes every original argument is reusable
-and that the launch has no initial prompt or launch-only option; separating those concerns into common, launch, and
-resume arguments is deferred.
+`--session <verified-absolute-file>`, OMP uses `--resume <verified-absolute-file>`, and Grok uses
+`--no-leader --resume <verified-conversation-id>`. For Pi and OMP, `{conversation}` in a resume template means that
+verified file path, not Farhelm's internal durable locator; for Codex it means the verified persistent thread ID, not
+the runtime session ID or encoded locator; for Grok it means the verified UUID, not the `grok:` locator or either
+evidence path. The original argv is reused as-is, including permission and configuration arguments, and is preserved as
+argv elements rather than rejoined shell text — except that OMP's own session selectors are stripped from the retained
+argv first, so an old resume or fork target cannot survive between the user and the verified one. Grok instead refuses
+to derive a template when the retained argv already has a session selector or a real `--`; an explicit template remains
+available for a custom supported shape. This immediate rule assumes every original argument is reusable and that the
+launch has no initial prompt or launch-only option; separating those concerns into common, launch, and resume arguments
+is deferred.
 
 Anything farhelm attaches to an agent launch must be invisible from inside the session when it works AND when it fails:
 no output on the agent's terminal, no non-zero exit, no error the agent's own UI can show. A hook that cannot do its job
@@ -950,7 +973,8 @@ nothing is written to disk. It is on by default, because an agent that has never
 for it, and `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture
 exactly as it was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it.
 The instructions themselves are printed only when that command is run, so a session where the user never mentions
-farhelm pays one line and nothing more.
+farhelm pays one line and nothing more. Grok's manually configured hooks omit `--announce`: Grok ignores the relevant
+stdout, so its integration delivers no instructions pointer.
 
 For agents without integration, restart falls back to the profile's resume invocation verbatim apart from placeholder
 substitution (which may land in the agent's own picker or most-recent-conversation behavior), or a fresh launch when the

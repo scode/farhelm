@@ -1,13 +1,14 @@
-//! `farhelm internal hook`: the agent's own `SessionStart` hook, reporting
-//! the conversation id the vendor just minted.
+//! `farhelm internal hook`: a bounded vendor callback that reports the
+//! conversation identity the agent is currently using.
 //!
-//! Both supported vendors fire a `SessionStart` hook whose JSON payload
-//! carries the exact `session_id` a later resume needs. Farhelm injects
-//! itself as that hook, so this module runs as a short-lived child of the
-//! agent process, inside the agent's own terminal, with the session
-//! credential already in its environment. It reads the payload from stdin
-//! and sends one `ControlMsg::ReportConversation` over the supervisor
-//! socket. Everything else about it is a consequence of *where* it runs.
+//! Most adapters report a session-start event. Grok uses three manually
+//! configured callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
+//! the first event can select a UUID and later events can supply its exact
+//! record path. In every case this module runs as a short-lived child below
+//! the agent process, inside the agent's terminal, with the session credential
+//! already in its environment. It reads one JSON payload from stdin and sends
+//! one `ControlMsg::ReportConversation` over the supervisor socket. Everything
+//! else about it is a consequence of *where* it runs.
 //!
 //! ## The contract
 //!
@@ -15,9 +16,9 @@
 //! is visible to the human using the agent.
 //!
 //! 1. **Silence on stdout and stderr, except for one deliberate line.**
-//!    The identity work itself writes nothing to either descriptor: both
-//!    vendors feed a `SessionStart` hook's stdout into the model's context
-//!    as text, and both surface stderr when the hook fails, so a
+//!    The identity work itself writes nothing to either descriptor. Claude
+//!    and Codex feed `SessionStart` stdout into the model's context, and hook
+//!    failures may surface in the vendor UI, so a
 //!    diagnostic printed to either stream here is at best noise in
 //!    someone's terminal and at worst text the model reads as instruction.
 //!    (The per-session hook log below is the one place this run DOES
@@ -37,7 +38,7 @@
 //!    detached reader thread rather than any async-stdin design.
 //! 4. **No credential, no IDENTITY work.** Without the three injected
 //!    environment values there is no supervisor to talk to (someone ran
-//!    the agent outside farhelm with our flags somehow present); the run
+//!    the agent outside Farhelm with its callback still configured); the run
 //!    logs `no-credential` and stops without touching a socket. This rule
 //!    is scoped to identity capture only: [`announce`] needs no credential
 //!    at all and still prints [`POINTER_LINE`] whenever `--announce` was
@@ -129,8 +130,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-/// Largest stdin payload accepted. A `SessionStart` payload is a few
-/// hundred bytes of JSON; the cap exists so a vendor (or anything else
+/// Largest stdin payload accepted. A hook payload is normally a few hundred
+/// bytes of JSON; the cap exists so a vendor (or anything else
 /// holding our stdin) cannot make the hook allocate without bound while
 /// the budget runs down.
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
@@ -157,9 +158,9 @@ const REQUEST_ID: u64 = 1;
 ///
 /// ## Why stdout reaches the model at all
 ///
-/// Both supported vendors treat plain-text stdout from a `SessionStart`
-/// hook as context for the model, and both were checked rather than
-/// assumed:
+/// Claude and Codex, the two integrations that enable this announcement,
+/// treat plain-text stdout from `SessionStart` as model context. Both were
+/// checked rather than assumed:
 ///
 /// - Claude Code (<https://code.claude.com/docs/en/hooks>): "For most
 ///   events, Claude Code writes stdout to the debug log and doesn't show
@@ -174,7 +175,8 @@ const REQUEST_ID: u64 = 1;
 ///
 /// That symmetry is why there is no Codex-specific fallback here — no file
 /// under farhelm's state directory, no `model_instructions_file` override.
-/// One mechanism serves both vendors.
+/// One mechanism serves both announcement-enabled vendors. Grok's manually
+/// configured callbacks stay silent and never request this line.
 ///
 /// ## Why the wording is constrained
 ///
@@ -415,6 +417,9 @@ fn parse_payload(
     use farhelm_proto::ReportVendor;
     use farhelm_supervisor::agent_kind::LocatorVendor;
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
+    if entry_vendor == ReportVendor::Grok {
+        return parse_grok_payload(&value);
+    }
     let session_id = match value.get("session_id") {
         None | Some(serde_json::Value::Null) => return Err("missing-session-id"),
         Some(serde_json::Value::String(id)) => id,
@@ -438,6 +443,7 @@ fn parse_payload(
         ReportVendor::Goose => "goose",
         ReportVendor::Pi => "pi",
         ReportVendor::Omp => "omp",
+        ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
     };
     match value.get("vendor") {
         None | Some(serde_json::Value::Null) => {}
@@ -445,8 +451,8 @@ fn parse_payload(
         Some(serde_json::Value::String(_)) => return Err("vendor-mismatch"),
         Some(_) => return Err("vendor-not-a-string"),
     }
-    // A locator-vendor entry point encodes the durable locator under its
-    // own vendor's spelling; the two locator vendors never accept each
+    // A Pi or OMP entry point encodes the durable locator under its own
+    // vendor's spelling; those two locator vendors never accept each
     // other's tokens downstream, which starts here with a per-vendor
     // encode. Every other entry point forwards the id verbatim with its
     // raw evidence attached.
@@ -454,6 +460,7 @@ fn parse_payload(
         ReportVendor::Pi => Some(LocatorVendor::Pi),
         ReportVendor::Omp => Some(LocatorVendor::Omp),
         ReportVendor::Claude | ReportVendor::Codex | ReportVendor::Goose => None,
+        ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
     } {
         let session_file = match value.get("session_file") {
             None | Some(serde_json::Value::Null) => None,
@@ -485,6 +492,137 @@ fn parse_payload(
         transcript_path: value.get("transcript_path").cloned(),
         hook_event_name: value.get("hook_event_name").cloned(),
         agent_id: value.get("agent_id").cloned(),
+    })
+}
+
+/// Parse the three manually configured Grok callbacks into one bounded,
+/// vendor-specific locator report.
+///
+/// Grok emits camelCase and snake_case copies of several fields. When both
+/// are present, neither spelling is treated as a fallback: both must have
+/// the expected type and name the same value. This matters most for the
+/// selection timestamp, because accepting a half-malformed duplicate would
+/// let a delayed event bypass the durable ordering fence.
+fn parse_grok_payload(value: &serde_json::Value) -> Result<ControlMsg, &'static str> {
+    use farhelm_proto::ReportVendor;
+
+    match value.get("vendor") {
+        None | Some(serde_json::Value::Null) => {}
+        Some(serde_json::Value::String(vendor)) if vendor == "grok" => {}
+        Some(serde_json::Value::String(_)) => return Err("vendor-mismatch"),
+        Some(_) => return Err("vendor-not-a-string"),
+    }
+
+    let aliased = |camel: &str, snake: &str| -> Result<Option<String>, &'static str> {
+        let left = value.get(camel);
+        let right = value.get(snake);
+        if left.is_some() && right.is_some() {
+            let Some(left) = left.and_then(serde_json::Value::as_str) else {
+                return Err("aliased-field-not-a-string");
+            };
+            let Some(right) = right.and_then(serde_json::Value::as_str) else {
+                return Err("aliased-field-not-a-string");
+            };
+            if left != right {
+                return Err("conflicting-field-spellings");
+            }
+            return Ok(Some(left.to_string()));
+        }
+        match left.or(right) {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::String(text)) => Ok(Some(text.clone())),
+            Some(_) => Err("aliased-field-not-a-string"),
+        }
+    };
+
+    let conversation = aliased("sessionId", "session_id")?.ok_or("missing-session-id")?;
+    if conversation.is_empty() {
+        return Err("empty-session-id");
+    }
+    if conversation.len() > MAX_SESSION_ID_BYTES {
+        return Err("oversized-session-id");
+    }
+
+    let normalize_event = |event: &str| match event {
+        "session_start" | "SessionStart" => Some("SessionStart"),
+        "user_prompt_submit" | "UserPromptSubmit" => Some("UserPromptSubmit"),
+        "stop" | "Stop" => Some("Stop"),
+        _ => None,
+    };
+    let left_event = value.get("hookEventName");
+    let right_event = value.get("hook_event_name");
+    let event = if left_event.is_some() && right_event.is_some() {
+        let Some(left) = left_event.and_then(serde_json::Value::as_str) else {
+            return Err("hook-event-not-a-string");
+        };
+        let Some(right) = right_event.and_then(serde_json::Value::as_str) else {
+            return Err("hook-event-not-a-string");
+        };
+        let left = normalize_event(left).ok_or("unsupported-hook-event")?;
+        let right = normalize_event(right).ok_or("unsupported-hook-event")?;
+        if left != right {
+            return Err("conflicting-field-spellings");
+        }
+        left
+    } else {
+        match left_event.or(right_event) {
+            None | Some(serde_json::Value::Null) => return Err("missing-hook-event"),
+            Some(serde_json::Value::String(event)) => {
+                normalize_event(event).ok_or("unsupported-hook-event")?
+            }
+            Some(_) => return Err("hook-event-not-a-string"),
+        }
+    };
+
+    let source = match value.get("source") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(source)) => Some(source.clone()),
+        Some(_) => return Err("source-not-a-string"),
+    };
+    if event == "SessionStart" && !matches!(source.as_deref(), Some("new" | "load")) {
+        return Err("unsupported-session-source");
+    }
+
+    let timestamp = match value.get("timestamp") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(timestamp)) => Some(timestamp.as_str()),
+        Some(_) => return Err("timestamp-not-a-string"),
+    };
+    if event == "SessionStart" && timestamp.is_none() {
+        return Err("missing-timestamp");
+    }
+
+    let transcript_path = aliased("transcriptPath", "transcript_path")?;
+    let agent_id = match value.get("subagentType") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(marker)) if marker.is_empty() => None,
+        Some(serde_json::Value::String(marker)) => Some(serde_json::Value::String(marker.clone())),
+        Some(_) => return Err("subagent-type-not-a-string"),
+    };
+    let selected_at = if event == "SessionStart" {
+        timestamp
+    } else {
+        if let Some(timestamp) = timestamp {
+            farhelm_supervisor::agent_kind::validate_grok_event_time(timestamp)
+                .map_err(|_| "invalid-grok-evidence")?;
+        }
+        None
+    };
+    let conversation = farhelm_supervisor::agent_kind::encode_grok_report(
+        conversation,
+        transcript_path,
+        selected_at,
+    )
+    .map_err(|_| "invalid-grok-evidence")?;
+
+    Ok(ControlMsg::ReportConversation {
+        req_id: REQUEST_ID,
+        vendor: ReportVendor::Grok,
+        conversation,
+        source: source.unwrap_or_default(),
+        transcript_path: None,
+        hook_event_name: Some(serde_json::Value::String(event.to_string())),
+        agent_id,
     })
 }
 
@@ -1274,6 +1412,160 @@ mod tests {
             )
             .expect_err("a non-string session file is refused"),
             "session-file-not-a-string"
+        );
+    }
+
+    /// Grok emits both naming conventions in the same callback. Agreement
+    /// must survive normalization into one report, including the raw child
+    /// marker that the shared doorway uses to reject subagent callbacks.
+    #[farhelm_testtrace::test]
+    fn grok_accepts_agreeing_dual_spellings_and_normalizes_the_event() {
+        let payload = br#"{
+            "vendor":"grok",
+            "sessionId":"grok-session-1",
+            "session_id":"grok-session-1",
+            "hookEventName":"session_start",
+            "hook_event_name":"SessionStart",
+            "transcriptPath":"/tmp/grok-session-1/updates.jsonl",
+            "transcript_path":"/tmp/grok-session-1/updates.jsonl",
+            "timestamp":"2026-09-22T12:00:00.123456789Z",
+            "source":"new",
+            "subagentType":"general-purpose"
+        }"#;
+        let ControlMsg::ReportConversation {
+            vendor,
+            conversation,
+            source,
+            transcript_path,
+            hook_event_name,
+            agent_id,
+            ..
+        } = parse_payload(payload, ReportVendor::Grok).expect("Grok callback parses")
+        else {
+            panic!("expected a conversation report");
+        };
+        assert_eq!(vendor, ReportVendor::Grok);
+        assert_eq!(source, "new");
+        assert_eq!(transcript_path, None, "evidence stays inside the locator");
+        assert_eq!(hook_event_name, Some(serde_json::json!("SessionStart")));
+        assert_eq!(agent_id, Some(serde_json::json!("general-purpose")));
+        let encoded = conversation
+            .strip_prefix("grok:")
+            .expect("Grok reports use their reserved locator prefix");
+        let locator: serde_json::Value =
+            serde_json::from_str(encoded).expect("the locator is JSON");
+        assert_eq!(locator["session_id"], "grok-session-1");
+        assert_eq!(locator["session_file"], "/tmp/grok-session-1/updates.jsonl");
+        assert!(
+            locator["selected_at"].is_object(),
+            "SessionStart carries its durable ordering key"
+        );
+    }
+
+    /// A duplicate spelling is corroborating evidence, never a fallback.
+    /// Wrong types, disagreement, and malformed selection metadata must be
+    /// refused before the supervisor can perform vendor file or process I/O.
+    #[farhelm_testtrace::test]
+    fn grok_rejects_conflicting_or_malformed_callback_fields() {
+        let cases = [
+            (
+                r#"{"sessionId":"a","session_id":"b","hookEventName":"SessionStart","timestamp":"2026-09-22T12:00:00Z","source":"new"}"#,
+                "conflicting-field-spellings",
+            ),
+            (
+                r#"{"sessionId":"a","hookEventName":"SessionStart","hook_event_name":"Stop","timestamp":"2026-09-22T12:00:00Z","source":"new"}"#,
+                "conflicting-field-spellings",
+            ),
+            (
+                r#"{"sessionId":"a","hookEventName":"SessionStart","transcriptPath":7,"timestamp":"2026-09-22T12:00:00Z","source":"new"}"#,
+                "aliased-field-not-a-string",
+            ),
+            (
+                r#"{"sessionId":"a","hookEventName":"SessionStart","timestamp":7,"source":"new"}"#,
+                "timestamp-not-a-string",
+            ),
+            (
+                r#"{"sessionId":"a","hookEventName":"SessionStart","timestamp":"not-a-time","source":"new"}"#,
+                "invalid-grok-evidence",
+            ),
+            (
+                r#"{"sessionId":"a","hookEventName":"SessionStart","timestamp":"2026-09-22T12:00:00Z","source":"resume"}"#,
+                "unsupported-session-source",
+            ),
+            (
+                r#"{"sessionId":"a","hookEventName":"Stop","subagentType":7}"#,
+                "subagent-type-not-a-string",
+            ),
+        ];
+        for (payload, expected) in cases {
+            assert_eq!(
+                parse_payload(payload.as_bytes(), ReportVendor::Grok)
+                    .expect_err("the malformed Grok callback must be refused"),
+                expected,
+                "payload: {payload}"
+            );
+        }
+    }
+
+    /// Selection and enrichment carry different evidence: SessionStart must
+    /// establish the ordering fence, while later lifecycle callbacks may be
+    /// path-only and leave the stored timestamp to the supervisor.
+    #[farhelm_testtrace::test]
+    fn grok_requires_ordering_only_for_session_start() {
+        assert_eq!(
+            parse_payload(
+                br#"{"sessionId":"a","hookEventName":"SessionStart","source":"new"}"#,
+                ReportVendor::Grok,
+            )
+            .expect_err("SessionStart without a timestamp cannot select"),
+            "missing-timestamp"
+        );
+
+        let ControlMsg::ReportConversation {
+            source,
+            hook_event_name,
+            conversation,
+            ..
+        } = parse_payload(
+            br#"{"sessionId":"a","hookEventName":"user_prompt_submit","transcriptPath":"/tmp/a/updates.jsonl"}"#,
+            ReportVendor::Grok,
+        )
+        .expect("enrichment needs neither source nor timestamp")
+        else {
+            panic!("expected a conversation report");
+        };
+        assert_eq!(source, "");
+        assert_eq!(hook_event_name, Some(serde_json::json!("UserPromptSubmit")));
+        let locator: serde_json::Value = serde_json::from_str(
+            conversation
+                .strip_prefix("grok:")
+                .expect("Grok reports use their locator prefix"),
+        )
+        .expect("the locator is JSON");
+        assert_eq!(locator["selected_at"], serde_json::Value::Null);
+
+        let ControlMsg::ReportConversation { conversation, .. } = parse_payload(
+            br#"{"sessionId":"a","hookEventName":"stop","timestamp":"2026-09-22T12:00:00.123456789+00:00","transcriptPath":"/tmp/a/updates.jsonl"}"#,
+            ReportVendor::Grok,
+        )
+        .expect("enrichment timestamps are validated but not persisted")
+        else {
+            panic!("expected a conversation report");
+        };
+        let locator: serde_json::Value = serde_json::from_str(
+            conversation
+                .strip_prefix("grok:")
+                .expect("Grok reports use their locator prefix"),
+        )
+        .expect("the locator is JSON");
+        assert_eq!(locator["selected_at"], serde_json::Value::Null);
+        assert_eq!(
+            parse_payload(
+                br#"{"sessionId":"a","hookEventName":"stop","timestamp":"not-a-time"}"#,
+                ReportVendor::Grok,
+            )
+            .expect_err("a malformed repeated timestamp is still refused"),
+            "invalid-grok-evidence"
         );
     }
 

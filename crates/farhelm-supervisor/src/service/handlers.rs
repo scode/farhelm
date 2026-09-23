@@ -7311,6 +7311,7 @@ mod tests {
             (72, ReportVendor::Goose),
             (73, ReportVendor::Pi),
             (74, ReportVendor::Omp),
+            (75, ReportVendor::Grok),
         ] {
             let reply = send_report_with_vendor(&sup, &auth, req_id, "conv-foreign", vendor).await;
             let ControlMsg::Error {

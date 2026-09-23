@@ -530,11 +530,11 @@ enum SupervisorCmd {
     },
 }
 
-/// The `--vendor` flag's spelling: exactly the wire enum's five adapters,
+/// The `--vendor` flag's spelling: exactly the wire enum's adapters,
 /// so the CLI-to-wire mapping is total and cannot drift one variant at a
-/// time. Injection installs only four of these (`internal goose-hook`
-/// supplies Goose internally); the fifth exists so the flag mirrors the
-/// closed wire enum rather than maintaining a second, narrower one.
+/// time. Some adapters are installed automatically, Grok is configured by
+/// the user, and `internal goose-hook` supplies Goose internally; the flag
+/// still mirrors the complete closed wire enum.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum HookVendor {
     Claude,
@@ -542,6 +542,7 @@ enum HookVendor {
     Goose,
     Pi,
     Omp,
+    Grok,
 }
 
 impl HookVendor {
@@ -552,6 +553,7 @@ impl HookVendor {
             HookVendor::Goose => farhelm_proto::ReportVendor::Goose,
             HookVendor::Pi => farhelm_proto::ReportVendor::Pi,
             HookVendor::Omp => farhelm_proto::ReportVendor::Omp,
+            HookVendor::Grok => farhelm_proto::ReportVendor::Grok,
         }
     }
 }
@@ -570,16 +572,17 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
-    /// The agent's `SessionStart` hook: read the vendor's JSON payload
-    /// from stdin and report the conversation id it names to the
-    /// supervisor that launched this session.
+    /// An agent hook adapter: read the vendor's JSON payload from stdin and
+    /// report the conversation identity it names to the supervisor that
+    /// launched this session.
     ///
-    /// Farhelm injects `<farhelm_exe> internal hook` into the agent's own
-    /// launch, so this runs as a child of the agent, inside the user's
-    /// terminal, with the session credential in its environment.
-    /// Everything it needs to report arrives on stdin or in that
-    /// environment. See `hook.rs` for the silence and budget contract this
-    /// arm exists to honour.
+    /// Farhelm injects `<farhelm_exe> internal hook` for vendors with a
+    /// per-launch hook surface. Grok instead uses manually configured
+    /// `SessionStart`, `UserPromptSubmit`, and `Stop` callbacks. Either way it
+    /// runs below the agent, inside the user's terminal, with the session
+    /// credential in its environment. Everything it needs to report arrives
+    /// on stdin or in that environment. See `hook.rs` for the silence and
+    /// budget contract this arm exists to honour.
     Hook {
         /// Print [`hook::POINTER_LINE`] on stdout after reporting, so the
         /// agent learns `farhelm agent instructions` exists.
