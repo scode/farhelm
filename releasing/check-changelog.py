@@ -8,11 +8,11 @@ writes to the repository; every mode reports and exits non-zero on a problem.
 
 ## The three modes
 
-`format` lints `CHANGELOG.md` and the fragments under `releasing/changelog.d/` against the layout the process
-stipulates: one `## vX.Y.Z - YYYY-MM-DD` heading per stable release, newest first; category headings from the fixed
-emoji table in its fixed order; prose subsections only under Highlights; one-item bullets ending in a PR reference
-everywhere else. The format is deliberately narrower than what dist accepts, so a violation here is a curation slip,
-not a dist failure. It runs in the release gate on every tag.
+`format` lints `CHANGELOG.md` and the fragments under `releasing/changelog.d/` against the layouts the process has used:
+one `## vX.Y.Z - YYYY-MM-DD` heading per stable release, newest first; recognized category headings in their prescribed
+order; and entries with the required PR references. Current sections use one-paragraph bullets in every category, while
+older curated sections retain their historical Highlights subsections. The checker is deliberately narrower than what
+dist accepts, so a violation here is a curation slip, not a dist failure. It runs in the release gate on every tag.
 
 `fragments` answers "did every user-facing change since the last stable release leave a changelog fragment". It walks
 the commits since the merge base with the last stable tag, picks out the Conventional Commit types the process says
@@ -59,7 +59,6 @@ FRAGMENT_README = "README.md"
 # The category table IS the format: names, emoji, and order are all fixed here and nowhere else. `releasing/AGENTS.md`
 # repeats it in prose for humans; if the two ever disagree, this table is what the gate enforces.
 CATEGORIES: tuple[tuple[str, str], ...] = (
-    ("Highlights", "✨"),  # sparkles
     ("Breaking", "\U0001f4a5"),  # collision
     ("Added", "\U0001f680"),  # rocket
     ("Changed", "\U0001f504"),  # counterclockwise arrows
@@ -68,6 +67,17 @@ CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 CATEGORY_ORDER = {name: index for index, (name, _emoji) in enumerate(CATEGORIES)}
 CATEGORY_HEADING = {f"### {emoji} {name}": name for name, emoji in CATEGORIES}
+
+# Historical sections used this prose category before the current bullet-only format. It remains accepted so changing
+# the release process never forces a rewrite of approved or in-flight release notes. New sections must follow
+# `CATEGORIES`; this compatibility table is not a recommendation for new curation.
+LEGACY_CATEGORIES: tuple[tuple[str, str], ...] = (("Highlights", "✨"),)
+LEGACY_CATEGORY_ORDER = {name: index for index, (name, _emoji) in enumerate(LEGACY_CATEGORIES)}
+LEGACY_CATEGORY_HEADING = {f"### {emoji} {name}": name for name, emoji in LEGACY_CATEGORIES}
+CATEGORY_HEADINGS = {**CATEGORY_HEADING, **LEGACY_CATEGORY_HEADING}
+# These sections were already curated under the retired Highlights layout. A new release version must not silently
+# revive it; add a version here only when an in-flight section was approved before the format changed.
+LEGACY_HIGHLIGHTS_VERSIONS = frozenset({"0.12.0", "0.13.0"})
 
 # Fragment kinds map onto the bullet categories; `none` records a deliberate "considered, nothing user-facing" so the
 # coverage sweep can tell an omission from a decision.
@@ -176,12 +186,12 @@ def check_changelog_format(text: str) -> list[str]:
         if previous is not None and current >= previous:
             problems.append(f"{where}: v{release.version} is not older than the release above it; newest goes first")
         previous = current
-        problems.extend(f"{where} (v{release.version}): {item}" for item in _check_release_body(release.body))
+        problems.extend(f"{where} (v{release.version}): {item}" for item in _check_release_body(release.version, release.body))
     return problems
 
 
-def _check_release_body(lines: list[str]) -> list[str]:
-    """Validate one release's categories: fixed headings in fixed order, prose only under Highlights, bullets elsewhere."""
+def _check_release_body(version: str, lines: list[str]) -> list[str]:
+    """Validate the fixed category order and require a referenced bullet for every entry."""
     problems: list[str] = []
     categories: list[tuple[str, list[str]]] = []
     stray: list[str] = []
@@ -190,9 +200,12 @@ def _check_release_body(lines: list[str]) -> list[str]:
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
         if not in_fence and line.startswith("### "):
-            name = CATEGORY_HEADING.get(line)
+            name = CATEGORY_HEADINGS.get(line)
+            if name == "Highlights" and version not in LEGACY_HIGHLIGHTS_VERSIONS:
+                name = None
             if name is None:
-                allowed = ", ".join(f"`{heading}`" for heading in CATEGORY_HEADING)
+                headings = CATEGORY_HEADINGS if version in LEGACY_HIGHLIGHTS_VERSIONS else CATEGORY_HEADING
+                allowed = ", ".join(f"`{heading}`" for heading in headings)
                 problems.append(f"unknown category heading `{line}`; the headings are {allowed}")
                 categories.append(("?", []))
             else:
@@ -209,33 +222,63 @@ def _check_release_body(lines: list[str]) -> list[str]:
     for name, body in categories:
         if name == "?":
             continue
-        order = CATEGORY_ORDER[name]
+        order = LEGACY_CATEGORY_ORDER[name] if name in LEGACY_CATEGORY_ORDER else len(LEGACY_CATEGORIES) + CATEGORY_ORDER[name]
         if order <= last_order:
-            problems.append(f"category `{name}` is out of order or repeated; the order is Highlights, Breaking, Added, Changed, Fixed, Removed")
+            order_names = (
+                [name for name, _emoji in LEGACY_CATEGORIES] + [name for name, _emoji in CATEGORIES]
+                if version in LEGACY_HIGHLIGHTS_VERSIONS
+                else [name for name, _emoji in CATEGORIES]
+            )
+            problems.append(
+                f"category `{name}` is out of order or repeated; the order is {', '.join(order_names)}"
+            )
         last_order = order
         if not any(line.strip() for line in body):
             problems.append(f"category `{name}` is empty; omit a category with no entries")
             continue
-        if name == "Highlights":
-            problems.extend(_check_highlights(body))
-        else:
-            problems.extend(f"under `{name}`: {item}" for item in _check_bullets(body))
+        checker = _check_highlights if name in LEGACY_CATEGORY_ORDER else _check_bullets
+        problems.extend(f"under `{name}`: {item}" for item in checker(body))
     return problems
 
 
 def _check_highlights(lines: list[str]) -> list[str]:
-    """Highlights hold `####` subsections with prose and nothing at the top level; bullets belong in the categories."""
+    """Validate the prose subsection shape retained by historical release sections."""
     problems: list[str] = []
     seen_subsection = False
+    subsection: list[str] = []
+
+    def check_subsection() -> None:
+        """Require prose and a trailing PR reference in each historical subsection."""
+        content = [line.strip() for line in subsection if line.strip()]
+        if not content:
+            problems.append("Highlights subsections need prose")
+            return
+        if any(line.startswith(("-", "#", ">", "```")) or re.match(r"\d+\.\s", line) for line in content):
+            problems.append("Highlights subsections may contain prose paragraphs only")
+        prose = [line for line in content if not PR_REFERENCE_RE.fullmatch(line)]
+        if not prose:
+            problems.append("Highlights subsections need prose")
+        if not PR_REFERENCE_RE.search(" ".join(content)):
+            problems.append("Highlights subsections must end with a PR reference, `(#N)` or `(#N, #M)`")
+
     for line in lines:
         if line.startswith("#### "):
+            if not line[5:].strip():
+                problems.append("Highlights subsections need a title")
+            if seen_subsection:
+                check_subsection()
+            subsection = []
             seen_subsection = True
             continue
         if not seen_subsection and line.strip():
             problems.append("Highlights must start with a `#### ` subsection; loose text before it is not allowed")
             break
+        if seen_subsection:
+            subsection.append(line)
     if not seen_subsection:
         problems.append("Highlights needs at least one `#### ` subsection")
+    else:
+        check_subsection()
     return problems
 
 
@@ -256,7 +299,7 @@ def _check_bullets(lines: list[str]) -> list[str]:
         elif line.startswith("  ") and items:
             items[-1].append(line.strip())
         elif line.startswith("#"):
-            problems.append(f"heading `{line}` is not allowed here; only Highlights has subsections")
+            problems.append(f"heading `{line}` is not allowed here; categories contain only bullets")
         else:
             problems.append(f"free text `{line[:60]}` is not allowed here; every entry is a `- ` bullet")
     if not items and not problems:
@@ -557,12 +600,6 @@ Notable user-facing changes in each stable release.
 
 ## v0.2.0 - 2026-02-01
 
-### ✨ Highlights
-
-#### A feature worth a paragraph
-
-It does the thing. It does not do the other thing. (#12)
-
 ### \U0001f4a5 Breaking
 
 - The old flag is gone. (#11)
@@ -629,13 +666,39 @@ def self_test() -> int:
         "categories out of order": GOOD_CHANGELOG.replace("### \U0001f4a5 Breaking\n\n- The old flag is gone. (#11)\n\n", "")
         .replace("### \U0001f527 Fixed", "### \U0001f4a5 Breaking\n\n- Late. (#11)\n\n### \U0001f527 Fixed"),
         "a bullet without a PR reference": GOOD_CHANGELOG.replace("- A fix. (#13, #14)", "- A fix."),
-        "a subsection outside Highlights": GOOD_CHANGELOG.replace("- A fix. (#13, #14)", "#### A fix\n\nProse. (#13)"),
-        "loose text in Highlights": GOOD_CHANGELOG.replace("#### A feature worth a paragraph\n\n", "Loose.\n\n#### A feature worth a paragraph\n\n"),
+        "a subsection within a category": GOOD_CHANGELOG.replace("- A fix. (#13, #14)", "#### A fix\n\nProse. (#13)"),
         "an empty category": GOOD_CHANGELOG.replace("- Everything. (#1)\n", ""),
         "a wrong top heading": GOOD_CHANGELOG.replace("# Changelog", "# Release notes"),
     }
     for what, text in variants.items():
         expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+
+    old_highlights = GOOD_CHANGELOG.replace("## v0.2.0", "## v0.13.0").replace("## v0.1.0", "## v0.12.0").replace(
+        "### \U0001f4a5 Breaking", "### ✨ Highlights\n\n#### A feature\n\nProse. (#12)\n\n### \U0001f4a5 Breaking"
+    )
+    expect(check_changelog_format(old_highlights) == [], "the format check preserves historical Highlights sections")
+    future_highlights = old_highlights.replace("## v0.13.0", "## v0.14.0", 1)
+    expect(check_changelog_format(future_highlights) != [], "the format check rejects Highlights in new sections")
+    reference_only = old_highlights.replace("Prose. (#12)", "(#12)")
+    reference_only_problems = check_changelog_format(reference_only)
+    expect(
+        "Highlights subsections need prose" in " ".join(reference_only_problems),
+        "the format check rejects a historical subsection without prose",
+    )
+    list_item = old_highlights.replace("Prose. (#12)", "- A list item. (#12)")
+    expect(check_changelog_format(list_item) != [], "the format check rejects a list item in a historical subsection")
+    nested_heading = old_highlights.replace("Prose. (#12)", "##### A nested heading\n\nProse. (#12)")
+    expect(check_changelog_format(nested_heading) != [], "the format check rejects a nested heading in a historical subsection")
+    empty_title = old_highlights.replace("#### A feature", "#### ")
+    expect(check_changelog_format(empty_title) != [], "the format check rejects an untitled historical subsection")
+    ordered_list = old_highlights.replace("Prose. (#12)", "1. A list item. (#12)")
+    expect(check_changelog_format(ordered_list) != [], "the format check rejects an ordered list in a historical subsection")
+    blockquote = old_highlights.replace("Prose. (#12)", "> A quote. (#12)")
+    expect(check_changelog_format(blockquote) != [], "the format check rejects a blockquote in a historical subsection")
+    fenced_code = old_highlights.replace("Prose. (#12)", "```\ncode (#12)\n```")
+    expect(check_changelog_format(fenced_code) != [], "the format check rejects fenced code in a historical subsection")
+    no_highlight_reference = old_highlights.replace("Prose. (#12)", "Prose.")
+    expect(check_changelog_format(no_highlight_reference) != [], "the format check rejects a historical subsection without a PR reference")
 
     good_fragment = "---\nkind: added\npr: 12, 13\n---\n\nThe thing.\n"
     fragment = parse_fragment(Path("x.md"), good_fragment)
