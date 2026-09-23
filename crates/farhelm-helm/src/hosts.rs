@@ -126,6 +126,10 @@ pub(crate) enum HostStateView {
     Connected {
         identity: Option<String>,
         build_version: String,
+        /// Whether the peer's parseable build is older than this helm's
+        /// build. `false` also represents an unknown age when either side
+        /// does not publish a valid semantic version.
+        old_version: bool,
         refresh: RefreshView,
     },
     /// Refused at the hello: both versions are named so the user can see
@@ -252,6 +256,7 @@ impl From<&HostState> for HostStateView {
                 last_refresh,
             } => HostStateView::Connected {
                 identity: identity.clone(),
+                old_version: peer_is_older(build_version),
                 build_version: build_version.clone(),
                 refresh: last_refresh.into(),
             },
@@ -284,6 +289,21 @@ impl From<&HostState> for HostStateView {
             },
         }
     }
+}
+
+/// Return whether a connected peer is older than this helm by SemVer.
+///
+/// Build metadata does not affect the ordering, while prerelease identifiers
+/// do. Any unparsable value leaves the age unknown and therefore returns
+/// `false`; the connected phase remains usable in that case.
+fn peer_is_older(peer_build: &str) -> bool {
+    let Ok(peer) = semver::Version::parse(peer_build) else {
+        return false;
+    };
+    let Ok(ours) = semver::Version::parse(farhelm_proto::BUILD_VERSION) else {
+        return false;
+    };
+    peer < ours
 }
 
 /// Join the manager's live snapshots with helm.db's registry rows into the
@@ -785,6 +805,7 @@ mod tests {
             HostStateView::Connected {
                 identity: None,
                 build_version: "0.0.0".to_string(),
+                old_version: true,
                 refresh: RefreshView::Pending,
             },
             HostStateView::VersionSkew {
@@ -816,6 +837,18 @@ mod tests {
                 "the phase word and the wire tag disagree for {state:?}"
             );
         }
+    }
+
+    /// Build age is advisory and follows SemVer precedence rather than
+    /// lexical ordering: prereleases sort before the final release, build
+    /// metadata does not change precedence, and malformed values stay
+    /// unknown instead of being classified as old.
+    #[farhelm_testtrace::test]
+    fn connected_build_age_uses_semver_and_tolerates_unknown_values() {
+        assert!(super::peer_is_older("0.14.0-rc.1"));
+        assert!(!super::peer_is_older("0.14.0-rc.2+different-build"));
+        assert!(!super::peer_is_older("0.14.0"));
+        assert!(!super::peer_is_older("peer-build"));
     }
 
     /// Issue one request against the harness's real router and return the
@@ -2131,6 +2164,58 @@ mod tests {
                 .is_some_and(|text| !text.is_empty()),
             "the state must carry the sentence a user acts on, not just the diagnosis: {state}"
         );
+    }
+
+    /// A compatible supervisor that predates this helm's build remains in
+    /// the connected phase while the REST state carries an advisory age
+    /// flag. The phase and its operational meaning must not become the
+    /// version-skew refusal used for incompatible protocols. The scripted
+    /// hello changes only on reconnect, so both waits name a build: merely
+    /// waiting for `connected` could read the previous connection.
+    #[farhelm_testtrace::test]
+    async fn a_connected_older_build_is_flagged_without_version_skew() {
+        let harness = lone_local_helm().await;
+        let (_, added, _) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": "user@older" })),
+        )
+        .await;
+        let host = added["id"].as_i64().unwrap();
+        harness
+            .await_state(host, |state| {
+                matches!(
+                    state,
+                    crate::manager::HostState::Connected { build_version, .. }
+                        if build_version == "peer-build"
+                )
+            })
+            .await;
+        harness.fleet.edit(host, |script| {
+            script.build = "0.14.0-rc.1".to_string();
+        });
+        harness.fleet.kill_connection(host);
+        harness
+            .await_state(host, |state| {
+                matches!(
+                    state,
+                    crate::manager::HostState::Connected { build_version, .. }
+                        if build_version == "0.14.0-rc.1"
+                )
+            })
+            .await;
+
+        let (_, hosts, _) = call(&harness, "GET", "/api/hosts", None).await;
+        let state = &hosts["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == host)
+            .expect("the older host is listed")["state"];
+        assert_eq!(state["phase"], "connected");
+        assert_eq!(state["old_version"], true);
+        assert_eq!(state["build_version"], "0.14.0-rc.1");
     }
 
     /// Editing a RETIRED host must bring it back, not wedge it.

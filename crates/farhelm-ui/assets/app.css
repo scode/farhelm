@@ -2941,6 +2941,12 @@ samp {
   color: var(--ok);
 }
 
+/* A compatible older build remains usable, but its age is worth surfacing
+   without borrowing the red refusal styling used by `needs-attention`. */
+.host-status.old-version {
+  color: var(--warn);
+}
+
 .host-status.connecting {
   font-style: italic;
 }

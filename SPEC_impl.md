@@ -347,14 +347,16 @@ existing bounded classification and pending-focus settlement.
 Hosts use one permanently mounted list beside the session list, not a compact summary plus a second management panel.
 Its one-row header gives the known host count, an unpersisted global details checkbox, and the secondary add control.
 Every row always shows its name, phase dot, and muted actions toggle in the same narrow trailing gutter as the
-session-row actions toggle; connected spends no visible word, while other phases use humanized prose and retain the
-stable wire token in their data attribute. Each row's effective disclosure is the global checkbox OR that row's
-automatic update disclosure: the checkbox is the user's preference and no update writes it, while an update expands only
-its own row at click acceptance, follows the accepted or observed running run under it, and collapses that automatic
-half only on authoritative success for the exact tracked run. Provisioning commands live in the row menu, but setup's
-confirmation and active or retained progress stay under the row because that lifecycle owns more context than a floating
-menu can safely hold. Starting setup opens details before planning, while a running or failed retained run leaves one
-short trace when details are closed.
+session-row actions toggle; connected spends no visible word unless the helm marks a compatible older build, in which
+case the amber `old version` advisory is shown. Other phases use humanized prose and retain the stable wire token in
+their data attribute. A protocol-incompatible supervisor remains the red `needs update` case; an unparseable build
+leaves a connected host's age unknown and keeps the ordinary connected label. Each row's effective disclosure is the
+global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and no update writes
+it, while an update expands only its own row at click acceptance, follows the accepted or observed running run under it,
+and collapses that automatic half only on authoritative success for the exact tracked run. Provisioning commands live in
+the row menu, but setup's confirmation and active or retained progress stay under the row because that lifecycle owns
+more context than a floating menu can safely hold. Starting setup opens details before planning, while a running or
+failed retained run leaves one short trace when details are closed.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
@@ -2513,11 +2515,15 @@ constraint (see the GUI section's motivation), not an afterthought:
 ## Version and skew
 
 One version number across the workspace; the protocol hello carries protocol and build versions; incompatibility refuses
-with a clear error at the edge (helm↔supervisor connect, client↔helm load) per SPEC.md. Protocol version bumps with any
-incompatible change — which includes a field whose omission changes what the receiver DOES, not only changes to frames
-and message sets. A serde-additive field can still be semantically load-bearing: the non-displacing attach is the worked
-example (a peer that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode
-tolerance is why such a bump is required rather than why it is unnecessary.
+with a clear error at the edge (helm↔supervisor connect, client↔helm load) per SPEC.md. Once a hello is compatible, the
+helm compares the peer and its own build strings as semantic versions for an advisory age signal: prerelease ordering
+applies, build metadata does not change precedence, and an unparsable value leaves age unknown and false. That signal
+adds `old_version` to the connected REST state, without changing the `connected` phase or operational routing; only the
+incompatible protocol case is displayed as `needs update`. Protocol version bumps with any incompatible change — which
+includes a field whose omission changes what the receiver DOES, not only changes to frames and message sets. A
+serde-additive field can still be semantically load-bearing: the non-displacing attach is the worked example (a peer
+that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is why
+such a bump is required rather than why it is unnecessary.
 
 The client↔helm edge has no hello to refuse at, so the helm stamps its build on every reply and the UI compares it
 against the one compiled into its bundle. A mismatch — including a helm that reports no build at all — surfaces a reload

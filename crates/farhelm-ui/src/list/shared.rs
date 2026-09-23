@@ -841,6 +841,7 @@ pub(super) mod tests {
             state: crate::HostPhase::Connected {
                 identity: Some(format!("install-{id}")),
                 build_version: "test".to_string(),
+                old_version: false,
                 refresh: crate::RefreshHealth::Pending,
             },
             incarnation: 1,
