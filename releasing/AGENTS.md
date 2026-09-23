@@ -44,10 +44,10 @@ The layout is stipulated, not suggested. The checker refuses deviations, so read
 - Highlights is prose: one `####` subsection per item, each a title and one or more paragraphs, no bullets at the top
   level. Every other category is bullets: one `-` item per entry, one paragraph, ending in its PR reference as `(#N)` or
   `(#N, #M)`.
-- One paragraph per physical line, however long. `CHANGELOG.md` and the fragments are excluded from dprint in
-  `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every newline as a
-  line break, and HackMD does the same, so a section hard-wrapped at 120 columns shows up ragged on the release page and
-  in the curation note. The checker tolerates indented continuation lines as part of an item, but do not write them.
+- One paragraph per physical line, however long. `CHANGELOG.md`, the fragments, and local curation drafts are excluded
+  from dprint in `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every
+  newline as a line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker
+  tolerates indented continuation lines as part of an item, but do not write them.
 - An item that gets a highlight also gets its one-line bullet in its category. The category lists are complete on their
   own; Highlights is a reading aid, and a release with nothing worth a paragraph has no Highlights heading.
 - A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
@@ -130,12 +130,22 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    fragment author's judgment is not the user's decision), and `STALE` ones are raised as described under the checker.
    This is the sweep the fragment rule exists to make cheap.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
-   agent agree on in conversation, following that guidance. Decide which items earn a highlight. Publish the draft as an
-   owner-only HackMD note (the maintainer's setup has the `skillette-hackmd` mechanics for this; any way of publishing
-   and re-reading a note works) and iterate there and inline in the session until the user is satisfied; the note is the
-   review surface, not a record, and is deleted once the section is committed. HackMD's API returns a note's text but
-   not its comments or suggestions, so feedback left that way has to be pasted into the session; edits made to the
-   note's text come back with an export.
+   agent agree on in conversation, following that guidance. Decide which items earn a highlight. Write the whole
+   proposed `## vX.Y.Z - YYYY-MM-DD` section to `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path.
+   This ignored local Markdown file is the review surface. The maintainer edits it in a text editor and tells the agent
+   when to read it back. Read the file again after each editing round; do not reconstruct its contents from conversation
+   or an earlier read. Continue until the maintainer approves the text. Keep the file until the changelog section is
+   committed, then delete it.
+
+   Treat the file's text and any wording the maintainer supplies as authoritative. Reproduce supplied wording and file
+   edits exactly: do not summarize, paraphrase, polish, reorder, or silently correct them. If the agent proposes wording
+   and the maintainer gives edits in conversation, apply precisely those edits to the proposal, without interpreting
+   them as permission for other changes. An explicit request to write or rewrite text grants that latitude only for the
+   requested text. Ask when an instruction is ambiguous. Format or checker problems must be brought back to the
+   maintainer rather than silently changing reviewed wording. When transferring the approved section into
+   `CHANGELOG.md`, copy the section verbatim, including its headings, whitespace, and line breaks; add only the
+   separation needed between it and the surrounding changelog sections. Verify the copied section against the draft. Do
+   not run a formatter over the draft or the approved section.
 3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
    internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Two ways a
    rule gets into `releasing/EDITORIAL_GUIDANCE.md`, and only two: the maintainer states it as a rule in so many words
@@ -144,7 +154,7 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    agent's own judgment; the file is the maintainer's opinions, and a guessed one would steer every future draft. Record
    each rule in the same changelog PR, with the example that prompted it. Feedback that only fixes the one entry is
    applied and not recorded.
-4. Make the changelog PR: the new `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
+4. Make the changelog PR: the approved `## vX.Y.Z - <today>` section at the top of `CHANGELOG.md`, every fragment under
    `releasing/changelog.d/` deleted (including `kind: none` ones; they were for this sweep), any guidance gathered in
    step 3, `dprint fmt`, and `python3 releasing/check-changelog.py format` passing. Merge it before going on.
 5. Start a `release-X.Y.Z` branch at the changelog PR's merge commit EXACTLY, not at whatever main has become since:
