@@ -528,6 +528,10 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Goose => Some(&GooseIntegration),
         AgentKind::Pi => Some(&PiIntegration),
         AgentKind::Omp => Some(&OmpIntegration),
+        // Grok's hook/report integration is deliberately deferred to the
+        // follow-up capture unit; retaining the kind still keeps snapshots
+        // honest and prevents a silent Generic downgrade.
+        AgentKind::Grok => None,
         AgentKind::Generic => None,
     }
 }
@@ -2285,8 +2289,9 @@ pub struct IntegrationSnapshot {
     pub kind: AgentKind,
     /// The resume invocation as an argv VECTOR, so a path with spaces
     /// survives without quoting. `None` means this session has no resume
-    /// invocation at all, which only a [`AgentKind::Generic`] session can
-    /// be: an integrated kind always has at least its derived default.
+    /// invocation at all. An active integration always has at least its
+    /// derived default; a newly introduced kind may retain an explicit
+    /// template before its capture integration is enabled.
     pub resume_template: Option<Vec<String>>,
 }
 
@@ -2339,6 +2344,7 @@ fn kind_name(kind: AgentKind) -> &'static str {
         AgentKind::Goose => "goose",
         AgentKind::Pi => "pi",
         AgentKind::Omp => "omp",
+        AgentKind::Grok => "grok",
         AgentKind::Generic => "generic",
     }
 }
@@ -2558,7 +2564,9 @@ impl IntegrationSnapshot {
 pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex => true,
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Omp => false,
+        AgentKind::Claude | AgentKind::Goose | AgentKind::Pi | AgentKind::Omp | AgentKind::Grok => {
+            false
+        }
         AgentKind::Generic => false,
     }
 }
@@ -2581,6 +2589,7 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
     match kind {
         AgentKind::Pi => parse_locator(LocatorVendor::Pi, value).is_ok(),
         AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
+        AgentKind::Grok => false,
         AgentKind::Codex => codex::CodexLocator::parse(value).is_ok(),
         AgentKind::Claude | AgentKind::Goose => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)

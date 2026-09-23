@@ -16,6 +16,9 @@ Codex, Goose, Pi, and OMP do not have a scanning fallback. See the harness notes
 [Cursor has basic launch support only](harnesses/cursor.md): it uses no hook or status wrapper and has no conversation
 tracking or automatic Resume.
 
+[Grok's launch layer](harnesses/grok.md) likewise does not inject a hook yet. It always uses `--no-leader` and preserves
+the exact native resume argv, but no Resume offer appears until a later capture layer has verified the conversation.
+
 ## Why hooks at all
 
 Farhelm's job on a restart is to bring back the conversation you were in, not just the agent. Until now it worked that

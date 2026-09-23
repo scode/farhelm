@@ -34,6 +34,7 @@ derivative work.
 | Goose    | goose silhouette          | official, unaltered    | `ui/desktop/src/components/icons/Goose.tsx` in `aaif-goose/goose` (Apache-2.0)  |
 | Pi       | pixel-grid "P" with dot   | official, unaltered    | `https://pi.dev/favicon.svg`, the press kit's badge mark                        |
 | OMP      | block-style π             | official, tile dropped | `https://omp.sh/favicon.svg` path (MIT repo `can1357/oh-my-pi`)                 |
+| Grok     | block "G"                 | Farhelm original       | drawn here; xAI publishes no self-serve brand kit for this use                  |
 | OpenCode | even-odd ring             | official, unaltered    | `packages/ui/src/assets/favicon/favicon-v3.svg` in `anomalyco/opencode` (MIT)   |
 | Terminal | window with prompt        | Farhelm original       | drawn here                                                                      |
 
@@ -116,6 +117,12 @@ is intended. Farhelm uses the π path and drops the tile. The only trademark lan
 services rather than the omp mark; referential use of an MIT-licensed favicon was judged acceptable.
 
 An older `assets/icon.svg` in the repository is a different, stale design and is not the mark.
+
+### Grok — Farhelm original
+
+xAI publishes product artwork but no self-serve brand kit or trademark terms that authorize a third-party sidebar to
+reuse it. The Grok row therefore uses a plain block G that Farhelm draws itself. It names the harness without tracing or
+approximating xAI's product mark, and its single filled path stays legible at the sidebar's 12px size.
 
 ### OpenCode — official favicon cut
 

@@ -394,6 +394,7 @@ fn known_harness(program: &str) -> HarnessGlyph {
         "goose" => HarnessGlyph::Goose,
         "pi" => HarnessGlyph::Pi,
         "omp" => HarnessGlyph::Omp,
+        "grok" => HarnessGlyph::Grok,
         "opencode" => HarnessGlyph::OpenCode,
         _ => HarnessGlyph::Terminal,
     }
@@ -425,6 +426,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
             LaunchHarness::Goose => HarnessGlyph::Goose,
             LaunchHarness::Pi => HarnessGlyph::Pi,
             LaunchHarness::Omp => HarnessGlyph::Omp,
+            LaunchHarness::Grok => HarnessGlyph::Grok,
             LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         };
         // Pi is the compatibility rewrite: an omitted permission from an
@@ -450,6 +452,7 @@ fn agent_badge(session: &Session) -> AgentBadge {
             HarnessGlyph::Goose => "Goose".to_string(),
             HarnessGlyph::Pi => "Pi".to_string(),
             HarnessGlyph::Omp => "OMP".to_string(),
+            HarnessGlyph::Grok => "Grok".to_string(),
             HarnessGlyph::OpenCode => "OpenCode".to_string(),
             HarnessGlyph::Terminal => unreachable!("structured selections always name a harness"),
         };

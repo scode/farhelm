@@ -525,6 +525,7 @@ fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str {
         farhelm_proto::AgentKind::Goose => "goose",
         farhelm_proto::AgentKind::Pi => "pi",
         farhelm_proto::AgentKind::Omp => "omp",
+        farhelm_proto::AgentKind::Grok => "grok",
         farhelm_proto::AgentKind::Generic => "generic",
     }
 }
@@ -538,6 +539,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "goose" => Ok(farhelm_proto::AgentKind::Goose),
         "pi" => Ok(farhelm_proto::AgentKind::Pi),
         "omp" => Ok(farhelm_proto::AgentKind::Omp),
+        "grok" => Ok(farhelm_proto::AgentKind::Grok),
         "generic" => Ok(farhelm_proto::AgentKind::Generic),
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     }
@@ -13534,26 +13536,31 @@ mod tests {
         }
     }
 
-    /// The OMP kind round-trips through the profile column vocabulary, and an
-    /// unknown spelling is still refused rather than downgraded to a default.
-    /// Pinned beside the round-trip test above because the strict decode is
-    /// the data-integrity half of the protocol bump that introduced the kind:
-    /// a helm that silently coerced `omp` (or a typo next to it) would change
+    /// New closed agent kinds round-trip through the profile column vocabulary,
+    /// while unknown spellings remain errors rather than implicit downgrades.
+    ///
+    /// The strict decode is the storage half of each protocol bump that adds a
+    /// kind. Silently coercing `omp`, `grok`, or a nearby typo would change
     /// which integration a stored profile selects without any write happening.
     #[farhelm_testtrace::test]
-    fn omp_agent_kind_round_trips_and_unknown_spellings_stay_refused() {
-        assert_eq!(agent_kind_column(farhelm_proto::AgentKind::Omp), "omp");
-        assert_eq!(
-            agent_kind_from_column("omp").expect("the omp spelling decodes"),
-            farhelm_proto::AgentKind::Omp
-        );
+    fn new_agent_kinds_round_trip_and_unknown_spellings_stay_refused() {
+        for (kind, spelling) in [
+            (farhelm_proto::AgentKind::Omp, "omp"),
+            (farhelm_proto::AgentKind::Grok, "grok"),
+        ] {
+            assert_eq!(agent_kind_column(kind), spelling);
+            assert_eq!(
+                agent_kind_from_column(spelling).expect("the exact kind spelling decodes"),
+                kind
+            );
+        }
         // Pi's spelling is unchanged by the OMP addition: the two kinds are
         // distinct at this boundary, never aliases.
         assert_eq!(
             agent_kind_from_column("pi").expect("pi still decodes"),
             farhelm_proto::AgentKind::Pi
         );
-        for unknown in ["ompish", "OMP", "", "generic "] {
+        for unknown in ["ompish", "grokish", "GROK", "", "generic "] {
             assert!(
                 agent_kind_from_column(unknown).is_err(),
                 "{unknown:?} must stay outside the strict vocabulary"

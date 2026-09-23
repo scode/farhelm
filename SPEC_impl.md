@@ -1667,19 +1667,26 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   lifecycle contract. Cursor likewise maps its structured harness to the existing Generic kind, with no resume template
   or capture machinery. Its two release-owned profiles invoke `agent` and `agent --force`; models use `--model`, with no
   separate effort flag. The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking
-  and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. OMP is also a structured
-  harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider
-  flags for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider
-  intent explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification is not a
-  promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix`
-  interpretations on the id it receives, as documented in `docs/harnesses/omp.md`). `--thinking <effort>` carries the
-  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
-  YOLO/Approve choices while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO
-  default is rewritten on. SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen
-  so it cannot read as Pi's "P" at sidebar size. Resolving `SourceProfile` snapshots while draining remote sessions
-  discovers catalog state only: those observations never select the helm-wide remembered default. A successful
-  profile-backed create through the user's REST surface alone writes that default; agent-relay creates and clones do
-  not, so an agent's work cannot change the profile the user's next dialog suggests.
+  and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. Protocol 29 adds Grok as
+  both a structured harness and a durable agent kind. Its compiler emits `grok --no-leader`, maps YOLO to
+  `--always-approve`, refuses model and effort choices, and stores
+  `grok --no-leader [--always-approve] --resume {conversation}` as argv elements. Its dedicated kind reuses the shared
+  ownership-proven capture and exact Resume lifecycle; it uses generic activity status and requires the user's manual
+  hook configuration for conversation capture.
+
+  OMP is also a structured harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's,
+  omits model and provider flags for the harness default, and compiles an explicit model as
+  `omp --provider openrouter --model <id>` (provider intent explicit; a literal custom id stays one argv element and is
+  stored verbatim — provider qualification is not a promise of literal upstream routing for unknown ids; OMP's own
+  resolution still runs alias, fuzzy, and `:suffix` interpretations on the id it receives, as documented in
+  `docs/harnesses/omp.md`). `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not
+  offered), and `--approval-mode yolo|always-ask` carries the YOLO/Approve choices while `default` adds no flag and
+  stays omitted in the stored selection — unlike Pi, no YOLO default is rewritten on. SmartApprove and Chat are refused
+  for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size. Resolving
+  `SourceProfile` snapshots while draining remote sessions discovers catalog state only: those observations never select
+  the helm-wide remembered default. A successful profile-backed create through the user's REST surface alone writes that
+  default; agent-relay creates and clones do not, so an agent's work cannot change the profile the user's next dialog
+  suggests.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

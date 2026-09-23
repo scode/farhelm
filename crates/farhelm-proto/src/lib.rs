@@ -248,7 +248,10 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// adds optional subagent identity evidence.
 /// Exact-version negotiation prevents older peers from bypassing that contract.
 ///
-/// `protocol_version_is_pinned_at_28` (renamed at every bump since `_at_4`)
+/// Version 29 adds Grok to the structured launch and durable agent-kind
+/// vocabularies. Older peers cannot retain its tracked launch policy.
+///
+/// `protocol_version_is_pinned_at_29` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -261,7 +264,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13,
 /// [`ControlMsg::SessionList`] for version 14, and
 /// [`ControlMsg::ReportConversation`]'s required fields for version 28.
-pub const PROTOCOL_VERSION: u32 = 28;
+pub const PROTOCOL_VERSION: u32 = 29;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -1296,6 +1299,7 @@ pub fn validate_profile_fields(
             AgentKind::Goose => "goose",
             AgentKind::Pi => "pi",
             AgentKind::Omp => "omp",
+            AgentKind::Grok => "grok",
             AgentKind::Generic => unreachable!(),
         };
         return Err(format!(
@@ -1544,6 +1548,9 @@ pub enum AgentKind {
     /// accepted for the other, and neither may pass as a plain conversation
     /// id for the id-reporting kinds.
     Omp,
+    /// Grok's tracked native launch kind. Capture policy is added separately,
+    /// but this identity must survive launch snapshots now.
+    Grok,
     /// Explicitly non-integrated: no status heuristics beyond the
     /// generic ones, no conversation-identity capture, regardless of
     /// what basename recognition would have concluded on its own.
@@ -4518,7 +4525,8 @@ mod tests {
     /// version 25 adds the agent restart tag and its discovery capability;
     /// version 26 removes session archive state and operations. Version 27
     /// adds the Cursor harness variant; version 28 requires the conversation
-    /// report's vendor discriminator. These changes need a handshake
+    /// report's vendor discriminator; version 29 adds the Grok harness/kind
+    /// pair. These changes need a handshake
     /// refusal rather than silent tolerance. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
@@ -4527,24 +4535,24 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test and the literal-27 skew check below are
+    /// an edit per bump; this test and the literal-28 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_28() {
-        assert_eq!(PROTOCOL_VERSION, 28);
+    fn protocol_version_is_pinned_at_29() {
+        assert_eq!(PROTOCOL_VERSION, 29);
     }
 
-    /// Pins the skew direction the ownership report bump exists to create, in
+    /// Pins the skew direction the Grok harness/kind bump exists to create, in
     /// BOTH directions, against the LITERAL previous version rather than the
     /// constant-relative ± 1 the `io.rs` skew test uses:
     ///
-    /// - A peer still speaking v27 is refused by this build's handshake with
+    /// - A peer still speaking v28 is refused by this build's handshake with
     ///   the explicit skew error and the connection torn down — never
-    ///   tolerated into sending reports without the required ownership evidence.
-    /// - A v28 hello is refused by a hand-rolled v27 receiver, which sees a
+    ///   tolerated into receiving a harness variant it cannot decode.
+    /// - A v29 hello is refused by a hand-rolled v28 receiver, which sees a
     ///   version it does not know and hangs up. This test models the old
     ///   receiver with its refusal rule: accept
-    ///   exactly 27, refuse anything else. It is what keeps this test
+    ///   exactly 28, refuse anything else. It is what keeps this test
     ///   honest about the old side instead of asserting only the new side's
     ///   opinion.
     ///
@@ -4554,7 +4562,7 @@ mod tests {
     /// version history disagree. Each bump renames this test and moves both
     /// literals with it so both directions exercise the previous version.
     #[farhelm_testtrace::test]
-    async fn v27_and_v28_peers_refuse_each_other() {
+    async fn v28_and_v29_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4563,7 +4571,7 @@ mod tests {
             auth: None,
         };
 
-        // A literal-v27 peer against THIS build's handshake.
+        // A literal-v28 peer against THIS build's handshake.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
@@ -4574,7 +4582,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(27)).await.unwrap();
+        w.write_control(&stale_hello(28)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4590,22 +4598,22 @@ mod tests {
         let err = receiver.await.unwrap().unwrap_err();
         assert!(
             err.to_string().contains("protocol version mismatch"),
-            "a literal v27 peer must be refused: {err}"
+            "a literal v28 peer must be refused: {err}"
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 27);
-        assert_eq!(skew.our_protocol, 28);
+        assert_eq!(skew.peer_protocol, 28);
+        assert_eq!(skew.our_protocol, 29);
 
-        // The reverse direction: a v27 receiver (the refusal rule itself,
-        // modeled by its exact-version check) meets a v28 hello and hangs up.
+        // The reverse direction: a v28 receiver (the refusal rule itself,
+        // modeled by its exact-version check) meets a v29 hello and hangs up.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
-        let v27_receiver = tokio::spawn(async move {
+        let v28_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(27)).await.unwrap();
+            w.write_control(&stale_hello(28)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4614,7 +4622,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 27 {
+            if protocol_version != 28 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4624,7 +4632,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-                Err("refused a v28 peer".to_string())
+                Err("refused a v29 peer".to_string())
             } else {
                 Ok(())
             }
@@ -4634,11 +4642,11 @@ mod tests {
         w.write_control(&stale_hello(PROTOCOL_VERSION))
             .await
             .unwrap();
-        // Hellos cross first; the v27 peer's hello precedes its refusal.
+        // Hellos cross first; the v28 peer's hello precedes its refusal.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
         assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
-        assert!(v27_receiver.await.unwrap().is_err());
+        assert!(v28_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -5875,6 +5883,7 @@ mod tests {
             AgentKind::Goose,
             AgentKind::Pi,
             AgentKind::Omp,
+            AgentKind::Grok,
             AgentKind::Generic,
         ] {
             let expected = match kind {
@@ -5883,6 +5892,7 @@ mod tests {
                 AgentKind::Goose => "goose",
                 AgentKind::Pi => "pi",
                 AgentKind::Omp => "omp",
+                AgentKind::Grok => "grok",
                 AgentKind::Generic => "generic",
             };
             assert_eq!(

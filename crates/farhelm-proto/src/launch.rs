@@ -39,6 +39,8 @@ pub enum LaunchHarness {
     /// OpenCode's terminal UI, intentionally kept on the generic runtime
     /// integration because Farhelm does not capture or resume its sessions.
     OpenCode,
+    /// Grok's native terminal UI. Tracked launches require `--no-leader`.
+    Grok,
 }
 
 /// An explicit reasoning-effort value requested from a structured harness.
@@ -212,6 +214,15 @@ mod tests {
             serde_json::to_value(LaunchPermission::SmartApprove)
                 .expect("serialize Goose permission"),
             "smart_approve"
+        );
+    }
+
+    /// Grok's durable launch tag must remain a closed, stable wire value.
+    #[test]
+    fn grok_harness_serializes_with_its_exact_wire_name() {
+        assert_eq!(
+            serde_json::to_value(LaunchHarness::Grok).expect("serialize Grok harness"),
+            serde_json::json!("grok")
         );
     }
 }

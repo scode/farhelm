@@ -392,6 +392,9 @@ pub enum LaunchHarness {
     /// OpenCode's generic integration has no captured conversation or
     /// synthesized resume command, despite being a first-class composer row.
     OpenCode,
+    /// Grok's native tracked launch; model and effort choices are not exposed
+    /// until their CLI contract is verified.
+    Grok,
 }
 
 /// A literal reasoning effort understood by the selected harness.

@@ -4379,6 +4379,7 @@ pub(super) fn CreateSessionForm(
                                     (LaunchHarness::Claude, "Claude"),
                                     (LaunchHarness::Muse, "Muse"),
                                     (LaunchHarness::Cursor, "Cursor"),
+                                    (LaunchHarness::Grok, "Grok"),
                                     (LaunchHarness::Goose, "Goose"),
                                     (LaunchHarness::Pi, "Pi"),
                                     (LaunchHarness::Omp, "OMP"),
@@ -4461,6 +4462,7 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if *creation_surface.read() == CreationSurface::Structured {
+                        if structured_harness() != Some(LaunchHarness::Grok) {
                         div { class: "launch-composer-choice launch-composer-model-choice",
                             span { class: "launch-composer-section-label", "model" }
                             div { class: "launch-composer-model",
@@ -4676,11 +4678,12 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         if let Some(reason) = model_draft_error() { div { class: "launch-composer-choice-error", "{reason}" } }
-                        // OpenCode and Cursor have no effort vocabulary, so permissions stands
-                        // alone in this pair rather than gaining a blank sibling
-                        // that suggests an unavailable setting exists.
+                        }
+                        // OpenCode, Cursor, and Grok have no effort vocabulary, so permissions
+                        // stands alone in this pair rather than gaining a blank sibling that
+                        // suggests an unavailable setting exists.
                         div { class: "launch-composer-choice-pair",
-                        if !matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Cursor)) {
+                        if !matches!(structured_harness(), Some(LaunchHarness::OpenCode | LaunchHarness::Cursor | LaunchHarness::Grok)) {
                         div { class: "launch-composer-choice launch-composer-effort-choice",
                             span { class: "launch-composer-section-label", "effort" }
                             div { class: "launch-composer-segmented",

@@ -1050,6 +1050,7 @@ pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str 
         K::Goose => "goose",
         K::Pi => "pi",
         K::Omp => "omp",
+        K::Grok => "grok",
         K::Generic => "generic",
     }
 }
@@ -1075,6 +1076,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "goose" => K::Goose,
         "pi" => K::Pi,
         "omp" => K::Omp,
+        "grok" => K::Grok,
         "generic" => K::Generic,
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     })
@@ -2548,6 +2550,7 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
             farhelm_proto::LaunchHarness::Goose => farhelm_proto::AgentKind::Goose,
             farhelm_proto::LaunchHarness::Pi => farhelm_proto::AgentKind::Pi,
             farhelm_proto::LaunchHarness::Omp => farhelm_proto::AgentKind::Omp,
+            farhelm_proto::LaunchHarness::Grok => farhelm_proto::AgentKind::Grok,
         };
         if row.agent_kind != expected_kind {
             anyhow::bail!(
@@ -8042,15 +8045,14 @@ mod tests {
         }
     }
 
-    /// The OMP kind round-trips through the supervisor's strict column
-    /// vocabulary, and a hand-edited unknown spelling fails the row decode
-    /// rather than downgrading the session to a different integration. This
-    /// is the supervisor-side half of the protocol bump that introduced the
-    /// kind: the store is the trust boundary a binary downgrade's rows reach
-    /// first, and silently coercing the kind would misdirect conversation
-    /// reports and resume offers.
+    /// New closed agent kinds round-trip through the supervisor's strict
+    /// column vocabulary, while a hand-edited unknown spelling fails decode.
+    ///
+    /// The store is the first trust boundary an older binary's rows reach.
+    /// Silently coercing a kind here would misdirect conversation reports and
+    /// resume offers even though the durable row still claims another vendor.
     #[farhelm_testtrace::test]
-    async fn omp_agent_kind_round_trips_and_unknown_spellings_fail_decode() {
+    async fn new_agent_kinds_round_trip_and_unknown_spellings_fail_decode() {
         let (_dir, store) = fresh_store().await;
         let mut row = launching_row("s-omp");
         row.agent_kind = farhelm_proto::AgentKind::Omp;
@@ -8070,6 +8072,38 @@ mod tests {
             .expect("read")
             .expect("present");
         assert_eq!(loaded.agent_kind, farhelm_proto::AgentKind::Omp);
+
+        let mut grok = launching_row("s-grok");
+        grok.agent_kind = farhelm_proto::AgentKind::Grok;
+        // The launch slice persists the future exact-resume command before
+        // capture is enabled, so the later integration can start reporting
+        // identity without rewriting sessions created by this release.
+        grok.resume_template = Some(vec![
+            "grok".to_string(),
+            "--no-leader".to_string(),
+            "--resume".to_string(),
+            crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+        ]);
+        let claimed = store
+            .insert_session(grok, None)
+            .await
+            .expect("insert Grok row");
+        assert!(matches!(claimed, Claimed::Ours { .. }));
+        let loaded = store
+            .session("s-grok")
+            .await
+            .expect("read Grok row")
+            .expect("Grok row present");
+        assert_eq!(loaded.agent_kind, farhelm_proto::AgentKind::Grok);
+        assert_eq!(
+            loaded.resume_template,
+            Some(vec![
+                "grok".to_string(),
+                "--no-leader".to_string(),
+                "--resume".to_string(),
+                crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
+            ])
+        );
 
         {
             let conn = store.conn.lock().expect("db mutex");

@@ -21131,6 +21131,7 @@ pub(crate) mod tests {
             AgentKind::Goose => "goose",
             AgentKind::Pi => "pi",
             AgentKind::Omp => "omp",
+            AgentKind::Grok => "grok",
             AgentKind::Generic => "agent",
         };
         IntegrationSnapshot::resolve(&[argv0.to_string()], Some(kind), None)
