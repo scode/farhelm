@@ -140,6 +140,47 @@ mod tests {
         }
     }
 
+    /// Execute remote shell commands locally while making SFTP publish exact
+    /// fixture bytes. This isolates digest and cleanup checks from SSH setup
+    /// without replacing the backend's own shell command construction.
+    struct ScriptedSftpLauncher {
+        temporary: PathBuf,
+        bytes: &'static str,
+        exit_status: i32,
+    }
+
+    impl CommandLauncher for ScriptedSftpLauncher {
+        fn spawn(
+            &self,
+            command: &mut tokio::process::Command,
+        ) -> std::io::Result<tokio::process::Child> {
+            let mut child = tokio::process::Command::new("sh");
+            let program = command.as_std().get_program().to_string_lossy();
+            if program == "sftp" {
+                let temporary = shell_path(&self.temporary)
+                    .map_err(|error| std::io::Error::other(error.rendered()))?;
+                child.arg("-c").arg(format!(
+                    "cat >/dev/null; printf '%s' {} > {}; exit {}",
+                    shell_words::quote(self.bytes),
+                    temporary,
+                    self.exit_status
+                ));
+            } else {
+                assert_eq!(program, "ssh");
+                child
+                    .arg("-c")
+                    .arg(command.as_std().get_args().last().unwrap());
+            }
+            child
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            isolate_process_group(&mut child);
+            child.spawn()
+        }
+    }
+
     struct RecordingLauncher {
         programs: Mutex<Vec<String>>,
     }
@@ -376,6 +417,20 @@ mod tests {
                 self.release.notified().await;
             }
             Ok(result)
+        }
+
+        async fn upload_path(
+            &self,
+            _target: &ProvisioningTarget,
+            kind: PayloadKind,
+            _payload: &PreparedPayload,
+            _destination: &Path,
+            _temporary: &Path,
+        ) -> Result<ActionOutcome, BackendFailure> {
+            self.record(match kind {
+                PayloadKind::Farhelm => "upload-farhelm",
+                PayloadKind::Tmux => "upload-tmux",
+            })
         }
 
         async fn install_path(
@@ -748,8 +803,8 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
         assert!(confirmation.contains("starts at boot if linger succeeds"));
         assert!(confirmation.contains("starts at login, not at boot"));
-        let ProvisioningAction::WriteUnit { unit, .. } = &plan.actions[2] else {
-            panic!("the third action must write the unit")
+        let ProvisioningAction::WriteUnit { unit, .. } = &plan.actions[3] else {
+            panic!("the fourth action must write the unit")
         };
         let farhelm = root.path().join("lib/farhelm");
         let unit_path = root.path().join("units").join(unit);
@@ -757,15 +812,19 @@ mod tests {
             "Farhelm will perform these steps for user@absent:\n\
              host: ubuntu, x86_64\n\
              1. create or reuse directories {} (mode 0755), {} (mode 0700), {} (mode 0755)\n\
-             2. install Farhelm at {} via temporary file {} and atomic rename\n\
-             3. write user unit {unit} at {} via temporary file {} and atomic rename\n\
-             4. reload the systemd user manager\n\
-             5. enable and start {unit}; the supervisor runs persistently under the systemd user manager\n\
-             6. optionally enable linger: the supervisor starts at boot if linger succeeds; if privilege is refused, continue and report that it starts at login, not at boot\n\
-             7. dial the supervisor and attach it to the already-registered host row\n",
+             2. upload Farhelm to temporary file {} and verify its digest\n\
+             3. install Farhelm at {} via temporary file {} and atomic rename\n\
+             4. write user unit {unit} at {} via temporary file {} and atomic rename\n\
+             5. reload the systemd user manager\n\
+             6. enable and start {unit}; the supervisor runs persistently under the systemd user manager\n\
+             7. optionally enable linger: the supervisor starts at boot if linger succeeds; if privilege is refused, continue and report that it starts at login, not at boot\n\
+             8. dial the supervisor and attach it to the already-registered host row\n",
             root.path().join("lib").display(),
             root.path().join("state").display(),
             root.path().join("units").display(),
+            root.path()
+                .join(format!("lib/.farhelm.farhelm-tmp-{probe_id}"))
+                .display(),
             farhelm.display(),
             root.path()
                 .join(format!("lib/.farhelm.farhelm-tmp-{probe_id}"))
@@ -1706,12 +1765,13 @@ mod tests {
         let view = wait_finished(&service, accepted.host_id).await;
         assert_eq!(view.status, RunStatus::Failed);
         let message = view.message.unwrap();
-        assert!(message.contains("step 4 (daemon-reload) failed"));
+        assert!(message.contains("step 5 (daemon-reload) failed"));
         assert!(message.contains("\\u{1b}[31mhost said no\\nnext"));
         assert_eq!(
             backend.operations.lock().unwrap().as_slice(),
             [
                 "create-directories",
+                "upload-farhelm",
                 "install-farhelm",
                 "write-unit",
                 "daemon-reload"
@@ -1755,6 +1815,87 @@ mod tests {
         assert_eq!(
             wait_finished(&service, accepted.host_id).await.status,
             RunStatus::Completed
+        );
+    }
+
+    /// An upload failure is its own visible step and cannot advance to
+    /// installation. A new update plan may retry after the host claim is
+    /// released, preserving the existing binary until the retry succeeds.
+    #[farhelm_testtrace::test]
+    async fn failed_remote_upload_stops_before_install_and_update_can_retry() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let host = harness
+            .store
+            .add_ssh_host("upload-retry.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        backend
+            .stateful
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        std::fs::create_dir_all(root.path().join("lib")).unwrap();
+        std::fs::write(root.path().join("lib/farhelm"), b"old binary").unwrap();
+        *backend.fail.lock().unwrap() = Some("upload-farhelm".to_string());
+        let service = service(&harness, backend.clone(), root.path());
+
+        let first = service.plan_update(host).await.unwrap();
+        let accepted = service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: first.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let failed = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert_eq!(failed.steps[1].status, StepStatus::Failed);
+        assert_eq!(failed.steps[2].status, StepStatus::Pending);
+        assert!(
+            failed
+                .message
+                .unwrap()
+                .contains("step 2 (upload-farhelm) failed")
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("lib/farhelm")).unwrap(),
+            b"old binary"
+        );
+        assert_eq!(
+            backend.operations.lock().unwrap().as_slice(),
+            ["create-directories", "upload-farhelm"]
+        );
+
+        *backend.fail.lock().unwrap() = None;
+        let retry = service.plan_update(host).await.unwrap();
+        let accepted = service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: retry.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let completed = wait_finished(&service, accepted.host_id).await;
+        assert_eq!(completed.status, RunStatus::Completed);
+        assert_eq!(completed.steps[1].status, StepStatus::Completed);
+        assert_eq!(completed.steps[2].status, StepStatus::Completed);
+        assert_eq!(
+            std::fs::read(root.path().join("lib/farhelm")).unwrap(),
+            b"farhelm test payload"
+        );
+        assert!(
+            backend
+                .operations
+                .lock()
+                .unwrap()
+                .windows(3)
+                .any(|actions| actions
+                    == ["create-directories", "upload-farhelm", "install-farhelm"])
         );
     }
 
@@ -2750,7 +2891,7 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(
-            &plan.actions[2],
+            &plan.actions[4],
             ProvisioningAction::InstallPayload {
                 payload: PayloadKind::Tmux,
                 arch: PayloadArch::X86_64,
@@ -2758,7 +2899,7 @@ mod tests {
                 ..
             } if destination == &root.path().join("lib/tmux")
         ));
-        let ProvisioningAction::WriteUnit { content, .. } = &plan.actions[3] else {
+        let ProvisioningAction::WriteUnit { content, .. } = &plan.actions[5] else {
             panic!("the unit follows both payloads")
         };
         assert!(content.contains(&format!("PATH={}", root.path().join("lib").display())));
@@ -2862,14 +3003,25 @@ mod tests {
             assert_eq!(directories[0].path, lib);
             assert_eq!(directories[1].path, expected_state);
             assert_eq!(directories[2].path, user_units);
+            let install_index = if matches!(plan.target, ProvisioningTarget::Ssh { .. }) {
+                assert!(matches!(
+                    &plan.actions[1],
+                    ProvisioningAction::UploadPayload { destination, temporary, .. }
+                        if destination == &farhelm
+                            && temporary == &lib.join(".farhelm.farhelm-tmp-nonce")
+                ));
+                2
+            } else {
+                1
+            };
             assert!(matches!(
-                &plan.actions[1],
+                &plan.actions[install_index],
                 ProvisioningAction::InstallPayload { destination, temporary, .. }
                     if destination == &farhelm
                         && temporary == &lib.join(".farhelm.farhelm-tmp-nonce")
             ));
             assert!(matches!(
-                &plan.actions[2],
+                &plan.actions[install_index + 1],
                 ProvisioningAction::WriteUnit { unit: name, destination, temporary, .. }
                     if name == "farhelm-supervisor.service"
                         && destination == &unit
@@ -3517,6 +3669,138 @@ mod tests {
                 format!("sha256sum < {quoted}")
             );
         }
+    }
+
+    /// Failed SFTP and a successful transfer with the wrong digest both
+    /// remove the nonce temporary without replacing the installed binary.
+    /// The second case proves that a zero SFTP exit is not proof of payload
+    /// integrity.
+    #[farhelm_testtrace::test]
+    async fn failed_remote_upload_removes_partial_temporary() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("farhelm");
+        let temporary = root.path().join(".farhelm.nonce");
+        let source = root.path().join("source");
+        tokio::fs::write(&destination, b"installed bytes")
+            .await
+            .unwrap();
+        tokio::fs::write(&source, b"new bytes").await.unwrap();
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        let prepared = stage_payload(&source).await.unwrap();
+        for (bytes, exit_status, diagnostic) in [
+            ("partial", 23, "transferring"),
+            ("wrong", 0, "uploaded payload digest mismatch"),
+        ] {
+            let backend = SystemBackend {
+                control_dir: root.path().to_path_buf(),
+                linger: LingerBehavior::Simulated(Ok(())),
+                launcher: Arc::new(ScriptedSftpLauncher {
+                    temporary: temporary.clone(),
+                    bytes,
+                    exit_status,
+                }),
+                runtime_units: false,
+                fail_before_rename: false,
+            };
+            let error = backend
+                .upload_path(
+                    &target,
+                    PayloadKind::Farhelm,
+                    &prepared,
+                    &destination,
+                    &temporary,
+                )
+                .await
+                .expect_err("a failed or corrupt transfer must fail its own action");
+            assert!(error.rendered().contains(diagnostic), "{error:?}");
+            assert_eq!(
+                tokio::fs::read(&destination).await.unwrap(),
+                b"installed bytes"
+            );
+            assert!(
+                !temporary.exists(),
+                "the failed upload must remove its partial file"
+            );
+        }
+    }
+
+    /// The install step cannot trust the upload step's earlier digest: bytes
+    /// at the nonce path may change between separately reported actions.
+    /// A mismatch must preserve the installed binary and clean the nonce.
+    #[farhelm_testtrace::test]
+    async fn remote_install_rejects_tampering_after_upload() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("farhelm");
+        let temporary = root.path().join(".farhelm.nonce");
+        let source = root.path().join("source");
+        tokio::fs::write(&destination, b"installed bytes")
+            .await
+            .unwrap();
+        tokio::fs::write(&source, b"new bytes").await.unwrap();
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(ScriptedSftpLauncher {
+                temporary: temporary.clone(),
+                bytes: "new bytes",
+                exit_status: 0,
+            }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        let prepared = stage_payload(&source).await.unwrap();
+        assert!(matches!(
+            backend
+                .upload_path(
+                    &target,
+                    PayloadKind::Farhelm,
+                    &prepared,
+                    &destination,
+                    &temporary
+                )
+                .await
+                .unwrap(),
+            ActionOutcome::Completed
+        ));
+        assert_eq!(tokio::fs::read(&temporary).await.unwrap(), b"new bytes");
+        tokio::fs::write(&temporary, b"tampered bytes")
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read(&temporary).await.unwrap(),
+            b"tampered bytes"
+        );
+
+        let error = backend
+            .install_path(
+                &target,
+                PayloadKind::Farhelm,
+                &prepared,
+                &destination,
+                &temporary,
+                0o755,
+            )
+            .await
+            .expect_err("install must recheck bytes at the nonce path");
+        assert!(
+            error
+                .rendered()
+                .contains("uploaded payload digest mismatch"),
+            "{error:?}"
+        );
+        assert_eq!(
+            tokio::fs::read(&destination).await.unwrap(),
+            b"installed bytes"
+        );
+        assert!(
+            !temporary.exists(),
+            "failed install must remove the nonce temporary"
+        );
     }
 
     /// Local convergence streams hashes, installs one immutable payload

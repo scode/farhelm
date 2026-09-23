@@ -76,6 +76,17 @@ pub(crate) enum ProvisioningAction {
     EnsureDirectories {
         directories: Vec<DirectorySpec>,
     },
+    /// Remote plans transfer the verified snapshot to this nonce temporary
+    /// before the install step can change the live executable. Local plans
+    /// copy within their install action and have no upload step.
+    UploadPayload {
+        payload: PayloadKind,
+        arch: PayloadArch,
+        destination: PathBuf,
+        temporary: PathBuf,
+    },
+    /// Install the local snapshot or the remote upload from this same plan.
+    /// A remote install must not start another network transfer.
     InstallPayload {
         payload: PayloadKind,
         arch: PayloadArch,
@@ -108,6 +119,14 @@ impl ProvisioningAction {
     pub(super) fn label(&self) -> &'static str {
         match self {
             Self::EnsureDirectories { .. } => "create-directories",
+            Self::UploadPayload {
+                payload: PayloadKind::Farhelm,
+                ..
+            } => "upload-farhelm",
+            Self::UploadPayload {
+                payload: PayloadKind::Tmux,
+                ..
+            } => "upload-tmux",
             Self::InstallPayload {
                 payload: PayloadKind::Farhelm,
                 ..
@@ -136,6 +155,12 @@ impl ProvisioningAction {
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
+            ),
+            Self::UploadPayload {
+                payload, temporary, ..
+            } => format!(
+                "upload {payload:?} to temporary file {} and verify its digest",
+                temporary.display()
             ),
             Self::InstallPayload {
                 payload,
@@ -325,33 +350,52 @@ impl PlanLayout {
                 },
             ],
         }];
+        let remote = matches!(&target, ProvisioningTarget::Ssh { .. });
+        let farhelm_temporary = temporary(&farhelm_path, farhelm_name);
+        if remote {
+            actions.push(ProvisioningAction::UploadPayload {
+                payload: PayloadKind::Farhelm,
+                arch: reach.arch,
+                destination: farhelm_path.clone(),
+                temporary: farhelm_temporary.clone(),
+            });
+        }
         actions.push(ProvisioningAction::InstallPayload {
             payload: PayloadKind::Farhelm,
             arch: reach.arch,
             destination: farhelm_path.clone(),
-            temporary: temporary(&farhelm_path, farhelm_name),
+            temporary: farhelm_temporary,
         });
         // Whichever branch runs, `tmux_program` ends up naming the exact
         // executable the supervisor must drive — see `supervisor_unit`
         // for why a directory on PATH is not enough.
         let tmux_program = if reach.needs_tmux {
             let tmux_path = lib_dir.join("tmux");
+            let tmux_temporary = temporary(
+                &tmux_path,
+                tmux_path.file_name().ok_or_else(|| {
+                    BackendFailure::new(
+                        format!(
+                            "provisioning tmux destination {:?} has no file name",
+                            tmux_path
+                        ),
+                        "",
+                    )
+                })?,
+            );
+            if remote {
+                actions.push(ProvisioningAction::UploadPayload {
+                    payload: PayloadKind::Tmux,
+                    arch: reach.arch,
+                    destination: tmux_path.clone(),
+                    temporary: tmux_temporary.clone(),
+                });
+            }
             actions.push(ProvisioningAction::InstallPayload {
                 payload: PayloadKind::Tmux,
                 arch: reach.arch,
                 destination: tmux_path.clone(),
-                temporary: temporary(
-                    &tmux_path,
-                    tmux_path.file_name().ok_or_else(|| {
-                        BackendFailure::new(
-                            format!(
-                                "provisioning tmux destination {:?} has no file name",
-                                tmux_path
-                            ),
-                            "",
-                        )
-                    })?,
-                ),
+                temporary: tmux_temporary,
             });
             tmux_path
         } else {

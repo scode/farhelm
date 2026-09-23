@@ -43,7 +43,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Modernize the interrupted-session view shown after the host running the supervisor or agents restarts. Make clear that the session must be restarted intentionally, then offer clean, Farhelm-styled `Restart` and `Replace` buttons instead of making the state look like a failure.
 - Restyle the typical session header's `Restart` button to match Farhelm's visual style. Consider moving the status indicator and session actions — Restart, Replace, Clone, Clone with, and related buttons — to a more visible bottom area while keeping the interface consistent; exact layout is TBD.
 - Audit the remaining GUI buttons for controls that are rendered as plain gray text or otherwise do not match Farhelm's visual style, and make button styling consistent throughout the GUI.
-- Show the remote binary upload as its own provisioning step in the GUI, separate from installation, so users can see when Farhelm is doing network transfer.
 
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each
   time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently

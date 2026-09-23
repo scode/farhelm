@@ -2371,11 +2371,14 @@ Artifacts land under temporary names in their final flat directories and are ato
 version directories or `current` symlinks: a failed transfer leaves the installed file intact, while a running binary
 keeps its old inode until the explicit supervisor restart. Hash checks skip identical payloads and unit files are
 written only when their content differs, so rerunning provisioning converges from wherever an earlier run stopped.
-Matching content also repairs installed-file mode drift. Provisioning may create directories with explicit modes and
-repair permissions on directories dedicated to Farhelm; the supervisor state directory is private to its user (`0700`).
-Existing shared directories, including a shared executable directory or the systemd user-unit directory, must retain
-their permissions. If those permissions prevent installation, report the obstacle rather than changing them. This
-ownership restriction is maintainer-confirmed policy; existing provisioning paths still require assessment against it.
+Remote plans report binary upload and installation as separate actions. Upload verifies the nonce temporary's digest;
+installation checks it again before the atomic rename. Both actions use the same staged payload snapshot, and local
+plans retain a single install action because they do not transfer over the network. Matching content also repairs
+installed-file mode drift. Provisioning may create directories with explicit modes and repair permissions on directories
+dedicated to Farhelm; the supervisor state directory is private to its user (`0700`). Existing shared directories,
+including a shared executable directory or the systemd user-unit directory, must retain their permissions. If those
+permissions prevent installation, report the obstacle rather than changing them. This ownership restriction is
+maintainer-confirmed policy; existing provisioning paths still require assessment against it.
 
 The supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to the private tmux server that the
 supervisor launches, so systemd's default `control-group` policy would kill that server and every session whenever an

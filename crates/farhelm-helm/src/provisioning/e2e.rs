@@ -255,6 +255,24 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         self.action(target, "create-directories").await
     }
 
+    async fn upload_path(
+        &self,
+        target: &ProvisioningTarget,
+        kind: PayloadKind,
+        _payload: &PreparedPayload,
+        _destination: &Path,
+        _temporary: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.action(
+            target,
+            match kind {
+                PayloadKind::Farhelm => "upload-farhelm",
+                PayloadKind::Tmux => "upload-tmux",
+            },
+        )
+        .await
+    }
+
     async fn install_path(
         &self,
         target: &ProvisioningTarget,
