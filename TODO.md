@@ -42,8 +42,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Investigate suppressing the Claude and Codex startup prompts that ask whether to trust the working directory, using
   supported per-session mechanisms where available without weakening their trust boundaries; keep the warning when
   Farhelm cannot establish directory trust safely.
-- Do not require users to choose a model for OMP or any other harness unless clear evidence shows that harness requires
-  one; leave model selection optional and use the harness default otherwise.
 - Assess what is needed to prevent native and shelled-out subagents from replacing or withdrawing the foreground
   conversation's restart target across harnesses. #801 adds Codex-specific ownership checks; Claude, Goose, Pi, and OMP
   still lack equivalent report-admission checks. Establish actual child reporter inheritance and triggering, including

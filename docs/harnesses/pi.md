@@ -1,5 +1,10 @@
 # Pi
 
+## Model choice
+
+You can leave the model unset in Farhelm. Pi then uses its configured provider and model; Farhelm does not add
+`--provider` or `--model`. Choosing a model explicitly keeps Farhelm's OpenRouter launch arguments for that choice.
+
 ## YOLO is the only permission mode
 
 Pi does not ask for permission before running shell commands or editing files, so Farhelm shows YOLO as its only

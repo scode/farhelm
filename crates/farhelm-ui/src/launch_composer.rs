@@ -269,7 +269,8 @@ pub(crate) fn model_enter_target(
 ///
 /// A known id carries its owning harness, so matching it never depends on a
 /// browser-side guess. The catalog order remains stable within the fixed
-/// harness order, making movement predictable while the list is open.
+/// harness order, making movement predictable while the list is open. The
+/// default row stays available even when a harness has suggested models.
 pub(crate) fn model_options(
     catalog: &[LaunchCatalogModel],
     harness: Option<LaunchHarness>,
@@ -278,14 +279,7 @@ pub(crate) fn model_options(
 ) -> Vec<ModelOption> {
     let folded_query = query.to_ascii_lowercase();
     let mut options = Vec::new();
-    if !matches!(
-        harness,
-        Some(
-            LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp
-        )
-    ) {
-        options.push(ModelOption::HarnessDefault);
-    }
+    options.push(ModelOption::HarnessDefault);
     for owner in [
         LaunchHarness::Codex,
         LaunchHarness::Claude,
@@ -1018,23 +1012,16 @@ pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
 ///
 /// Unknown model IDs are valid custom IDs once the person has selected their
 /// owning harness. They cannot have model-specific effort constraints locally,
-/// so this applies the harness-wide vocabulary and the required-model rules
-/// for OpenCode, Goose, Pi, and OMP. It also rejects Goose-only permission
-/// modes on every other harness and hidden workspace-trust choices while accepting an omitted Pi permission as
-/// the older spelling of YOLO and OMP's own default/Approve choices. The helm
+/// so this applies the harness-wide vocabulary. It also rejects Goose-only
+/// permission modes on every other harness and hidden workspace-trust choices,
+/// while accepting an omitted Pi permission as the older spelling of YOLO and
+/// OMP's own default/Approve choices. The helm
 /// validates the final request again, including Zen provider syntax for
 /// custom OpenCode IDs.
 pub(crate) fn selection_is_compatible(
     selection: &LaunchSelection,
     catalog: &[LaunchCatalogModel],
 ) -> bool {
-    if matches!(
-        selection.harness,
-        LaunchHarness::OpenCode | LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Omp
-    ) && selection.model.is_none()
-    {
-        return false;
-    }
     let known_models = selection.model.as_ref().map(|model| {
         catalog
             .iter()
@@ -1686,10 +1673,28 @@ mod tests {
         assert!(!selection_is_compatible(&wrong, &catalog));
     }
 
-    /// The model picker must keep its bounded default row, filter only ids,
-    /// and omit an invalid OpenCode default before any renderer is involved.
+    /// The composer must offer the same omitted-model launch the helm
+    /// compiles, including for harnesses whose catalog has suggested models.
+    /// An explicit choice still goes through the ordinary owner checks.
     #[test]
-    fn model_options_filter_and_respect_opencode_requirements() {
+    fn omitted_model_is_compatible_for_each_configured_default() {
+        for harness in [
+            LaunchHarness::OpenCode,
+            LaunchHarness::Goose,
+            LaunchHarness::Pi,
+            LaunchHarness::Omp,
+        ] {
+            assert!(selection_is_compatible(
+                &selection(harness, None, None),
+                &[]
+            ));
+        }
+    }
+
+    /// The model picker keeps the default row for every harness while
+    /// filtering only model ids; the renderer must not invent a requirement.
+    #[test]
+    fn model_options_filter_and_keep_harness_defaults() {
         let catalog = vec![
             LaunchCatalogModel {
                 id: "codex-fast".into(),
@@ -1730,7 +1735,7 @@ mod tests {
         );
         assert!(matches!(
             model_options(&catalog, Some(LaunchHarness::OpenCode), "", false).first(),
-            Some(ModelOption::ShowAll)
+            Some(ModelOption::HarnessDefault)
         ));
         // With no harness chosen every row is already listed, so the toggle
         // would flip its label without changing anything; it must be absent.
@@ -2064,9 +2069,9 @@ mod tests {
             },
             &[],
         ));
-        // The model-required rule matches the helm: OMP refuses to compose
-        // without one.
-        assert!(!selection_is_compatible(
+        // An OMP default leaves both the model and permission choices to the
+        // harness; the composer must accept the same omission as the helm.
+        assert!(selection_is_compatible(
             &LaunchSelection {
                 harness: LaunchHarness::Omp,
                 model: None,

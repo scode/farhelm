@@ -1,11 +1,11 @@
 //! Explicit, user-selected launch intent shared by the helm and supervisor.
 //!
 //! This module intentionally records choices, not inferred runtime facts. A
-//! missing model, effort, permission, or workspace-trust choice means that the selected harness
-//! receives no corresponding argument and decides its own default. OpenCode
-//! is the exception: the helm requires an explicit model so local provider
-//! configuration cannot override Farhelm's Zen-only contract. The
-//! supervisor later stores the same value beside the resolved argv so clone
+//! missing model, effort, permission, or workspace-trust choice means that the
+//! selected harness receives no corresponding argument and decides its own
+//! default. Even OpenCode may use its configured default; an explicit
+//! OpenCode model still has to use its supported Zen provider. The supervisor
+//! later stores the same value beside the resolved argv so clone
 //! and history can describe what the user chose without attempting to parse a
 //! command line back into a structured launch.
 
@@ -98,9 +98,9 @@ pub enum LaunchPermission {
 /// `model` remains a literal identifier so a release catalog can recognize
 /// supported IDs while still allowing the explicit custom-model escape hatch.
 /// It is never a shell fragment or a sequence of command-line arguments.
-/// The wire shape permits an absent model for harness defaults; the helm
-/// rejects that absence for OpenCode. Provider qualification belongs only to
-/// compiled argv, so persisted intent retains the identifier the user entered.
+/// The wire shape permits an absent model for every harness default. Provider
+/// qualification belongs only to compiled argv, so persisted intent retains
+/// the identifier the user entered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {

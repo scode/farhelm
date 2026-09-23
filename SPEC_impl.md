@@ -1653,16 +1653,17 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   are last-write-wins and carry no definition fingerprint. Muse's two definitions explicitly select `generic` with no
   resume template. They use the ordinary terminal launch path and generic activity classifier, without per-agent hooks
   or conversation-identity capture. OpenCode is a structured harness only: its release catalog holds verified Zen model
-  IDs, requires a model, passes bare custom Zen names as `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag.
-  Its empty effort vocabulary, generic activity classifier, and absent resume template deliberately avoid claiming a
-  provider-specific effort or conversation lifecycle contract. Cursor likewise maps its structured harness to the
-  existing Generic kind, with no resume template or capture machinery. Its two release-owned profiles invoke `agent` and
-  `agent --force`; models use `--model`, with no separate effort flag. The UI preserves its harness in launch intent
-  while explicitly disclosing the lack of tracking and Resume. Protocol 27 adds the Cursor harness variant, not a new
-  runtime integration kind. OMP is also a structured harness only at launch time: its release catalog holds the same
-  OpenRouter model IDs as Pi's, requires a model, and compiles `omp --provider openrouter --model <id>` (provider intent
-  explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise
-  of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix`
+  IDs, accepts an omitted model for OpenCode's configured default, passes explicit bare custom Zen names as
+  `opencode/<model>`, and maps YOLO to OpenCode's `--auto` flag. Its empty effort vocabulary, generic activity
+  classifier, and absent resume template deliberately avoid claiming a provider-specific effort or conversation
+  lifecycle contract. Cursor likewise maps its structured harness to the existing Generic kind, with no resume template
+  or capture machinery. Its two release-owned profiles invoke `agent` and `agent --force`; models use `--model`, with no
+  separate effort flag. The UI preserves its harness in launch intent while explicitly disclosing the lack of tracking
+  and Resume. Protocol 27 adds the Cursor harness variant, not a new runtime integration kind. OMP is also a structured
+  harness only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider
+  flags for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider
+  intent explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification is not a
+  promise of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix`
   interpretations on the id it receives, as documented in `docs/harnesses/omp.md`). `--thinking <effort>` carries the
   seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
   YOLO/Approve choices while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO
