@@ -33,7 +33,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 ## Near term
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently connected displays and falling back safely when the display layout changes so the window never reopens off-screen or unusably large. The current native API boundary is recorded in [docs/window-restoration-investigation.md](docs/window-restoration-investigation.md).
 - Fix the vertical alignment of the destination selector and browse-folders button in the new-session form; their labels should be centered within their controls.
-- Add an `update all` action that updates all remote hosts in one operation; details are TBD.
 - Modernize the interrupted-session view shown after the host running the supervisor or agents restarts. Make clear that the session must be restarted intentionally, then offer clean, Farhelm-styled `Restart` and `Replace` buttons instead of making the state look like a failure.
 - Audit the remaining GUI buttons for controls that are rendered as plain gray text or otherwise do not match Farhelm's visual style, and make button styling consistent throughout the GUI.
 

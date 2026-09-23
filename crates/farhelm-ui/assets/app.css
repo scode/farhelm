@@ -779,8 +779,15 @@ samp {
 }
 
 .session-heading .new-session-button,
-.hosts-heading .add-host-button {
+.hosts-heading .update-all-button {
   margin-left: auto;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* The two host actions share the header's trailing edge. Only the first
+   action absorbs spare width, so the pair stays together as counts change. */
+.hosts-heading .add-host-button {
   padding: 2px 8px;
   font-size: 12px;
 }
@@ -2817,6 +2824,7 @@ samp {
 }
 
 .add-host-button,
+.update-all-button,
 .profiles-toggle {
   background: var(--bg-2);
   border-color: var(--border);

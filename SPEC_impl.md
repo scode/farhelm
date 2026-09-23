@@ -2352,6 +2352,13 @@ way, and the UI never replays a spent token. Discovery records the resolved supe
 identity together so a later helm dials the same installation that answered the probe. UPDATE starts from those recorded
 coordinates rather than assuming the standard layout.
 
+The Hosts header's `update all` button reads the current host snapshot and enqueues the same binding-captured UPDATE
+request that each available SSH row's menu would send. The row's permanently mounted provisioning panel retains its own
+intent, one-use plan, submission claim, and progress. Rows with no current Update offer are skipped, so an ADD in flight
+cannot turn the header click into a delayed update after setup finishes. All eligible rows begin planning without
+waiting for one another; a failed plan or run stays on its own row and cannot suppress another host's result. There is
+no fleet endpoint or page-wide update result to reconcile against those host-scoped authorities.
+
 A supervisor that answers the hello but speaks a DIFFERENT protocol version is a distinct discovery outcome, not a probe
 failure: presence is proven (only a live supervisor sends a hello) and the skew payload names its build, but nothing
 after the refusal — in particular no identity — was exchanged. ADD registers such a host as discovered (identity

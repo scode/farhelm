@@ -207,6 +207,38 @@ pub(crate) fn is_connected(state: &HostPhase) -> bool {
     matches!(state, HostPhase::Connected { .. })
 }
 
+/// Capture the remote updates the individual row menus would offer now.
+///
+/// Each request keeps the rendered row's binding, so a retarget before the
+/// mounted provisioning panel consumes it cannot update a different host.
+/// Rows occupied by setup or another run have no Update offer and must not
+/// acquire a request that starts later when that work finishes. The parent's
+/// live busy set is also checked because a panel's published menu offer can
+/// lag the run-start notification by one render.
+fn available_remote_updates(
+    hosts: &[Host],
+    menus: &HashMap<HostId, ProvisioningMenuState>,
+    busy_hosts: &HashSet<HostId>,
+) -> HashMap<HostId, ActionRequest> {
+    hosts
+        .iter()
+        .filter(|host| {
+            host.kind == HostKind::Ssh
+                && !busy_hosts.contains(&host.id)
+                && menus.get(&host.id).is_some_and(|state| state.update)
+        })
+        .map(|host| {
+            (
+                host.id,
+                ActionRequest {
+                    operation: ProvisioningOperation::Update,
+                    binding: HostBinding::from(host),
+                },
+            )
+        })
+        .collect()
+}
+
 /// The identity an adopt would approve, RAW, and `None` wherever adopting is
 /// not on the table.
 ///
@@ -957,6 +989,14 @@ pub(crate) fn HostsPanel(
             })
             .collect::<Vec<_>>()
     });
+    let update_all_available = read.hosts().is_some_and(|list| {
+        !available_remote_updates(
+            list,
+            &provisioning_menu_states.read(),
+            &provisioning_busy_hosts.read(),
+        )
+        .is_empty()
+    });
     // Cosmetic, not the guard — every handler below claims the token for
     // itself (see the `ops` module).
     let busy = ops.busy();
@@ -997,6 +1037,33 @@ pub(crate) fn HostsPanel(
                                     },
                     }
                     "details"
+                }
+                button {
+                    r#type: "button",
+                    class: "btn update-all-button",
+                    disabled: !update_all_available,
+                    onclick: move |_| {
+                        // Read the latest snapshot at activation, since the
+                        // rendered eligibility may already be one frame old.
+                        // Each panel and the helm still revalidate its own
+                        // binding and one-use plan before a host is touched.
+                        let requests = {
+                            let snapshot = hosts.peek();
+                            let menus = provisioning_menu_states.peek();
+                            let busy_hosts = provisioning_busy_hosts.peek();
+                            snapshot
+                                .hosts()
+                                .map(|list| available_remote_updates(list, &menus, &busy_hosts))
+                                .unwrap_or_default()
+                        };
+                        if requests.is_empty() {
+                            return;
+                        }
+                        host_menu_open.set(None);
+                        session_menu_open.set(None);
+                        provisioning_action_requests.write().extend(requests);
+                    },
+                    "update all"
                 }
                 button {
                     r#type: "button",
@@ -3605,6 +3672,34 @@ mod tests {
             },
             incarnation: 1,
         }
+    }
+
+    /// A published Update offer can lag the parent's run-start notice.
+    /// The header must skip that busy row even while a separate remote row
+    /// remains eligible, or a fleet click can queue work its row refuses.
+    #[farhelm_testtrace::test]
+    fn fleet_updates_recheck_live_busy_hosts_after_menu_publication() {
+        let ready = row_specimen(1);
+        let busy = row_specimen(2);
+        let mut local = row_specimen(3);
+        local.kind = HostKind::Local;
+        let hosts = [ready, busy, local];
+        let menus = hosts
+            .iter()
+            .map(|host| {
+                (
+                    host.id,
+                    ProvisioningMenuState {
+                        update: true,
+                        ..ProvisioningMenuState::default()
+                    },
+                )
+            })
+            .collect();
+        let busy_hosts = HashSet::from([2]);
+
+        let requests = available_remote_updates(&hosts, &menus, &busy_hosts);
+        assert_eq!(requests.keys().copied().collect::<Vec<_>>(), vec![1]);
     }
 
     /// A host row whose state did not change must not rerender when its
