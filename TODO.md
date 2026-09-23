@@ -40,6 +40,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Add hover help text to the session-list icons: status dots, agent-type icons, and the unlock icon should explain what they represent.
 - Surface an `old version` status for hosts even when the supervisor and helm have no protocol version skew; reserve `needs update` for the incompatible-supervisor case.
 - Add an `update all` action that updates all remote hosts in one operation; details are TBD.
+- Modernize the interrupted-session view shown after the host running the supervisor or agents restarts. Make clear that the session must be restarted intentionally, then offer clean, Farhelm-styled `Restart` and `Replace` buttons instead of making the state look like a failure.
 
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each
   time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently
