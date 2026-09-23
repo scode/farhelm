@@ -103,7 +103,8 @@
 - Completion criteria: the relay cannot busy-loop on repeated empty chunks, the existing upload progress and stall
   behavior remains intact, focused regression coverage exercises the shape, and this feedback file and its index entry
   are removed in the execution change.
-- Execution: `pending`.
+- Execution: implemented in change `ktzkpzzu` on bookmark `pr/empty-upload-stall`;
+  [draft PR #898](https://github.com/scode/farhelm/pull/898/changes).
 
 ## normal-teardown-waits-unboundedly-on-detach.md
 
