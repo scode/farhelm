@@ -1,0 +1,322 @@
+/*
+ * Starlight supplies the documentation shell. This layer supplies the
+ * Farhelm visual language on top of it: the dark slate-blue surfaces and
+ * electric-blue accent of the application UI, Inter for prose and JetBrains
+ * Mono Nerd Font for code and chrome. It only overrides Starlight's theme
+ * variables and a handful of its selectors, leaving its structure,
+ * responsive behavior, and accessibility hooks intact; when Starlight is
+ * upgraded, the class names below are the surface to re-check.
+ *
+ * Fonts are self-hosted from public/fonts/ so the site renders the same
+ * everywhere (and offline in the desktop app's engine family). The Nerd
+ * Font woff2 files are the same ones the UI crate vendors.
+ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Inter-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/Inter-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Inter-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Nerd Font";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMonoNerdFont-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Nerd Font";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMonoNerdFont-Bold.woff2") format("woff2");
+}
+
+:root {
+  --sl-font: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --sl-font-mono: "JetBrains Mono Nerd Font", ui-monospace, monospace;
+  --sl-content-width: 58rem;
+  --sl-sidebar-width: 18rem;
+  --sl-nav-height: 4.25rem;
+  --farhelm-bg: #151d27;
+  --farhelm-sidebar: #18222e;
+  --farhelm-panel: #1b2633;
+  --farhelm-panel-raised: #223043;
+  --farhelm-line: rgba(177, 194, 216, 0.14);
+  --farhelm-line-strong: rgba(177, 194, 216, 0.28);
+  --farhelm-text: #d8e0ec;
+  --farhelm-muted: #9ba8ba;
+  --farhelm-dim: #8491a3;
+  --farhelm-blue: #4d9af2;
+  --farhelm-blue-bright: #78b7ff;
+  --farhelm-cyan: #a9bfd9;
+  --farhelm-green: #79d891;
+  --farhelm-coral: #ff7f7f;
+}
+
+:root,
+:root[data-theme="dark"] {
+  --sl-color-accent-low: rgba(77, 154, 242, 0.18);
+  --sl-color-accent: var(--farhelm-blue);
+  --sl-color-accent-high: var(--farhelm-blue-bright);
+  --sl-color-white: #f3f4f7;
+  --sl-color-gray-1: #d1d5df;
+  --sl-color-gray-2: #b6bdcc;
+  --sl-color-gray-3: #8e97a8;
+  --sl-color-gray-4: #687184;
+  --sl-color-gray-5: #394252;
+  --sl-color-gray-6: #252c38;
+  --sl-color-gray-7: #171d27;
+  --sl-color-black: var(--farhelm-bg);
+  --sl-color-bg: var(--farhelm-bg);
+  --sl-color-bg-nav: rgba(9, 11, 16, 0.92);
+  --sl-color-bg-sidebar: var(--farhelm-sidebar);
+  --sl-color-bg-inline-code: rgba(77, 154, 242, 0.14);
+  --sl-color-hairline: var(--farhelm-line);
+  --sl-color-hairline-light: var(--farhelm-line-strong);
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #dbeafd;
+  --sl-color-accent: #286db8;
+  --sl-color-accent-high: #174b83;
+  --sl-color-white: #181b22;
+  --sl-color-gray-1: #272c36;
+  --sl-color-gray-2: #515a6a;
+  --sl-color-gray-3: #697386;
+  --sl-color-gray-4: #8791a2;
+  --sl-color-gray-5: #b9c0cc;
+  --sl-color-gray-6: #d5dae2;
+  --sl-color-gray-7: #e7eaf0;
+  --sl-color-black: #f8f9fb;
+  --sl-color-bg: #f8f9fb;
+  --sl-color-bg-nav: #f0f2f6;
+  --sl-color-bg-sidebar: #eef1f5;
+  --sl-color-bg-inline-code: #e1ebf7;
+  --sl-color-hairline: #d7dce5;
+  --sl-color-hairline-light: #c2c9d5;
+}
+
+header.header {
+  border-bottom: 1px solid var(--farhelm-line);
+  background: var(--sl-color-bg-nav);
+  backdrop-filter: blur(14px);
+}
+
+.site-title {
+  gap: 0.7rem;
+  color: var(--sl-color-white);
+  font-family: var(--sl-font-mono);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.title-nav a {
+  font-family: var(--sl-font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#starlight__sidebar {
+  background: var(--sl-color-bg-sidebar);
+  border-inline-end: 1px solid var(--farhelm-line);
+}
+
+#starlight__sidebar a,
+#starlight__sidebar summary {
+  font-size: 0.92rem;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+#starlight__sidebar a[aria-current="page"] {
+  background: rgba(77, 154, 242, 0.16);
+  box-shadow: inset 2px 0 0 var(--farhelm-blue-bright);
+  color: var(--sl-color-accent-high);
+}
+
+#starlight__sidebar a:hover,
+#starlight__sidebar summary:hover {
+  background: rgba(77, 154, 242, 0.09);
+  color: var(--sl-color-white);
+}
+
+#starlight__sidebar .group-label {
+  color: var(--farhelm-dim);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.main-pane {
+  min-width: 0;
+}
+
+.sl-markdown-content {
+  font-size: 1.06rem;
+  line-height: 1.78;
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+.sl-markdown-content h5,
+.sl-markdown-content h6 {
+  color: var(--sl-color-white);
+}
+
+.sl-markdown-content h1 {
+  font-family: var(--sl-font);
+  font-size: clamp(2.7rem, 6vw, 4.8rem);
+  font-weight: 700;
+  letter-spacing: -0.06em;
+  line-height: 1;
+}
+
+.sl-markdown-content h2 {
+  border-bottom: 1px solid var(--farhelm-line);
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  padding-bottom: 0.7rem;
+}
+
+.sl-markdown-content h3,
+.sl-markdown-content h4 {
+  color: var(--farhelm-cyan);
+  font-family: var(--sl-font-mono);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.sl-markdown-content > p:first-of-type {
+  color: var(--sl-color-gray-1);
+  font-size: 1.12rem;
+}
+
+.sl-markdown-content a {
+  text-decoration-color: rgba(120, 183, 255, 0.65);
+  text-underline-offset: 0.2em;
+}
+
+.sl-markdown-content code:not(pre code) {
+  border: 1px solid rgba(120, 183, 255, 0.28);
+  border-radius: 3px;
+  font-family: var(--sl-font-mono);
+}
+
+.sl-markdown-content pre {
+  border: 1px solid var(--farhelm-line-strong);
+  border-radius: 4px;
+}
+
+/* The near-black code surface is a dark-theme choice; in the light theme
+   Starlight's own code frame (its terminal-style header included) stays
+   light so the block reads as one piece. */
+:root[data-theme="dark"] .sl-markdown-content pre {
+  background: #080a0f;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+}
+
+.sl-markdown-content pre code {
+  font-family: var(--sl-font-mono);
+}
+
+.sl-markdown-content blockquote {
+  background: rgba(77, 154, 242, 0.1);
+  border-inline-start: 2px solid var(--farhelm-blue);
+  padding-inline-start: 1.1rem;
+}
+
+.sl-markdown-content table {
+  background: rgba(16, 20, 28, 0.74);
+  border: 1px solid var(--farhelm-line);
+  border-radius: 4px;
+}
+
+.sl-markdown-content th {
+  color: var(--sl-color-white);
+  font-family: var(--sl-font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.farhelm-panel {
+  border: 1px solid var(--farhelm-line-strong);
+  border-inline-start: 2px solid var(--farhelm-blue);
+  border-radius: 4px;
+  margin: 1.5rem 0;
+  padding: 1rem 1.2rem;
+}
+
+.farhelm-panel-accent {
+  background: linear-gradient(110deg, rgba(77, 154, 242, 0.12), transparent 60%), var(--farhelm-panel);
+}
+
+.farhelm-panel-quiet {
+  background: var(--farhelm-panel);
+  border-inline-start-color: var(--farhelm-cyan);
+}
+
+.farhelm-panel-title {
+  color: var(--sl-color-white);
+  font-family: var(--sl-font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.6rem;
+  text-transform: uppercase;
+}
+
+.farhelm-panel-body > :first-child {
+  margin-top: 0;
+}
+
+.farhelm-panel-body > :last-child {
+  margin-bottom: 0;
+}
+
+.right-sidebar {
+  border-inline-start-color: var(--farhelm-line);
+}
+
+.right-sidebar h2 {
+  color: var(--farhelm-dim);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 50rem) {
+  .sl-markdown-content {
+    font-size: 1rem;
+  }
+
+  .sl-markdown-content h1 {
+    font-size: 3rem;
+  }
+}

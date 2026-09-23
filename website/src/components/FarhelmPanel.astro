@@ -1,0 +1,15 @@
+---
+interface Props {
+  /** Optional heading shown above the panel's Markdown slot. */
+  title?: string;
+  /** Accent treatment for emphasis levels used by future pages. */
+  tone?: 'accent' | 'quiet';
+}
+
+const { title, tone = 'accent' } = Astro.props;
+---
+
+<aside class:list={['farhelm-panel', `farhelm-panel-${tone}`]}>
+  {title && <p class="farhelm-panel-title">{title}</p>}
+  <div class="farhelm-panel-body"><slot /></div>
+</aside>

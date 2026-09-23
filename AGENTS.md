@@ -145,6 +145,9 @@ that its required systemd or SSH substrate ran.
   because the workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the
   container image and the tmux build are both cached after the first run.
 - `dprint check`
+- `cd website && bun install --frozen-lockfile && bun run build` — the docs website (Astro + Starlight) must build; this
+  is what catches a page with missing frontmatter or a sidebar slug that names no page. Bun is the package manager the
+  Vercel project is configured with, so the lockfile is `bun.lock`; commit it with any dependency change.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
@@ -154,9 +157,9 @@ that its required systemd or SSH substrate ran.
   `CHANGELOG.md` or a fragment changes, the self-test when the checker does.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
-compilation, the JS harness, installer validation, and generated-workflow validation; costly Rust, pinned-tmux, desktop
-runtime, and CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes, update this list in
-the same change.
+compilation, the JS harness, the website build, installer validation, and generated-workflow validation; costly Rust,
+pinned-tmux, desktop runtime, and CentOS gates run in the x86_64 Linux release artifact job. If either workflow changes,
+update this list in the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build
@@ -406,10 +409,10 @@ The app icon is `packaging/farhelm-desktop/icon.svg` (the source of `icon.png` a
 wordmark, "farhelm" in JetBrains Mono Nerd Font Bold with the icon's block cursor after it, is
 `packaging/farhelm-desktop/wordmark-dark.svg` and `wordmark-light.svg`, one per ground. Its letters are outlines pulled
 from the font the UI crate vendors by `docs/readme/outline-wordmark.py` into `docs/readme/wordmark-outline.json`, and
-`docs/readme/render-svgs.mjs` inlines them into the wordmark files and the README's header, pillars, and how-it-works
-blocks under `docs/readme/`. Anything that needs the name as a mark uses those files; anything that changes the mark
-changes the script and re-runs it, never the SVGs by hand, and the outline step only reruns when the word or the font
-changes.
+`docs/readme/render-svgs.mjs` inlines them into the wordmark files, the README's header, pillars, and how-it-works
+blocks under `docs/readme/`, and the docs website's header mark (`website/src/site-mark-dark.svg` and `-light.svg`).
+Anything that needs the name as a mark uses those files; anything that changes the mark changes the script and re-runs
+it, never the SVGs by hand, and the outline step only reruns when the word or the font changes.
 
 # Desktop/web UI bug triage
 
