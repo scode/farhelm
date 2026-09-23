@@ -720,13 +720,10 @@ async fn serve_term(
         let _ = inbound.await;
     }
 
-    // Detaching is what ends the outbound task in the ORDINARY case (the
-    // browser closed its socket): the supervisor drops the attachment,
-    // the client signals detached, and the drain unwinds after sending
-    // its notice. The grace period covers exactly that notice; past it
-    // the task is abandoned, because by then it can only be blocked on
-    // the same unreadable socket the detach was about.
-    client.detach(channel).await;
+    // Let detach finish within the same grace as forced teardown. The
+    // independently owned upstream send survives this wait, so timing out
+    // bounds this handler without dropping the supervisor notification.
+    detach_bounded(&client, channel).await;
     settle_outbound(outbound, outbound_finished, WS_TEARDOWN_GRACE).await;
     result
 }
@@ -741,7 +738,7 @@ async fn detach_bounded(client: &SupervisorClient, channel: u32) {
     {
         tracing::warn!(
             channel,
-            "supervisor detach timed out after socket revocation"
+            "supervisor detach timed out during terminal teardown"
         );
     }
 }
@@ -784,6 +781,7 @@ async fn settle_outbound(
 #[cfg(test)]
 mod tests {
     use crate::BUILD_STAMP_HEADER;
+    use crate::client::SupervisorClient;
     use crate::rest_harness::{self, WsTestClient};
     use axum::body::to_bytes;
     use axum::http::{Request, StatusCode};
@@ -857,6 +855,90 @@ mod tests {
             start.elapsed() < Duration::from_secs(2),
             "a wedged drain must be abandoned at the grace, not waited on"
         );
+    }
+
+    /// Normal teardown bounds its wait while preserving the real client's
+    /// independently owned upstream send under writer backpressure.
+    ///
+    /// The peer first completes a real attach, then stops reading while
+    /// terminal input fills the client's bounded writer queue. The helper
+    /// must return at the teardown grace; once the peer resumes reading, it
+    /// must still receive the Detach that the timed-out caller no longer owns.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn ordinary_detach_wait_is_bounded_by_the_teardown_grace() {
+        use farhelm_proto::TerminalSelector;
+
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (read, write) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("peer handshake");
+            let request = farhelm_proto::io::parse_control(
+                &reader
+                    .read_frame()
+                    .await
+                    .expect("attach read")
+                    .expect("peer remains connected"),
+            )
+            .expect("attach control");
+            let ControlMsg::Attach {
+                req_id, channel, ..
+            } = request
+            else {
+                panic!("expected Attach, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::Attached { req_id, channel })
+                .await
+                .expect("attach reply");
+
+            release_rx.await.expect("test releases the stalled peer");
+            loop {
+                let frame = reader
+                    .read_frame()
+                    .await
+                    .expect("peer read")
+                    .expect("peer remains connected");
+                if frame.kind == farhelm_proto::FrameKind::Control
+                    && matches!(
+                        farhelm_proto::io::parse_control(&frame).expect("control frame"),
+                        ControlMsg::Detach { channel: got } if got == channel
+                    )
+                {
+                    return channel;
+                }
+            }
+        });
+        let (read, write) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(read, write)
+            .await
+            .expect("client handshake");
+        let (channel, _events) = client
+            .attach_terminal("sess-1", 80, 24, TerminalSelector::default(), "")
+            .await
+            .expect("terminal attach");
+
+        // Poll until the real bounded writer has accepted all available
+        // capacity and the remaining input is waiting for the stalled peer.
+        let mut input = Box::pin(client.send_input(channel, vec![0; 8 * 1024 * 1024]));
+        let parked = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(std::future::Future::poll(input.as_mut(), cx).is_pending())
+        })
+        .await;
+        assert!(parked, "the scripted peer must backpressure the writer");
+
+        super::detach_bounded(&client, channel).await;
+        drop(input);
+        release_tx.send(()).expect("peer is waiting for release");
+        let detached = tokio::time::timeout(Duration::from_secs(5), peer)
+            .await
+            .expect("the independent detach send was lost after caller timeout")
+            .expect("peer task panicked");
+        assert_eq!(detached, channel);
     }
 
     /// Rotation during supervisor admission never starts browser I/O and

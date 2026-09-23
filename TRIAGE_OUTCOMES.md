@@ -118,7 +118,8 @@
 - Completion criteria: normal close stops waiting after the existing teardown grace, the independent detach send remains
   active, forced teardown behavior is unchanged, focused teardown coverage passes, and this feedback file and its index
   entry are removed in the execution change.
-- Execution: `pending`.
+- Execution: implemented in change `pnmnrvpw` on bookmark `pr/normal-teardown-detach`;
+  [draft PR #900](https://github.com/scode/farhelm/pull/900/changes).
 
 ## orphaned-install-temps-on-managed-hosts.md
 
