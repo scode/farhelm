@@ -51,6 +51,14 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// is mounted at a time.
 const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
 
+/// Ask for consent when the agent may still be running. `Unknown` can be a
+/// reloaded live pane whose status sampler has not caught up; sending an
+/// unconfirmed restart then is refused by the supervisor with no way for
+/// the user to approve the stop from this button.
+fn restart_needs_confirmation(status: &SessionStatus) -> bool {
+    status.is_live() || *status == SessionStatus::Unknown
+}
+
 /// One session: a single header row (title, metadata, status, actions) over
 /// a tab strip over one terminal per open terminal — the sidebar beside this
 /// view owns navigation and rename. Each terminal div is handed to the JS island
@@ -1358,7 +1366,7 @@ pub(crate) fn SessionView(
     });
 
     let shown = current.read().clone();
-    let alive = shown.status.is_live();
+    let confirms_restart = restart_needs_confirmation(&shown.status);
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
@@ -1487,7 +1495,7 @@ pub(crate) fn SessionView(
                             // decision, exposed so it is inspectable (the
                             // browser suite waits on it) instead of only
                             // observable after the fact by clicking.
-                            "data-confirms": "{alive}",
+                            "data-confirms": "{confirms_restart}",
                             "aria-expanded": "{confirming()}",
                             "aria-controls": "restart-confirm-panel",
                             // SPEC.md's "restart says so" (`restart_label`,
@@ -1508,10 +1516,10 @@ pub(crate) fn SessionView(
                                 if !lifecycle.claim() {
                                     return;
                                 }
-                                if alive {
-                                    // Never a direct request for a live agent:
-                                    // restarting one kills it, so the click
-                                    // only opens the confirmation.
+                                if confirms_restart {
+                                    // A live or unclassified agent may need
+                                    // to be stopped, so the click obtains
+                                    // consent before sending that request.
                                     confirming.set(true);
                                 } else {
                                     fresh_restart(false);
@@ -2057,6 +2065,18 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An uncached startup row has no badge yet, but its live pane may
+    /// still need stopping. Restart must offer consent for that uncertain
+    /// state while ended sessions keep the direct restart path.
+    #[farhelm_testtrace::test]
+    fn an_unclassified_restart_requires_confirmation() {
+        assert!(restart_needs_confirmation(&SessionStatus::Unknown));
+        assert!(restart_needs_confirmation(&SessionStatus::Running));
+        assert!(!restart_needs_confirmation(&SessionStatus::Exited {
+            exit_code: Some(0),
+        }));
+    }
 
     /// A session fixture for the terminal-surface decisions below: live and
     /// reachable — the state that mounts terminals — so each

@@ -6159,11 +6159,10 @@ impl Supervisor {
                     hooked: hook_flag(false),
                     hook_warned: hook_flag(false),
                     // Activity samples are process-local and deliberately
-                    // not durable: a reloaded session has been observed by
-                    // nobody in THIS process, and inventing a STATUS for
-                    // it from a stored screen would claim knowledge of
-                    // what happened while the supervisor was down.
-                    activity: ActivitySample::unsampled(),
+                    // not durable. Mark this reload provisional so the
+                    // first live-pane reply does not replace the helm's
+                    // cached status with an unsampled `Running` guess.
+                    activity: ActivitySample::reloaded(),
                     // The timestamp beside it IS restored, and the two are
                     // not in tension. What the sampler holds is a claim
                     // about now — this pane looks like this, it has been

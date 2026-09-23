@@ -1206,6 +1206,21 @@ pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> Sessi
     }
 }
 
+/// Keep a host's last in-memory status when a fresh list has no status
+/// evidence for that session yet. Other fields remain from the new list;
+/// an identity-less host has no durable cache to perform this merge for it.
+fn retain_unknown_list_status(previous: &[SessionInfo], incoming: &mut [SessionInfo]) {
+    let statuses: HashMap<_, _> = previous
+        .iter()
+        .map(|session| (session.id.as_str(), &session.status))
+        .collect();
+    for entry in incoming {
+        if let Some(status) = statuses.get(entry.id.as_str()) {
+            entry.status = merged_status(status, entry.status.clone());
+        }
+    }
+}
+
 /// Fold what the helm already cached for a session into the `SessionInfo`
 /// a MUTATION's reply just produced, before that reply is recorded.
 ///
@@ -3690,6 +3705,12 @@ impl HostActor {
                     cache_changed: false,
                 };
             }
+            // The durable branch performs this inside its cache transaction.
+            // An identity-less host has only the actor's published list,
+            // which the lock above protects from concurrent seed writes.
+            if let Some(previous) = self.status.borrow().live_sessions.as_ref() {
+                retain_unknown_list_status(previous, &mut entries);
+            }
             return RefreshStep {
                 health: RefreshHealth::Ok { sessions },
                 end_connection: None,
@@ -4167,6 +4188,27 @@ mod tests {
     use std::{future::Future, pin::Pin};
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::sync::broadcast;
+
+    /// Identity-less hosts keep their previous list only in memory. An
+    /// unclassified startup reply must retain its last status there while
+    /// still updating other fields, then yield to a definite observation.
+    #[farhelm_testtrace::test]
+    fn an_identity_less_refresh_keeps_only_a_provisional_status() {
+        let mut old = session("s1", 100);
+        old.status = SessionStatus::Waiting;
+        let mut fresh = session("s1", 100);
+        fresh.title = "new title".to_string();
+        fresh.status = SessionStatus::Unknown;
+        let mut incoming = vec![fresh];
+
+        retain_unknown_list_status(&[old.clone()], &mut incoming);
+        assert_eq!(incoming[0].status, SessionStatus::Waiting);
+        assert_eq!(incoming[0].title, "new title");
+
+        incoming[0].status = SessionStatus::Idle;
+        retain_unknown_list_status(&[old], &mut incoming);
+        assert_eq!(incoming[0].status, SessionStatus::Idle);
+    }
 
     /// A row that has LEARNED an identity, met by a peer that reports none,
     /// must freeze rather than connect.

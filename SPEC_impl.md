@@ -1199,20 +1199,25 @@ failure can leave private evidence, but cannot authorize another directory move.
 - Status heuristics: periodic sampling of tmux pane activity and captured tail content, sharpened per agent kind (see
   below). Sampling must never sit on the attach/input path — SPEC.md forbids status from gating interaction. The
   supervisor's own ticker takes the samples; classification is a pure read of the sample beside the durable outcome, and
-  sits BELOW the recorded-error and dead-pane rules in the existing precedence, so a heuristic can only ever choose
-  among the live statuses. The generic baseline is observed output alone, counted in a session's OWN samples rather than
-  in elapsed time: three consecutive samples showing an unchanged screen reads idle, anything else live reads running,
-  and a session not yet sampled twice reads running since that is what a session that just launched is. Counting samples
-  rather than seconds is load-bearing — the sampler works through live panes on a budgeted round robin, so a session's
-  real sampling period grows with the fleet, and any wall-clock window would eventually report a continuously-working
-  agent as idle because the HOST was busy. Waiting is never derived from activity at all (a blocked agent and a finished
-  one are equally quiet); it comes only from per-kind sharpening. Codex is the one audited exception to raw comparison:
-  the sampler takes a temporary 64 KiB visible-grid tail, recognizes only its bottom composer (including its known
-  sparkle cells and safely bounded draft rows), then applies the normal UTF-8-safe 4096-byte cap to canonical comparison
-  text. It separately retains the raw 4096-byte tail for waiting recognition. Unknown composer, popup, and output shapes
-  remain unchanged. The pinned Codex `Working (elapsed • esc to interrupt)` widget adjoining that composer can prevent
-  quiet decay in both its animated and reduced-motion forms, including its bounded inline context and detail rows;
-  historical or quoted copies elsewhere in the pane do not. Waiting still wins.
+  sits BELOW the recorded-error and dead-pane rules in the existing precedence, so a heuristic only chooses among the
+  live statuses once sampling has produced evidence. The generic baseline is observed output alone, counted in a
+  session's OWN samples rather than in elapsed time: three consecutive samples showing an unchanged screen reads idle,
+  anything else live reads running. A new launch reads running before its first comparison. A reloaded live pane instead
+  reports provisional `unknown` until a changed screen, positive work hint, recognized waiting prompt, or three quiet
+  comparisons provide fresh status evidence; dead-pane and recorded-error outcomes bypass that provisional state. The
+  helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces the rest of
+  the row as usual. Its identity-less in-memory list follows the same rule within a connection. Disconnect clears those
+  rows by the existing identity-less host rule, so there is no previous status to retain after its supervisor restarts.
+  Counting samples rather than seconds is load-bearing — the sampler works through live panes on a budgeted round robin,
+  so a session's real sampling period grows with the fleet, and any wall-clock window would eventually report a
+  continuously-working agent as idle because the HOST was busy. Waiting is never derived from activity at all (a blocked
+  agent and a finished one are equally quiet); it comes only from per-kind sharpening. Codex is the one audited
+  exception to raw comparison: the sampler takes a temporary 64 KiB visible-grid tail, recognizes only its bottom
+  composer (including its known sparkle cells and safely bounded draft rows), then applies the normal UTF-8-safe
+  4096-byte cap to canonical comparison text. It separately retains the raw 4096-byte tail for waiting recognition.
+  Unknown composer, popup, and output shapes remain unchanged. The pinned Codex `Working (elapsed • esc to interrupt)`
+  widget adjoining that composer can prevent quiet decay in both its animated and reduced-motion forms, including its
+  bounded inline context and detail rows; historical or quoted copies elsewhere in the pane do not. Waiting still wins.
 - Last-activity timestamp: the same ticker that samples for status also DATES the changes it sees, into a
   `last_activity_at` column on the session row and onto the wire. It drives the row's displayed age and the helm's
   seen/unseen comparison, seeded to the session's creation time so one that has never produced output has an honest age,

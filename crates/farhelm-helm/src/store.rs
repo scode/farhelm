@@ -702,8 +702,8 @@ pub fn status_key(status: &SessionStatus) -> &'static str {
 /// word this build does not know.
 ///
 /// `unknown` is accepted even though it must never RENDER (see
-/// `SessionStatus::Unknown`'s own docs): the value exists in the cache
-/// while a freshly created session waits for its first classification, and
+/// `SessionStatus::Unknown`'s own docs): the value can exist in the cache
+/// while a session waits for its first classification, and
 /// a filter that could not name it would leave those rows unreachable
 /// rather than merely unbadged. Refusing an unrecognized word — rather
 /// than matching nothing — is what turns a typo into a 400 the user can
@@ -4325,6 +4325,13 @@ impl HelmStore {
     ///   `identity` is refused as [`HostStoreError::IdentityMismatch`] with
     ///   the existing cache left untouched.
     ///
+    /// An `Unknown` status in a fresh row retains this same host's previous
+    /// status, when its old payload still decodes. The supervisor uses that
+    /// value while a reloaded live pane has no fresh activity evidence;
+    /// retaining only the status lets a new title or timestamp land at once.
+    /// The merge happens inside this replacement transaction, so a reader
+    /// never sees a partly updated row.
+    ///
     /// ## Reports whether it CHANGED anything
     ///
     /// [`CacheReplacement::changed`] is the invalidation feed's changed-only
@@ -4412,8 +4419,21 @@ impl HelmStore {
             .context("clearing the stale cache")?;
             let mut contested: Vec<String> = Vec::new();
             let mut changed = false;
-            for entry in &entries {
-                let json = serde_json::to_string(entry).context("serializing cached session")?;
+            for mut entry in entries {
+                // A reloaded supervisor can identify a live pane before
+                // its sampler has enough evidence to classify the agent.
+                // `Unknown` carries no newer status claim, so keep this
+                // host's last answer until a definite observation arrives.
+                // Only this field is retained; the rest of the fresh row
+                // still replaces the old one. A corrupt old payload offers
+                // no status to retain and is replaced normally.
+                if entry.status == SessionStatus::Unknown
+                    && let Some((_, stored)) = previous.get(&entry.id)
+                    && let Ok(old) = serde_json::from_str::<SessionInfo>(stored)
+                {
+                    entry.status = old.status;
+                }
+                let json = serde_json::to_string(&entry).context("serializing cached session")?;
                 let inserted = tx
                     .execute(
                         // Conditional on the one-owner index rather than
@@ -4430,7 +4450,7 @@ impl HelmStore {
                              (host_id, session_id, created_at, info_json) \
                          VALUES (?1, ?2, ?3, ?4) \
                          ON CONFLICT (session_id) DO NOTHING",
-                        rusqlite::params![host, entry.id, entry.created_at, json],
+                        rusqlite::params![host, &entry.id, entry.created_at, json],
                     )
                     .context("inserting cached session")?;
                 if inserted == 0 {
@@ -12129,6 +12149,47 @@ mod tests {
         let cached = store.cached_sessions(host).await.unwrap();
         assert_eq!(cached.len(), 1, "the overlapping id must not duplicate");
         assert_eq!(cached[0].title, "renamed", "the newer copy must win");
+    }
+
+    /// An unclassified startup reply must carry the last cached status
+    /// through the same atomic replacement that updates the rest of a row.
+    /// A later definite status must then win, or the preserved answer would
+    /// become a permanent stale badge instead of a brief startup bridge.
+    #[farhelm_testtrace::test]
+    async fn provisional_refresh_keeps_status_until_a_definite_reply() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "startup@host", "startup-identity").await;
+        let mut initial = session("s1", 100);
+        initial.status = SessionStatus::Idle;
+        store
+            .replace_host_sessions(host, "startup-identity", vec![initial], false)
+            .await
+            .unwrap();
+
+        let mut provisional = session("s1", 100);
+        provisional.title = "fresh title".to_string();
+        provisional.status = SessionStatus::Unknown;
+        let changed = store
+            .replace_host_sessions(host, "startup-identity", vec![provisional.clone()], false)
+            .await
+            .unwrap();
+        assert!(
+            changed.changed,
+            "the fresh title still changes the cached row"
+        );
+        let cached = store.cached_sessions(host).await.unwrap();
+        assert_eq!(cached[0].status, SessionStatus::Idle);
+        assert_eq!(cached[0].title, "fresh title");
+
+        provisional.status = SessionStatus::Running;
+        store
+            .replace_host_sessions(host, "startup-identity", vec![provisional], false)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.cached_sessions(host).await.unwrap()[0].status,
+            SessionStatus::Running
+        );
     }
 
     /// The wholesale-replacement contract stress-tested across a SHRINKING

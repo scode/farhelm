@@ -36,9 +36,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently
   connected displays and falling back safely when the display layout changes so the window never reopens off-screen or
   unusably large.
-- On Farhelm startup with existing sessions, render each session's last known state immediately instead of briefly
-  marking many sessions green/active for several seconds while the live state settles; reconcile the cached state with
-  the current live state once available.
 - Investigate suppressing the Claude and Codex startup prompts that ask whether to trust the working directory, using
   supported per-session mechanisms where available without weakening their trust boundaries; keep the warning when
   Farhelm cannot establish directory trust safely.
