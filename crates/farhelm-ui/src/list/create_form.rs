@@ -3661,7 +3661,7 @@ pub(super) fn CreateSessionForm(
                     } else {
                         "{summary_permission}"
                     }
-                    if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Muse | LaunchHarness::Pi)) {
+                    if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi)) {
                         " · trust: {summary_trust}"
                     }
                 }
@@ -4817,11 +4817,14 @@ pub(super) fn CreateSessionForm(
                             }
                         }
                         }
-                        if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Muse | LaunchHarness::Pi)) {
+                        if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi)) {
                             div { class: "launch-composer-choice launch-composer-trust-choice",
                                 span { class: "launch-composer-section-label", "workspace trust" }
                                 if structured_harness() == Some(LaunchHarness::Muse) {
                                     p { class: "launch-composer-choice-help", "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace." }
+                                }
+                                if structured_harness() == Some(LaunchHarness::Codex) {
+                                    p { class: "launch-composer-choice-help", "Codex true trusts this directory for this launch; false runs it as untrusted. Default uses Codex's own setting or prompt." }
                                 }
                                 div { class: "launch-composer-segmented",
                                     for (choice, label) in [(None, "default"), (Some(true), "true"), (Some(false), "false")] {

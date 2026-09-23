@@ -153,6 +153,13 @@ pub const CONVERSATION_PLACEHOLDER: &str = "{conversation}";
 /// or word-split, and never as `argv[0]` (see [`ensure_no_cwd_program`]).
 pub const CWD_PLACEHOLDER: &str = "{cwd}";
 
+/// Structured Codex launches defer their project-trust override until the
+/// target supervisor knows the final working directory. Each marker is one
+/// entire argv element after `-c`; raw paths cannot be embedded in the
+/// helm's earlier invocation because a fresh checkout has no path yet.
+pub const CODEX_TRUSTED_CWD_PLACEHOLDER: &str = "{codex:trusted-cwd}";
+pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
+
 /// The short model-visible pointer delivered through every supported vendor's
 /// additive instruction channel.
 pub const INSTRUCTIONS_POINTER: &str = "farhelm: when the user writes \"$farhelm ...\", run `farhelm agent instructions` and follow its output.";
@@ -2605,8 +2612,10 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
     }
 }
 
-/// Substitute the launch's working directory for every [`CWD_PLACEHOLDER`]
-/// element. Meant for exactly one caller, `Supervisor::spawn_agent` — the
+/// Substitute the launch's working directory into each supported whole-element
+/// marker. Codex project-trust markers use the target's canonical directory
+/// when available; the ordinary `{cwd}` marker keeps the path tmux receives.
+/// Meant for exactly one caller, `Supervisor::spawn_agent` — the
 /// single seam where an argv becomes a process for create, retry, and
 /// every restart mode alike — as the first of the two transformations that
 /// seam applies, ahead of hook-flag injection, so the injected tail is
@@ -2628,15 +2637,49 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 /// rejected one is.)
 pub fn fill_cwd(mut argv: Vec<String>, cwd: &str) -> Vec<String> {
     fill_slots(&mut argv, CWD_PLACEHOLDER, cwd);
+    if !argv.iter().skip(1).any(|element| {
+        matches!(
+            element.as_str(),
+            CODEX_TRUSTED_CWD_PLACEHOLDER | CODEX_UNTRUSTED_CWD_PLACEHOLDER
+        )
+    }) {
+        return argv;
+    }
+    // Codex matches project trust by the path it sees after chdir. Resolve
+    // symlinks here, on the target host, so the per-run override names that
+    // same directory. If the path changes after the earlier usability check,
+    // retain the original spelling: the subsequent exec will decide whether
+    // the directory still exists, without accidentally trusting another key.
+    let resolved = std::fs::canonicalize(cwd)
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok())
+        .unwrap_or_else(|| cwd.to_string());
+    for element in argv.iter_mut().skip(1) {
+        let level = match element.as_str() {
+            CODEX_TRUSTED_CWD_PLACEHOLDER => "trusted",
+            CODEX_UNTRUSTED_CWD_PLACEHOLDER => "untrusted",
+            _ => continue,
+        };
+        // The existing TOML encoder also escapes DEL, which JSON leaves raw
+        // even though TOML forbids it. Keep any directory name inside one
+        // project key rather than letting it change the config's structure.
+        let path = toml_basic_string(&resolved);
+        *element = format!("projects={{{path}={{trust_level=\"{level}\"}}}}");
+    }
     argv
 }
 
-/// Whether `argv` carries [`CWD_PLACEHOLDER`] as a whole element anywhere.
+/// Whether `argv` carries a working-directory marker as a whole element.
 /// The one place that comparison is spelled out, so the log line in
-/// `spawn_agent` and this module's own tests cannot drift from the
-/// substitution rule itself.
+/// `spawn_agent` and this module's own tests cannot drift from either the
+/// ordinary `{cwd}` or Codex project-trust substitution rule.
 pub fn has_cwd_placeholder(argv: &[String]) -> bool {
-    argv.iter().any(|element| element == CWD_PLACEHOLDER)
+    argv.iter().any(|element| {
+        matches!(
+            element.as_str(),
+            CWD_PLACEHOLDER | CODEX_TRUSTED_CWD_PLACEHOLDER | CODEX_UNTRUSTED_CWD_PLACEHOLDER
+        )
+    })
 }
 
 /// Whether a resume template carries the placeholder as a whole element.
@@ -3402,6 +3445,74 @@ mod tests {
             ["w", "run", "/a b/c", "claude", "--dir={cwd}", "/a b/c"],
             "slots 2 and 5 are whole-element matches and must be replaced; slot 4 is `{{cwd}}` \
              embedded in a longer flag and must not be"
+        );
+    }
+
+    /// Codex's project key must be built on the target after checkout
+    /// resolution. Keep both trust levels and a quoted path in one `-c`
+    /// element, or shell/config parsing could trust a different directory.
+    #[farhelm_testtrace::test]
+    fn codex_project_trust_uses_the_final_cwd_as_one_config_argument() {
+        let cwd = "/not-present/a \"quoted\" \\ dir \u{7f}";
+        for (marker, level) in [
+            (CODEX_TRUSTED_CWD_PLACEHOLDER, "trusted"),
+            (CODEX_UNTRUSTED_CWD_PLACEHOLDER, "untrusted"),
+        ] {
+            let argv = vec!["codex".to_string(), "-c".to_string(), marker.to_string()];
+            assert!(has_cwd_placeholder(&argv));
+            let filled = fill_cwd(argv, cwd);
+            assert!(!has_cwd_placeholder(&filled));
+            assert_eq!(filled.len(), 3);
+            assert_eq!(
+                filled[2],
+                format!(
+                    "projects={{{}={{trust_level=\"{level}\"}}}}",
+                    toml_basic_string(cwd)
+                )
+            );
+            assert!(filled[2].contains("\\u007F"));
+            assert!(!filled[2].contains('\u{7f}'));
+            let parsed: toml::Value = filled[2].parse().expect("Codex override is valid TOML");
+            assert_eq!(
+                parsed["projects"][cwd]["trust_level"].as_str(),
+                Some(level),
+                "the escaped path must remain one exact project key"
+            );
+        }
+    }
+
+    /// A symlink spelling of the selected directory must authorize the
+    /// directory Codex sees after chdir, rather than leave the prompt active
+    /// because the config key names only the alias.
+    #[cfg(unix)]
+    #[farhelm_testtrace::test]
+    fn codex_project_trust_resolves_a_symlinked_cwd() {
+        let root = tempfile::tempdir().expect("workdir");
+        let target = root.path().join("target");
+        std::fs::create_dir(&target).expect("target directory");
+        let alias = root.path().join("alias");
+        std::os::unix::fs::symlink(&target, &alias).expect("directory alias");
+        let filled = fill_cwd(
+            vec![
+                "codex".into(),
+                "-c".into(),
+                CODEX_TRUSTED_CWD_PLACEHOLDER.into(),
+            ],
+            alias.to_str().expect("fixture path is UTF-8"),
+        );
+        assert_eq!(
+            filled[2],
+            format!(
+                "projects={{{}={{trust_level=\"trusted\"}}}}",
+                serde_json::to_string(
+                    target
+                        .canonicalize()
+                        .expect("canonical target")
+                        .to_str()
+                        .expect("fixture path is UTF-8")
+                )
+                .unwrap()
+            )
         );
     }
 

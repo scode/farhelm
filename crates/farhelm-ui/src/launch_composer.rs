@@ -85,7 +85,7 @@ pub(crate) const fn normalized_permissions(
     }
 }
 
-/// Keep a trust choice only on harnesses with a documented per-launch switch.
+/// Keep a trust choice only on harnesses with a supported launch mapping.
 ///
 /// A switch to an unsupported harness clears the current draft's choice;
 /// the helm's remembered default remains available for a new dialog.
@@ -94,7 +94,7 @@ pub(crate) const fn normalized_workspace_trust(
     trust: Option<bool>,
 ) -> Option<bool> {
     match harness {
-        LaunchHarness::Muse | LaunchHarness::Pi => trust,
+        LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => trust,
         _ => None,
     }
 }
@@ -686,7 +686,12 @@ pub(crate) fn search_results(
     }
 
     if scope == SearchScope::Trust
-        && harness.is_some_and(|harness| matches!(harness, LaunchHarness::Muse | LaunchHarness::Pi))
+        && harness.is_some_and(|harness| {
+            matches!(
+                harness,
+                LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
+            )
+        })
     {
         for (word, value) in [("true", true), ("false", false)] {
             if query.is_empty() || word.starts_with(&folded_query) {
@@ -1248,7 +1253,7 @@ mod tests {
     #[test]
     fn trust_search_actions_are_scoped_to_supported_harnesses() {
         let history = LaunchHistory::default();
-        for harness in [LaunchHarness::Muse, LaunchHarness::Pi] {
+        for harness in [LaunchHarness::Codex, LaunchHarness::Muse, LaunchHarness::Pi] {
             let results = search_results(&history, &[], "trust:", Some(harness), None);
             assert_eq!(
                 results,
@@ -1265,7 +1270,7 @@ mod tests {
                 &history,
                 &[],
                 "trust:true",
-                Some(LaunchHarness::Codex),
+                Some(LaunchHarness::Claude),
                 None
             )
             .is_empty()
@@ -1280,7 +1285,7 @@ mod tests {
     fn harness_reconciliation_clears_unsupported_workspace_trust() {
         let mut choice = selection(LaunchHarness::Muse, None, None);
         choice.workspace_trust = Some(false);
-        let (changed, _) = reconcile_harness_selection(choice, None, LaunchHarness::Codex, &[]);
+        let (changed, _) = reconcile_harness_selection(choice, None, LaunchHarness::Claude, &[]);
         assert_eq!(changed.workspace_trust, None);
         assert!(selection_is_compatible(&changed, &[]));
     }

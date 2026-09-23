@@ -426,9 +426,19 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
             argv.push(flag.to_string());
         }
     }
-    // Pi's project settings and extensions are separate from its absent
-    // tool gate; this flag must never be inferred from `permissions`.
+    // Workspace trust is independent of tool approval. Codex's project key
+    // needs the target's final cwd, which the supervisor fills only after a
+    // possible checkout has been prepared.
     match (selection.harness, selection.workspace_trust) {
+        (LaunchHarness::Codex, Some(trust)) => argv.extend([
+            "-c".to_string(),
+            if trust {
+                farhelm_supervisor::agent_kind::CODEX_TRUSTED_CWD_PLACEHOLDER
+            } else {
+                farhelm_supervisor::agent_kind::CODEX_UNTRUSTED_CWD_PLACEHOLDER
+            }
+            .to_string(),
+        ]),
         (LaunchHarness::Muse, Some(true)) => argv.push("--trust-workspace".to_string()),
         (LaunchHarness::Pi, Some(trust)) => argv.push(if trust {
             "--approve".to_string()
@@ -474,7 +484,10 @@ fn program(harness: LaunchHarness) -> &'static str {
 /// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
     if selection.workspace_trust.is_some()
-        && !matches!(selection.harness, LaunchHarness::Muse | LaunchHarness::Pi)
+        && !matches!(
+            selection.harness,
+            LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
+        )
     {
         return Err("workspace trust is not offered by this harness".to_string());
     }
@@ -1252,10 +1265,13 @@ mod tests {
     }
 
     /// A workspace-trust choice changes only a supported harness's one-run
-    /// project-content flag. Pi's mandatory YOLO tool mode remains separate.
+    /// project-content setting. Pi's mandatory YOLO tool mode remains separate,
+    /// and Codex's path waits for the supervisor's resolved launch directory.
     #[test]
-    fn workspace_trust_compiles_only_for_muse_and_pi() {
+    fn workspace_trust_compiles_only_for_supported_harnesses() {
         for (harness, trust, expected_flag) in [
+            (LaunchHarness::Codex, Some(true), None),
+            (LaunchHarness::Codex, Some(false), None),
             (LaunchHarness::Muse, Some(true), Some("--trust-workspace")),
             (LaunchHarness::Muse, Some(false), None),
             (LaunchHarness::Pi, Some(true), Some("--approve")),
@@ -1279,15 +1295,23 @@ mod tests {
                 expected_flag.into_iter().collect::<Vec<_>>()
             );
             assert_eq!(compiled.selection.workspace_trust, trust);
+            if harness == LaunchHarness::Codex {
+                assert_eq!(argv[0], "codex");
+                assert_eq!(argv[1], "-c");
+                assert_eq!(
+                    argv[2],
+                    if trust == Some(true) {
+                        farhelm_supervisor::agent_kind::CODEX_TRUSTED_CWD_PLACEHOLDER
+                    } else {
+                        farhelm_supervisor::agent_kind::CODEX_UNTRUSTED_CWD_PLACEHOLDER
+                    }
+                );
+            }
             if harness == LaunchHarness::Pi {
                 assert_eq!(compiled.selection.permissions, Some(LaunchPermission::Yolo));
             }
         }
-        for harness in [
-            LaunchHarness::Codex,
-            LaunchHarness::Claude,
-            LaunchHarness::Goose,
-        ] {
+        for harness in [LaunchHarness::Claude, LaunchHarness::Goose] {
             let mut choice = selection(harness);
             choice.model = Some("z-ai/glm-5.3".into());
             choice.workspace_trust = Some(true);
