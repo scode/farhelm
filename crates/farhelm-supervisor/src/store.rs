@@ -119,7 +119,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// step in `apply_schema`: version 2 (PLAN_M3.md item 2 — the durable
 /// last-known outcome and the boot id) is the first real migration this
 /// database has ever had, and the template every later one follows.
-const SCHEMA_VERSION: i64 = 20;
+const SCHEMA_VERSION: i64 = 22;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1422,6 +1422,44 @@ pub struct StoredSession {
     /// cannot upgrade it — see the migration 20 comment for why the
     /// backfill direction is 0, unconditionally.
     pub capture_ownership_version: i64,
+    /// Which gated reporter asset this session's CURRENT launch installed,
+    /// or `None` when unknown — every pre-proof launch, every launch whose
+    /// injection was skipped, every launch that never got past its spec
+    /// publish (which provably started nothing), and every relaunch whose
+    /// provenance write has not landed yet (a relaunch opens its
+    /// generation with both provenance columns cleared).
+    ///
+    /// The value is the asset's file name (today
+    /// `farhelm-conversation-v2.ts` for OMP), written pre-spawn — after
+    /// the launch spec publishes, before tmux can start anything — by
+    /// the one place that decides injection, fenced on the launch
+    /// generation. Publishing before the first process can exist is
+    /// what closes the startup-report race. OMP admission requires it
+    /// to name the current binary's asset AND the file to re-read
+    /// byte-identical: a session launched under the old gateless asset
+    /// carries `None` (or a stale name) and fails closed — runnable, no
+    /// capture. Preserved across supervisor reload like the rest of the
+    /// row, and re-proven at each admission rather than trusted, which
+    /// is what makes a reload a proven reload. Only OMP uses this
+    /// column today; later kinds must not reinterpret it without their
+    /// own per-kind meaning recorded here.
+    pub omp_reporter_asset: Option<String>,
+    /// The launch PROGRAM this session's CURRENT launch started — the
+    /// installation descriptor the OMP corridor must find live — or
+    /// `None` when unknown (every pre-proof launch, every launch whose
+    /// provenance write never landed).
+    ///
+    /// The value is
+    /// [`OmpLaunchProgram`](crate::agent_kind::omp::OmpLaunchProgram)'s
+    /// column spelling, classified from the argv this generation
+    /// actually started — after Fresh/Resume selection — and written
+    /// beside the asset marker by the same fenced provenance write.
+    /// The resume template is a future resume's command, not this
+    /// launch's, and says nothing about what runs now; admission reads
+    /// this column instead. Decoded leniently: anything unrecognized
+    /// is `Unknown` and fails closed at the corridor. Only OMP uses
+    /// this column today.
+    pub omp_launch_program: Option<String>,
     /// Which profile this session was CREATED from, or `None` for a
     /// raw-created session (PLAN_M6_75.md item 4).
     ///
@@ -1648,7 +1686,9 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  launch                TEXT,
                  last_work_started_at  INTEGER NOT NULL DEFAULT 0,
                  fresh_checkout_id     TEXT,
-                 capture_ownership_version INTEGER NOT NULL DEFAULT 0
+                 capture_ownership_version INTEGER NOT NULL DEFAULT 0,
+                 omp_reporter_asset TEXT,
+                 omp_launch_program TEXT
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1692,7 +1732,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  working_copy_id TEXT NOT NULL,
                  PRIMARY KEY (session_id, working_copy_id)
              ) STRICT;
-             PRAGMA user_version = 20;
+             PRAGMA user_version = 22;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2201,6 +2241,42 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 19 to 20")?;
         version = 20;
     }
+    if version == 20 {
+        // Launch provenance for the OMP ownership proof: which gated
+        // reporter asset the session's current launch installed. Every
+        // pre-21 row adopts NULL — launched before any binary recorded
+        // this — so old launches fail closed rather than being
+        // grandfathered. The column is nullable `TEXT`, repeated in the
+        // fresh-database DDL above so a migrated and a freshly created
+        // database have identical schemas.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN omp_reporter_asset TEXT;
+             PRAGMA user_version = 21;
+             COMMIT;",
+        )
+        .context("migrating schema from version 20 to 21")?;
+        version = 21;
+    }
+    if version == 21 {
+        // The launch PROGRAM beside the asset marker: the classification
+        // of the argv this generation actually started, retained so
+        // admission binds the live chain to the current launch rather
+        // than to the resume template (a future resume's command, not
+        // this launch's). Every pre-22 row adopts NULL — launched
+        // before any binary recorded this — so old launches fail
+        // closed. The column is nullable `TEXT`, repeated in the
+        // fresh-database DDL above so a migrated and a freshly created
+        // database have identical schemas.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE sessions ADD COLUMN omp_launch_program TEXT;
+             PRAGMA user_version = 22;
+             COMMIT;",
+        )
+        .context("migrating schema from version 21 to 22")?;
+        version = 22;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2338,9 +2414,9 @@ fn insert_session_row(
           captured_record, capture_ambiguous, first_input_at, generation, launch_scoped, \
           source_profile_id, source_profile_name, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, launch, \
-          capture_ownership_version) \
+          capture_ownership_version, omp_reporter_asset, omp_launch_program) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2379,6 +2455,8 @@ fn insert_session_row(
                 .transpose()
                 .context("serializing structured launch selection")?,
             row.capture_ownership_version,
+            row.omp_reporter_asset,
+            row.omp_launch_program,
         ],
     )
     .context("inserting session row")?;
@@ -2409,7 +2487,7 @@ const SESSION_COLUMNS: &str = "id, title, cwd, invocation, tmux_name, pane, \
                                first_input_at, generation, launch_scoped, created_at, \
                                source_profile_id, source_profile_name, parent, creation_seq, \
                                last_activity_at, last_work_started_at, conversation_source, launch, \
-                               capture_ownership_version";
+                               capture_ownership_version, omp_reporter_asset, omp_launch_program";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
@@ -2464,6 +2542,8 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             source_profile: None,
             conversation_source: r.get(26)?,
             capture_ownership_version: r.get(28)?,
+            omp_reporter_asset: r.get(29)?,
+            omp_launch_program: r.get(30)?,
         },
         (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?),
         r.get(10)?,
@@ -3695,6 +3775,8 @@ impl SessionStore {
             let mut row = StoredSession {
                 conversation_source: None,
                 capture_ownership_version: 0,
+                omp_reporter_asset: None,
+                omp_launch_program: None,
                 created_at: preserved_created_at,
                 // Carried for `created_at`'s reason and with the same
                 // reach: the replaced row provably never launched (an
@@ -3825,6 +3907,14 @@ impl SessionStore {
     ///   hooked kind fires its hook again on the resumed launch and reports
     ///   the same id; that write is an idempotent overwrite of the
     ///   already-preserved value, not the thing that keeps it alive.
+    /// - `omp_reporter_asset` and `omp_launch_program` clear UNCONDITIONALLY
+    ///   — on a `Resume` relaunch as much as a fresh one. They describe the
+    ///   LAUNCH (which argv started, which reporter it installed), not the
+    ///   conversation being resumed, so preserving them would lend the
+    ///   previous run's capture authority to this one. The pre-spawn
+    ///   provenance write republishes the new generation's pair; if that
+    ///   write fails, the columns stay unknown and admission fails closed
+    ///   instead of reading stale authority.
     /// - `launch_scoped` is re-decided from `scope_available`, because the
     ///   selection belongs to a launch and not to a session (PLAN_M3.md item
     ///   10): a host that lost its user manager between two launches must
@@ -3896,10 +3986,14 @@ impl SessionStore {
             // One statement rather than two near-identical ones: the capture
             // columns are cleared by an expression that is a no-op when the
             // relaunch is resuming, so the SQL cannot drift between the two
-            // cases the way two copies of it could.
+            // cases the way two copies of it could. The OMP launch-provenance
+            // columns beside them clear unconditionally — they describe the
+            // launch, not the conversation, so even a Resume must not inherit
+            // them.
             tx.execute(
                 "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, pane = '', generation = ?6, launch_scoped = ?7, \
+                 omp_reporter_asset = NULL, omp_launch_program = NULL, \
                  first_input_at = CASE WHEN ?8 THEN NULL ELSE first_input_at END, \
                  captured_conversation = \
                      CASE WHEN ?8 THEN NULL ELSE captured_conversation END, \
@@ -4833,6 +4927,52 @@ impl SessionStore {
         .context("ownership-proven admission task panicked")?
     }
 
+    /// Record one OMP launch's provenance: which gated reporter asset it
+    /// installed (`None` when it installed none) and which program its
+    /// argv started. The write is fenced on the launch generation, so a
+    /// slow spawn records against the run it actually launched rather
+    /// than one a relaunch has since replaced.
+    ///
+    /// Called pre-spawn — after the launch spec publishes, before tmux
+    /// can start anything — by the one place that decides injection,
+    /// for every OMP launch that gets that far. Publishing before the
+    /// first process can exist is what closes the startup-report race:
+    /// a report requires a live agent, which requires the tmux start
+    /// this write precedes. Only a spec-publish failure records
+    /// nothing, and that failure provably started nothing. A tmux
+    /// failure records the decided values: the argv was fixed, so an
+    /// ambiguous survivor runs exactly what the row describes. Only
+    /// OMP writes here today.
+    ///
+    /// `program` is the launch classification's column spelling, not
+    /// the enum: the store keeps plain strings at its boundary the
+    /// way it does for the asset name, and the caller owns the
+    /// mapping.
+    pub async fn record_omp_launch_provenance(
+        &self,
+        id: &str,
+        generation: i64,
+        asset: Option<&str>,
+        program: &str,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let asset = asset.map(str::to_owned);
+        let program = program.to_owned();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            conn.execute(
+                "UPDATE sessions SET omp_reporter_asset = ?3, omp_launch_program = ?4 \
+                 WHERE id = ?1 AND generation = ?2",
+                rusqlite::params![id, generation, asset, program],
+            )
+            .context("recording the launch's OMP provenance")?;
+            Ok(())
+        })
+        .await
+        .context("OMP provenance record task panicked")?
+    }
+
     /// Record durably that this session's correlation was AMBIGUOUS, so no
     /// SCAN will ever claim an identity for this launch (PLAN_M3.md item
     /// 8).
@@ -5518,6 +5658,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: id.to_string(),
                     parent: None,
                     title: id.to_string(),
@@ -6361,9 +6503,18 @@ mod tests {
             let conn = Connection::open(&db_path).expect("open raw v19 fixture");
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN capture_ownership_version;
+                 ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
+                 ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  PRAGMA user_version = 19;",
             )
             .expect("downgrade the fixture to the pre-provenance schema");
+            let downgraded: i64 = conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("read downgraded version");
+            assert_eq!(
+                downgraded, 19,
+                "the fixture premise: a genuine pre-20 database"
+            );
         }
 
         let migrated = SessionStore::open(&db_path, true)
@@ -6396,7 +6547,10 @@ mod tests {
             .expect("open raw")
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .expect("read user version");
-        assert_eq!(version, 20, "the migration stamps version 20");
+        assert_eq!(
+            version, SCHEMA_VERSION,
+            "the migration replays the whole ladder to the current version"
+        );
     }
 
     /// Only the authoritative admission writer establishes version 1,
@@ -6556,6 +6710,125 @@ mod tests {
         );
     }
 
+    /// A relaunch opens its generation with UNKNOWN OMP launch provenance
+    /// even when it preserves the captured conversation: the asset marker
+    /// and the program describe the LAUNCH (which argv started, which
+    /// reporter it installed), not the conversation being resumed, so
+    /// carrying them across would lend the previous run's capture
+    /// authority to this one. If the new generation's provenance publish
+    /// then fails, the columns stay unknown and admission fails closed
+    /// instead of evaluating this launch's reporters as its predecessor.
+    ///
+    /// Why this test matters: the pre-spawn provenance write is
+    /// best-effort — a transient storage failure warns and launches
+    /// anyway. Starting from non-NULL old provenance is what makes the
+    /// test discriminate: without the atomic clear, the failed publish
+    /// would leave the preceding generation's pair on the new
+    /// generation's row. Both relaunch arms are covered because the
+    /// clear is unconditional: the Resume arm keeps its conversation
+    /// while losing its provenance.
+    ///
+    /// What stands in for the failed write: a provenance write through
+    /// the real function against a superseded generation, which the
+    /// fence provably drops. A failed write's observable contract is
+    /// that nothing lands, and this is a write — carrying values
+    /// distinct from both the old and the new pair — that lands
+    /// nothing. Afterwards the new generation's own publish lands,
+    /// proving the clear did not wedge the columns.
+    #[farhelm_testtrace::test]
+    async fn relaunch_clears_omp_provenance_when_the_publish_lands_nothing() {
+        let (_dir, store) = fresh_store().await;
+        for id in ["omp-fresh", "omp-resume"] {
+            let mut row = launching_row(id);
+            row.captured_conversation = Some("conv-old".to_string());
+            row.conversation_source = Some("hook".to_string());
+            row.omp_reporter_asset = Some("farhelm-conversation-v2.ts".to_string());
+            row.omp_launch_program = Some("omp".to_string());
+            store
+                .insert_session(row, None)
+                .await
+                .expect("insert stale-provenance fixture");
+        }
+        let basis = OfferBasis {
+            captured_conversation: Some("conv-old".to_string()),
+            capture_ambiguous: false,
+            capture_ownership_version: 0,
+        };
+        for (id, reset_capture, kept_conversation) in [
+            ("omp-fresh", true, None),
+            ("omp-resume", false, Some("conv-old")),
+        ] {
+            let claim = claimed(
+                store
+                    .begin_relaunch(id, basis.clone(), reset_capture, false)
+                    .await
+                    .expect("relaunch"),
+            );
+            let row = store
+                .session(id)
+                .await
+                .expect("read reopened row")
+                .expect("row survives");
+            assert_eq!(
+                row.omp_reporter_asset, None,
+                "{id}: the new generation must not inherit the previous run's asset marker"
+            );
+            assert_eq!(
+                row.omp_launch_program, None,
+                "{id}: the new generation must not inherit the previous run's program"
+            );
+            assert_eq!(
+                row.captured_conversation.as_deref(),
+                kept_conversation,
+                "{id}: the clear must not disturb the capture-preservation arm it rides with"
+            );
+            // The failed publish: a write through the real function that
+            // lands nothing — the fence drops a superseded generation.
+            store
+                .record_omp_launch_provenance(
+                    id,
+                    claim.generation - 1,
+                    Some("farhelm-conversation-v2.ts"),
+                    "shell",
+                )
+                .await
+                .expect("a fenced-out write is still a successful call");
+            let row = store
+                .session(id)
+                .await
+                .expect("read after the failed publish")
+                .expect("row survives");
+            assert_eq!(
+                (
+                    row.omp_reporter_asset.as_deref(),
+                    row.omp_launch_program.as_deref()
+                ),
+                (None, None),
+                "{id}: a publish that lands nothing must leave unknown provenance, not stale authority"
+            );
+            // And the new generation's own publish lands on the cleared
+            // columns — here the finding's resumed-shell shape, whose
+            // authority differs from the direct-`omp` launch it replaces.
+            store
+                .record_omp_launch_provenance(id, claim.generation, None, "shell")
+                .await
+                .expect("the new generation publishes");
+            let row = store
+                .session(id)
+                .await
+                .expect("read after the new publish")
+                .expect("row survives");
+            assert_eq!(
+                (
+                    row.omp_reporter_asset.as_deref(),
+                    row.omp_launch_program.as_deref()
+                ),
+                (None, Some("shell")),
+                "{id}: the new generation's pair must publish onto the cleared columns"
+            );
+        }
+    }
+
     /// Every outcome shape must survive the on-disk round trip — the stop
     /// annotation and the exit code especially, since those are exactly
     /// what SPEC.md promises a user still sees after a supervisor restart
@@ -6630,6 +6903,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "demo".to_string(),
@@ -6683,6 +6958,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     title: "demo".to_string(),
                     parent: None,
@@ -7290,6 +7567,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: Some("parent-7".to_string()),
                     title: "demo".to_string(),
@@ -7355,6 +7634,8 @@ mod tests {
                 StoredSession {
                     conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "structured".to_string(),
@@ -7443,6 +7724,8 @@ mod tests {
                         conversation_source: None,
                         capture_ownership_version: 0,
                         id: "s-structured".to_string(),
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
                         parent: None,
                         title: "structured launch".to_string(),
                         created_at: now_unix(),
@@ -7538,6 +7821,8 @@ mod tests {
                  ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
                  ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
+                 ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
+                 ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  PRAGMA user_version = 17;",
             )
             .expect("restore pre-checkout schema");
@@ -7607,6 +7892,8 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
+                 ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
+                 ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  UPDATE sessions SET archived = 1,
                      title = 'retained title', pane = '', outcome_state = 'exited',
                      exit_code = 0, annotation = 'archived by user', parent = 'parent-session',
@@ -7958,6 +8245,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -8019,6 +8308,8 @@ mod tests {
         StoredSession {
             conversation_source: None,
             capture_ownership_version: 0,
+            omp_reporter_asset: None,
+            omp_launch_program: None,
             canonical_cwd: None,
             captured_record: None,
             capture_ambiguous: false,
@@ -9041,6 +9332,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     created_at: ORIGINAL_CREATED_AT,
                     last_activity_at: ORIGINAL_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -9061,6 +9354,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     created_at: RETRY_CREATED_AT,
                     last_activity_at: RETRY_ACTIVITY_AT,
                     last_work_started_at: 0,
@@ -9115,6 +9410,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     created_at: CREATED,
                     last_activity_at: CREATED,
                     last_work_started_at: 0,
@@ -9233,6 +9530,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "t".to_string(),
@@ -9845,6 +10144,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -10072,12 +10373,14 @@ mod tests {
                 "ALTER TABLE sessions DROP COLUMN last_work_started_at;
                  ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
                  ALTER TABLE sessions DROP COLUMN capture_ownership_version;
+                 ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
+                 ALTER TABLE sessions DROP COLUMN omp_launch_program;
                  DROP TABLE working_copies;
                  DROP TABLE working_copy_members;
                  ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
                  PRAGMA user_version = 16;",
             )
-            .expect("remove the v17, v18, and v19 additions from the fixture");
+            .expect("remove the v17, v18, v19, and v20 additions from the fixture");
         }
 
         let migrated = SessionStore::open(&db_path, true)
@@ -10153,6 +10456,8 @@ mod tests {
                     StoredSession {
                         conversation_source: None,
                         capture_ownership_version: 0,
+                        omp_reporter_asset: None,
+                        omp_launch_program: None,
                         created_at: *created_at,
                         last_activity_at: *created_at,
                         last_work_started_at: 0,
@@ -10177,6 +10482,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN last_work_started_at;
              ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
+             ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
+             ALTER TABLE sessions DROP COLUMN omp_launch_program;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
@@ -10263,6 +10570,8 @@ mod tests {
              ALTER TABLE sessions DROP COLUMN last_work_started_at;
              ALTER TABLE sessions DROP COLUMN fresh_checkout_id;
              ALTER TABLE sessions DROP COLUMN capture_ownership_version;
+             ALTER TABLE sessions DROP COLUMN omp_reporter_asset;
+             ALTER TABLE sessions DROP COLUMN omp_launch_program;
              DROP TABLE working_copies;
              DROP TABLE working_copy_members;
              ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
@@ -10915,6 +11224,8 @@ mod tests {
                 StoredSession {
                     conversation_source: None,
                     capture_ownership_version: 0,
+                    omp_reporter_asset: None,
+                    omp_launch_program: None,
                     id: "s1".to_string(),
                     parent: None,
                     title: "s1".to_string(),
@@ -11124,6 +11435,8 @@ mod tests {
         let stranded = |title: &str| StoredSession {
             conversation_source: None,
             capture_ownership_version: 0,
+            omp_reporter_asset: None,
+            omp_launch_program: None,
             id: "s1".to_string(),
             parent: None,
             title: title.to_string(),

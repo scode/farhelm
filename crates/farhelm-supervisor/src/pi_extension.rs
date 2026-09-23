@@ -31,9 +31,15 @@ pub(crate) const PI_ASSET: VendorAsset = VendorAsset {
 /// OMP's conversation reporter, loaded with `-e` and pointed at the reporter
 /// through `FARHELM_OMP_REPORTER_EXE`. Same publication contract as Pi's;
 /// the assets are never shared because the vendors' event surfaces differ.
+///
+/// The file name is versioned past Pi's shared `v1`: the gated asset must
+/// materialize beside — never over — the gateless `v1` bytes an old launch
+/// may still be running, so post-upgrade launches capture immediately
+/// while old launches fail closed by launch provenance instead of by
+/// having their file pulled out from under them.
 pub(crate) const OMP_ASSET: VendorAsset = VendorAsset {
     directory: "omp",
-    file_name: "farhelm-conversation-v1.ts",
+    file_name: "farhelm-conversation-v2.ts",
     source: include_bytes!("../assets/omp-conversation-v1.ts"),
 };
 
@@ -124,6 +130,8 @@ mod tests {
     /// OMP's artifact materializes under its own directory under the same
     /// exact-bytes contract: private, reused on a second publish, and
     /// refused on a collision — without disturbing Pi's published copy.
+    /// The versioned file name keeps the gated asset beside the gateless
+    /// `v1` bytes rather than over them.
     #[farhelm_testtrace::test]
     async fn omp_artifact_materializes_privately_and_refuses_collisions() {
         let state = farhelm_teststate::tempdir().expect("state directory");
@@ -134,7 +142,7 @@ mod tests {
             first,
             state
                 .path()
-                .join("integrations/omp/farhelm-conversation-v1.ts")
+                .join("integrations/omp/farhelm-conversation-v2.ts")
         );
         let second = materialize_asset(state.path(), &OMP_ASSET)
             .await
@@ -160,11 +168,43 @@ mod tests {
 
         let collision = state
             .path()
-            .join("integrations/omp/farhelm-conversation-v1.ts");
+            .join("integrations/omp/farhelm-conversation-v2.ts");
         std::fs::write(&collision, b"not Farhelm's extension").expect("collision");
         let error = materialize_asset(state.path(), &OMP_ASSET)
             .await
             .expect_err("mismatched collision must be refused");
         assert!(format!("{error:#}").contains("does not contain Farhelm's expected bytes"));
+    }
+
+    /// The gated asset publishes BESIDE the gateless `v1` bytes, never over
+    /// them: a pre-existing `v1` file (an old launch's loaded artifact) is
+    /// left byte-identical while the versioned publish lands separately.
+    ///
+    /// Why this test matters: the old-asset fail-closed rule depends on the
+    /// old file surviving the upgrade untouched — old launches keep running
+    /// the bytes they loaded and fail closed by launch provenance, not by
+    /// having their artifact replaced under them.
+    #[farhelm_testtrace::test]
+    async fn omp_gated_asset_publishes_beside_the_old_artifact() {
+        let state = farhelm_teststate::tempdir().expect("state directory");
+        let old = state
+            .path()
+            .join("integrations/omp/farhelm-conversation-v1.ts");
+        crate::ensure_private_dir(old.parent().unwrap())
+            .await
+            .expect("artifact directory");
+        std::fs::write(&old, b"gateless old bytes").expect("old artifact");
+        let gated = materialize_asset(state.path(), &OMP_ASSET)
+            .await
+            .expect("gated publish");
+        assert_eq!(
+            std::fs::read(&old).expect("old artifact bytes"),
+            b"gateless old bytes",
+            "the old launch's artifact is untouched by the upgrade publish"
+        );
+        assert_eq!(
+            std::fs::read(&gated).expect("gated artifact bytes"),
+            OMP_ASSET.source
+        );
     }
 }

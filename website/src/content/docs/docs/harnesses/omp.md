@@ -7,7 +7,9 @@ OMP is the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI — a fork of Pi, 
 private extension Farhelm supplies at launch reports which conversation you are in, and Farhelm does not scan OMP's own
 state directory to guess at anything it was not told. The one bounded exception: before a resume, Farhelm reads a
 bounded prefix of the exact session file the report named — wherever it lives, usually inside OMP's state directory — to
-verify it still belongs to that conversation. This page describes the integration as built against OMP 18.2.4.
+verify it still belongs to that conversation. This page describes the integration as built against OMP 18.2.4 and
+18.2.6, both pinned at the source with the same rules for which launches count. Live lifecycle evidence was collected
+against 18.2.6.
 
 ## What the integration deliberately does not do
 
@@ -26,6 +28,21 @@ symlinks and requires the session header inside it to match the conversation it 
 belongs to a different conversation, or does not read as the session it was reported to be, Farhelm refuses Resume and
 offers a fresh launch instead — it never silently starts a new conversation under a Resume request. This matters because
 OMP itself can silently start a new conversation when given a missing session file.
+
+## How Farhelm knows the report is yours
+
+The extension reports only from the interactive window. Background tasks and workpool children stay silent. A separate
+interactive child must also pass process attribution: Farhelm checks the reporting process against the owned pane and
+the launch's recorded program, rather than trusting inherited reporting credentials.
+
+The launch record must name the current gated extension, whose installed bytes are checked before admission. Old
+launches without that provenance remain runnable but cannot capture a conversation until relaunched. Supported process
+chains include the Bun runtime running OMP's bundle or source entry, its compiled binary, the recognized `bun x` and
+`npx` launchers, and transparent shell trampolines. Nested runtimes, Node running OMP, and unknown wrappers are refused.
+A refused report leaves the saved identity unchanged; it cannot replace the root conversation's Resume target.
+
+Live lifecycle evidence covers the Bun-executed entry. Compiled and package-launcher forms have process-chain shape
+tests, but have not been exercised through the same live lifecycle scenarios.
 
 ## How your model id is resolved
 
