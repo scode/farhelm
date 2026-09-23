@@ -1008,13 +1008,14 @@ The instructions themselves are printed only when that command is run, so a sess
 farhelm pays one line and nothing more. Grok's manually configured hooks omit `--announce`: Grok ignores the relevant
 stdout, so its integration delivers no instructions pointer.
 
-For agents without integration, restart falls back to the profile's resume invocation verbatim apart from placeholder
-substitution (which may land in the agent's own picker or most-recent-conversation behavior), or a fresh launch when the
-profile defines none. If a supported agent's conversation identity was never captured for a session, restart says so and
-offers that same fallback or a fresh launch — it must never silently resume the wrong conversation. A resume invocation
-referencing `{conversation}` is never run with the placeholder unfilled: no captured identity means restart offers a
-fresh launch and says why, not a garbled command line. `{cwd}` is always filled where it stands as a whole argument, on
-every launch and restart; there is no launch without a working directory.
+For agents without integration, restart falls back to the profile's resume invocation verbatim, or to a fresh launch
+when the profile defines none. A generic session has no conversation-identity capture, so its fallback command cannot
+contain `{conversation}`; create refuses that configuration with guidance to remove the placeholder or use an integrated
+kind. If an integrated agent's conversation identity was never captured, restart says so and offers a fresh launch when
+its resume invocation requires that identity. A resume invocation referencing `{conversation}` is never run with the
+placeholder unfilled: no captured identity means restart offers a fresh launch and says why, not a garbled command line.
+`{cwd}` is always filled where it stands as a whole argument, on every launch and restart; there is no launch without a
+working directory.
 
 ## VCS neutrality
 
