@@ -17,9 +17,19 @@ also uses the heading text as the release's name. `releasing/check-changelog.py`
 the release gate runs it, so a file dist would misread fails the tag build instead of publishing a release with the
 wrong notes.
 
+Curated release sections are historical records. Once a section has been approved or published, do not rewrite it to
+adopt a later layout rule, wording convention, or category set. A change to this process applies to sections curated
+after the change; the checker must retain compatibility with older sections so a release in flight does not require
+retroactive edits. When a new format is introduced, update the checker and its fixtures to recognize both the new format
+and the older formats that remain in the file.
+
+The current compatibility registry preserves the Highlights layout in `v0.12.0` and `v0.13.0`. It is a record of
+already-curated sections, not permission to use that layout in a new release.
+
 ## Format
 
-The layout is stipulated, not suggested. The checker refuses deviations, so read this before editing the file.
+The layout below is the current format for new sections. It is a curation guide, not a migration instruction for older
+sections; the checker accepts the historical formats that are already present.
 
 - The file opens with `# Changelog` and a short paragraph of prose. Nothing else sits above the first release.
 - Each release is `## vX.Y.Z - YYYY-MM-DD`: the version first, with its `v`, then the date the section was written.
@@ -29,27 +39,22 @@ The layout is stipulated, not suggested. The checker refuses deviations, so read
   picking up half-written notes.
 - Inside a release, categories appear in this order and with these emoji, each omitted when it has nothing:
 
-  | Heading             | Holds                                                                       |
-  | ------------------- | --------------------------------------------------------------------------- |
-  | `### ✨ Highlights` | prose subsections for anything that needs more than a sentence              |
-  | `### 💥 Breaking`   | `feat!` and any other type marked `!`; anything a user must act on          |
-  | `### 🚀 Added`      | `feat`                                                                      |
-  | `### 🔄 Changed`    | `style`, and `feat` or `perf` that alters existing behavior                 |
-  | `### 🔧 Fixed`      | `fix`, `perf` that fixes a performance problem                              |
-  | `### 🗑️ Removed`     | removals that are not breaking in practice; breaking ones go under Breaking |
+  | Heading           | Holds                                                                       |
+  | ----------------- | --------------------------------------------------------------------------- |
+  | `### 💥 Breaking` | `feat!` and any other type marked `!`; anything a user must act on          |
+  | `### 🚀 Added`    | `feat`                                                                      |
+  | `### 🔄 Changed`  | `style`, and `feat` or `perf` that alters existing behavior                 |
+  | `### 🔧 Fixed`    | `fix`, `perf` that fixes a performance problem                              |
+  | `### 🗑️ Removed`   | removals that are not breaking in practice; breaking ones go under Breaking |
 
   Why these emoji: 💥 rather than 🔥 for Breaking because 🔥 is the common mark for removed code, and 🔄 rather than ♻️
   for Changed because recycling reads as refactoring. Category headings sit below the release level, so the parser never
   looks at them and the emoji stay out of the release name.
-- Highlights is prose: one `####` subsection per item, each a title and one or more paragraphs, no bullets at the top
-  level. Every other category is bullets: one `-` item per entry, one paragraph, ending in its PR reference as `(#N)` or
-  `(#N, #M)`.
+- Every category is bullets: one `-` item per entry, one paragraph, ending in its PR reference as `(#N)` or `(#N, #M)`.
 - One paragraph per physical line, however long. `CHANGELOG.md`, the fragments, and local curation drafts are excluded
   from dprint in `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every
   newline as a line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker
   tolerates indented continuation lines as part of an item, but do not write them.
-- An item that gets a highlight also gets its one-line bullet in its category. The category lists are complete on their
-  own; Highlights is a reading aid, and a release with nothing worth a paragraph has no Highlights heading.
 - A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
   not only what changed.
 - Entries are written for someone running Farhelm. Name the feature as the UI or CLI names it, say what changed for
@@ -96,16 +101,17 @@ several PRs at once; a fragment added in the change's own commit needs no `pr:` 
 commit that added it.
 
 The body is a draft in user-facing voice, written after reading `releasing/EDITORIAL_GUIDANCE.md`, the maintainer's
-accumulated wording rules: the first paragraph is the one-liner candidate, further paragraphs are material for a
-highlight. Err toward including caveats. It is not reviewed at PR time and it is not the final text; curation rewrites
+accumulated wording rules: the first paragraph is the entry candidate, and further paragraphs supply context for
+curation. Err toward including caveats. It is not reviewed at PR time and it is not the final text; curation rewrites
 it. When the draft rests on a guess (a PR with no description, say), say so in the body so the curator verifies it.
 
 ## The checker
 
 `releasing/check-changelog.py` has three modes and a `--self-test`; none of them writes anything.
 
-- `format` lints `CHANGELOG.md` and every fragment against the rules above. The release gate runs it on every tag, and
-  it belongs in the validation of any PR that touches either.
+- `format` lints `CHANGELOG.md` and every fragment against the current rules plus the historical section formats the
+  checker still supports. It checks structure and references; it does not rewrite, normalize, or migrate curated release
+  text. The release gate runs it on every tag, and it belongs in the validation of any PR that touches either.
 - `fragments` walks the commits since the merge base with the last stable `vX.Y.Z` tag (stable releases are tagged on a
   release branch that never merges, so the merge base is the honest "since"), reports each required commit as covered by
   a fragment it added or changed, or one that claims its PR, or as `MISSING`, and lists `STALE` fragments whose adding
@@ -130,12 +136,11 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    fragment author's judgment is not the user's decision), and `STALE` ones are raised as described under the checker.
    This is the sweep the fragment rule exists to make cheap.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
-   agent agree on in conversation, following that guidance. Decide which items earn a highlight. Write the whole
-   proposed `## vX.Y.Z - YYYY-MM-DD` section to `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path.
-   This ignored local Markdown file is the review surface. The maintainer edits it in a text editor and tells the agent
-   when to read it back. Read the file again after each editing round; do not reconstruct its contents from conversation
-   or an earlier read. Continue until the maintainer approves the text. Keep the file until the changelog section is
-   committed, then delete it.
+   agent agree on in conversation, following that guidance. Write the whole proposed `## vX.Y.Z - YYYY-MM-DD` section to
+   `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path. This ignored local Markdown file is the
+   review surface. The maintainer edits it in a text editor and tells the agent when to read it back. Read the file
+   again after each editing round; do not reconstruct its contents from conversation or an earlier read. Continue until
+   the maintainer approves the text. Keep the file until the changelog section is committed, then delete it.
 
    Treat the file's text and any wording the maintainer supplies as authoritative. Reproduce supplied wording and file
    edits exactly: do not summarize, paraphrase, polish, reorder, or silently correct them. If the agent proposes wording
