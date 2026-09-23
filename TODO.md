@@ -4,15 +4,15 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Nine buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
+Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
 the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
-review triage within each item's stated scope; "near term" is what should be picked up next; "tricky bugs" retains
-unresolved bug reports and their investigation findings; "deflake" gathers test and harness reliability work, including
-CI execution and restoring gates; "broken tests" records tests that fail deterministically, with the failure and the
-evidence that it predates any in-flight work; "code review" is the residue of the September 2026 review swarms after the
-policy pass, ordered by confidence and risk; "maybe later" is wanted but not soon, and may never happen; "unbucketized"
-is everything not yet sorted, which carries no implication either way. Within a bucket, no order unless the bucket
-explicitly says so.
+review triage within each item's stated scope; "near term" is what should be picked up next; "doc todo" holds
+documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers test
+and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
+deterministically, with the failure and the evidence that it predates any in-flight work; "code review" is the residue
+of the September 2026 review swarms after the policy pass, ordered by confidence and risk; "maybe later" is wanted but
+not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way.
+Within a bucket, no order unless the bucket explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -42,6 +42,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Add an `update all` action that updates all remote hosts in one operation; details are TBD.
 - Modernize the interrupted-session view shown after the host running the supervisor or agents restarts. Make clear that the session must be restarted intentionally, then offer clean, Farhelm-styled `Restart` and `Replace` buttons instead of making the state look like a failure.
 - Restyle the typical session header's `Restart` button to match Farhelm's visual style. Consider moving the status indicator and session actions — Restart, Replace, Clone, Clone with, and related buttons — to a more visible bottom area while keeping the interface consistent; exact layout is TBD.
+- Audit the remaining GUI buttons for controls that are rendered as plain gray text or otherwise do not match Farhelm's visual style, and make button styling consistent throughout the GUI.
 
 - Remember Farhelm's expanded/full-screen state across restarts so users do not have to double-click to expand it each
   time. Use the platform's standard restorable-window-state behavior, validating saved bounds against the currently
@@ -54,6 +55,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   mixed-harness delegation, and propose the required ownership checks while preserving legitimate foreground
   clear/new/switch/fork/resume transitions. This is an assessment task, not a claim that every vendor path has been
   reproduced. [Historical assessment](lore/2026-09-20-harness-conversation-ownership.md).
+
+## Doc todo
+
+- Bring the README overview/splash content into the main documentation.
+- Document the harness support feature matrix so supported and unsupported features are clear.
 
 ## Tricky bugs
 
