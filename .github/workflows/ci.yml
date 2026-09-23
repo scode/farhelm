@@ -131,7 +131,7 @@ jobs:
           fi
           base=$(git merge-base "origin/$BASE_REF" HEAD) || exit 1
           # A file outside the docs allowlist means the change is code.
-          if git diff --name-only "$base" HEAD | grep -qvE '^(.*\.md|docs/.*|lore/.*|LICENSE.*)$'; then
+          if git diff --name-only "$base" HEAD | grep -qvE '^(.*\.md|docs/.*|lore/.*|LICENSE.*|website/.*)$'; then
             echo "code=true" >>"$GITHUB_OUTPUT"
           else
             echo "docs-only change; skipping the Rust jobs"
@@ -285,6 +285,25 @@ jobs:
             sh -n scripts/install.sh
             bash scripts/test-install-sh.sh
           '
+
+  # The docs website (website/, Astro + Starlight) builds here so a page with
+  # broken frontmatter or a dangling sidebar slug fails before Vercel's own
+  # build does. Like dprint it is independent of the `changes` gate: a
+  # website-only change is in the docs allowlist and skips the Rust jobs,
+  # while this job is seconds long and the one check that covers it.
+  website:
+    runs-on: ubicloud
+    # Draft PRs run nothing (see the trigger comment at the top).
+    if: inputs.suite != 'uninstall-macos' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+        working-directory: website
+      - run: bun run build
+        working-directory: website
 
   dprint:
     runs-on: ubicloud

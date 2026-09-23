@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Renders the README's drawn blocks (the header mark and the pillars grid) as
 // SVG files, one light and one dark variant each, into this directory, plus
-// the standalone wordmark files beside the app icon in packaging/.
+// the standalone wordmark files beside the app icon in packaging/ and the
+// docs website's header mark under website/src/.
 //
 // Why a generator instead of four hand-edited files: the light and dark
 // variants share every coordinate and differ only in colors, and the pillars
@@ -138,6 +139,20 @@ function headerSvg(p) {
     <circle cx="498" cy="162" r="4" fill="${p.ok}"/><text x="510" y="166">gpu-1</text>
     <circle cx="568" cy="162" r="4" fill="${p.warn}"/><text x="580" y="166">lab</text>
   </g>
+</svg>
+`;
+}
+
+// Icon and wordmark on one line, for the docs website's header: the README
+// header without its tagline and host row, at a size that fits Starlight's
+// navigation bar. Two files for the same reason as the README's: the site
+// hands Starlight one image per color scheme rather than one SVG that could
+// see the page's theme. The mark is drawn small (a 64-unit-high box) so its
+// intrinsic size is close to the rendered one and no CSS has to fight it.
+function siteMarkSvg(p) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 296 64" width="296" height="64" role="img" aria-label="farhelm">
+  ${iconMark(p, 2, 4, 56)}
+  ${wordmark(p, 74, 50, 46)}
 </svg>
 `;
 }
@@ -403,10 +418,15 @@ function howItWorksSvg(p) {
 // The standalone wordmark lives beside the app icon it is drawn to match, so
 // anyone looking for the brand marks finds both in one place.
 const brandDir = join(here, "..", "..", "packaging", "farhelm-desktop");
+// The site mark lives with the website source that references it (Starlight
+// resolves the logo path relative to the project), not under public/, so it
+// is bundled and fingerprinted like the rest of the site's assets.
+const siteDir = join(here, "..", "..", "website", "src");
 
 for (const [theme, p] of Object.entries(palettes)) {
   writeFileSync(join(here, `header-${theme}.svg`), headerSvg(p));
   writeFileSync(join(here, `pillars-${theme}.svg`), pillarsSvg(p));
   writeFileSync(join(here, `how-it-works-${theme}.svg`), howItWorksSvg(p));
   writeFileSync(join(brandDir, `wordmark-${theme}.svg`), wordmarkSvg(p));
+  writeFileSync(join(siteDir, `site-mark-${theme}.svg`), siteMarkSvg(p));
 }

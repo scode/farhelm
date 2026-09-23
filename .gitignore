@@ -53,3 +53,8 @@ e2e/.auth/storage-state.json
 # booted (e2e/readme-hero/start-stack.sh); per run, removed by its trap.
 e2e/readme-hero/.stack-info.json
 __pycache__/
+
+# Astro build output and content-collection cache for the docs website;
+# Vercel builds website/dist itself and nothing in the repo consumes it.
+website/dist/
+website/.astro/

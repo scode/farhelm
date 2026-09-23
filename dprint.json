@@ -6,6 +6,7 @@
   },
   "excludes": [
     "**/*-lock.json",
+    "**/bun.lock",
     "target/**",
     "lore/**",
     "CHANGELOG.md",
