@@ -53,7 +53,7 @@ installTerminalSuiteHooks();
 // a restart affordance that fired on open, or on back, would be the bug.
 /**
  * Add one interrupted, resumable session to the real listing and intercept
- * its restart route, counting the requests that reach it.
+ * its restart and replace routes, counting the requests that reach them.
  *
  * The real listing plus one injected row, so every other test's session
  * (and the shared "e2e-session") keeps coming through untouched. The
@@ -80,7 +80,7 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
     listing.total += 1;
     await route.fulfill({ response, json: listing });
   });
-  const counter = { restartRequests: 0 };
+  const counter = { restartRequests: 0, replaceRequests: 0 };
   // The reply is the shape a real restart returns — the session with the
   // supervisor's deliberate `unknown` for a run it cannot vouch for yet —
   // so the view takes its SUCCESS path (a bare `{}` would fail to decode
@@ -95,6 +95,26 @@ async function injectInterruptedSession(page: Page, sessionId: string, title: st
       body: JSON.stringify({
         id: sessionId,
         title,
+        cwd: "/tmp",
+        invocation: "claude",
+        status: { state: "unknown" },
+        restart_offer: "resume",
+        created_at: 0,
+        last_activity_at: 0,
+        tabs: [],
+      }),
+    });
+  });
+  await page.route(`**/api/sessions/${sessionId}/replace`, async (route) => {
+    counter.replaceRequests++;
+    await fulfillAsHelm(route, {
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        // The replacement must have a different identity. Reusing the
+        // source id would let this test pass without proving selection moved.
+        id: `${sessionId.slice(0, -1)}9`,
+        title: `${title} (replaced)`,
         cwd: "/tmp",
         invocation: "claude",
         status: { state: "unknown" },
@@ -168,8 +188,9 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(page.locator(".tab-strip")).toHaveCount(0);
   const notice = page.locator(".interrupted-notice");
   await expect(notice).toBeVisible();
-  await expect(notice).toContainText("did not survive the host reboot");
+  await expect(notice).toContainText("host reboot interrupted this session's terminal");
   await expect(notice).toContainText("resumes this session's own conversation");
+  await expect(notice.locator(".restart-from-notice")).toHaveText("Restart");
   await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "resume conversation");
   expect(counter.restartRequests).toBe(0);
 
@@ -181,6 +202,59 @@ test("an interrupted session's view leads with the resume offer, and declining c
   const row = rowByTitle(page, title);
   await expect(row.locator(".status-badge")).toHaveText("interrupted");
   expect(counter.restartRequests).toBe(0);
+});
+
+/**
+ * The missing-terminal choices stay visually coherent with the compact
+ * Farhelm controls, and Replace cannot discard a conversation without a
+ * deliberate confirmation. A successful choice must show the new session;
+ * a refusal must leave an actionable error on the interrupted one.
+ */
+test("Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal", async ({
+  page,
+}) => {
+  const sessionId = "11111111-2222-3333-4444-777777777777";
+  const title = `interrupted-replace-${Date.now()}`;
+  const counter = await injectInterruptedSession(page, sessionId, title);
+
+  await page.goto("/");
+  await rowByTitle(page, title).locator(".session-row-open").click();
+  const notice = page.locator(".interrupted-notice");
+  const replace = notice.locator(".replace-from-notice");
+  await expect(replace).toHaveCSS("padding-top", "2px");
+  await expect(notice.locator(".restart-from-notice")).toHaveCSS("padding-top", "2px");
+  await replace.click();
+  await expect(notice.locator(".replace-confirm")).toBeVisible();
+  await expect(replace).toHaveCSS("opacity", "1");
+  await expect(notice.locator(".replace-confirm-submit")).toHaveCSS("font-size", "12px");
+  await expect(notice.locator(".replace-confirm-submit")).toHaveCSS("padding-left", "8px");
+  await notice.locator(".replace-cancel").click();
+  await expect(notice.locator(".replace-confirm")).toHaveCount(0);
+  expect(counter.replaceRequests).toBe(0);
+
+  await replace.click();
+  await notice.locator(".replace-confirm-submit").click();
+  await expect.poll(() => counter.replaceRequests).toBe(1);
+  await expect(page.locator(".titlebar .title")).toHaveText(`${title} (replaced)`);
+
+  const refusedId = "11111111-2222-3333-4444-888888888888";
+  const refusedTitle = `interrupted-replace-refused-${Date.now()}`;
+  const refused = await injectInterruptedSession(page, refusedId, refusedTitle);
+  await page.route(`**/api/sessions/${refusedId}/replace`, async (route) => {
+    refused.replaceRequests++;
+    await fulfillAsHelm(route, {
+      status: 409,
+      contentType: "text/plain",
+      body: "replacement refused: source is no longer available",
+    });
+  });
+  await rowByTitle(page, refusedTitle).locator(".session-row-open").click();
+  await page.locator(".replace-from-notice").click();
+  await page.locator(".replace-confirm-submit").click();
+  await expect.poll(() => refused.replaceRequests).toBe(1);
+  await expect(page.locator(".replace-error")).toContainText("source is no longer available");
+  await expect(page.locator(".replace-error")).toHaveCSS("font-size", "12px");
+  await expect(page.locator(".replace-from-notice")).toBeVisible();
 });
 
 // The interrupted surface's own restart control is the same request the

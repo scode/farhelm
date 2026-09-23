@@ -48,4 +48,4 @@ mod shared;
 mod view;
 
 pub(crate) use shared::OpenDestination;
-pub(crate) use view::{ListView, SharedPreferences};
+pub(crate) use view::{ListView, SharedPreferences, remember_selection};

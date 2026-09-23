@@ -1554,6 +1554,7 @@ fn AppBody() -> Element {
                                     key: "{session.id}",
                                     session: session.clone(),
                                     gate: ops::PaneGate::new(page_ops, row_ops),
+                                    on_replaced: move |replacement: Session| current.set(Some(replacement)),
                                 }
                             },
                         }

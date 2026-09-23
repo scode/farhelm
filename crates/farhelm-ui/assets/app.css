@@ -972,7 +972,8 @@ samp {
    disabled. It is disabled — claiming the cross-pane lifecycle gate is
    what disables it — and `.btn:disabled`'s 0.5 opacity alone would say
    "unavailable" about the one control the open popover belongs to. */
-.titlebar-actions .btn[aria-expanded="true"] {
+.titlebar-actions .btn[aria-expanded="true"],
+.interrupted-notice .replace-from-notice[aria-expanded="true"] {
   opacity: 1;
   background: var(--accent-fill);
   border-color: var(--accent-edge);
@@ -1882,6 +1883,7 @@ samp {
 .confirm-delete,
 .confirm-cancel,
 .confirm-replace,
+.replace-confirm-submit,
 .replace-cancel,
 .rename-submit,
 .rename-cancel {
@@ -3414,9 +3416,9 @@ samp {
    host rebooted and took the terminal with it, so there is nothing to
    attach and nothing to retry (SPEC.md's missing-terminal rule — metadata
    and the reason, never an empty pane). Same band treatment as the stale
-   notice, since both explain an absent terminal, plus the one control the
-   situation calls for: restart, which for an interrupted session offers
-   to resume the conversation. The header already carries that control;
+   notice, since both explain an absent terminal, plus the intentional
+   Restart and Replace choices the interrupted state calls for. The header
+   already carries Restart;
    this one sits where the terminal was, because that is where the user
    is looking when they wonder why nothing is there. */
 .interrupted-notice {
@@ -3428,6 +3430,35 @@ samp {
   font-size: 12px;
   color: var(--warn);
   background: var(--bg-1);
+}
+
+/* The choice buttons sit inside a narrow explanatory band. Give them the
+   header's compact dimensions rather than leaving their padding to each
+   browser's button defaults; the text stays together when the band wraps. */
+.interrupted-notice > .restart-from-notice,
+.interrupted-notice > .replace-from-notice {
+  font-size: 12px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.replace-confirm {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-basis: 100%;
+}
+
+.replace-confirm .confirm-consequence {
+  flex: 1 1 100%;
+}
+
+.replace-error {
+  /* A refusal gets the same full-width, readable band as restart errors. */
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--danger);
 }
 
 /* The rest of SPEC.md's metadata triple for a stale session: the header
