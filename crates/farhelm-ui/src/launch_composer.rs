@@ -85,6 +85,20 @@ pub(crate) const fn normalized_permissions(
     }
 }
 
+/// Keep a trust choice only on harnesses with a documented per-launch switch.
+///
+/// A switch to an unsupported harness clears the current draft's choice;
+/// the helm's remembered default remains available for a new dialog.
+pub(crate) const fn normalized_workspace_trust(
+    harness: LaunchHarness,
+    trust: Option<bool>,
+) -> Option<bool> {
+    match harness {
+        LaunchHarness::Muse | LaunchHarness::Pi => trust,
+        _ => None,
+    }
+}
+
 /// Return the permission phrase a complete selection presents to the user.
 pub(crate) fn selection_permission_value(selection: &LaunchSelection) -> &'static str {
     normalized_permissions(selection.harness, selection.permissions)
@@ -115,6 +129,7 @@ pub(crate) struct ComposerFilter {
     pub(crate) model: Option<String>,
     pub(crate) effort: Option<LaunchEffort>,
     pub(crate) permissions: Option<LaunchPermission>,
+    pub(crate) workspace_trust: Option<bool>,
 }
 
 /// One explicit choice shown by composer search.
@@ -133,6 +148,8 @@ pub(crate) enum ComposerSearchResult {
     },
     /// Apply one effort offered by the currently selected harness and model.
     Effort(LaunchEffort),
+    /// Apply an explicit per-launch workspace-trust choice.
+    Trust(bool),
     /// Apply the path the person typed without changing their agent choices.
     UsePath(String),
     /// Open the explicit directory browser at the path the person typed.
@@ -293,6 +310,7 @@ pub(crate) enum ComposerSearchGroup {
     Models,
     /// Reasoning-effort words valid for the selected harness and model.
     Efforts,
+    Trust,
     Folders,
     Repositories,
     RecentSetups,
@@ -305,6 +323,7 @@ impl ComposerSearchGroup {
             Self::Harnesses => "Harnesses",
             Self::Models => "Models",
             Self::Efforts => "Efforts",
+            Self::Trust => "Workspace trust",
             Self::Folders => "Folders",
             Self::Repositories => "GitHub repositories",
             Self::RecentSetups => "Recent setups",
@@ -323,6 +342,7 @@ pub(crate) fn grouped_search_results(
     let mut harnesses = Vec::new();
     let mut models = Vec::new();
     let mut efforts = Vec::new();
+    let mut trust = Vec::new();
     let mut folders = Vec::new();
     let mut repositories = Vec::new();
     let mut recents = Vec::new();
@@ -332,6 +352,7 @@ pub(crate) fn grouped_search_results(
             ComposerSearchResult::Command => harnesses.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
             ComposerSearchResult::Effort(_) => efforts.push(result),
+            ComposerSearchResult::Trust(_) => trust.push(result),
             ComposerSearchResult::UsePath(_)
             | ComposerSearchResult::BrowsePath(_)
             | ComposerSearchResult::Folder(_) => folders.push(result),
@@ -343,6 +364,7 @@ pub(crate) fn grouped_search_results(
         (ComposerSearchGroup::Harnesses, harnesses),
         (ComposerSearchGroup::Models, models),
         (ComposerSearchGroup::Efforts, efforts),
+        (ComposerSearchGroup::Trust, trust),
         (ComposerSearchGroup::Folders, folders),
         (ComposerSearchGroup::Repositories, repositories),
         (ComposerSearchGroup::RecentSetups, recents),
@@ -355,8 +377,8 @@ pub(crate) fn grouped_search_results(
 /// Render every choice a recent setup will apply before an interaction changes
 /// the form.
 ///
-/// Omitted fields are named as defaults so absence is never mistaken for an
-/// invisible retained value. Pi is the compatibility exception: an omitted
+/// Omitted model, effort, and permission fields are named as defaults, while
+/// trust is shown only when explicitly set. Pi is the compatibility exception: an omitted
 /// permission from an older snapshot is presented as its mandatory YOLO mode.
 /// This is the complete accessible description; the compact row surface puts
 /// its harness in a separately styled leading span.
@@ -375,11 +397,15 @@ pub(crate) fn selection_summary(selection: &LaunchSelection) -> String {
 /// Keeping one tail builder prevents those two representations from silently
 /// disagreeing about which saved defaults a row will apply.
 pub(crate) fn selection_summary_without_harness(selection: &LaunchSelection) -> String {
-    format!(
+    let mut summary = format!(
         "{} · permissions: {}",
         selection_summary_before_permissions(selection),
         selection_permission_value(selection),
-    )
+    );
+    if let Some(trust) = selection.workspace_trust {
+        summary.push_str(&format!(" · trust: {trust}"));
+    }
+    summary
 }
 
 /// Render the model and effort of a saved selection, stopping before the
@@ -407,9 +433,8 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
     )
 }
 
-/// Render only the model and effort a saved selection sets EXPLICITLY, in the
-/// summary's own spelling, stopping before the permission; empty when both
-/// are defaults.
+/// Render the model, effort, and trust values a saved selection sets
+/// explicitly, stopping before permission; empty when all are defaults.
 ///
 /// This is what the compact recent row shows. Three rows that each spelled
 /// out "model: default · effort: default · permissions: default" made the
@@ -423,20 +448,23 @@ pub(crate) fn selection_summary_before_permissions(selection: &LaunchSelection) 
 /// way: when nothing at all is explicit it says `defaults`, where a blank
 /// would leave a reader guessing (see [`RECENT_ALL_DEFAULTS`]).
 ///
-/// The permission is left out because the row spells it itself, so that it
+/// Permission is left out because the row spells it itself, so that it
 /// can color "yolo" as a warning without cutting the word back out of a
-/// formatted string.
+/// formatted string. An explicit trust value remains visible in that row.
 pub(crate) fn selection_explicit_before_permissions(selection: &LaunchSelection) -> Vec<String> {
     let model = selection
         .model
         .as_deref()
         .map(|model| format!("model: {model}"));
     let effort = selection.effort.map(|effort| format!("effort: {effort:?}"));
-    model.into_iter().chain(effort).collect()
+    let trust = selection
+        .workspace_trust
+        .map(|value| format!("trust: {value}"));
+    model.into_iter().chain(effort).chain(trust).collect()
 }
 
 /// The word a compact recent row shows when its setup sets nothing
-/// explicitly: no model, no effort, and the default permission.
+/// explicitly: no model, effort, or trust value, and the default permission.
 ///
 /// A word and not a blank, because a blank cell cannot be told apart from
 /// one that failed to render, and because saying so keeps the summary's
@@ -454,6 +482,7 @@ pub(crate) enum SearchScope {
     Harness,
     Model,
     Effort,
+    Trust,
     Folder,
     Recent,
     Github,
@@ -476,6 +505,8 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
         SearchScope::Model
     } else if label.eq_ignore_ascii_case("effort") {
         SearchScope::Effort
+    } else if label.eq_ignore_ascii_case("trust") {
+        SearchScope::Trust
     } else if label.eq_ignore_ascii_case("folder") {
         SearchScope::Folder
     } else if label.eq_ignore_ascii_case("recent") {
@@ -586,6 +617,16 @@ pub(crate) fn search_results(
         }
     }
 
+    if scope == SearchScope::Trust
+        && harness.is_some_and(|harness| matches!(harness, LaunchHarness::Muse | LaunchHarness::Pi))
+    {
+        for (word, value) in [("true", true), ("false", false)] {
+            if query.is_empty() || word.starts_with(&folded_query) {
+                results.push(ComposerSearchResult::Trust(value));
+            }
+        }
+    }
+
     if matches!(scope, SearchScope::All | SearchScope::Folder) {
         if is_path_query(query) {
             results.push(ComposerSearchResult::UsePath(query.to_string()));
@@ -651,6 +692,7 @@ pub(crate) fn default_search_index(
         SearchScope::Harness => vec![ComposerSearchGroup::Harnesses],
         SearchScope::Model => vec![ComposerSearchGroup::Models],
         SearchScope::Effort => vec![ComposerSearchGroup::Efforts],
+        SearchScope::Trust => vec![ComposerSearchGroup::Trust],
         SearchScope::Folder | SearchScope::Recent | SearchScope::Github => Vec::new(),
     };
     for kind in kinds {
@@ -690,6 +732,9 @@ fn exact_word_group(
         ComposerSearchResult::Effort(effort) if effort_value(*effort) == folded_query => {
             Some(ComposerSearchGroup::Efforts)
         }
+        ComposerSearchResult::Trust(value) if value.to_string() == folded_query => {
+            Some(ComposerSearchGroup::Trust)
+        }
         _ => None,
     }
 }
@@ -726,6 +771,9 @@ pub(crate) fn matches_filter(selection: &LaunchSelection, filter: &ComposerFilte
         && filter
             .permissions
             .is_none_or(|permissions| selection.permissions == Some(permissions))
+        && filter
+            .workspace_trust
+            .is_none_or(|trust| selection.workspace_trust == Some(trust))
 }
 
 /// Rank every unique recent setup for the selected folder.
@@ -889,7 +937,7 @@ pub(crate) fn select_recent(entry: &LaunchHistoryEntry) -> LaunchSelection {
 /// owning harness. They cannot have model-specific effort constraints locally,
 /// so this applies the harness-wide vocabulary and the required-model rules
 /// for OpenCode, Goose, Pi, and OMP. It also rejects Goose-only permission
-/// modes on every other harness while accepting an omitted Pi permission as
+/// modes on every other harness and hidden workspace-trust choices while accepting an omitted Pi permission as
 /// the older spelling of YOLO and OMP's own default/Approve choices. The helm
 /// validates the final request again, including Zen provider syntax for
 /// custom OpenCode IDs.
@@ -945,7 +993,10 @@ pub(crate) fn selection_is_compatible(
             ),
         ) => false,
     };
-    effort_is_compatible && permissions_are_compatible
+    effort_is_compatible
+        && permissions_are_compatible
+        && normalized_workspace_trust(selection.harness, selection.workspace_trust)
+            == selection.workspace_trust
 }
 
 /// Move a structured choice to another harness without retaining impossible
@@ -957,6 +1008,7 @@ pub(crate) fn selection_is_compatible(
 /// Effort is independent when the new harness still offers it; only an effort
 /// the new model or harness cannot accept is cleared. Goose-only permissions
 /// clear elsewhere, while Pi always becomes YOLO because it has no tool gate.
+/// Workspace trust clears when the destination harness has no per-run switch.
 pub(crate) fn reconcile_harness_selection(
     mut selection: LaunchSelection,
     model_owner: Option<LaunchHarness>,
@@ -994,6 +1046,7 @@ pub(crate) fn reconcile_harness_selection(
         selection.effort = None;
     }
     selection.permissions = normalized_permissions(harness, selection.permissions);
+    selection.workspace_trust = normalized_workspace_trust(harness, selection.workspace_trust);
     (selection, retained_owner)
 }
 
@@ -1077,6 +1130,49 @@ mod tests {
     use crate::api::{FolderHistoryEntry, LaunchCatalogModel};
     use crate::{HostId, LaunchEffort, LaunchHarness, LaunchPermission};
 
+    /// The typed trust action is available only where the UI can compile a
+    /// real per-launch workspace choice; unsupported harnesses cannot offer
+    /// an action that would be refused at submit.
+    #[test]
+    fn trust_search_actions_are_scoped_to_supported_harnesses() {
+        let history = LaunchHistory::default();
+        for harness in [LaunchHarness::Muse, LaunchHarness::Pi] {
+            let results = search_results(&history, &[], "trust:", Some(harness), None);
+            assert_eq!(
+                results,
+                vec![
+                    ComposerSearchResult::Trust(true),
+                    ComposerSearchResult::Trust(false)
+                ]
+            );
+            let grouped = grouped_search_results(results);
+            assert_eq!(default_search_index(&grouped, "trust:false"), 1);
+        }
+        assert!(
+            search_results(
+                &history,
+                &[],
+                "trust:true",
+                Some(LaunchHarness::Codex),
+                None
+            )
+            .is_empty()
+        );
+        assert!(search_results(&history, &[], "trust:false", None, None).is_empty());
+    }
+
+    /// Switching away from a supported harness clears a hidden trust flag;
+    /// the last explicit choice may still live in helm preferences for a
+    /// future fresh dialog.
+    #[test]
+    fn harness_reconciliation_clears_unsupported_workspace_trust() {
+        let mut choice = selection(LaunchHarness::Muse, None, None);
+        choice.workspace_trust = Some(false);
+        let (changed, _) = reconcile_harness_selection(choice, None, LaunchHarness::Codex, &[]);
+        assert_eq!(changed.workspace_trust, None);
+        assert!(selection_is_compatible(&changed, &[]));
+    }
+
     /// Build an explicit structured setup; omitted optional choices stay
     /// omitted so grouping tests can distinguish defaults from explicit values.
     fn selection(
@@ -1089,6 +1185,7 @@ mod tests {
             model: model.map(str::to_string),
             effort,
             permissions: None,
+            workspace_trust: None,
         }
     }
 
@@ -1180,6 +1277,7 @@ mod tests {
             model: Some("gpt-6-astra".into()),
             effort: Some(LaunchEffort::High),
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         };
 
         assert_eq!(
@@ -1213,6 +1311,7 @@ mod tests {
             model: model.map(Into::into),
             effort,
             permissions: None,
+            workspace_trust: None,
         };
 
         assert!(selection_explicit_before_permissions(&selection(None, None)).is_empty());
@@ -1686,6 +1785,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: Some(LaunchPermission::SmartApprove),
+            workspace_trust: None,
         };
         let (pi, _) = reconcile_harness_selection(goose.clone(), None, LaunchHarness::Pi, &[]);
         assert_eq!(pi.permissions, Some(LaunchPermission::Yolo));
@@ -1698,6 +1798,7 @@ mod tests {
 
         let omitted = LaunchSelection {
             permissions: None,
+            workspace_trust: None,
             ..goose.clone()
         };
         let (pi_from_default, _) =
@@ -1736,6 +1837,7 @@ mod tests {
                     model: Some("custom/provider-model".into()),
                     effort: None,
                     permissions: Some(permission),
+                    workspace_trust: None,
                 },
                 &[],
             ));
@@ -1752,6 +1854,7 @@ mod tests {
                         model: Some("custom/provider-model".into()),
                         effort: None,
                         permissions: Some(permission),
+                        workspace_trust: None,
                     },
                     &[],
                 ));
@@ -1764,6 +1867,7 @@ mod tests {
                     model: Some("custom/provider-model".into()),
                     effort: None,
                     permissions,
+                    workspace_trust: None,
                 },
                 &[],
             ));
@@ -1788,6 +1892,7 @@ mod tests {
                     model: None,
                     effort: None,
                     permissions,
+                    workspace_trust: None,
                 },
                 None,
                 LaunchHarness::Omp,
@@ -1801,6 +1906,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: Some(cleared),
+                workspace_trust: None,
             };
             let (omp, _) =
                 reconcile_harness_selection(goose.clone(), None, LaunchHarness::Omp, &[]);
@@ -1816,6 +1922,7 @@ mod tests {
                         model: Some("custom/provider-model".into()),
                         effort: None,
                         permissions: Some(cleared),
+                        workspace_trust: None,
                     },
                     &[]
                 ),
@@ -1828,6 +1935,7 @@ mod tests {
                 model: Some("custom/provider-model".into()),
                 effort: None,
                 permissions: Some(LaunchPermission::Approve),
+                workspace_trust: None,
             },
             &[],
         ));
@@ -1839,6 +1947,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             },
             &[],
         ));
@@ -1849,11 +1958,13 @@ mod tests {
             model: Some("z-ai/glm-5.3".into()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         assert_eq!(selection_permission_value(&omitted), "default");
         assert!(selection_summary(&omitted).ends_with("permissions: default"));
         let approve = LaunchSelection {
             permissions: Some(LaunchPermission::Approve),
+            workspace_trust: None,
             ..omitted
         };
         assert_eq!(selection_permission_value(&approve), "approve");
@@ -1869,6 +1980,7 @@ mod tests {
             model: Some("x-ai/grok-4.6".into()),
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         assert_eq!(selection_permission_value(&pi), "yolo");
         assert!(selection_summary(&pi).ends_with("permissions: yolo"));
@@ -1876,6 +1988,7 @@ mod tests {
         let goose = LaunchSelection {
             harness: LaunchHarness::Goose,
             permissions: Some(LaunchPermission::SmartApprove),
+            workspace_trust: None,
             ..pi
         };
         assert_eq!(selection_permission_value(&goose), "smart approve");

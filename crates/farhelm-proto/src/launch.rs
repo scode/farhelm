@@ -1,7 +1,7 @@
 //! Explicit, user-selected launch intent shared by the helm and supervisor.
 //!
 //! This module intentionally records choices, not inferred runtime facts. A
-//! missing model, effort, or permission flag means that the selected harness
+//! missing model, effort, permission, or workspace-trust choice means that the selected harness
 //! receives no corresponding argument and decides its own default. OpenCode
 //! is the exception: the helm requires an explicit model so local provider
 //! configuration cannot override Farhelm's Zen-only contract. The
@@ -108,6 +108,14 @@ pub struct LaunchSelection {
     pub model: Option<String>,
     pub effort: Option<LaunchEffort>,
     pub permissions: Option<LaunchPermission>,
+    /// An explicit per-run choice about project-local settings and extensions.
+    ///
+    /// This is separate from tool approval and from Farhelm's hook-trust
+    /// bypass. Older saved selections lack the field and retain the vendor's
+    /// ordinary startup behavior. An unset value stays absent in serialized
+    /// JSON because that encoding also serves as a durable launch fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_trust: Option<bool>,
 }
 
 #[cfg(test)]
@@ -123,6 +131,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
 
         let json = serde_json::to_value(&selection).expect("serialize launch selection");
@@ -130,10 +139,48 @@ mod tests {
         assert!(json["model"].is_null());
         assert!(json["effort"].is_null());
         assert!(json["permissions"].is_null());
+        assert!(json.get("workspace_trust").is_none());
         assert_eq!(
             serde_json::from_value::<LaunchSelection>(json).expect("deserialize launch selection"),
             selection
         );
+    }
+
+    /// Existing launch history predates workspace trust; decoding it must
+    /// retain the harness default rather than inventing consent.
+    #[test]
+    fn older_selection_without_workspace_trust_decodes_as_unset() {
+        let selection: LaunchSelection = serde_json::from_value(serde_json::json!({
+            "harness": "muse",
+            "model": null,
+            "effort": null,
+            "permissions": null
+        }))
+        .expect("decode an older stored selection");
+        assert_eq!(selection.workspace_trust, None);
+    }
+
+    /// Explicit consent and refusal must remain distinct in saved intent and
+    /// keyed-create fingerprints even though an unset choice is omitted.
+    #[test]
+    fn explicit_workspace_trust_values_serialize() {
+        let mut selection = LaunchSelection {
+            harness: LaunchHarness::Muse,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        };
+        for choice in [true, false] {
+            selection.workspace_trust = Some(choice);
+            let json = serde_json::to_value(&selection).expect("serialize explicit trust choice");
+            assert_eq!(json["workspace_trust"], choice);
+            assert_eq!(
+                serde_json::from_value::<LaunchSelection>(json)
+                    .expect("decode explicit trust choice"),
+                selection
+            );
+        }
     }
 
     /// A structured choice must reject unknown keys rather than silently

@@ -1,7 +1,7 @@
 //! `GET`/`PUT /api/preferences` — the one client preference the helm
 //! remembers for every client (SPEC.md, Session list): the chosen list order,
-//! last user-selected session, compact-row choice, and the permissions mode
-//! the last successful structured launch used.
+//! last user-selected session, compact-row choice, and the remembered
+//! permissions and workspace-trust choices of successful structured launches.
 //!
 //! The helm holds this rather than each client, and that is the whole
 //! design: no client keeps its own copy, so a browser tab and the desktop
@@ -11,14 +11,14 @@
 //! after authenticating and writes a sparse patch on change; a field a
 //! patch leaves out is untouched, and an explicit `null` clears one.
 //!
-//! `remembered_permissions` is the exception to "every client writes its own
-//! choice": no shipped client ever PUTs it. It is written only by the helm
+//! The remembered launch choices are exceptions to "every client writes its own
+//! choice": no shipped client ever PUTs them. They are written only by the helm
 //! itself, as a side effect of a successful user-initiated structured
 //! launch (`store::HelmStore::record_create_history_with_paths`), which is
-//! what makes it a fact every client and the spawn path agree on rather
-//! than something any one client claims happened. The route still accepts
-//! it on `PUT` for wire uniformity with the other three fields (and so a
-//! test fixture can plant a value directly), and validates it the same way.
+//! what makes them facts every client and the spawn path agree on rather
+//! than choices any one client claims happened. The route still accepts
+//! them on `PUT` for wire uniformity with the client-declared fields (and so a
+//! test fixture can plant a value directly). The permissions word is validated.
 //!
 //! ## What the handlers check, and what they leave alone
 //!
@@ -235,6 +235,7 @@ mod tests {
                 last_selected: Some("session-7".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -323,6 +324,7 @@ mod tests {
                 last_selected: None,
                 compact: Some(true),
                 remembered_permissions: Some("yolo".to_string()),
+                remembered_workspace_trust: None,
             },
             "an explicit null clears the field it names and only that one"
         );

@@ -6,6 +6,10 @@ Pi does not ask for permission before running shell commands or editing files, s
 permission option. Pi's `--approve` flag instead controls whether Pi trusts settings and extensions supplied by the
 project you opened; it does not enable approval prompts for the agent's actions. This was verified against Pi 0.85.1.
 
+The structured launch composer offers workspace trust separately from YOLO. Choosing true adds `--approve` for that
+launch; choosing false adds `--no-approve`. The last explicit choice from a successful user launch becomes the next new
+dialog's default. Farhelm does not write Pi's persistent trust settings.
+
 ## Resume needs a saved conversation
 
 Pi saves conversations automatically; there is no separate Save step. A new conversation's file is written after the

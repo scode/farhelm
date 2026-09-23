@@ -163,7 +163,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The schema's current shape. See [`apply_schema`] for the version
 /// history and the ladder future migrations extend.
-const SCHEMA_VERSION: i64 = 29;
+const SCHEMA_VERSION: i64 = 30;
 
 /// The helm-owned profile catalog uses the same durable row shape as the
 /// former supervisor catalog so profiles remain portable across this move.
@@ -795,7 +795,7 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 
 /// The client preference this helm remembers for every client at once
 /// (SPEC.md, Session list): the chosen list order, session the user last
-/// selected, and compact-row choice. One row, one shape — the stored row and
+/// selected, compact-row choice, and structured-launch defaults. One row, one shape — the stored row and
 /// the `GET` reply.
 ///
 /// Every field is `Option` because "never set" is a real state: the
@@ -807,14 +807,14 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// [`PreferencePatch`], not this type: a patch has to tell "leave alone"
 /// from "clear", and a plain `Option` cannot.
 ///
-/// `remembered_permissions` is the odd one out among these four: every other
-/// field is a client-declared choice, while this one is written only by the
-/// helm itself, as a side effect of a successful structured launch
+/// The remembered launch fields are server-observed facts, unlike the
+/// client-declared list fields. The helm writes them as side effects of
+/// successful structured launches
 /// (`record_create_history_with_paths`) — see that function's doc for why
-/// origin-gating it to a user-initiated launch matters. The wire route still
-/// accepts it on `PUT` like the others (kept uniform with the rest of this
+/// origin-gating them to user-initiated launches matters. The wire route still
+/// accepts them on `PUT` like the others (kept uniform with the rest of this
 /// type rather than carved into a read-only exception), but no shipped
-/// client ever sends one.
+/// client sends either one.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
@@ -831,6 +831,10 @@ pub struct Preferences {
     /// to a client that could not act on it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remembered_permissions: Option<String>,
+    /// The last explicit workspace-trust choice from a successful user
+    /// structured launch on a harness that supports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remembered_workspace_trust: Option<bool>,
 }
 
 /// A sparse change to [`Preferences`]: each field is absent (leave it as
@@ -875,6 +879,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub remembered_permissions: Option<Option<String>>,
+    /// See [`Preferences::remembered_workspace_trust`].
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub remembered_workspace_trust: Option<Option<bool>>,
 }
 
 /// Deserialize a PRESENT field of [`PreferencePatch`] — serde only calls
@@ -1686,23 +1697,24 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              ) STRICT;
              -- The ONE client preference row (SPEC.md, Session list): the
              -- chosen list order, last user-selected session, compact rows,
-             -- and the permissions mode the last successful STRUCTURED
+             -- and the permissions and workspace-trust choices of successful STRUCTURED
              -- launch used, shared by every client of this helm. Singleton
              -- for the same reason web_token is: no client keeps its own
              -- copy, so there is exactly one answer to remember. Preference
              -- columns are nullable — an unset preference is a real state
              -- (the default) and the row may hold one without the other.
-             -- `remembered_permissions` is written only by a successful
+             -- The remembered launch fields are written only by a successful
              -- structured create (`record_create_history_with_paths`), never
              -- by a client PUT: SPEC.md's launch-composer carve-out makes
              -- this one choice a server-observed fact rather than a
-             -- client-declared preference like the other three columns.
+             -- client-declared preference like the list columns.
              CREATE TABLE preferences (
                  singleton              INTEGER PRIMARY KEY CHECK (singleton = 1),
                  list_sort              TEXT,
                  last_selected          TEXT,
                  compact                INTEGER CHECK (compact IN (0, 1)),
-                 remembered_permissions TEXT
+                 remembered_permissions TEXT,
+                 remembered_workspace_trust INTEGER CHECK (remembered_workspace_trust IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -1789,7 +1801,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 29;",
+              PRAGMA user_version = 30;",
         ))
         .context("creating schema")?;
         version = SCHEMA_VERSION;
@@ -2562,6 +2574,17 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
         .context("migrating helm.db to schema version 29")?;
         version = 29;
     }
+    if version == 29 {
+        // Earlier launches did not record a workspace-trust choice. Preserve
+        // that distinction until a user explicitly chooses one.
+        tx.execute_batch(
+            "ALTER TABLE preferences ADD COLUMN remembered_workspace_trust INTEGER \
+             CHECK (remembered_workspace_trust IN (0, 1)); \
+             PRAGMA user_version = 30;",
+        )
+        .context("migrating helm.db to schema version 30")?;
+        version = 30;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -3165,7 +3188,7 @@ impl HelmStore {
             conn.lock()
                 .expect("helm db mutex poisoned")
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -3184,6 +3207,7 @@ impl HelmStore {
                             // forwarded to a client that has no flag for it.
                             remembered_permissions: remembered_permissions
                                 .filter(|word| is_known_remembered_permissions_word(word)),
+                            remembered_workspace_trust: row.get(4)?,
                         })
                     },
                 )
@@ -3220,32 +3244,38 @@ impl HelmStore {
             let selected_present = patch.last_selected.is_some();
             let compact_present = patch.compact.is_some();
             let remembered_permissions_present = patch.remembered_permissions.is_some();
+            let remembered_workspace_trust_present = patch.remembered_workspace_trust.is_some();
             let sort = patch.list_sort.flatten();
             let selected = patch.last_selected.flatten();
             let compact = patch.compact.flatten();
             let remembered_permissions = patch.remembered_permissions.flatten();
+            let remembered_workspace_trust = patch.remembered_workspace_trust.flatten();
             conn.lock()
                 .expect("helm db mutex poisoned")
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions) \
-                     VALUES (1, ?1, ?2, ?3, ?4) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, remembered_workspace_trust) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5) \
                      ON CONFLICT (singleton) DO UPDATE SET \
-                         list_sort = CASE WHEN ?5 THEN excluded.list_sort ELSE list_sort END, \
-                         last_selected = CASE WHEN ?6 THEN excluded.last_selected \
+                         list_sort = CASE WHEN ?6 THEN excluded.list_sort ELSE list_sort END, \
+                         last_selected = CASE WHEN ?7 THEN excluded.last_selected \
                                               ELSE last_selected END, \
-                         compact = CASE WHEN ?7 THEN excluded.compact ELSE compact END, \
-                         remembered_permissions = CASE WHEN ?8 \
-                             THEN excluded.remembered_permissions ELSE remembered_permissions END",
+                         compact = CASE WHEN ?8 THEN excluded.compact ELSE compact END, \
+                         remembered_permissions = CASE WHEN ?9 \
+                             THEN excluded.remembered_permissions ELSE remembered_permissions END, \
+                         remembered_workspace_trust = CASE WHEN ?10 \
+                             THEN excluded.remembered_workspace_trust ELSE remembered_workspace_trust END",
                     rusqlite::params![
                         sort,
                         selected,
                         compact,
                         remembered_permissions,
+                        remembered_workspace_trust,
                         sort_present,
                         selected_present,
                         compact_present,
-                        remembered_permissions_present
+                        remembered_permissions_present,
+                        remembered_workspace_trust_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -4708,11 +4738,12 @@ impl HelmStore {
     /// fact is absent, callers pass the display spelling as a distinct key;
     /// the helm must never resolve it itself.
     ///
-    /// `remember_permissions` gates a SECOND, independent side effect that
-    /// piggybacks on this same admitted-create transaction: when `entry` is
+    /// `remember_launch_choices` gates TWO independent side effects that
+    /// piggyback on this same admitted-create transaction: when `entry` is
     /// a structured launch, its permissions choice (one of the released
-    /// permission words, or absent)
-    /// becomes the helm-wide `preferences.remembered_permissions` memory
+    /// permission words, or absent) becomes the helm-wide
+    /// `preferences.remembered_permissions` memory. An explicit Muse or Pi
+    /// trust choice updates `remembered_workspace_trust` as well
     /// (SPEC.md's launch-composer carve-out). The caller passes `false` for
     /// an agent-relay-originated create (`sessions::CreateOrigin::Agent`):
     /// that memory is the interactive user's own dialog default, and an
@@ -4736,7 +4767,7 @@ impl HelmStore {
         entry: &SessionInfo,
         canonical_cwd: &str,
         display_cwd: &str,
-        remember_permissions: bool,
+        remember_launch_choices: bool,
     ) -> anyhow::Result<bool> {
         self.record_create_history_with_destination(
             host,
@@ -4744,7 +4775,7 @@ impl HelmStore {
             entry,
             (canonical_cwd, display_cwd),
             None,
-            remember_permissions,
+            remember_launch_choices,
         )
         .await
     }
@@ -4764,7 +4795,7 @@ impl HelmStore {
         entry: &SessionInfo,
         paths: (&str, &str),
         github_repo: Option<&farhelm_proto::GithubRepo>,
-        remember_permissions: bool,
+        remember_launch_choices: bool,
     ) -> anyhow::Result<bool> {
         let github_repo = github_repo
             .map(|repo| {
@@ -4992,6 +5023,14 @@ impl HelmStore {
                     farhelm_proto::LaunchPermission::SmartApprove => "smart_approve",
                     farhelm_proto::LaunchPermission::Chat => "chat",
                 });
+                let workspace_trust = if matches!(
+                    selection.harness,
+                    farhelm_proto::LaunchHarness::Muse | farhelm_proto::LaunchHarness::Pi
+                ) {
+                    selection.workspace_trust
+                } else {
+                    None
+                };
                 let selection = serde_json::to_string(selection)
                     .context("serializing structured launch history")?;
                 let changed = tx
@@ -5015,12 +5054,12 @@ impl HelmStore {
                     )
                     .context("recording structured launch")?
                     != 0;
-                // The second, independent side effect this admitted create
+                // The remembered launch side effects this admitted create
                 // triggers: see `record_create_history_with_paths`'s own doc
-                // for why this is gated on `remember_permissions` and placed
+                // for why this is gated on `remember_launch_choices` and placed
                 // here rather than written unconditionally from
                 // `entry.launch`.
-                if remember_permissions {
+                if remember_launch_choices {
                     tx.execute(
                         "INSERT INTO preferences (singleton, remembered_permissions) \
                          VALUES (1, ?1) \
@@ -5029,6 +5068,18 @@ impl HelmStore {
                         rusqlite::params![permissions_word],
                     )
                     .context("remembering the launched permissions choice")?;
+                    // An unsupported harness or an omitted choice has no
+                    // opinion about the last explicit trust choice.
+                    if let Some(workspace_trust) = workspace_trust {
+                        tx.execute(
+                            "INSERT INTO preferences (singleton, remembered_workspace_trust) \
+                             VALUES (1, ?1) \
+                             ON CONFLICT (singleton) DO UPDATE SET \
+                                 remembered_workspace_trust = excluded.remembered_workspace_trust",
+                            rusqlite::params![workspace_trust],
+                        )
+                        .context("remembering the launched workspace-trust choice")?;
+                    }
                 }
                 changed
             } else {
@@ -6288,6 +6339,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         });
         entry.github_repo = Some(other.clone());
         assert!(
@@ -6509,6 +6561,7 @@ mod tests {
             conn.execute_batch(
                 "ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  PRAGMA user_version = 27;",
             )
             .unwrap();
@@ -6518,6 +6571,10 @@ mod tests {
             assert_eq!(version, 27);
             assert!(
                 conn.prepare("SELECT github_repo FROM create_history_sessions")
+                    .is_err()
+            );
+            assert!(
+                conn.prepare("SELECT remembered_workspace_trust FROM preferences")
                     .is_err()
             );
         }
@@ -6551,6 +6608,7 @@ mod tests {
                 model: Some("gpt-6-astra".to_string()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: None,
+                workspace_trust: None,
             }),
             ..session("created", 100)
         };
@@ -6593,7 +6651,7 @@ mod tests {
         );
     }
 
-    /// `remember_permissions` is the one thing distinguishing a user-
+    /// `remember_launch_choices` is the one thing distinguishing a user-
     /// initiated structured create from an agent-relay-originated one at
     /// this function's call site (`sessions::do_create_session` passes
     /// `origin == CreateOrigin::User`): a user create updates the helm-wide
@@ -6604,7 +6662,7 @@ mod tests {
     /// which real caller passes which origin — is the risk this test
     /// exists to catch.
     #[farhelm_testtrace::test]
-    async fn remember_permissions_gates_whether_a_structured_create_updates_the_memory() {
+    async fn remember_launch_choices_gates_whether_a_structured_create_updates_the_memory() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "permissions.example", "identity-a").await;
         let yolo = |id: &str, seq: u64| SessionInfo {
@@ -6614,6 +6672,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                workspace_trust: None,
             }),
             ..session(id, 100)
         };
@@ -6633,7 +6692,7 @@ mod tests {
         assert_eq!(
             store.preferences().await.unwrap().remembered_permissions,
             None,
-            "remember_permissions: false must leave the memory untouched"
+            "remember_launch_choices: false must leave the memory untouched"
         );
 
         let user_origin = yolo("user-origin", 2);
@@ -6656,7 +6715,7 @@ mod tests {
                 .remembered_permissions
                 .as_deref(),
             Some("yolo"),
-            "remember_permissions: true sets the memory"
+            "remember_launch_choices: true sets the memory"
         );
 
         for (index, (permission, word)) in [
@@ -6677,6 +6736,7 @@ mod tests {
                     model: Some("z-ai/glm-5.3".into()),
                     effort: None,
                     permissions: Some(permission),
+                    workspace_trust: None,
                 }),
                 ..session(&format!("goose-mode-{index}"), 101 + index as i64)
             };
@@ -6700,6 +6760,87 @@ mod tests {
                     .as_deref(),
                 Some(word),
                 "every released permission mode must survive the durable preference round trip"
+            );
+        }
+    }
+
+    /// Trust memory follows admitted human launches, while agent launches
+    /// and harnesses without a per-run switch cannot change that default.
+    #[farhelm_testtrace::test]
+    async fn workspace_trust_memory_requires_an_explicit_supported_user_launch() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "trust.example", "identity-a").await;
+        for (id, seq, harness, trust, user, expected) in [
+            (
+                "agent",
+                1,
+                farhelm_proto::LaunchHarness::Muse,
+                Some(true),
+                false,
+                None,
+            ),
+            (
+                "decline",
+                2,
+                farhelm_proto::LaunchHarness::Pi,
+                Some(false),
+                true,
+                Some(false),
+            ),
+            (
+                "unsupported",
+                3,
+                farhelm_proto::LaunchHarness::Codex,
+                None,
+                true,
+                Some(false),
+            ),
+            (
+                "omitted",
+                4,
+                farhelm_proto::LaunchHarness::Muse,
+                None,
+                true,
+                Some(false),
+            ),
+            (
+                "accept",
+                5,
+                farhelm_proto::LaunchHarness::Muse,
+                Some(true),
+                true,
+                Some(true),
+            ),
+        ] {
+            let entry = SessionInfo {
+                creation_seq: Some(seq),
+                launch: Some(LaunchSelection {
+                    harness,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    workspace_trust: trust,
+                }),
+                ..session(id, 100)
+            };
+            store
+                .record_create_history_with_paths(
+                    host,
+                    "identity-a",
+                    &entry,
+                    &entry.cwd,
+                    &entry.cwd,
+                    user,
+                )
+                .await
+                .expect("record admitted structured launch");
+            assert_eq!(
+                store
+                    .preferences()
+                    .await
+                    .unwrap()
+                    .remembered_workspace_trust,
+                expected
             );
         }
     }
@@ -6751,6 +6892,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let first = SessionInfo {
             cwd: "/link-a/project".to_string(),
@@ -6882,6 +7024,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             }),
             ..session("proven", 1)
         };
@@ -6956,6 +7099,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             }),
             ..session("proven-older", 1)
         };
@@ -7100,6 +7244,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             }),
             ..session("before-retarget", 100)
         };
@@ -7176,6 +7321,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
             let entry = SessionInfo {
@@ -7244,6 +7390,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             }),
             ..session("structured", 1)
         };
@@ -7300,6 +7447,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let first = SessionInfo {
             creation_seq: Some(1),
@@ -7497,6 +7645,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let early = SessionInfo {
             creation_seq: Some(1),
@@ -7629,6 +7778,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         for sequence in 1..=MAX_LAUNCH_HISTORY as u64 {
             store
@@ -7692,6 +7842,7 @@ mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         for identity in ["retired-one", "retired-two"] {
             seed_retired_history_partition(&store, host, identity, &selection);
@@ -8033,6 +8184,7 @@ mod tests {
                 last_selected: Some("session-1".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -8049,6 +8201,7 @@ mod tests {
                 last_selected: Some("session-1".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -8064,6 +8217,7 @@ mod tests {
                 last_selected: None,
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "an explicit null clears exactly the field it names"
         );
@@ -8128,6 +8282,7 @@ mod tests {
                 last_selected: None,
                 compact: None,
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -8301,6 +8456,7 @@ mod tests {
             let conn = store.conn.lock().expect("db mutex");
             conn.execute_batch(
                 "ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  PRAGMA user_version = 28;",
             )
             .expect("restore schema 28");
@@ -8322,6 +8478,10 @@ mod tests {
                 )
                 .expect("read schema-28 premise");
             assert_eq!(premise, (28, 1, 1));
+            assert!(
+                conn.prepare("SELECT remembered_workspace_trust FROM preferences")
+                    .is_err()
+            );
         }
         drop(store);
 
@@ -8804,6 +8964,7 @@ mod tests {
                  -- with \"duplicate column name\" — exactly the class of bug
                  -- `apply_schema`'s own comment on its fresh-create branch
                  -- warns about.
+                 ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -8883,6 +9044,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             }),
             ..session("post-migration", 2)
         };
@@ -8917,6 +9079,7 @@ mod tests {
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN compact;
+                 ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected)
                  VALUES (1, 'title', 'session-before-compact');
@@ -8939,6 +9102,7 @@ mod tests {
                 last_selected: Some("session-before-compact".to_string()),
                 compact: None,
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "the new field defaults absent while both existing choices survive"
         );
@@ -8961,7 +9125,8 @@ mod tests {
             drop(store);
             let conn = Connection::open(&path).expect("reopen raw");
             conn.execute_batch(
-                "ALTER TABLE preferences DROP COLUMN remembered_permissions;
+                "ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
+                 ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  INSERT INTO preferences (singleton, list_sort, last_selected, compact)
                  VALUES (1, 'title', 'session-before-permissions-memory', 1);
                  -- Down to schema 25, so the checkout-config tables added
@@ -8984,6 +9149,7 @@ mod tests {
                 last_selected: Some("session-before-permissions-memory".to_string()),
                 compact: Some(true),
                 remembered_permissions: None,
+                remembered_workspace_trust: None,
             },
             "the new field defaults absent while every existing choice survives"
         );
@@ -9259,6 +9425,7 @@ mod tests {
             conn.execute_batch(
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
+                 ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
@@ -10559,6 +10726,7 @@ mod tests {
             conn.execute_batch(
                 "DROP TABLE session_seen;
                  ALTER TABLE preferences DROP COLUMN compact;
+                 ALTER TABLE preferences DROP COLUMN remembered_workspace_trust;
                  ALTER TABLE preferences DROP COLUMN remembered_permissions;
                  ALTER TABLE hosts DROP COLUMN alias;
                  DROP TABLE checkout_config_host;

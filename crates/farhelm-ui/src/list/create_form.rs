@@ -178,6 +178,8 @@ fn apply_composer_search_result(
     mut structured_effort: Signal<Option<LaunchEffort>>,
     mut structured_permissions: Signal<Option<LaunchPermission>>,
     mut structured_permissions_is_explicit: Signal<bool>,
+    mut structured_workspace_trust: Signal<Option<bool>>,
+    mut structured_workspace_trust_is_explicit: Signal<bool>,
     mut composer_reset_reason: Signal<Option<String>>,
     catalog: &[crate::api::LaunchCatalogModel],
     mut intent_key: Signal<Option<(String, IntentBinding)>>,
@@ -247,6 +249,7 @@ fn apply_composer_search_result(
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
+                workspace_trust: structured_workspace_trust(),
             };
             let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
                 before.clone(),
@@ -265,6 +268,7 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
         }
         crate::launch_composer::ComposerSearchResult::Model { id, harness } => {
@@ -277,12 +281,14 @@ fn apply_composer_search_result(
                 model: structured_model(),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
+                workspace_trust: structured_workspace_trust(),
             };
             let selection = LaunchSelection {
                 harness,
                 model: Some(id),
                 effort: structured_effort(),
                 permissions: structured_permissions(),
+                workspace_trust: structured_workspace_trust(),
             };
             let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
                 selection,
@@ -301,6 +307,7 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_workspace_trust.set(selection.workspace_trust);
             custom_model_harness.set(owner);
         }
         crate::launch_composer::ComposerSearchResult::Effort(effort) => {
@@ -312,6 +319,10 @@ fn apply_composer_search_result(
             // a changed create.
             structured_effort.set(Some(effort));
         }
+        crate::launch_composer::ComposerSearchResult::Trust(trust) => {
+            structured_workspace_trust.set(Some(trust));
+            structured_workspace_trust_is_explicit.set(true);
+        }
         crate::launch_composer::ComposerSearchResult::Recent(entry) => {
             creation_surface.set(CreationSurface::Structured);
             composer_reset_reason.set(None);
@@ -319,6 +330,10 @@ fn apply_composer_search_result(
             selection.permissions = crate::launch_composer::normalized_permissions(
                 selection.harness,
                 selection.permissions,
+            );
+            selection.workspace_trust = crate::launch_composer::normalized_workspace_trust(
+                selection.harness,
+                selection.workspace_trust,
             );
             let owner = selection.model.as_ref().and_then(|model| {
                 (!catalog.iter().any(|candidate| candidate.id == *model))
@@ -330,6 +345,8 @@ fn apply_composer_search_result(
             structured_model.set(selection.model);
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_workspace_trust.set(selection.workspace_trust);
+            structured_workspace_trust_is_explicit.set(true);
             // A search-applied recent replaces the whole draft with a real
             // choice, not a passive default — see
             // `structured_permissions_is_explicit`'s own doc.
@@ -1523,6 +1540,17 @@ pub(super) fn CreateSessionForm(
     // — SPEC.md keeps them unpreselected on a fresh open — so only
     // permissions needs this second signal.
     let mut structured_permissions_is_explicit = use_signal(|| false);
+    // The helm records only an explicit choice from a supported harness.
+    // Seeding the draft does not send it through unsupported harnesses.
+    let mut structured_workspace_trust = use_signal(|| {
+        prefill
+            .is_none()
+            .then(|| preferences.0.peek().remembered_workspace_trust)
+            .flatten()
+    });
+    // A passive remembered default should not hide recents that made a
+    // different explicit choice. Search, controls, clone, and recents do.
+    let mut structured_workspace_trust_is_explicit = use_signal(|| false);
     // Compatibility clears are intentional, but defaults must never make an
     // earlier explicit choice vanish without telling the person what changed.
     let mut composer_reset_reason = use_signal(|| None::<String>);
@@ -1868,6 +1896,13 @@ pub(super) fn CreateSessionForm(
                         launch.harness,
                         launch.permissions,
                     ));
+                    structured_workspace_trust.set(
+                        crate::launch_composer::normalized_workspace_trust(
+                            launch.harness,
+                            launch.workspace_trust,
+                        ),
+                    );
+                    structured_workspace_trust_is_explicit.set(true);
                     // A restored structured snapshot is a real choice the
                     // source session made, not a passive default — it must
                     // filter recents exactly as it always has.
@@ -1881,6 +1916,8 @@ pub(super) fn CreateSessionForm(
                     custom_model_harness.set(None);
                     structured_effort.set(None);
                     structured_permissions.set(None);
+                    structured_workspace_trust.set(None);
+                    structured_workspace_trust_is_explicit.set(false);
                     structured_permissions_is_explicit.set(true);
                 }
                 // A prefill is as fresh an intent as any manual edit —
@@ -2208,6 +2245,11 @@ pub(super) fn CreateSessionForm(
         } else {
             None
         },
+        workspace_trust: if structured_workspace_trust_is_explicit() {
+            structured_workspace_trust()
+        } else {
+            None
+        },
     };
     let recent_launches = crate::launch_composer::destination_recents(
         &recent_history,
@@ -2297,6 +2339,7 @@ pub(super) fn CreateSessionForm(
             model: structured_model(),
             effort: structured_effort(),
             permissions: structured_permissions(),
+            workspace_trust: crate::launch_composer::normalized_workspace_trust(harness, structured_workspace_trust()),
         };
         if selection.model.is_none()
             && let Some(message) = missing_model_error(harness)
@@ -2338,6 +2381,10 @@ pub(super) fn CreateSessionForm(
                 permissions: crate::launch_composer::normalized_permissions(
                     harness,
                     structured_permissions(),
+                ),
+                workspace_trust: crate::launch_composer::normalized_workspace_trust(
+                    harness,
+                    structured_workspace_trust(),
                 ),
             })
         })
@@ -2412,6 +2459,8 @@ pub(super) fn CreateSessionForm(
     let summary_effort = structured_effort()
         .map(crate::launch_composer::effort_value)
         .unwrap_or("default");
+    let summary_trust = structured_workspace_trust()
+        .map_or("default", |value| if value { "true" } else { "false" });
     let summary_permission = match structured_harness() {
         Some(harness) => {
             crate::launch_composer::normalized_permissions(harness, structured_permissions())
@@ -2449,6 +2498,10 @@ pub(super) fn CreateSessionForm(
                 selection.harness,
                 selection.permissions,
             );
+            selection.workspace_trust = crate::launch_composer::normalized_workspace_trust(
+                selection.harness,
+                selection.workspace_trust,
+            );
             structured_harness.set(Some(selection.harness));
             structured_model_raw_seed.set(selection.model.clone());
             structured_model_edited.set(false);
@@ -2459,6 +2512,8 @@ pub(super) fn CreateSessionForm(
             }));
             structured_effort.set(selection.effort);
             structured_permissions.set(selection.permissions);
+            structured_workspace_trust.set(selection.workspace_trust);
+            structured_workspace_trust_is_explicit.set(true);
             // Applying a recent is a deliberate whole-draft replacement, not
             // a passive default — its permissions choice must filter
             // further recents exactly as it always has.
@@ -2561,6 +2616,7 @@ pub(super) fn CreateSessionForm(
                             model: structured_model(),
                             effort: structured_effort(),
                             permissions: structured_permissions(),
+                            workspace_trust: structured_workspace_trust(),
                         };
                         let (selection, owner) =
                             crate::launch_composer::reconcile_harness_selection(
@@ -2569,6 +2625,7 @@ pub(super) fn CreateSessionForm(
                                     model: Some(id),
                                     effort: structured_effort(),
                                     permissions: structured_permissions(),
+                                    workspace_trust: structured_workspace_trust(),
                                 },
                                 None,
                                 harness,
@@ -2585,6 +2642,7 @@ pub(super) fn CreateSessionForm(
                         structured_model.set(selection.model);
                         structured_effort.set(selection.effort);
                         structured_permissions.set(selection.permissions);
+                        structured_workspace_trust.set(selection.workspace_trust);
                         custom_model_harness.set(owner);
                     }
                     model_draft_error.set(None);
@@ -2960,6 +3018,9 @@ pub(super) fn CreateSessionForm(
                         model: structured_model.peek().clone(),
                         effort: *structured_effort.peek(),
                         permissions: *structured_permissions.peek(),
+                        workspace_trust: crate::launch_composer::normalized_workspace_trust(
+                            harness, *structured_workspace_trust.peek(),
+                        ),
                     };
                     selection.permissions = crate::launch_composer::normalized_permissions(
                         harness,
@@ -3262,6 +3323,9 @@ pub(super) fn CreateSessionForm(
                                 model: structured_model.peek().clone(),
                                 effort: *structured_effort.peek(),
                                 permissions: *structured_permissions.peek(),
+                                workspace_trust: crate::launch_composer::normalized_workspace_trust(
+                                    harness, *structured_workspace_trust.peek(),
+                                ),
                             };
                             if *creation_surface.peek() != CreationSurface::Structured
                                 || !crate::launch_composer::selection_is_compatible(
@@ -3528,12 +3592,21 @@ pub(super) fn CreateSessionForm(
                             // since "reset" means "as if freshly opened now".
                             structured_permissions
                                 .set(initial_structured_permissions(&preferences.0.peek()));
+                            structured_workspace_trust
+                                .set(structured_harness().map_or_else(
+                                    || preferences.0.peek().remembered_workspace_trust,
+                                    |harness| crate::launch_composer::normalized_workspace_trust(
+                                        harness,
+                                        preferences.0.peek().remembered_workspace_trust,
+                                    ),
+                                ));
                             // Back to a passive seed, exactly like a fresh
                             // open: reset does not turn the remembered value
                             // into a deliberate choice, so it must not start
                             // filtering recents either (see
                             // `structured_permissions_is_explicit`).
                             structured_permissions_is_explicit.set(false);
+                            structured_workspace_trust_is_explicit.set(false);
                             composer_reset_reason.set(None);
                             promote_fetched_history_snapshot(
                                 offered_history, create_target, fetched_history,
@@ -3562,6 +3635,9 @@ pub(super) fn CreateSessionForm(
                         span { class: "launch-composer-danger", "yolo" }
                     } else {
                         "{summary_permission}"
+                    }
+                    if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Muse | LaunchHarness::Pi)) {
+                        " · trust: {summary_trust}"
                     }
                 }
             }
@@ -3762,6 +3838,8 @@ pub(super) fn CreateSessionForm(
                                             structured_effort,
                                             structured_permissions,
                                             structured_permissions_is_explicit,
+                                            structured_workspace_trust,
+                                            structured_workspace_trust_is_explicit,
                                             composer_reset_reason,
                                             &catalog,
                                             intent_key,
@@ -3863,6 +3941,8 @@ pub(super) fn CreateSessionForm(
                                                                 structured_model_raw_seed, structured_model_edited,
                                                                 custom_model_harness, structured_effort,
                                                                 structured_permissions, structured_permissions_is_explicit,
+                                                                structured_workspace_trust,
+                                                                structured_workspace_trust_is_explicit,
                                                                 composer_reset_reason,
                                                                 &catalog, intent_key,
                                                             );
@@ -3890,6 +3970,7 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
                                                         crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
+                                                        crate::launch_composer::ComposerSearchResult::Trust(value) => rsx! { "Trust workspace: {value}" },
                                                         crate::launch_composer::ComposerSearchResult::Recent(entry) => rsx! {
                                                             span { class: "launch-composer-search-recent-destination", "Recent setup: {display_peer(&crate::launch_composer::recent_destination_label(&entry))} · {selected_host_label}" }
                                                             // Keep the dangerous permission as a semantic span
@@ -4248,6 +4329,7 @@ pub(super) fn CreateSessionForm(
                                                 model: structured_model(),
                                                 effort: structured_effort(),
                                                 permissions: structured_permissions(),
+                                                workspace_trust: structured_workspace_trust(),
                                             };
                                             let (selection, owner) = crate::launch_composer::reconcile_harness_selection(
                                                 selection, *custom_model_harness.peek(), harness, &catalog,
@@ -4258,6 +4340,7 @@ pub(super) fn CreateSessionForm(
                                                     model: structured_model(),
                                                     effort: structured_effort(),
                                                     permissions: structured_permissions(),
+                                                    workspace_trust: structured_workspace_trust(),
                                                 },
                                                 &selection,
                                                 structured_permissions_is_explicit(),
@@ -4268,6 +4351,7 @@ pub(super) fn CreateSessionForm(
                                             structured_model.set(selection.model);
                                             structured_effort.set(selection.effort);
                                             structured_permissions.set(selection.permissions);
+                                            structured_workspace_trust.set(selection.workspace_trust);
                                             custom_model_harness.set(owner);
                                             creation_surface.set(CreationSurface::Structured);
                                             intent_key.set(None);
@@ -4421,12 +4505,14 @@ pub(super) fn CreateSessionForm(
                                                                 model: structured_model(),
                                                                 effort: structured_effort(),
                                                                 permissions: structured_permissions(),
+                                                                workspace_trust: structured_workspace_trust(),
                                                             };
                                                             let selection = LaunchSelection {
                                                                 harness,
                                                                 model: Some(model),
                                                                 effort: structured_effort(),
                                                                 permissions: structured_permissions(),
+                                                                workspace_trust: structured_workspace_trust(),
                                                             };
                                                             if !crate::launch_composer::selection_is_compatible(
                                                                 &selection,
@@ -4657,6 +4743,34 @@ pub(super) fn CreateSessionForm(
                                 }
                             }
                         }
+                        }
+                        if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Muse | LaunchHarness::Pi)) {
+                            div { class: "launch-composer-choice launch-composer-trust-choice",
+                                span { class: "launch-composer-section-label", "workspace trust" }
+                                if structured_harness() == Some(LaunchHarness::Muse) {
+                                    p { class: "launch-composer-choice-help", "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace." }
+                                }
+                                div { class: "launch-composer-segmented",
+                                    for (choice, label) in [(None, "default"), (Some(true), "true"), (Some(false), "false")] {
+                                        button {
+                                            key: "{label}", r#type: "button",
+                                            class: if structured_workspace_trust() == choice { "selected" } else { "" },
+                                            aria_pressed: structured_workspace_trust() == choice,
+                                            disabled: busy,
+                                            onclick: move |_| {
+                                                if !draft_transition_allowed(ops) { return; }
+                                                promote_fetched_history_snapshot(
+                                                    offered_history, create_target, fetched_history,
+                                                );
+                                                structured_workspace_trust.set(choice);
+                                                structured_workspace_trust_is_explicit.set(true);
+                                                intent_key.set(None);
+                                            },
+                                            "{label}"
+                                        }
+                                    }
+                                }
+                            }
                         }
                         if let Some(reason) = structured_choice_error {
                             div { class: "launch-composer-choice-error", "{reason}" }
@@ -4968,6 +5082,7 @@ mod tests {
             last_selected: None,
             compact: None,
             remembered_permissions: word.map(str::to_string),
+            remembered_workspace_trust: None,
         };
         assert_eq!(
             super::initial_structured_permissions(&with(Some("yolo"))),
@@ -5123,6 +5238,7 @@ mod tests {
                     model: None,
                     effort: None,
                     permissions: None,
+                    workspace_trust: None,
                 }),
                 ..base.clone()
             },
@@ -5504,6 +5620,7 @@ mod tests {
             model: Some("muse-spark-1.3-contributor".to_string()),
             effort: None,
             permissions: Some(LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         let session = Session {
             invocation: "muse --model muse-spark-1.3-contributor --yolo".to_string(),

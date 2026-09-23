@@ -368,6 +368,10 @@ pub struct LaunchSelection {
     pub model: Option<String>,
     pub effort: Option<LaunchEffort>,
     pub permissions: Option<LaunchPermission>,
+    /// A per-run project-resource trust choice, independent of tool permissions.
+    /// Older history rows have no such choice and use the harness default.
+    #[serde(default)]
+    pub workspace_trust: Option<bool>,
 }
 
 /// The interactive harness selected in the launch composer.

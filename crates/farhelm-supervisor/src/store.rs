@@ -7344,6 +7344,7 @@ mod tests {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         let expected_work_start = 1_700_000_123_456;
         store
@@ -7431,6 +7432,7 @@ mod tests {
                 model: Some(model.to_string()),
                 effort,
                 permissions: Some(permissions),
+                workspace_trust: None,
             };
             store
                 .insert_session(
@@ -7500,6 +7502,7 @@ mod tests {
             model: Some("provider/model".into()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Approve),
+            workspace_trust: None,
         };
         let locator = r#"omp:{"version":1,"session_id":"persisted-omp","session_file":"/work/conversation.jsonl"}"#;
         let mut row = launching_row("persisted-omp");

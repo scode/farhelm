@@ -2738,6 +2738,7 @@ mod tests {
                 model: None,
                 effort: None,
                 permissions: Some(crate::LaunchPermission::Yolo),
+                workspace_trust: None,
             }),
             invocation: "unknown-command --anything".to_string(),
             ..row_specimen("structured-agent-badge")
@@ -2764,6 +2765,7 @@ mod tests {
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,
                 permissions: Some(crate::LaunchPermission::SmartApprove),
+                workspace_trust: None,
             }),
             invocation: "goose session".to_string(),
             ..row_specimen("structured-goose-badge")
@@ -2780,6 +2782,7 @@ mod tests {
                 model: Some("z-ai/glm-5.3".into()),
                 effort: None,
                 permissions: None,
+                workspace_trust: None,
             }),
             invocation: "pi --provider openrouter".to_string(),
             ..row_specimen("structured-pi-badge")

@@ -2433,13 +2433,13 @@ pub(crate) fn ListView(
                         // PUT here, only a local mirror (compare
                         // `remember_selection`/`remember_compact`, which DO
                         // write through). A legacy/profile launch carries no
-                        // `launch` at all and must leave this field alone,
+                        // `launch` at all and must leave these fields alone,
                         // matching the helm's own write condition. Not
                         // exactly, though: the helm also declines to write
                         // when the create's history admission is refused (a
                         // host with no install identity, an out-of-order
                         // replay), cases this client cannot see. Until the
-                        // next reload this client then preselects a value
+                        // next reload this client may then preselect a value
                         // the helm never stored — the rarer, reversible
                         // direction, and accepted rather than plumbed back.
                         if let Some(launch) = &session.launch {
@@ -2450,6 +2450,11 @@ pub(crate) fn ListView(
                                 crate::LaunchPermission::Chat => "chat".to_string(),
                             });
                             preferences.0.write().remembered_permissions = word;
+                            if matches!(launch.harness, crate::LaunchHarness::Muse | crate::LaunchHarness::Pi)
+                                && let Some(trust) = launch.workspace_trust
+                            {
+                                preferences.0.write().remembered_workspace_trust = Some(trust);
+                            }
                         }
                         show_create.set(false);
                         // This component stays mounted after creation, so

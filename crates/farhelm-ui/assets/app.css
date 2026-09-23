@@ -3783,6 +3783,12 @@ samp {
   gap: 8px;
 }
 
+.launch-composer-choice-help {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: 12px;
+}
+
 .launch-composer-choice-pair {
   /* The two segmented decisions sit beside one another when the choice
      column has room for both at their full width, and permissions drops to

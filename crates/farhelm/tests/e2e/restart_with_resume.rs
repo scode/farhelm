@@ -660,6 +660,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         model: Some("claude-fable-5".to_string()),
         effort: Some(farhelm_proto::LaunchEffort::High),
         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+        workspace_trust: None,
     });
     let structured_options = structured
         .then(|| "--model claude-fable-5 --effort high --dangerously-skip-permissions".to_string());

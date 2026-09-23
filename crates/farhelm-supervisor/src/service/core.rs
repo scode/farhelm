@@ -18068,6 +18068,7 @@ pub(crate) mod tests {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
         };
         assert_eq!(
             create_fingerprint(
@@ -18334,6 +18335,7 @@ pub(crate) mod tests {
                 model: Some("x-ai/grok-4.6".into()),
                 effort: Some(farhelm_proto::LaunchEffort::High),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
+                workspace_trust: None,
             })
         );
         drop(sessions);
@@ -22700,7 +22702,8 @@ pub(crate) mod tests {
     /// Fresh intent must retain launch selection even when two selections
     /// compile to identical commands. Otherwise a reused key could replay a
     /// different saved setup. This includes inherited metadata on Raw mode;
-    /// the frozen Existing encodings remain covered by their literal tests.
+    /// an unset trust choice must retain its older serialized shape too.
+    /// The frozen Existing encodings remain covered by their literal tests.
     #[farhelm_testtrace::test]
     fn fresh_fingerprint_binds_launch_selection_without_changing_existing() {
         let root = tempfile::tempdir().unwrap();
@@ -22710,6 +22713,7 @@ pub(crate) mod tests {
             model: None,
             effort: None,
             permissions: None,
+            workspace_trust: None,
         };
         let mut explicit = selection.clone();
         explicit.model = Some("explicit-model".into());
@@ -22735,6 +22739,13 @@ pub(crate) mod tests {
             let implicit_mode = mode(selection.clone());
             let explicit_mode = mode(explicit.clone());
             let original = create_fingerprint(Some(&checkout), None, "", &implicit_mode, None);
+            let historical_selection =
+                r#"{"harness":"codex","model":null,"effort":null,"permissions":null}"#;
+            assert!(
+                original.contains(historical_selection),
+                "an unset trust choice must not alter a stored fresh-checkout fingerprint"
+            );
+            assert!(!original.contains("workspace_trust"));
             assert_ne!(
                 original,
                 create_fingerprint(Some(&checkout), None, "", &explicit_mode, None)
@@ -22743,6 +22754,11 @@ pub(crate) mod tests {
                 original,
                 create_fingerprint(Some(&checkout), None, "", &implicit_mode, None)
             );
+            let mut trusted = selection.clone();
+            trusted.workspace_trust = Some(true);
+            let trusted = create_fingerprint(Some(&checkout), None, "", &mode(trusted), None);
+            assert_ne!(original, trusted);
+            assert!(trusted.contains("\"workspace_trust\":true"));
             let FreshCreateFingerprint::GithubCheckout {
                 parent,
                 requested_cwd,

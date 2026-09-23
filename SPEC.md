@@ -154,6 +154,9 @@ that tracking and Resume are unsupported. Restart starts fresh; history and clon
 Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state
 recognition are not implemented; no Muse integration kind is implied by the presence of its built-in profiles.
+Structured Muse launches also offer a workspace-trust choice separate from tool permissions: true adds
+`--trust-workspace` for that launch; false adds no trust flag. False does not undo trust already implied by `--yolo` or
+vendor configuration, so a prompt is possible only when neither has granted trust.
 
 OpenCode is a structured harness, not a built-in profile. Its Zen model is required: Farhelm suggests
 `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`, `opencode/gpt-6-luna`,
@@ -314,32 +317,40 @@ checkout; the agent choice is independent of that destination:
   a rename's title alone is held to that same bound. Renaming has no conflict detection: two renames of one session both
   succeed, and the later write is the title that sticks.
 - Launch composer: New opens a dialog with no selected harness. Structured Codex, Claude, Muse, Cursor, Goose, Pi,
-  OpenCode, and OMP launches carry a harness plus model, effort, and permission choices where that harness supports
-  them; visible permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`. Absent optional
-  choices mean the selected harness's defaults and omit their flags, except an omitted Pi permission means its mandatory
-  YOLO mode. OpenCode, Goose, Pi, and OMP require a model; OpenCode and Cursor offer no effort choice. The helm owns the
-  released model catalog and validates every structured choice, so the browser never turns a model identifier into an
-  argv fragment. A known model identifies its owning harness; a custom model needs an explicit harness. A shared known
-  model retains a selected owning harness, while an unselected ambiguous id asks for one. Replacing a harness clears
-  only choices that are incompatible with it. An invalid combination cannot launch. The one exception to "New preselects
-  nothing": the permissions mode remembers the last SUCCESSFUL structured launch, helm-wide across every client; "reset
-  choices" returns the segment to that remembered value rather than to the harness default, and a recent-setup row's own
-  saved choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by
-  the chosen harness, effort words offered by that harness and model, folders, and recent setups. Accepting a result
-  applies it and clears the box while keeping focus there. Enter on an empty box launches only a complete, valid
-  selection through the ordinary Launch path; Enter on a non-empty query with no result never launches, and Escape
-  closes the result list without clearing the query, so Enter after Escape does nothing until the box is emptied.
+  OpenCode, and OMP launches carry a harness plus model, effort, permission, and workspace-trust choices where that
+  harness supports them; visible permission vocabulary is `default`, `approve`, `smart approve`, `chat`, and `yolo`.
+  Absent optional choices mean the selected harness's defaults and omit their flags, except an omitted Pi permission
+  means its mandatory YOLO mode. OpenCode, Goose, Pi, and OMP require a model; OpenCode and Cursor offer no effort
+  choice. The helm owns the released model catalog and validates every structured choice, so the browser never turns a
+  model identifier into an argv fragment. A known model identifies its owning harness; a custom model needs an explicit
+  harness. A shared known model retains a selected owning harness, while an unselected ambiguous id asks for one.
+  Replacing a harness clears only choices that are incompatible with it. An invalid combination cannot launch. New
+  normally preselects no harness or model. The permissions mode remembers the last successful structured launch,
+  helm-wide across every client; an explicit workspace-trust choice on Muse or Pi is remembered separately after a
+  successful user launch. `trust:true` and `trust:false` are single search actions on those harnesses. Muse true uses
+  `--trust-workspace`; Pi true and false use `--approve` and `--no-approve` respectively. The choice grants or declines
+  whether Muse bypasses its workspace prompt or Pi approves project-local content for one launch; it never writes vendor
+  trust state. Codex and Claude can still ask for directory trust; Farhelm does not silently answer their prompts.
+  Codex's per-run project override needs the final resolved working directory, which a fresh checkout does not have when
+  the helm compiles launch argv. Other harnesses have no supported interactive workspace-trust switch. "reset choices"
+  returns both segments to their remembered values rather than to harness defaults, and a recent-setup row's own saved
+  choice overrides it when used. The launch-composer search matches harnesses, `other / command`, models scoped by the
+  chosen harness, effort words offered by that harness and model, supported trust actions, folders, and recent setups.
+  Accepting a result applies it and clears the box while keeping focus there. Enter on an empty box launches only a
+  complete, valid selection through the ordinary Launch path; Enter on a non-empty query with no result never launches,
+  and Escape closes the result list without clearing the query, so Enter after Escape does nothing until the box is
+  emptied.
 - Legacy agent profile or arbitrary command: `other / command` is a harness-picker choice in the same composer. It
-  replaces only the model, effort, and permissions controls with the profile picker and raw invocation field. Existing
-  callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not silently choose
-  a remembered profile. Values from this mode cannot affect a structured request or its idempotency key. The helm owns
-  the remembered profile default: remote supervisor metadata must not override an explicit user choice or indefinitely
-  determine the default profile for sessions on other hosts. Choosing this mode does not make the structured composer
-  preselect a harness or profile. Search in this mode ignores the retained structured draft: harnesses and known models
-  remain available globally, while effort actions are absent until a structured harness is active. Accepting a harness,
-  model, or recent setup activates the structured launch it names; accepting a folder keeps the current mode. The
-  structured model/effort/permissions summary is absent while a profile or command is active. See the
-  maintainer-confirmed decisions below.
+  replaces only the model, effort, permissions, and workspace-trust controls with the profile picker and raw invocation
+  field. Existing callers, profiles, and their helm-wide last-used profile behavior remain compatible, but New does not
+  silently choose a remembered profile. Values from this mode cannot affect a structured request or its idempotency key.
+  The helm owns the remembered profile default: remote supervisor metadata must not override an explicit user choice or
+  indefinitely determine the default profile for sessions on other hosts. Choosing this mode does not make the
+  structured composer preselect a harness or profile. Search in this mode ignores the retained structured draft:
+  harnesses and known models remain available globally, while effort actions are absent until a structured harness is
+  active. Accepting a harness, model, or recent setup activates the structured launch it names; accepting a folder keeps
+  the current mode. The structured model/effort/permissions/trust summary is absent while a profile or command is
+  active. See the maintainer-confirmed decisions below.
 - Recent setups: the helm remembers bounded successful structured combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

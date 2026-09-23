@@ -53,6 +53,7 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
             model: Some("gpt-6-astra".to_string()),
             effort: Some(farhelm_proto::LaunchEffort::High),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
         }),
         ..rest_harness::session("composer-history", 100)
     };
@@ -340,6 +341,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                             model: Some("gpt-6-astra".into()),
                             effort: Some(farhelm_proto::LaunchEffort::High),
                             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                            workspace_trust: None,
                         }),
                         status: farhelm_proto::SessionStatus::Unknown,
                         annotation: None,
@@ -444,6 +446,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     model: None,
                     effort: None,
                     permissions: Some(LaunchPermission::Yolo),
+                    workspace_trust: None,
                 }),
             ),
             ("legacy-launch", None),
@@ -454,6 +457,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                     model: None,
                     effort: None,
                     permissions: None,
+                    workspace_trust: None,
                 }),
             ),
         ];
@@ -1696,6 +1700,7 @@ async fn replace_of_a_structured_session_preserves_its_resume_template() {
         model: Some("claude-opus-4-6".to_string()),
         effort: Some(LaunchEffort::High),
         permissions: Some(LaunchPermission::Yolo),
+        workspace_trust: None,
     };
     let resume_template = vec![
         "claude".to_string(),
