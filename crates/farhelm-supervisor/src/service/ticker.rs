@@ -163,7 +163,7 @@ use super::status::{live_status, observe_entry};
 use super::terminals::{Terminal, tabs_from_pane_states};
 use crate::store::LastOutcome;
 use crate::tmux::retain_pane_tail;
-use farhelm_proto::AgentKind;
+use farhelm_proto::{AgentKind, SessionStatus};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -343,6 +343,13 @@ pub(crate) const SAMPLING_ADMISSION_PERMITS: usize = 1;
 /// and any interval.
 #[derive(Debug, Default)]
 pub(crate) struct ActivitySample {
+    /// A reloaded pane has no process-local screen history yet. While this
+    /// is true, the list reply leaves its status provisional so the helm
+    /// can keep the last cached answer until this process sees real evidence.
+    /// A recognized wait is returned immediately, then retires this flag
+    /// so a later failed capture can withdraw that claim.
+    /// New launches start false: their initial `Running` is intentional.
+    pub(crate) startup_provisional: bool,
     /// How many times this session has been sampled at all.
     ///
     /// Load-bearing rather than a statistic: the FIRST sample of a pane
@@ -406,6 +413,15 @@ impl ActivitySample {
     /// exactly why each has its own named constructor.)
     pub(crate) fn unsampled() -> Arc<std::sync::Mutex<ActivitySample>> {
         Arc::new(std::sync::Mutex::new(ActivitySample::default()))
+    }
+
+    /// Start a reloaded run without treating a live tmux pane as evidence
+    /// that its agent is producing output right now.
+    pub(crate) fn reloaded() -> Arc<std::sync::Mutex<ActivitySample>> {
+        Arc::new(std::sync::Mutex::new(ActivitySample {
+            startup_provisional: true,
+            ..ActivitySample::default()
+        }))
     }
 
     /// Reset run evidence while preserving an already accepted durable retry.
@@ -500,6 +516,9 @@ impl ActivitySample {
         self.tail = Some(tail);
         self.working = working;
         self.samples += 1;
+        if changed || working || self.unchanged_streak >= super::status::QUIET_SAMPLES_BEFORE_IDLE {
+            self.startup_provisional = false;
+        }
         changed
     }
 
@@ -1192,17 +1211,36 @@ async fn sample_pass(
         // recovery sample is therefore only a baseline: it cannot invent a
         // transition from no prior observation.
         let previous_status = live_status(entry);
-        let changed = entry
-            .activity
-            .lock()
-            .expect("activity mutex poisoned")
-            .observe_screen(comparison, status_tail, screen.working);
+        let (changed, was_provisional) = {
+            let mut activity = entry.activity.lock().expect("activity mutex poisoned");
+            let was_provisional = activity.startup_provisional;
+            let changed = activity.observe_screen(comparison, status_tail, screen.working);
+            (changed, was_provisional)
+        };
+        // Waiting is evidence from the new screen even when the screen has
+        // no earlier baseline for comparison. Retire the startup gap once
+        // that answer has been published; if a later capture fails,
+        // `forget_tail` must be able to withdraw the stale waiting claim.
+        settle_startup_wait(entry, was_provisional);
         if changed {
             note_activity(sup, entry).await;
             if observed_work_start(&previous_status, &live_status(entry), changed) {
                 persist_work_started(sup, entry, true).await;
             }
         }
+    }
+}
+
+/// Accept a freshly recognized wait as enough evidence to leave startup.
+/// A later failed capture must then withdraw `Waiting` through
+/// `forget_tail`, rather than leave the helm preserving it as provisional.
+fn settle_startup_wait(entry: &SessionEntry, was_provisional: bool) {
+    if was_provisional && live_status(entry) == SessionStatus::Waiting {
+        entry
+            .activity
+            .lock()
+            .expect("activity mutex poisoned")
+            .startup_provisional = false;
     }
 }
 
@@ -1476,7 +1514,7 @@ async fn reap_dead_tabs(
 mod tests {
     use super::super::capture::note_first_input;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
-    use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
+    use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with, no_uploads};
     use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::session_status;
@@ -4082,6 +4120,43 @@ mod tests {
         );
     }
 
+    /// A reloaded pane may recognize a wait from its first captured screen.
+    /// That observation must end the provisional interval so a later failed
+    /// capture can withdraw the old prompt instead of preserving it in the
+    /// helm cache through an `Unknown` reply.
+    #[farhelm_testtrace::test]
+    fn a_first_startup_wait_can_be_withdrawn_after_capture_failure() {
+        let entry = SessionEntry {
+            snapshot: IntegrationSnapshot {
+                kind: AgentKind::Claude,
+                resume_template: None,
+            },
+            activity: ActivitySample::reloaded(),
+            ..entry_with(Some(a_terminal()), LastOutcome::Running)
+        };
+        entry
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .observe_screen(
+                CLAUDE_APPROVAL_DIALOG.to_string(),
+                CLAUDE_APPROVAL_DIALOG.to_string(),
+                false,
+            );
+        assert_eq!(live_status(&entry), SessionStatus::Waiting);
+        settle_startup_wait(&entry, true);
+        assert!(
+            !entry
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .startup_provisional
+        );
+
+        entry.activity.lock().expect("activity mutex").forget_tail();
+        assert_eq!(live_status(&entry), SessionStatus::Running);
+    }
+
     /// A prompt that has since been ANSWERED must not hold its session at
     /// `Waiting` through a run of failing captures — driven through
     /// `sample_pass` with an injected failure, not by calling
@@ -4116,6 +4191,12 @@ mod tests {
     /// The other leaves the pre-failure streak standing, so a session that
     /// was nine quiet samples deep stays `Idle` through a screen that has
     /// visibly changed. The continuation below fails on both.
+    ///
+    /// A reloaded session has one extra boundary: its first recognized
+    /// prompt must end the provisional interval, or a later capture
+    /// failure yields `Unknown` and the helm keeps that stale `Waiting`.
+    /// The focused test below pins that transition separately from the
+    /// ordinary failed-sample paths this fixture exercises.
     #[farhelm_testtrace::test]
     async fn a_failed_sample_stops_the_session_being_sharpened_from_a_stale_screen() {
         for read in ["tail", "pane_states"] {

@@ -626,6 +626,12 @@ the supervisor was down shows the code only when the surviving terminal genuinel
 otherwise — never a guess (see Durability). A user-initiated stop yields exited with an annotation — "stopped" is not a
 distinct status. Host unreachability is per-host connection state, not a session status.
 
+After a supervisor restart, a live pane keeps its last cached status while the supervisor gathers new screen evidence.
+The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch error,
+changed screen, recognized wait, or enough unchanged samples replaces the old answer as soon as observed. A session with
+no cached status remains unclassified during that gap. An unclassified session still asks for confirmation before
+Restart, since its pane may be live.
+
 An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
 restart or delete are the ways out.
 

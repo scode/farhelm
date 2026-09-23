@@ -97,7 +97,7 @@ use tracing::warn;
 /// with a small fleet this is a handful of seconds, and an `Idle` that
 /// takes a minute to appear is not the signal the status column exists to
 /// give.
-const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
+pub(crate) const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 
 /// Compute one session's liveness for a `ListSessions` reply. tmux is the
 /// truth (module docs); this function only ever reports what it can
@@ -261,23 +261,20 @@ pub(crate) fn session_status(
 ///    `Running`. This is weaker than waiting and cannot cross the live-pane
 ///    boundary; capture failure clears it with the screen that proved it.
 ///
-/// ## The pre-first-sample state is `Running`, on purpose
+/// ## The pre-first-sample state
 ///
-/// A streak of zero unchanged samples means two different things — "just
-/// changed" and "never compared" — and `ActivitySample::samples` is what
-/// separates them. Below two samples nothing has been WATCHED, which is
-/// not the same fact as a still pane, and `Running` is the honest reading:
-/// a session with a live pane and no history is one that just launched,
-/// and an agent that just launched is working. It is also the reading that
-/// fails safely, since the alternative would paint every session `Idle`
-/// for its first moments and again after every supervisor restart.
+/// A new launch starts `Running` before sampling: its live pane is evidence
+/// of a newly started agent. A reloaded pane has no such fresh launch
+/// evidence, so it reports `Unknown` while the helm retains the preceding
+/// cached status. A screen change, positive work hint, recognized wait, or
+/// enough unchanged comparisons settles that provisional answer.
 ///
 /// ## Bounds this is deliberately allowed to violate cosmetically
 ///
-/// A session that never gets sampled at all — because tmux is unreachable
-/// on every tick — stays `Running` forever. That is the same honest
-/// "nothing has been observed" answer as the launch case, and it costs a
-/// wrong badge on a supervisor that already cannot talk to its terminals.
+/// A newly launched session that never gets sampled — because tmux is
+/// unreachable on every tick — stays `Running`. A reloaded one stays
+/// provisional instead. Both answers can remain stale while capture fails;
+/// neither changes whether the terminal can be used.
 ///
 /// No clock is read here, and none should be: see
 /// [`QUIET_SAMPLES_BEFORE_IDLE`] for why elapsed time is the wrong unit
@@ -301,15 +298,20 @@ pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
         } else {
             SessionStatus::Running
         };
-    let (Some(integration), Some(tail)) = (entry.snapshot.integration(), activity.tail.as_deref())
-    else {
-        return baseline;
+    let status = match (entry.snapshot.integration(), activity.tail.as_deref()) {
+        (Some(integration), Some(tail)) => waiting_or_baseline(
+            baseline.clone(),
+            integration.sharpen(baseline.clone(), tail),
+        ),
+        _ => baseline.clone(),
     };
-    let sharpened = integration.sharpen(baseline.clone(), tail);
-    let status = waiting_or_baseline(baseline.clone(), sharpened);
     if status == SessionStatus::Waiting {
-        status
-    } else if activity.working {
+        return status;
+    }
+    if activity.startup_provisional {
+        return SessionStatus::Unknown;
+    }
+    if activity.working {
         SessionStatus::Running
     } else {
         baseline
@@ -711,6 +713,7 @@ mod tests {
     use super::super::core::tests::{a_terminal, entry_with};
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
+    use crate::service::ticker::ActivitySample;
     use farhelm_proto::AgentKind;
 
     /// An entry with a live terminal whose sample cell has been filled in
@@ -1039,12 +1042,11 @@ mod tests {
 
     /// A session nothing has sampled twice yet is `Running`, not `Idle`.
     ///
-    /// This is the documented pre-first-sample state, and it is worth its
-    /// own test because it is the state EVERY session passes through — at
-    /// create, and again for every session after a supervisor restart. The
-    /// wrong answer here would paint a whole fleet idle for the first
-    /// moments of its life, which is exactly the kind of systematically
-    /// wrong status that teaches users to ignore the column.
+    /// This is the documented pre-first-sample state for a NEW launch. A
+    /// reloaded entry carries a separate provisional marker and keeps the
+    /// helm's last answer until this process has evidence. Painting every
+    /// fresh launch idle before its first comparison would still make the
+    /// column systematically wrong.
     ///
     /// Both sub-two counts are pinned, because they are different facts:
     /// zero means the ticker has not reached this session, one means it
@@ -1061,6 +1063,57 @@ mod tests {
                  ({samples} samples)"
             );
         }
+    }
+
+    /// A reloaded pane must not erase the helm's previous idle or waiting
+    /// answer with `Running` before this supervisor has seen its screen.
+    /// A changed screen and a settled quiet screen each end that gap, while
+    /// a dead pane uses the lifecycle result immediately.
+    #[farhelm_testtrace::test]
+    fn a_reloaded_live_pane_waits_for_status_evidence() {
+        let live = pane_map(false, None);
+        let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
+        entry.activity = ActivitySample::reloaded();
+        assert_eq!(session_status(&entry, &live).0, SessionStatus::Unknown);
+
+        {
+            let mut activity = entry.activity.lock().expect("activity mutex");
+            activity.observe("unchanged".to_string());
+            activity.observe("unchanged".to_string());
+        }
+        assert_eq!(session_status(&entry, &live).0, SessionStatus::Unknown);
+
+        entry
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .observe("changed".to_string());
+        assert_eq!(session_status(&entry, &live).0, SessionStatus::Running);
+
+        let mut quiet = entry_with(Some(a_terminal()), LastOutcome::Running);
+        quiet.activity = ActivitySample::reloaded();
+        for _ in 0..=QUIET_SAMPLES_BEFORE_IDLE {
+            quiet
+                .activity
+                .lock()
+                .expect("activity mutex")
+                .observe("still".to_string());
+        }
+        assert_eq!(session_status(&quiet, &live).0, SessionStatus::Idle);
+
+        let waiting = entry_sampled(AgentKind::Claude, 1, 0, Some(CLAUDE_APPROVAL_TAIL));
+        waiting
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .startup_provisional = true;
+        assert_eq!(session_status(&waiting, &live).0, SessionStatus::Waiting);
+
+        let dead = pane_map(true, Some(7));
+        assert_eq!(
+            session_status(&entry, &dead).0,
+            SessionStatus::Exited { exit_code: Some(7) }
+        );
     }
 
     /// Sharpening is actually WIRED: an integrated session whose sampled
