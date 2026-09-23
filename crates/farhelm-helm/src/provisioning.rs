@@ -4249,13 +4249,29 @@ mod tests {
 
     /// Prove both halves of session survival: tmux still reports a live
     /// process, and the post-restart supervisor can drive its terminal.
+    ///
+    /// A reloaded supervisor deliberately reports `Unknown` until its ticker
+    /// has sampled the pane. Wait for that readiness boundary rather than
+    /// treating the provisional status as evidence that the session died.
     async fn assert_session_operable(client: &crate::client::SupervisorClient, session_id: &str) {
-        let listing = client.list_sessions().await.expect("list live session");
-        let session = listing
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .expect("the tmux-held session must remain listed");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let session = loop {
+            let listing = client.list_sessions().await.expect("list live session");
+            let session = listing
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .cloned()
+                .expect("the tmux-held session must remain listed");
+            if session.status.is_live()
+                || !matches!(session.status, farhelm_proto::SessionStatus::Unknown)
+                || tokio::time::Instant::now() >= deadline
+            {
+                break session;
+            }
+            // sleep-ok: wait for status sampling; the deadline bounds observation.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
         assert!(
             session.status.is_live(),
             "the retained session is not running: {:?}",
