@@ -51,12 +51,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   connected displays and falling back safely when the display layout changes so the window never reopens off-screen or
   unusably large. The current native API boundary is recorded in
   [docs/window-restoration-investigation.md](docs/window-restoration-investigation.md).
-- Assess what is needed to prevent native and shelled-out subagents from replacing or withdrawing the foreground
-  conversation's restart target across harnesses. #801 adds Codex-specific ownership checks; Claude, Goose, Pi, and OMP
-  still lack equivalent report-admission checks. Establish actual child reporter inheritance and triggering, including
-  mixed-harness delegation, and propose the required ownership checks while preserving legitimate foreground
+- **Claude foreground ownership.** Assess whether native or shelled-out Claude children can replace or withdraw the
+  foreground conversation's restart target, then define the smallest admission check that preserves legitimate
   clear/new/switch/fork/resume transitions. This is an assessment task, not a claim that every vendor path has been
-  reproduced. [Historical assessment](lore/2026-09-20-harness-conversation-ownership.md).
+  reproduced.
+- **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
+  conversation's restart target, then define the smallest admission check that preserves legitimate foreground
+  transitions. This is an assessment task, not a claim that every vendor path has been reproduced.
+- **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the
+  foreground conversation's restart target beyond the checks now landed in #814, and define any remaining smallest
+  admission check. Preserve legitimate foreground transitions and avoid extending the reporter's scope without
+  evidence.
+
+The earlier cross-harness evidence is preserved in [the historical ownership
+assessment](lore/2026-09-20-harness-conversation-ownership.md).
 
 ## Doc todo
 
@@ -223,6 +231,12 @@ Real enough to keep, not established enough to act on. Each names what would set
   wanted; no blanket power-loss guarantee and no remote-branch change.
 
 ## Maybe later
+
+- **Goose foreground ownership.** Keep the basic Goose reporter for now; it does not distinguish a native or shelled-out
+  child that inherits the reporter from the foreground conversation. The stricter database-backed implementation is
+  preserved at the `goose-capture-complex-2026-09-23` tag for comparison. The research and proposed smaller replacement
+  are recorded in [the Goose session-tracking assessment](lore/2026-09-23-goose-session-tracking.md). Revisit only if
+  reliable child isolation becomes a product requirement or Goose exposes a direct root/subagent role signal.
 
 - Reconsider the first-use configuration experience for `gh:` launches when no working-copy root is configured. The
   first version refuses the launch and points to the CLI command; consider an inline GUI flow on initial use or another
