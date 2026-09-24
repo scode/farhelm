@@ -51,6 +51,11 @@ web-sys = { workspace = true, features = ["Storage"] }
 # for why the desktop target instead reuses `tokio::time::sleep`.
 gloo-timers.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows' std::fs::rename refuses an existing destination; MoveFileExW keeps
+# the close snapshot replacement atomic without deleting the prior record.
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow.workspace = true
 # Native system-clipboard writes for the desktop shell (`desktop.rs`'s
@@ -60,6 +65,9 @@ anyhow.workspace = true
 # Optional and desktop-feature-gated: the web build and the plain library
 # have no pasteboard to write.
 arboard = { workspace = true, optional = true }
+# Tao exposes the display backend through the window's raw handle. This is
+# needed before its first frame: Wayland has no meaningful global position.
+raw-window-handle = { version = "0.6", optional = true }
 farhelm-helm.workspace = true
 farhelm-supervisor.workspace = true
 # Content types for the desktop asset handler (`desktop::serve_asset`, D6).
@@ -99,7 +107,7 @@ tracing-subscriber.workspace = true
 [features]
 default = []
 web = ["dioxus/web"]
-desktop = ["dioxus/desktop", "dep:arboard"]
+desktop = ["dioxus/desktop", "dep:arboard", "dep:raw-window-handle"]
 
 [dev-dependencies]
 farhelm-teststate.workspace = true
