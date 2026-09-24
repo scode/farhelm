@@ -33,6 +33,15 @@ use super::shared::{
 };
 use crate::rename::RenameDialog;
 
+/// One-shot request sent by a session header to the list's existing composer.
+/// AppBody owns the signal so the request survives the keyed session view and
+/// ListView can consume it exactly once.
+#[derive(Clone, PartialEq)]
+pub(crate) enum HeaderPrefillRequest {
+    Clone(Session),
+    ReplaceWith(Session),
+}
+
 /// Return keyboard focus to the persistent control that opened the composer.
 ///
 /// Closing removes the dialog's focused descendant. Without an explicit
@@ -532,6 +541,7 @@ pub(crate) fn ListView(
     /// component's own on-demand panels) it also watches, which never
     /// touch this counter at all.
     layout_epoch: ReadSignal<u64>,
+    prefill_request: Signal<Option<HeaderPrefillRequest>>,
 ) -> Element {
     let open_host = open_destination
         .as_ref()
@@ -1858,6 +1868,49 @@ pub(crate) fn ListView(
         clone_prefill.set(Some(prefill));
         show_create.set(true);
     };
+
+    // Header actions arrive through the single AppBody-owned request signal;
+    // consuming and clearing it here prevents a keyed view remount from
+    // replaying an old clone or replace-with request.
+    use_effect(move || {
+        let Some(request) = prefill_request.read().clone() else {
+            return;
+        };
+        let session = match request {
+            HeaderPrefillRequest::Clone(session) => session,
+            HeaderPrefillRequest::ReplaceWith(session) => session,
+        };
+        if clone_is_refused(
+            ops.busy_now(),
+            &session.id,
+            &pending.read(),
+            &confirming.read(),
+            &confirming_replace.read(),
+            rename_editor
+                .read()
+                .as_ref()
+                .map(|editor| editor.id.as_str()),
+        ) {
+            prefill_request.set(None);
+            return;
+        }
+        let generation = clone_prefill
+            .peek()
+            .as_ref()
+            .map_or(0, |prefill| prefill.generation + 1);
+        let replace_with = matches!(
+            prefill_request.peek().as_ref(),
+            Some(HeaderPrefillRequest::ReplaceWith(_))
+        );
+        let mut prefill = prefill_from(&session, generation);
+        if replace_with {
+            prefill.replace_source = Some(session.id.clone());
+        }
+        clone_prefill.set(Some(prefill));
+        menu_open.set(None);
+        show_create.set(true);
+        prefill_request.set(None);
+    });
 
     // Opening Rename owns one editor above the keyed rows. The source menu
     // closes before the dialog mounts, so no fixed-position popup remains to

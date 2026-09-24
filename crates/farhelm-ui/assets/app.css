@@ -846,12 +846,12 @@ samp {
   height: 100%;
 }
 
-/* The consolidated header (the 2026-08 UI refresh): title, metadata, status,
-   and both lifecycle actions on ONE row, where four stacked bands used to
-   cost ~170px before the terminal began. Everything that made that stack —
-   the restart explanation, the confirmations, the failure lines — moved to
-   a tooltip, to anchored popovers, and to conditional bands respectively;
-   see `SessionView`'s own docs for the reasoning behind each.
+/* The consolidated header (the 2026-08 UI refresh): status, title, age,
+   copyable fields, and four lifecycle actions on ONE row, where four stacked
+   bands used to cost ~170px before the terminal began. Everything that made
+   that stack — the restart explanation, the confirmations, the failure
+   lines — moved to a tooltip, to anchored popovers, and to conditional bands
+   respectively; see `SessionView`'s own docs for the reasoning behind each.
 
    `min-height` rather than a fixed height, and that is deliberate: 40px is
    the target, but a browser whose default UI metrics make the controls
@@ -859,19 +859,12 @@ samp {
    keeps the terminal below from squeezing the header away in a short
    window — the terminal is the flexible member here, this is not.
 
-   MINIMUM SUPPORTED WIDTH is the main pane's own floor, ~320px (the
-   sidebar is a fixed 340px and the smallest window this app supports is
-   narrower than a phone screen would ever be). The give order below is
-   what makes the row survive down there without clipping a control:
-   `.meta` shrinks first (`flex-shrink: 3`), `.title` shrinks second
-   (`flex-shrink: 1`, the flex default), and the badge and
-   `.titlebar-actions` never shrink at all — a badge or a button that
-   ellipsizes is one a user cannot read before acting on it. The actions
-   cluster itself is sized to fit that floor: the button carries a compact
-   `restart` glyph rather than the full offer wording — the
-   longest of which ran to ~320px on its own, wider than the whole
-   supported minimum — leaving the rest of the row's ~320px for identity
-   and status to fight over instead of losing to a single control. */
+   Directory and command line give up width first, then the session name;
+   status, age, and the action cluster never shrink or hide. That ordering is
+   deliberate: the two copy buttons preserve their full values in `title`,
+   while the actions must remain readable and keyboard reachable. At widths
+   below the supported floor the row may clip; it never wraps or moves the
+   actions into another menu. */
 .titlebar {
   box-sizing: border-box;
   min-height: 40px;
@@ -898,25 +891,31 @@ samp {
   white-space: nowrap;
 }
 
-/* No `min-width: 0` here, deliberately: `overflow: hidden` alone already
-   makes `.meta` a scroll container, which per the flexbox spec zeroes
-   its automatic minimum on its own.
-
-   `flex-shrink: 3` names the give order for the whole row rather than
-   leaving it to flex's defaults: the header now holds four members
-   competing for one line, and the cwd/invocation pair is the one whose
-   ellipsis costs least — the title identifies the session, the badge is
-   already capped at 32ch, and the actions must stay full-size and
-   clickable at every width. Both truncated members carry the full string
-   as `title`, so nothing here is unrecoverable. */
-.titlebar .meta {
-  color: var(--fg-1);
-  font-size: 12px;
-  flex-shrink: 3;
+/* Copy affordances stay compact and keyboard reachable; their values give up
+   width before the title while the full value remains available in `title`. */
+.header-copy {
+  min-width: 0;
+  max-width: 18ch;
+  flex: 1 3 10ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+  padding: 2px 4px;
 }
+.header-copy:hover,
+.header-copy:focus-visible {
+  background: var(--accent-fill-hover);
+  color: var(--fg-bright);
+}
+.copy-glyph { display: none; margin-right: 4px; }
+.header-copy:hover .copy-glyph,
+.header-copy:focus-visible .copy-glyph { display: inline; }
+.header-copy.copied { color: var(--fg-bright); }
+.header-replace-anchor { position: relative; display: inline-flex; }
 
 /* The session's status, in the header rather than in a band of its own —
    the same badge the sidebar's rows draw, so one session cannot be
@@ -931,8 +930,8 @@ samp {
    `flex-shrink: 0`: the badge is an 8px dot or a string already capped at
    32ch by `.status-badge` itself, so shrinking it further would not free
    meaningful space while making the one thing it exists to state
-   unreadable — unlike `.meta` and `.title`, which have somewhere useful to
-   give. */
+   unreadable — unlike the copy fields and title, which have somewhere useful
+   to give. */
 .titlebar .status-badge {
   padding: 1px 6px;
   flex-shrink: 0;
@@ -2656,8 +2655,8 @@ samp {
    `1000d` for a session quiet long enough, deliberately, since a cap would
    need a "more than" marker to stay honest. This field is what makes the
    list's "recently active" order legible, so it holds its width and the
-   title and metadata line give instead; an age wide enough to squeeze them
-   is a fleet with a bigger problem than a wide row. `white-space` is left
+   title and copy fields give instead; an age wide enough to squeeze them is
+   a fleet with a bigger problem than a wide row. `white-space` is left
    alone on purpose — every age is one unbreakable token, so there is
    nothing for `nowrap` to prevent. */
 .status-time {

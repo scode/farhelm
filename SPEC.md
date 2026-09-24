@@ -742,6 +742,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   glance rather than only from the titlebar. A filter that excludes the selected session leaves no row to mark — the
   titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
   deselecting).
+- The typical session header is one keyboard-reachable row ordered status, session name, age, directory, command line,
+  then Restart, Replace, Clone, and Replace with. All four actions remain visible. Directory and command line are muted,
+  ellipsized click-to-copy buttons; a click confirms locally for about 1.5 seconds. Clipboard writes use the native
+  bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own
+  anchored danger confirmation and neutral cancellation.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a
