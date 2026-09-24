@@ -155,6 +155,9 @@ pub(crate) const QUIET_SAMPLES_BEFORE_IDLE: u64 = 3;
 ///    exited means the agent RAN, and a launch whose side effects were
 ///    never found has not established that. It stays pending for item 3's
 ///    sentinel (error) or item 6's reservation (retry) to resolve.
+///    A matching dead pane during an ambiguous restart is the same unknown
+///    evidence: its exit code may belong to the previous generation, so it
+///    must not be attributed to this launch.
 /// 5. Anything else with no pane — a stored `LastOutcome::Running` (the
 ///    durable record's own vocabulary, not the wire status that now
 ///    shares its name), or a stop whose sweep is in flight — falls back
@@ -201,6 +204,7 @@ pub(crate) fn session_status(
         // A live pane, and no annotation with it: an annotation describes
         // how a run ENDED, and this one has not.
         (_, Some(state)) if !state.dead => (live_status(entry), None),
+        (LastOutcome::Launching, Some(state)) if state.dead => (SessionStatus::Unknown, None),
         (recorded, Some(state)) => {
             let (recorded_code, annotation) = match recorded {
                 LastOutcome::Exited {
@@ -504,6 +508,10 @@ pub(crate) fn observation(recorded: &LastOutcome, live: Option<&PaneState>) -> O
         Some(state) => {
             let exit_code = state.exit_code;
             match recorded {
+                // A dead pane during an ambiguous restart may belong to the
+                // previous generation. It cannot establish that this launch
+                // ran and exited, so do not offer an exit transition.
+                LastOutcome::Launching => None,
                 // An already-recorded exit still accepts the code tmux may
                 // only now be able to report (monotonic enrichment).
                 LastOutcome::Exited {
@@ -850,6 +858,17 @@ mod tests {
             )
         );
 
+        // A dead pane left over from the previous run does not establish
+        // that an ambiguous restart ever started; live status must agree
+        // with reload instead of attributing the old exit.
+        assert_eq!(
+            session_status(
+                &entry_with(Some(a_terminal()), LastOutcome::Launching),
+                &dead
+            ),
+            (SessionStatus::Unknown, None)
+        );
+
         // No pane to ask: the record answers, and interrupted is NOT
         // flattened into exited-unknown — the whole point of the state.
         assert_eq!(
@@ -924,6 +943,11 @@ mod tests {
         assert_eq!(
             observation(&LastOutcome::Running, Some(&dead_with_code)),
             Some(Transition::ObservedExit { exit_code: Some(3) })
+        );
+        assert_eq!(
+            observation(&LastOutcome::Launching, Some(&dead_with_code)),
+            None,
+            "a dead pane during an ambiguous launch cannot establish that the new run exited"
         );
         assert_eq!(
             observation(&LastOutcome::Running, None),

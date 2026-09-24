@@ -12,7 +12,7 @@
 - Completion criteria: update both live status and observation paths, add focused regression coverage for the ambiguous
   dead-pane case, preserve genuine launch-error and ordinary exited-session behavior, and remove this feedback file and
   its index entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; `Launching` rows with a matching dead pane now remain `Unknown` and emit no observed-exit transition, while sentinel errors and established exits retain their behavior. Focused recorded nextest run `0d370584-9618-4571-bd07-80f8fe81b34a` passed both status regressions (858 skipped); formatting and isolated sleep checks passed. Draft PR [#917](https://github.com/scode/farhelm/pull/917/changes) is on bookmark `pr/ambiguous-restart-unknown`, jj change `824932be`.
 
 ## failure-suppressor-never-resets.md
 
