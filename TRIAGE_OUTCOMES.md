@@ -12,7 +12,7 @@
 - Completion criteria: update both live status and observation paths, add focused regression coverage for the ambiguous
   dead-pane case, preserve genuine launch-error and ordinary exited-session behavior, and remove this feedback file and
   its index entry in the execution change.
-- Execution: `complete`; `Launching` rows with a matching dead pane now remain `Unknown` and emit no observed-exit transition, while sentinel errors and established exits retain their behavior. Focused recorded nextest run `0d370584-9618-4571-bd07-80f8fe81b34a` passed both status regressions (858 skipped); formatting and isolated sleep checks passed. Draft PR [#917](https://github.com/scode/farhelm/pull/917/changes) is on bookmark `pr/ambiguous-restart-unknown`, jj change `824932be`.
+- Execution: `complete`; `Launching` rows with a matching dead pane now remain `Unknown` and emit no observed-exit transition, while sentinel errors and established exits retain their behavior. Focused recorded nextest run `0d370584-9618-4571-bd07-80f8fe81b34a` passed both status regressions (858 skipped); formatting and isolated sleep checks passed. Draft PR [#917](https://github.com/scode/farhelm/pull/917/changes) is on bookmark `pr/ambiguous-restart-unknown`, jj change `8ad56228854a`.
 
 ## failure-suppressor-never-resets.md
 
@@ -963,7 +963,7 @@
 - Completion criteria: a refused Delete preserves an in-flight upload; a successful Delete still cancels uploads before
   removing the session; focused regression coverage proves both paths; remove this feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `complete`; Delete now runs refusal-prone pane, tab, and scope preflights before cancelling uploads while retaining cancellation before the process sweep and destructive teardown. Focused recorded nextest run `398569c5-969b-4e8b-9b22-124b0fbfe979` passed both regressions (372 skipped); formatting, diff, and isolated sleep checks passed. Draft PR [#916](https://github.com/scode/farhelm/pull/916/changes) is on bookmark `pr/refused-delete-upload`, jj change `29021790`.
+- Execution: `complete`; Delete now runs refusal-prone pane, tab, and scope preflights before cancelling uploads while retaining cancellation before the process sweep and destructive teardown. Focused recorded nextest run `398569c5-969b-4e8b-9b22-124b0fbfe979` passed both regressions (372 skipped); formatting, diff, and isolated sleep checks passed. Draft PR [#916](https://github.com/scode/farhelm/pull/916/changes) is on bookmark `pr/refused-delete-upload`, jj change `513d1a650bc9`.
 
 ## refused-retry-strands-credential-spec.md
 
