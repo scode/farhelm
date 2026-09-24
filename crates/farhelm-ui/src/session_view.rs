@@ -60,7 +60,8 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
     status.is_live() || *status == SessionStatus::Unknown
 }
 
-/// One session: a single header row (title, metadata, status, actions) over
+/// One session: a single header row (status, identity, age, copyable fields,
+/// and actions) over
 /// a tab strip over one terminal per open terminal — the sidebar beside this
 /// view owns navigation and rename. Each terminal div is handed to the JS island
 /// on mount; Dioxus never touches its children again — that boundary is
@@ -68,17 +69,16 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///
 /// ## The consolidated header (the 2026-08 UI refresh)
 ///
-/// Everything that identifies the session lives in ONE ~40px row: the
-/// title, the `{cwd} — {invocation}` metadata, the status badge beside how
-/// long ago the session was last active, and the session-level restart
-/// action (rename stays in the sidebar, which owns
-/// navigation; tabs stay in the strip below). It replaced a stack of four
-/// bands — titlebar, restart offer, and tab strip — that cost
-/// ~170px of chrome before the terminal started, on a surface whose whole
-/// point is the terminal.
+/// Everything that identifies the session lives in ONE ~40px row: the status
+/// badge, session title, last-activity age, copyable directory and command
+/// line, and four always-visible lifecycle actions — Restart, Replace, Clone,
+/// and Replace with. Rename stays in the sidebar, which owns navigation, and
+/// tabs stay in the strip below. This replaced a stack of four bands that
+/// cost ~170px of chrome before the terminal started, on a surface whose
+/// whole point is the terminal.
 ///
-/// Three rules keep it at one row, and each of them is a decision rather
-/// than an implementation detail:
+/// Four rules keep it at one row, and each of them is a decision rather than
+/// an implementation detail:
 ///
 /// - **The confirmations are POPOVERS, anchored to the button that opened
 ///   them.** They are still the confirm-in-place flow they always were —
@@ -115,10 +115,16 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///   terms (`activity_destination`): a session nothing has classified yet
 ///   has no badge and still has an age.
 ///
-/// There is deliberately no overflow `⋯` menu: this view has one action,
-/// restart, which is what the row is sized for. A menu
-/// added before there is anything to put in it would be one more click in
-/// front of both.
+/// - **The action order is part of the keyboard contract.** The DOM places
+///   Restart, Replace, Clone, and Replace with in that order, so pointer,
+///   keyboard, and assistive-technology users encounter the same controls.
+///   There is deliberately no overflow `⋯` menu: all four actions remain
+///   visible in the row, even when the identity fields have to ellipsize.
+/// - **Directory and command line are copy buttons, not passive metadata.**
+///   Their full values remain in the tooltip while the fields shrink before
+///   the title. A hover or keyboard focus reveals the clipboard affordance;
+///   after a click, the local copied state is feedback for the click rather
+///   than a claim that the platform clipboard accepted the write.
 ///
 /// ## Tabs (PLAN_M4.md item 6)
 ///
@@ -331,6 +337,8 @@ pub(crate) fn SessionView(
     /// Reports a replacement's new session to `AppBody`, which owns the
     /// selected session and therefore controls the keyed view remount.
     on_replaced: EventHandler<Session>,
+    /// One-shot bridge to the list's existing clone composer.
+    prefill_request: Signal<Option<crate::list::HeaderPrefillRequest>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
     let preferences = use_context::<crate::list::SharedPreferences>();
@@ -375,6 +383,9 @@ pub(crate) fn SessionView(
     // endpoint's partial-failure wording or make the two operations race.
     let mut replacing = use_signal(|| false);
     let mut confirming_replace = use_signal(|| false);
+    // Independent from the interrupted card's confirmation so a header
+    // action cannot accidentally authorize that older surface's operation.
+    let mut confirming_header_replace = use_signal(|| false);
     let mut replace_error = use_signal(|| None::<String>);
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
@@ -1084,6 +1095,7 @@ pub(crate) fn SessionView(
         });
     };
     let mut confirm_replace = replace.clone();
+    let mut header_confirm_replace = replace.clone();
 
     // The add-tab control. Unlike `ListView`'s create, navigating away
     // while this is in flight is deliberately NOT locked out: a stranded
@@ -1472,7 +1484,6 @@ pub(crate) fn SessionView(
     // `title`: the line is truncated with an ellipsis at whatever width the
     // header has left, and the tooltip is the only way back to the full cwd
     // and invocation. Two copies of the format would let the two drift.
-    let meta_line = format!("{} — {}", shown.cwd, shown.invocation);
     // The restart offer's explanation, now the restart button's tooltip and
     // accessible description rather than a permanent band (see this
     // component's header docs).
@@ -1485,6 +1496,26 @@ pub(crate) fn SessionView(
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
+    let copied_directory = use_signal(|| false);
+    let copied_command = use_signal(|| false);
+    let copy_value = move |value: String, mut copied: Signal<bool>| {
+        let encoded = serde_json::to_string(&value).unwrap_or_else(|_| "\"\"".into());
+        // The desktop bridge is preferred because browser clipboard access is
+        // permission-gated in a webview. A bridge can still be present but
+        // fail synchronously or by rejected promise, so the browser path is
+        // a second attempt rather than an `else` branch that failure skips.
+        let js = format!(
+            "(() => {{ const v = {encoded}; const fallback = () => {{ try {{ navigator.clipboard?.writeText?.(v)?.catch(() => {{}}); }} catch (_) {{}} }}; try {{ const native = window.__farhelmNativeClipboardWrite; if (typeof native === \"function\") {{ const result = native(v); if (result && typeof result.catch === \"function\") result.catch(fallback); }} else {{ fallback(); }} }} catch (_) {{ fallback(); }} }})()"
+        );
+        document::eval(&js);
+        spawn(async move {
+            copied.set(true);
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            copied.set(false);
+        });
+    };
+    let header_session = shown.clone();
+    let header_replace_session = shown.clone();
     rsx! {
         div { class: "layout",
             // The one header row. Identity on the left, status in the
@@ -1495,14 +1526,13 @@ pub(crate) fn SessionView(
                 // ellipsize: a title and a cwd share `CreateSession`'s 64 KiB
                 // field budget, so the hover tooltip is the only route back
                 // to a value the row cannot fit.
-                span { class: "title", title: "{shown_title}", "{shown_title}" }
-                span { class: "meta", title: "{meta_line}", "{meta_line}" }
                 if let Some(badge) = header_badge {
                     // No toggle here: this is chrome for the OPEN session's
                     // own header, and only a row's own dot is a control
                     // (`StatusBadgeView`'s own doc).
                     StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
                 }
+                span { class: "title", title: "{shown_title}", "{shown_title}" }
                 // Its own `if`, not nested under the badge's: see
                 // `activity_destination` for why an absent badge must not
                 // take the age with it.
@@ -1512,6 +1542,20 @@ pub(crate) fn SessionView(
                         title: "{activity.absolute}",
                         "{activity.age}"
                     }
+                }
+                button {
+                    r#type: "button",
+                    class: if copied_directory() { "header-copy copied" } else { "header-copy" },
+                    title: "{shown.cwd} — click to copy",
+                    onclick: { let cwd = shown.cwd.clone(); move |_| copy_value(cwd.clone(), copied_directory) },
+                    if copied_directory() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.cwd}"
+                }
+                button {
+                    r#type: "button",
+                    class: if copied_command() { "header-copy copied" } else { "header-copy" },
+                    title: "{shown.invocation} — click to copy",
+                    onclick: { let invocation = shown.invocation.clone(); move |_| copy_value(invocation.clone(), copied_command) },
+                    if copied_command() { "✓ copied" } else { span { class: "copy-glyph", "📋" } } "{shown.invocation}"
                 }
                 div { class: "titlebar-actions",
                     // SPEC.md: "Opening an interrupted session offers
@@ -1538,11 +1582,9 @@ pub(crate) fn SessionView(
                             // SPEC.md's "restart says so" (`restart_label`,
                             // e.g. "resume conversation") is what this
                             // control's accessible name carries now that the
-                            // VISIBLE glyph is the compact "restart" every
-                            // header action uses — the header's supported
-                            // minimum width has no room for the longest
-                            // offer's ~320px of text. `title` repeats it for
-                            // a mouse's hover, ahead of the further
+                            // visible label stays compact beside the other
+                            // always-visible actions. `title` repeats the
+                            // offer for a mouse's hover, ahead of the further
                             // elaboration `offer_explanation` provides
                             // through `aria-describedby` below.
                             "aria-label": "{restart_label}",
@@ -1593,7 +1635,7 @@ pub(crate) fn SessionView(
                                 }
                                 button {
                                     r#type: "button",
-                                    class: "btn btn-primary restart-confirm",
+                                    class: "btn btn-danger restart-confirm",
                                     disabled: restarting(),
                                     onclick: move |_| {
                                         if !confirming() {
@@ -1621,6 +1663,57 @@ pub(crate) fn SessionView(
                                 }
                             }
                         }
+                    }
+                    div { class: "header-replace-anchor",
+                        button {
+                            r#type: "button",
+                            class: "btn btn-primary header-replace",
+                            disabled: lifecycle.busy(),
+                            "aria-expanded": "{confirming_header_replace()}",
+                            onclick: move |_| {
+                                if lifecycle.claim() { confirming_header_replace.set(true); }
+                            },
+                            "Replace"
+                        }
+                        if confirming_header_replace() {
+                            div { class: "header-confirm header-replace-confirm",
+                                span { class: "confirm-consequence", "replace this session with a fresh one?" }
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-danger",
+                                    disabled: replacing(),
+                                    onclick: move |_| {
+                                        confirming_header_replace.set(false);
+                                        header_confirm_replace();
+                                    },
+                                    "replace"
+                                }
+                                button {
+                                    r#type: "button",
+                                    class: "btn btn-neutral",
+                                    autofocus: true,
+                                    onclick: move |_| {
+                                        confirming_header_replace.set(false);
+                                        lifecycle.release();
+                                    },
+                                    "cancel"
+                                }
+                            }
+                        }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-primary header-clone",
+                        disabled: lifecycle.busy(),
+                        onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::Clone(header_session.clone()))),
+                        "Clone"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-primary header-replace-with",
+                        disabled: lifecycle.busy(),
+                        onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()))),
+                        "Replace with"
                     }
                 }
             }
@@ -2033,10 +2126,9 @@ fn activity_destination(
 /// button's hover tooltip and accessible description rather than a band
 /// above the terminal. `restart_button_label` carries the offer itself
 /// into the button's ACCESSIBLE name (`aria-label`, and the front half of
-/// `title`) — the visible glyph is the compact "restart" every header
-/// action uses, which the row's supported minimum width has no room to
-/// grow past. This function adds the reason and the elaboration behind
-/// that name, which is what did not deserve permanent chrome.
+/// `title`) — the visible label is kept compact beside the other
+/// always-visible actions. This function adds the reason and elaboration
+/// behind that name, which is what did not deserve permanent chrome.
 ///
 /// The status leads for `Interrupted` because that is the one state where
 /// the user needs to know why their terminal is gone before they are asked

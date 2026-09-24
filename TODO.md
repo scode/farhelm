@@ -46,10 +46,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
 
-- Restyle the typical session header's `Restart` button to match Farhelm's visual style. Consider moving the status
-  indicator and session actions — Restart, Replace, Clone, Clone with, and related buttons — to a more visible bottom
-  area while keeping the interface consistent; exact layout is TBD.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.

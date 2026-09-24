@@ -1,6 +1,6 @@
 /**
- * The consolidated session header (the 2026-08 UI refresh): title, metadata,
- * status badge, and the restart action folded into one row over
+ * The consolidated session header (the 2026-08 UI refresh): status, title,
+ * age, copyable fields, and four lifecycle actions folded into one row over
  * the tab strip. `session_view.rs`'s own docs carry the design; this file
  * proves the two properties that only a real layout engine can check —
  * that the row survives the SUPPORTED minimum width without clipping a
@@ -68,8 +68,8 @@ test(
 
       // The badge and action never shrink (`.titlebar .status-badge`
       // and `.titlebar-actions` are both `flex-shrink: 0`) and must
-      // therefore stay fully on screen regardless of how much `.title` and
-      // `.meta` have to give up.
+      // therefore stay fully on screen regardless of how much the copy
+      // fields and title have to give up.
       const badgeBox = (await page.locator(".titlebar .status-badge").boundingBox())!;
       const restartBox = (await restartButton.boundingBox())!;
       for (const [name, box] of [
@@ -118,13 +118,13 @@ test(
   },
 );
 
-test("oversized title and metadata overflow their box, and their tooltip carries the full value", async ({
+test("oversized title and copy fields overflow their boxes, with full tooltips", async ({
   page,
   request,
 }) => {
   const marker = `header-overflow-${Date.now()}`;
-  // Distinct oversized values for title and for the cwd/invocation pair
-  // that makes up `.meta`, so a bug that swapped the two `title` attributes
+  // Distinct oversized values for the title and the two copy buttons, so a
+  // bug that swapped the two `title` attributes
   // (or truncated one to the other's length) would show up as a mismatch
   // rather than passing by coincidence.
   const title = `${marker}-title-${"a".repeat(250)}`;
@@ -134,12 +134,16 @@ test("oversized title and metadata overflow their box, and their tooltip carries
     cwd: "/tmp",
     invocation,
   });
-  const expectedMeta = `/tmp — ${invocation}`;
   try {
     await page.goto("/");
-    await row(page, session.id).locator(".session-row-open").click();
+    const sessionRow = row(page, session.id);
+    await expect(sessionRow, "the created session must be listed before opening it").toBeVisible();
+    await sessionRow.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator(".titlebar .title")).toHaveAttribute("title", title);
-    await expect(page.locator(".titlebar .meta")).toHaveAttribute("title", expectedMeta);
+    await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAttribute("title", /\/tmp/);
+    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute("title", /sleep 300/);
 
     // `scrollWidth > clientWidth` is the DOM's own proof of a truncated
     // single-line box (`white-space: nowrap; overflow: hidden` on both
@@ -148,15 +152,100 @@ test("oversized title and metadata overflow their box, and their tooltip carries
     const titleOverflows = await page.locator(".titlebar .title").evaluate(
       (el) => el.scrollWidth > el.clientWidth,
     );
-    const metaOverflows = await page.locator(".titlebar .meta").evaluate(
+    const commandOverflows = await page.locator(".titlebar .header-copy").nth(1).evaluate(
       (el) => el.scrollWidth > el.clientWidth,
     );
     expect(titleOverflows, "the title must actually be clipped, or the tooltip is untested").toBe(
       true,
     );
-    expect(metaOverflows, "the meta line must actually be clipped, or the tooltip is untested").toBe(
+    expect(commandOverflows, "the command field must actually be clipped, or the tooltip is untested").toBe(
       true,
     );
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The session header is the only surface that exposes all four lifecycle
+ * actions together. This test pins their shared keyboard order, proves that
+ * both copy buttons hand their complete values to the native bridge, and
+ * verifies that header actions reuse the existing composer prefill paths.
+ */
+test("header actions stay ordered, copy full values, and open the right flows", async ({
+  page,
+  request,
+}) => {
+  const cwd = "/tmp";
+  const invocation = `${FAKE_AGENT_INVOCATION} #'header copy'`;
+  const session = await createSession(request, {
+    title: `header-actions-${Date.now()}`,
+    cwd,
+    invocation,
+  });
+  try {
+    await page.goto("/");
+    const sessionRow = row(page, session.id);
+    await expect(sessionRow, "the created session must be listed before opening it").toBeVisible();
+    await sessionRow.locator(".session-row-open").click();
+    await waitForSessionRevealed(page, session.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+
+    const actionNames = await page.locator(".titlebar-actions button").evaluateAll((buttons) =>
+      buttons.map((button) => button.textContent?.trim()),
+    );
+    expect(actionNames, "pointer and keyboard users must receive the same action order").toEqual([
+      "restart",
+      "Replace",
+      "Clone",
+      "Replace with",
+    ]);
+
+    await page.evaluate(() => {
+      (window as any).__headerCopies = [];
+      (window as any).__farhelmNativeClipboardWrite = (value: string) => {
+        (window as any).__headerCopies.push(value);
+      };
+    });
+    const copyButtons = page.locator(".titlebar .header-copy");
+    await copyButtons.nth(0).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__headerCopies), {
+        message: "the directory copy must reach the native bridge untruncated",
+      })
+      .toEqual([cwd]);
+    await expect(copyButtons.nth(0)).toContainText("copied");
+
+    await copyButtons.nth(1).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__headerCopies), {
+        message: "the command copy must reach the native bridge untruncated",
+      })
+      .toEqual([cwd, invocation]);
+    await expect(copyButtons.nth(1)).toContainText("copied");
+
+    const replace = page.getByRole("button", { name: "Replace", exact: true });
+    await replace.click();
+    const confirmation = page.locator(".header-replace-confirm");
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation.getByRole("button", { name: "replace", exact: true })).toHaveClass(
+      /btn-danger/,
+    );
+    await confirmation.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(confirmation).toHaveCount(0);
+
+    const form = page.locator(".create-session-form");
+    await page.getByRole("button", { name: "Clone", exact: true }).click();
+    await expect(form).toBeVisible();
+    await expect(form.locator('input[aria-label="folder"]')).toHaveValue(cwd);
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Replace with", exact: true }).click();
+    await expect(form).toBeVisible();
+    await expect(form.locator(".create-session-submit")).toHaveText("replace");
+    await form.getByRole("button", { name: "cancel", exact: true }).click();
+    await expect(form).toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
   }

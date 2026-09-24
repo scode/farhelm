@@ -173,6 +173,7 @@ mod tmux_probe;
 #[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 mod webview_watchdog;
 
+use list::HeaderPrefillRequest;
 use list::ListView;
 use session_view::SessionView;
 
@@ -1357,6 +1358,9 @@ pub fn App() -> Element {
 #[component]
 fn AppBody() -> Element {
     let mut current = use_signal(|| None::<Session>);
+    // A single one-shot bridge lets the keyed session view request the list's
+    // existing clone composer without introducing a registry or context.
+    let prefill_request = use_signal(|| None::<HeaderPrefillRequest>);
     // The cross-pane write gate lives HERE because both panes claim or
     // consult it (see ops.rs's module doc): the shared token covers the
     // list's create/host mutations and the view's restart,
@@ -1529,6 +1533,7 @@ fn AppBody() -> Element {
                                 }
                             },
                             layout_epoch,
+                            prefill_request,
                         }
                     }
                     div { class: "app-main",
@@ -1555,6 +1560,7 @@ fn AppBody() -> Element {
                                     session: session.clone(),
                                     gate: ops::PaneGate::new(page_ops, row_ops),
                                     on_replaced: move |replacement: Session| current.set(Some(replacement)),
+                                    prefill_request,
                                 }
                             },
                         }
