@@ -1018,7 +1018,7 @@
 - Completion criteria: no settled old-destination outcome can publish after a retarget nudge; focused deterministic
   tests cover the pending-nudge boundary for connected, mismatch, unverified, and failed outcomes, plus ordinary
   no-nudge behavior; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; the actor now discards any settled connection result when a retarget nudge is pending, while interrupted outcomes retain their own fresh-window decision. Focused pinned recorder run `a3b9b1b2-3db3-4296-9ae0-1baef377f1ba` passed four boundary tests (820 skipped); the isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed. The first Astra review's High finding was corrected and a fresh follow-up review reported `No entries. OK`. Draft PR [#920](https://github.com/scode/farhelm/pull/920/changes) is on bookmark `pr/stale-dial-publication`, implementation commit `930716226599450e375f016bf002bf4795c3b8c7`.
 
 ## stripped-agent-marker-forges-killable-tab.md
 
