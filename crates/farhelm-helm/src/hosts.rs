@@ -293,14 +293,28 @@ impl From<&HostState> for HostStateView {
 
 /// Return whether a connected peer is older than this helm by SemVer.
 ///
-/// Build metadata does not affect the ordering, while prerelease identifiers
-/// do. Any unparsable value leaves the age unknown and therefore returns
-/// `false`; the connected phase remains usable in that case.
+/// A thin binding of [`build_is_older`] to this helm's compiled build stamp;
+/// the ordering rules live there.
 fn peer_is_older(peer_build: &str) -> bool {
-    let Ok(peer) = semver::Version::parse(peer_build) else {
+    build_is_older(peer_build, farhelm_proto::BUILD_VERSION)
+}
+
+/// Return whether build `peer` sorts strictly before build `ours` by SemVer
+/// precedence.
+///
+/// Build metadata does not affect the ordering, while prerelease identifiers
+/// do, so `1.0.0-rc.2` is older than `1.0.0`. Any unparsable value on either
+/// side leaves the age unknown and therefore returns `false`; the connected
+/// phase remains usable in that case.
+///
+/// Kept separate from [`peer_is_older`] so the ordering can be tested against
+/// fixed hypothetical versions. A test that compared literals with the real
+/// build stamp broke on every release bump that crossed one of its literals.
+fn build_is_older(peer: &str, ours: &str) -> bool {
+    let Ok(peer) = semver::Version::parse(peer) else {
         return false;
     };
-    let Ok(ours) = semver::Version::parse(farhelm_proto::BUILD_VERSION) else {
+    let Ok(ours) = semver::Version::parse(ours) else {
         return false;
     };
     peer < ours
@@ -843,16 +857,22 @@ mod tests {
     /// lexical ordering: prereleases sort before the final release, build
     /// metadata does not change precedence, and malformed values stay
     /// unknown instead of being classified as old.
-    /// The equal-precedence case uses the compiled build stamp; a version
-    /// literal here would go stale on the next release bump.
+    ///
+    /// Every version here is hypothetical and passed explicitly as both
+    /// sides of the comparison. Earlier revisions compared literals against
+    /// the compiled build stamp, and each release bump that moved the stamp
+    /// past a literal failed the release gate (v0.15.0-rc.1 was lost to it).
     #[farhelm_testtrace::test]
     fn connected_build_age_uses_semver_and_tolerates_unknown_values() {
-        assert!(super::peer_is_older("0.14.0-rc.1"));
-        let same_build_with_metadata =
-            format!("{}+different-build", farhelm_proto::BUILD_VERSION);
-        assert!(!super::peer_is_older(&same_build_with_metadata));
-        assert!(!super::peer_is_older("0.14.0"));
-        assert!(!super::peer_is_older("peer-build"));
+        use super::build_is_older;
+        assert!(build_is_older("1.0.0-rc.1", "1.0.0-rc.2"));
+        assert!(build_is_older("1.0.0-rc.2", "1.0.0"));
+        assert!(build_is_older("1.9.0", "1.10.0"));
+        assert!(!build_is_older("1.0.0", "1.0.0-rc.2"));
+        assert!(!build_is_older("1.0.0-rc.2+other-build", "1.0.0-rc.2"));
+        assert!(!build_is_older("1.0.0", "1.0.0"));
+        assert!(!build_is_older("peer-build", "1.0.0"));
+        assert!(!build_is_older("1.0.0", "helm-build"));
     }
 
     /// Issue one request against the harness's real router and return the
