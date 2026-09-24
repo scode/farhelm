@@ -843,10 +843,14 @@ mod tests {
     /// lexical ordering: prereleases sort before the final release, build
     /// metadata does not change precedence, and malformed values stay
     /// unknown instead of being classified as old.
+    /// The equal-precedence case uses the compiled build stamp; a version
+    /// literal here would go stale on the next release bump.
     #[farhelm_testtrace::test]
     fn connected_build_age_uses_semver_and_tolerates_unknown_values() {
         assert!(super::peer_is_older("0.14.0-rc.1"));
-        assert!(!super::peer_is_older("0.14.0-rc.2+different-build"));
+        let same_build_with_metadata =
+            format!("{}+different-build", farhelm_proto::BUILD_VERSION);
+        assert!(!super::peer_is_older(&same_build_with_metadata));
         assert!(!super::peer_is_older("0.14.0"));
         assert!(!super::peer_is_older("peer-build"));
     }
