@@ -2512,7 +2512,9 @@ impl TmuxDriver {
     /// unwinding a window whose SQLite insert failed (`create_session`'s
     /// failure-ordering contract), `DeleteSession`, and a RESTART
     /// clearing the husk of a tmux session whose pane it can no longer find
-    /// before building a fresh terminal under the same name. The
+    /// before building a fresh terminal under the same name. Replacement
+    /// windows in a surviving session use [`Self::kill_window`] instead, so
+    /// this operation never tears down preserved tabs. The
     /// already-gone case this tolerates is NOT the agent
     /// exiting on its own — `remain-on-exit on` keeps a pane (and so its
     /// session) around after the process inside it dies, so that never
@@ -3440,6 +3442,28 @@ impl TmuxDriver {
             // "nothing to report" the first query tolerates, and leaves
             // every pane honestly unmarked rather than failing a call
             // whose authoritative half already succeeded.
+            Err(e) if self.is_definitively_empty(&e) => {}
+            Err(e) => return Err(e).context("querying pane window markers"),
+        }
+        Ok(states)
+    }
+
+    /// Read pane facts and window markers even when the server has only one
+    /// window. [`Self::pane_states`] skips the marker round trip in that
+    /// shape because a normal one-window session cannot contain a tab. A
+    /// dead-agent restart is the deliberate exception: after the recorded
+    /// pane disappears, a surviving tab can be the session's only window,
+    /// and its marker is needed to distinguish it from an unowned window.
+    pub async fn pane_states_with_markers(&self) -> anyhow::Result<HashMap<String, PaneState>> {
+        let mut states = self.pane_states().await?;
+        if states.is_empty() {
+            return Ok(states);
+        }
+        match self
+            .run(&["list-panes", "-a", "-F", PANE_MARKER_FORMAT])
+            .await
+        {
+            Ok(markers) => join_pane_markers(&mut states, &markers),
             Err(e) if self.is_definitively_empty(&e) => {}
             Err(e) => return Err(e).context("querying pane window markers"),
         }
