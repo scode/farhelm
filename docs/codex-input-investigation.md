@@ -88,3 +88,95 @@ conversation.
 Follow the [desktop/web triage guide](desktop-web-triage.md) to compare the desktop app, Safari, and Chromium against
 the same helm. The exact running versions and launch configuration are needed to connect that result to a vendor or
 Farhelm change. Until then, the TODO stays open.
+
+## Follow-up on 2026-09-23
+
+The current source makes a transport-level reorder less likely than the original note did. `terminal.js` sends each
+xterm `onData` event as one binary WebSocket message. The helm's inbound loop reads those messages in order and awaits
+each supervisor `send_input` call before reading the next one. The supervisor's dedicated tmux input client writes
+`send-keys` commands in order and waits for each command reply. There is still a loss window when the socket is not open,
+but there is no evident concurrent writer or unordered queue that would turn a suffix into repeated, separated words.
+
+The more plausible Farhelm boundary is painting. xterm.js 6.0.0 maintains a correct terminal buffer while its DOM/canvas
+rows can become stale. Farhelm reproduced and fixed one form of this on 2026-09-12: a terminal scrolled into scrollback
+could show old rows while new output continued, leaving the rendered rows different from `term.buffer.active`. Codex is a
+particularly good stimulus for this class of failure because it continuously redraws a prompt with cursor movement while
+the user types. The existing fix forces a throttled full-row refresh only when xterm reports that the viewport is scrolled
+back; it does not prove that the active-tail path in the macOS WKWebView is sound.
+
+There is independent vendor evidence for both halves of the hypothesis. OpenAI Codex issue
+[#46024](https://github.com/openai/codex/issues/46024) reports severe block-pattern corruption in Apple Terminal during
+macOS dictation even though the submitted conversation still works, which is a visual corruption pattern with intact
+underlying input. Issue [#32691](https://github.com/openai/codex/issues/32691) reports dropped characters and raw CSI-u
+fragments in iTerm2, tying genuine input corruption to terminal keyboard-enhancement handling. Neither issue proves a
+Farhelm defect, and neither exercises Farhelm's WKWebView or tmux path.
+
+The earlier Farhelm probes cannot distinguish these cases: they sampled completed frames after typing, did not capture a
+native macOS webview, and did not exercise IME/dictation or a paste event. At the next recurrence, capture both
+`term.buffer.active` and the rendered rows before forcing a resize or switching sessions. If the buffer contains the exact
+prompt while the pixels contain the scattered fragments, the defect is in xterm/WKWebView painting. If the buffer itself
+is wrong, add a bounded trace at xterm `onData`, WebSocket send/receive, and the tmux input confirmation to identify the
+first divergent byte. This is the shortest experiment that can separate the two live hypotheses.
+
+## Reproduction update on 2026-09-23
+
+The report has now recurred on Farhelm `0.14.0-rc.5` while typing `SPEC.md` quickly. A supplied capture shows the
+terminal line remaining correct through `SPE`, then displaying separated `SPEC` and `SPECIAL` fragments at different
+columns. The text before that point was deliberate random input and is not part of the symptom. This shape is compatible
+with stale cursor-addressed painting, but this occurrence also establishes an input fault: the operator typed the line in
+Farhelm, pressed Enter, and the same malformed text arrived here from the Codex agent. The screenshot and submitted text
+match, so the malformed bytes crossed the terminal input path rather than existing only in the viewer's paint.
+
+The `SPE>MD` shape adds one useful clue: on a US keyboard, `>` is the shifted form of `.`, while `C` is also a shifted
+letter. If the intended text was `SPEC.md`, a stale or misordered Shift transition could explain both a missing `C` and a
+period arriving as `>`. This points at the native key-event/composition path rather than tmux or TCP, although the
+separated `SPEC`/`SPECIAL` fragments could still include a concurrent redraw artifact.
+
+There is now a close upstream match in xterm.js. [Issue #6078](https://github.com/xtermjs/xterm.js/issues/6078) documents
+that xterm's hidden textarea retains uppercase letters and spaces, then re-emits the accumulated value through `onData`
+when a `keyCode`-229 composition-character event changes that textarea. Its `String.replace` diff treats an in-place edit
+as new input, so previously typed capitals can be injected again. Farhelm's `terminal.js` forwards `onData` directly and
+the helm and tmux paths preserve those bytes, which explains how duplicated `SPEC`-like text can reach Codex. The
+vendored xterm.js is 6.0.0; the upstream report reproduces on later 6.1.0 beta builds as well, so this is not tied to one
+Farhelm release.
+
+[Issue #5894](https://github.com/xtermjs/xterm.js/issues/5894) describes a second WKWebView composition defect: a dead
+key's committed character is emitted twice and the following physical key is lost. That report's `SPE>MD` pattern is
+consistent with the missing `C` and shifted period clue above. These two xterm defects can coexist in the same macOS input
+path; the exact one that fires needs an event trace.
+
+The leading hypothesis is therefore an xterm/WebKit composition bug, with terminal-query leakage as a secondary possibility.
+`SPEC.md` is a useful trigger because its uppercase letters exercise the hidden-textarea accumulation path and its period
+exercises the shifted/unshifted transition. A focused trace should record composition events, `keydown.keyCode`, the hidden
+textarea value, and `onData` before tracing the network path.
+
+The next recurrence should be captured at four boundaries in one bounded record: composition/key events and the hidden
+textarea, the exact bytes emitted by xterm's `onData`, the binary WebSocket frames received by the helm, and the bytes
+confirmed by the tmux input client. A malformed `onData` value proves the xterm/WebKit defect; matching `onData` and tmux
+bytes rules out the Farhelm transport. The submitted prompt should also be compared with the captured xterm buffer before
+any redraw or session switch.
+
+The related dead-key path has now been reproduced directly: `Option+N` followed by `/` produced `˜˜` instead of the dead
+character followed by `/`. That is the same duplicate-dead-character and dropped-next-key result documented by xterm.js
+[#5894](https://github.com/xtermjs/xterm.js/issues/5894), which confirms that this Farhelm desktop input surface reaches
+the affected WKWebView/xterm path. It does not by itself prove that every `SPEC.md` incident uses the same subcase, but it
+moves the leading cause from a general Farhelm transport hypothesis to xterm's macOS composition handling.
+
+The `SPEC` trigger itself is not yet deterministic: the operator has seen the corruption after typing `SPE` without using
+the accent picker, but has not found a fixed timing sequence. That does not contradict the xterm diagnosis. Issue #6078's
+trigger is a `keyCode`-229 or composition-character event, which can come from IME, dictation, dead-key handling, or other
+WebKit input transitions; an accent-picker action is only one way to force such a transition. Comparing rapid `SPE` with
+rapid lowercase `spe`, and repeating each after an Enter that clears the textarea, should distinguish the uppercase
+accumulation path from an unrelated redraw trigger.
+
+Network timing may change the reproduction rate without being the byte-level cause. WebSocket and TCP preserve input
+ordering, and a closed socket can drop input but cannot duplicate or reorder it. Remote output timing can still alter races
+between typing, Codex redraws, split terminal-query frames, and browser painting. The direct `Option+N` then `/` result of
+`˜˜` is local evidence for the WKWebView/xterm path because it reproduces the known dead-key defect before Farhelm's
+WebSocket or tmux delivery.
+
+Another live reproduction on 2026-09-23 submitted `SPECIALLY` after the operator intended to type only `SPE`; the capture
+shows the same contiguous word. This is stronger than the earlier separated fragments and fits #6078's retained
+uppercase-input mechanism if `CIALLY` was already present in the hidden textarea from earlier typing. The issue does not
+invent arbitrary letters, so a clean post-Enter attempt containing only `SPE` is the discriminator: persistence after that
+reset would point away from textarea accumulation and toward macOS input-method completion.
