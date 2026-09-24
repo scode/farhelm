@@ -1819,7 +1819,7 @@ pub(super) fn SessionRow(
                             }
                             button {
                                 r#type: "button",
-                                class: "btn confirm-delete",
+                                class: "btn btn-danger confirm-delete",
                                 // Disabled while the shared token is held:
                                 // the handler refuses then anyway (keeping
                                 // the prompt), and the attribute is that
@@ -1831,7 +1831,7 @@ pub(super) fn SessionRow(
                             }
                             button {
                                 r#type: "button",
-                                class: "btn confirm-cancel",
+                                class: "btn btn-neutral confirm-cancel",
                                 // Safe default: land keyboard focus on
                                 // cancel, not confirm, the instant this
                                 // prompt appears — a stray Enter/Space
@@ -1863,7 +1863,7 @@ pub(super) fn SessionRow(
                             span { class: "confirm-title", "\"{session.title}\"" }
                             button {
                                 r#type: "button",
-                                class: "btn confirm-replace",
+                                class: "btn btn-danger confirm-replace",
                                 // See confirm-delete: refusal made visible.
                                 disabled: busy,
                                 onclick: move |_| on_confirm_replace.call(confirm_replace_id.clone()),
@@ -1871,7 +1871,7 @@ pub(super) fn SessionRow(
                             }
                             button {
                                 r#type: "button",
-                                class: "btn replace-cancel",
+                                class: "btn btn-neutral replace-cancel",
                                 autofocus: true,
                                 onclick: move |_| on_cancel_replace.call(cancel_replace_id.clone()),
                                 "cancel"

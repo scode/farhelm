@@ -1712,7 +1712,7 @@ pub(crate) fn ProfilesPopup(
                 span { class: "profiles-title", "profiles" }
                 button {
                     r#type: "button",
-                    class: "btn new-profile-button",
+                    class: "btn btn-primary new-profile-button",
                     // This control UNMOUNTS an open form, so it must not act
                     // while anything is in flight: dropping the component
                     // mid-request strands the response with nothing left to
@@ -1986,7 +1986,7 @@ fn ProfileRow(
                     span { class: "confirm-title", "every host" }
                     button {
                         r#type: "button",
-                        class: "btn confirm-delete profile-confirm-delete",
+                        class: "btn btn-danger confirm-delete profile-confirm-delete",
                         disabled: busy,
                         onclick: {
                             let id = id.clone();
@@ -1996,7 +1996,7 @@ fn ProfileRow(
                     }
                     button {
                         r#type: "button",
-                        class: "btn confirm-cancel profile-cancel-delete",
+                        class: "btn btn-neutral confirm-cancel profile-cancel-delete",
                         onclick: {
                             let id = id.clone();
                             move |_| on_delete_cancel.call(id.clone())
@@ -2006,14 +2006,14 @@ fn ProfileRow(
                 } else if !editing && !profile.builtin {
                     button {
                         r#type: "button",
-                        class: "btn profile-edit",
+                        class: "btn btn-neutral profile-edit",
                         disabled: busy,
                         onclick: move |_| on_edit_start.call(edit_target.clone()),
                         "edit"
                     }
                     button {
                         r#type: "button",
-                        class: "btn profile-delete",
+                        class: "btn btn-neutral profile-delete",
                         disabled: busy,
                         onclick: {
                             let id = id.clone();
@@ -2206,13 +2206,13 @@ fn ProfileForm(
             }
             button {
                 r#type: "submit",
-                class: "btn profile-save",
+                class: "btn btn-primary profile-save",
                 disabled: busy,
                 "{submit_label}"
             }
             button {
                 r#type: "button",
-                class: "btn profile-cancel",
+                class: "btn btn-neutral profile-cancel",
                 disabled: busy,
                 onclick: move |_| {
                     if busy {

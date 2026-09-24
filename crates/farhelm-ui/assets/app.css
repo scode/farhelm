@@ -975,7 +975,7 @@ samp {
 .titlebar-actions .btn[aria-expanded="true"],
 .interrupted-notice .replace-from-notice[aria-expanded="true"] {
   opacity: 1;
-  background: var(--accent-fill);
+  background: var(--accent-fill-hover);
   border-color: var(--accent-edge);
   color: var(--fg-bright);
 }
@@ -1093,29 +1093,16 @@ samp {
 
 /* ===== Shared button look ========================================= */
 
-/* Two-tier button system: before this, every `.btn` — from "new session"
-   down to the row's tiny rename/stop/delete controls — drew the
-   SAME bordered gray box, so a sidebar with a dozen of them read as a wall
-   of identical outlined rectangles with no cue for which one thing was
-   worth clicking. `.btn` (below) is the GHOST tier — transparent border,
-   no fill, a hover/focus background the only resting affordance — and is
-   the DEFAULT look for a control in this system, not a look every control
-   is forced into: `.tab-close` opts out of `.btn` entirely rather than
-   layer on top of it (see its own comment for why). `.btn-primary` is a
-   second class layered on top of `.btn` for the filled, bordered exception
-   a given SURFACE gets.
-
-   "One filled primary per surface" is the actual rule, not "one filled
-   primary in the whole sheet": the sidebar's resting chrome carries
-   exactly one (`.new-session-button`), and each dialog that floats over
-   it — create session, add a host, rename — supplies its own submit as
-   THAT dialog's one primary, since a dialog reads as its own surface
-   rather than being counted against the sidebar's. Everything else, on
-   any surface, stays ghost, including destructive actions, which mark
-   themselves with red TEXT instead of a red fill (`.btn-primary`'s own
-   comment below names the fixed list of call sites that earn the class,
-   and why nothing else does). Shape (font-size, padding, alignment) still
-   lives per call-site class exactly as before; only the look moved here.
+/* Three deliberate action tiers sit on the shared `.btn` ghost base. The
+   base remains available for tabs, menus, disclosures, and other controls
+   whose quiet resting state is intentional. `.btn-primary` marks an
+   affirmative action with the accent fill, `.btn-neutral` gives secondary
+   actions the shared quiet chrome, and `.btn-danger` marks an irreversible
+   confirmation with the danger palette. The sidebar keeps exactly one blue
+   resting control (`.new-session-button`); dialogs and popovers may each
+   have their own affirmative primary. Shape (font-size, padding, alignment)
+   still lives per call-site class exactly as before; these classes only
+   choose the shared visual tier.
 
    The border is TRANSPARENT, not `none`: a ghost button and a filled-
    primary or selected one (`.btn-primary`, `.tab.selected`) sit beside
@@ -1159,23 +1146,40 @@ samp {
   cursor: default;
 }
 
-/* The filled-primary tier: exactly the sidebar's "new session" control plus
-   the confirming action of the three affirmative dialogs whose own primary
-   it is — create session, add a host, rename (`.new-session-button`,
-   `.create-session-submit`, `.add-host-submit`, `.rename-submit`). Nothing
-   else in the sheet carries this class; a confirm-delete/-remove stays
-   ghost with red TEXT instead (see those rules below). That keeps the one
-   filled control per surface meaning "the affirmative default action
-   here" rather than becoming one more box among equals. `border-color`
-   only, not a full `border` shorthand: `.btn` above already reserves the
-   same 1px solid width and style for every ghost control, so this class
-   only needs to color that already-reserved border — `--accent-edge`
-   rather than plain `--accent`, since the token's own role comment names
-   this exact use ("the outline a filled primary would take"). */
+/* The normal affirmative tier. `border-color` only, not a full `border`
+   shorthand: `.btn` reserves the same 1px width for every tier, so changing
+   only its color prevents neighboring controls from jumping in size. */
 .btn-primary {
   background: var(--accent-fill);
   border-color: var(--accent-edge);
   color: var(--fg-bright);
+}
+
+/* Secondary actions retain the quiet sidebar chrome without inheriting the
+   ghost base's transparent border. This is intentionally opt-in so the
+   many controls whose subdued ghost state carries meaning stay unchanged. */
+.btn-neutral {
+  background: var(--bg-2);
+  border-color: var(--border);
+  color: var(--fg-0);
+}
+
+.btn-neutral:hover:not(:disabled),
+.btn-neutral:focus-visible:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+
+/* Destructive confirmations are a distinct tier: the red fill makes the
+   irreversible choice legible at the moment consent is requested. */
+.btn-danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-soft);
+  color: var(--fg-bright);
+}
+
+.btn-danger:hover:not(:disabled),
+.btn-danger:focus-visible:not(:disabled) {
+  background: var(--danger-fill-hover);
 }
 
 .btn-primary:hover:not(:disabled),
@@ -1533,7 +1537,7 @@ samp {
    whole row's accent fill. */
 .session-row-menu[aria-expanded="true"],
 .host-row-menu[aria-expanded="true"] {
-  background: var(--control-hover-bg);
+  background: var(--accent-fill-hover);
   color: var(--accent);
 }
 
@@ -1846,11 +1850,11 @@ samp {
 }
 
 /* The divider before the destructive item — the one place in either menu
-   where the reading has to slow down. A rule, not a red box: the two-tier
-   button system keeps destructive actions ghost (see `.session-row-delete`
-   and `.host-remove` for the red TEXT they get instead), so the
-   separation is done by the quiet `--border-dim` rule rather than by
-   dressing the item up as a third tier.
+   where the reading has to slow down. A rule, not a red box: menu actions
+   stay ghost (see `.session-row-delete` and `.host-remove` for their red
+   text), while confirmation controls use
+   the explicit danger tier; the separation is done by the quiet
+   `--border-dim` rule rather than by dressing a menu item up as a box.
 
    Its own element, carrying `role="separator"`, rather than a `border-top`
    on the delete/remove item: drawn on the item, the boundary existed for
@@ -1865,12 +1869,12 @@ samp {
   border-top: 1px solid var(--border-dim);
 }
 
-/* Lifecycle confirmations: small, secondary-looking controls that stay
-   out of the open button's way — plain text buttons rather than icons,
-   matching the rest of M2's undecorated chrome (PLAN_M2.md). Box-model
-   shape itself comes from `.btn` above; this group only adds what
-   differs, shared across every confirmation control rather than
-   duplicated per pair since the shape is identical. `flex-shrink: 0`
+/* Lifecycle confirmations are small controls that stay out of the open
+   button's way — plain text buttons rather than icons, matching the rest of
+   the confirmation chrome. Box-model shape itself comes from `.btn` above;
+   this group only adds what differs, shared across every confirmation
+   control rather than duplicated per pair since the shape is identical.
+   `flex-shrink: 0`
    is deliberate, not a default left implicit: `.confirm-title` below is
    the ONE row member allowed to shrink under space pressure (a long
    title, say) — these buttons must stay full-size and reachable
@@ -1894,19 +1898,11 @@ samp {
   flex-shrink: 0;
 }
 
-/* The dangerous action in either state — plain "delete", or "confirm
-   delete" once a prompt is open — gets the same red: a user
-   mid-confirmation should read "confirm delete" as at least as alarming
-   as the button that led here, not a plainer, calmer control that
-   undersells what it is about to do. The tab strip's "confirm close"
-   borrows `.confirm-delete` rather than inventing a second red: closing a
-   tab kills its shell and everything under it, so it belongs in the same
-   visual class as the other irreversible actions, not a gentler one.
-   Color only, no border: the two-tier system keeps destructive actions
-   ghost like everything else that is not the one filled primary — a red
-   BOX would read as its own third tier. */
+/* Menu delete/remove items remain deliberate ghost exemptions: their red
+   text distinguishes the command without turning a whole menu row into a
+   confirmation surface. The actual confirmation buttons use `.btn-danger`. */
 .session-row-delete,
-.confirm-delete {
+.host-remove {
   color: var(--danger);
 }
 
@@ -2825,14 +2821,6 @@ samp {
   font-size: 12px;
 }
 
-.add-host-button,
-.update-all-button,
-.profiles-toggle {
-  background: var(--bg-2);
-  border-color: var(--border);
-  color: var(--fg-0);
-}
-
 .host-details-control {
   padding: 2px 8px;
 }
@@ -3052,9 +3040,8 @@ samp {
 }
 
 /* `remove` keeps the same danger color it had as an inline button, now
-   applied to the menu item instead — the two-tier system's rule (ghost by
-   default, red TEXT for the one destructive command) does not change just
-   because the command moved into a menu. */
+   applied to the menu item instead. Menu items are explicit ghost
+   exemptions; only the confirmation control gets the filled danger tier. */
 .host-remove {
   color: var(--danger);
 }
@@ -4341,10 +4328,8 @@ samp {
 .launch-composer-cancel {
   min-height: 44px;
   padding: 0 18px;
-  border: 1.5px solid var(--border);
+  border-width: 1px;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-0);
   font-size: 14px;
 }
 

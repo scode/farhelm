@@ -451,14 +451,14 @@ pub(crate) fn PlanConfirmation(
             div { class: "provisioning-confirm-actions",
                 button {
                     r#type: "button",
-                    class: "btn provisioning-confirm",
+                    class: "btn btn-primary provisioning-confirm",
                     disabled: busy,
                     onclick: move |_| on_confirm.call(()),
                     "{confirm_label}"
                 }
                 button {
                     r#type: "button",
-                    class: "btn provisioning-cancel",
+                    class: "btn btn-neutral provisioning-cancel",
                     disabled: busy,
                     onclick: move |_| on_cancel.call(()),
                     "cancel"

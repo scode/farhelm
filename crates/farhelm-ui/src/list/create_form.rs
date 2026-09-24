@@ -3577,7 +3577,7 @@ pub(super) fn CreateSessionForm(
                 }
                 button {
                     r#type: "button",
-                    class: "launch-composer-cancel",
+                    class: "btn btn-neutral launch-composer-cancel",
                     disabled: busy,
                     onclick: move |_| {
                         // The disabled attribute updates after this event's

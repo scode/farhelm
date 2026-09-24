@@ -1526,7 +1526,7 @@ pub(crate) fn SessionView(
                     div { class: "restart-offer",
                         button {
                             r#type: "button",
-                            class: "btn restart-primary",
+                            class: "btn btn-primary restart-primary",
                             // Whether this click opens the confirmation rather
                             // than restarting outright — the status-derived
                             // decision, exposed so it is inspectable (the
@@ -1593,7 +1593,7 @@ pub(crate) fn SessionView(
                                 }
                                 button {
                                     r#type: "button",
-                                    class: "btn restart-confirm",
+                                    class: "btn btn-primary restart-confirm",
                                     disabled: restarting(),
                                     onclick: move |_| {
                                         if !confirming() {
@@ -1611,7 +1611,7 @@ pub(crate) fn SessionView(
                                 }
                                 button {
                                     r#type: "button",
-                                    class: "btn restart-cancel",
+                                    class: "btn btn-neutral restart-cancel",
                                     autofocus: true,
                                     onclick: move |_| {
                                         confirming.set(false);
@@ -1823,13 +1823,13 @@ pub(crate) fn SessionView(
                         }
                         button {
                             r#type: "button",
-                            class: "btn confirm-delete confirm-close-tab",
+                            class: "btn btn-danger confirm-delete confirm-close-tab",
                             onclick: move |_| confirm_close_tab(tab_id.clone()),
                             "confirm close"
                         }
                         button {
                             r#type: "button",
-                            class: "btn confirm-cancel",
+                            class: "btn btn-neutral confirm-cancel",
                             // Safe default, exactly as the delete prompt does
                             // it: keyboard focus lands on the way OUT of the
                             // destructive action, via the plain HTML attribute

@@ -261,20 +261,20 @@ for that specific role rather than folded into the `--bg-*` surface family, so n
 level to lay something out on. `--well` is a third fill of that kind: the inside of an input, select, or code box,
 darker than any surface a control can sit on so that a field reads as cut into its panel, and lighter than the ground so
 that a field on a dialog does not read as a hole through to the page. The second is that there is ONE accent, and what
-it may be spent on is a closed list rather than a palette to decorate with: selection, `:focus-visible`, the one filled
-primary control a surface is allowed, and any PRESSED disclosure control — a trigger wearing the accent for exactly as
-long as the thing it opened is showing. That last entry covers the session row's actions-menu toggle and the header's
-own restart trigger alike; they are one category, not a rule plus exceptions, and the accent is what separates "this one
-is open" from the hover fill every ghost control already takes. The filled-primary entry is scoped per SURFACE, not per
-screen: the sidebar's resting chrome carries exactly one filled control (`new session`), and each dialog that floats
-over it — create session, add a host, rename — supplies its own submit as THAT dialog's one primary, since a dialog is
-read as its own surface rather than counted against the sidebar's. Everything else, on any surface, stays ghost,
-including destructive actions, which mark themselves with red text rather than a red fill. SPEC.md requires the sidebar
-to mark the selected session's row readably at a glance, so anything joining that list has to be a place where the
-accent means "this is where you are" — the same thing the other entries say — because an accent spread across ordinary
-decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under them: the
-quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on, which is
-what caps how light the selected row's fill may go.
+it may be spent on is a closed list rather than a palette to decorate with: selection, `:focus-visible`, normal primary
+actions, and any PRESSED disclosure control. Action buttons use three deliberate tiers on the shared ghost `.btn` base:
+`.btn-primary` is the normal blue affirmative, `.btn-neutral` is the quiet secondary treatment, and `.btn-danger` is
+reserved for destructive confirmations. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct
+from a resting primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome
+carries exactly one filled control (`new session`), and each dialog or popup that floats over it may supply its own
+affirmative primary. The sidebar's secondary actions and profile-row edit/delete controls use the neutral tier; menu
+items, tabs, composer selections, relays, and other explicit exemptions retain their ghost or purpose-built styling.
+Destructive menu items remain red text, while their confirmation buttons use the danger tier. SPEC.md requires the
+sidebar to mark the selected session's row readably at a glance, so anything joining that list has to be a place where
+the accent means "this is where you are" — the same thing the other entries say — because an accent spread across
+ordinary decoration would leave nothing to make the selection readable. Both constraints have a contrast floor under
+them: the quiet foreground tokens are set so that metadata stays at WCAG AA against the brightest surface it lands on,
+which is what caps how light the selected row's fill may go.
 
 Selection is one construct wherever it appears — the sidebar's selected row, the selected tab, and the launch composer's
 chosen harness, segment, folder, and list option: the accent-tinted `--accent-fill`, an accent bar along one edge, and

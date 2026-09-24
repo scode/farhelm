@@ -463,7 +463,7 @@ pub(crate) fn TokenPrompt() -> Element {
                     oninput: move |event| token.set(event.value()),
                 }
                 button {
-                    class: "btn auth-submit",
+                    class: "btn btn-primary auth-submit",
                     r#type: "submit",
                     disabled: *busy.read(),
                     if *busy.read() { "Checking…" } else { "Continue" }
