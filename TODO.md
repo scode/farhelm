@@ -7,8 +7,8 @@ priorities unless an entry says so itself.
 Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
 the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
 review triage within each item's stated scope; "near term" is what should be picked up next; "doc todo" holds
-documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers test
-and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
+documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
+test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
 deterministically, with the failure and the evidence that it predates any in-flight work; "code review" is the residue
 of the September 2026 review swarms after the policy pass, ordered by confidence and risk; "maybe later" is wanted but
 not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way.
@@ -31,6 +31,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `create-runs-inline-on-read-loop.md`; it does not request immediate implementation.
 
 ## Near term
+
 - **Claude foreground ownership.** Assess whether native or shelled-out Claude children can replace or withdraw the
   foreground conversation's restart target, then define the smallest admission check that preserves legitimate
   clear/new/switch/fork/resume transitions. This is an assessment task, not a claim that every vendor path has been
@@ -38,13 +39,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Pi foreground ownership.** Assess whether native or shelled-out Pi children can replace or withdraw the foreground
   conversation's restart target, then define the smallest admission check that preserves legitimate foreground
   transitions. This is an assessment task, not a claim that every vendor path has been reproduced.
-- **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the
-  foreground conversation's restart target beyond the checks now landed in #814, and define any remaining smallest
-  admission check. Preserve legitimate foreground transitions and avoid extending the reporter's scope without
-  evidence.
+- **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
+  conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
+  Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
 
-The earlier cross-harness evidence is preserved in [the historical ownership
-assessment](lore/2026-09-20-harness-conversation-ownership.md).
+The earlier cross-harness evidence is preserved in
+[the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
 
 ## Doc todo
 
@@ -57,10 +57,14 @@ assessment](lore/2026-09-20-harness-conversation-ownership.md).
 - Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
   `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing
   scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them, before submission.
-  No bug screenshot or logs were supplied. Whether the underlying input was corrupted or only its rendering is unknown.
-  [Investigation findings](docs/codex-input-investigation.md): direct tmux and Linux Chromium/WebKit probes did not
-  reproduce the scattered current input; the report remains unresolved, including native macOS coverage.
-
+  Later recurrences in the macOS desktop app showed the input itself is corrupted, not only its rendering: typing `SPE`
+  submitted `SPECIALLY`. [Investigation findings](docs/codex-input-investigation.md). Believed fixed by opting xterm's
+  hidden input textarea out of macOS inline predictive text (`writingsuggestions="false"` in `terminal.js`), since the
+  recent fragments (`SPEC`, `SPECIAL`, `SPECIALLY`) are all dictionary completions of `SPE`. The original report's
+  `COMMI` and `PR` are not, and fit xterm re-sending retained capitals instead, which this change does not address. The
+  entry stays open to gather evidence: there is no reliable reproduction, so the fix is unconfirmed until the symptom
+  stays absent in normal use. A recurrence after this change points back to the xterm composition defects the findings
+  doc cites.
 
 ## Deflake
 

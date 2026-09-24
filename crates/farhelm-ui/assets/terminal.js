@@ -3064,6 +3064,31 @@
         term.open(el);
         fit.fit();
 
+        // Opt xterm's hidden input textarea out of macOS inline predictive
+        // text. That textarea is where keystrokes land before xterm turns
+        // them into terminal input, and it is not cleared between keys:
+        // uppercase letters typed on a line stay in it until Enter, Ctrl-C,
+        // or blur (xterm.js issue #6078; the vendored core's keydown path
+        // lets capitals through and clears only on those three). WebKit can
+        // therefore offer a completion for what looks like an ordinary word
+        // there, and when the textarea's value grows, xterm's composition
+        // handling forwards the difference as typed input. The suspected
+        // result is the Codex input corruption recorded in
+        // docs/codex-input-investigation.md: `SPE` typed, `SPECIALLY`
+        // submitted, with no keystroke for the extra letters. That cause is
+        // a hypothesis, not a confirmed diagnosis; the doc tracks it.
+        //
+        // xterm already sets `autocorrect`, `autocapitalize` and
+        // `spellcheck` off on this element but not `writingsuggestions`,
+        // the HTML attribute WebKit honors for inline predictions. Engines
+        // that do not know the attribute ignore it, so this is inert outside
+        // WebKit and on WebKit builds too old to support it. It does NOT
+        // address the other two xterm composition defects the investigation
+        // doc cites (the doubled dead key, or the accumulated textarea being
+        // re-sent by some other composition event); those need xterm itself
+        // to change.
+        term.textarea?.setAttribute("writingsuggestions", "false");
+
         // The REGULAR backstop path only — `fontReady` above already
         // covers the overwhelmingly common case (the font settled by a
         // real load, so the constructor already got the right family and
