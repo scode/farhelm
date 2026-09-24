@@ -1468,7 +1468,11 @@ async fn reap_dead_tabs(
         let Some(session_states) = by_session.get(terminal.tmux_name.as_str()) else {
             continue;
         };
-        for tab in tabs_from_pane_states(session_states.iter().copied(), &terminal.tmux_name) {
+        for tab in tabs_from_pane_states(
+            session_states.iter().copied(),
+            &terminal.tmux_name,
+            Some(&terminal.pane),
+        ) {
             if !tab.dead {
                 continue;
             }
@@ -2165,7 +2169,7 @@ mod tests {
             !states.contains_key(&dead_a) && !states.contains_key(&dead_b),
             "every dead tab's window must be gone after one tick, not just the first"
         );
-        let survivors = tabs_from_pane_states(states.values(), tmux_name);
+        let survivors = tabs_from_pane_states(states.values(), tmux_name, None);
         assert_eq!(
             survivors
                 .iter()
@@ -2384,6 +2388,91 @@ mod tests {
         assert_eq!(classify(&sup, "codex").await, SessionStatus::Running);
     }
 
+    /// A dead agent pane whose marker was removed or malformed may carry a
+    /// forged tab marker, but automatic dead-tab cleanup must exclude its
+    /// whole recorded window. A separate genuine dead tab proves the reap
+    /// still performs its normal destructive work for real tabs.
+    #[farhelm_testtrace::test]
+    async fn dead_tab_reap_excludes_a_forged_marker_on_the_agent_window() {
+        let state = StateDir::new();
+        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
+        install_live_session(&sup, "forged-agent-reap", "true").await;
+        let tmux_name = "fh-forged-agent-reap";
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get("forged-agent-reap")
+            .cloned()
+            .expect("the session is installed");
+        let agent = entry.terminal.clone().expect("agent terminal");
+        let genuine_dead_pane = dead_tab_in(&sup, tmux_name).await;
+        let forged_id = uuid::Uuid::new_v4().to_string();
+        sup.tmux
+            .mark_window(
+                tmux_name,
+                &agent.pane,
+                crate::tmux::AGENT_WINDOW_OPTION,
+                "malformed-agent-marker",
+            )
+            .await
+            .expect("corrupt the mutable agent marker");
+        sup.tmux
+            .mark_window(
+                tmux_name,
+                &agent.pane,
+                crate::tmux::TAB_WINDOW_OPTION,
+                &forged_id,
+            )
+            .await
+            .expect("forge a tab marker on the agent window");
+
+        // The fixture premise is that the agent and genuine tab are both
+        // dead before the reap; otherwise the protected window could look
+        // safe merely because it was still live.
+        wait_for_no_live_agent_pane(&sup).await;
+        let before = sup
+            .tmux
+            .pane_states()
+            .await
+            .expect("pane states before reap");
+        assert!(
+            before.contains_key(&agent.pane),
+            "remain-on-exit keeps the agent pane"
+        );
+        assert!(
+            before.contains_key(&genuine_dead_pane),
+            "genuine dead tab is present"
+        );
+
+        let listed = sup.session_tabs(&agent).await.expect("tab listing");
+        assert!(
+            listed.is_empty(),
+            "dead forged and genuine tabs stay hidden from listing"
+        );
+        let mut cursor = None;
+        let (_stop_tx, mut stop) = oneshot::channel();
+        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
+
+        let after = sup
+            .tmux
+            .pane_states()
+            .await
+            .expect("pane states after reap");
+        assert!(
+            after.contains_key(&agent.pane),
+            "automatic dead-tab reap must retain the recorded agent window"
+        );
+        assert!(
+            !after.contains_key(&genuine_dead_pane),
+            "automatic dead-tab reap must still remove a genuine dead tab"
+        );
+        assert!(
+            tabs_from_pane_states(after.values(), tmux_name, Some(&agent.pane)).is_empty(),
+            "the forged marker remains excluded after the reap"
+        );
+    }
+
     /// The reap still runs when NO agent pane on the whole server is live
     /// — the sampler's `live.is_empty()` early return must not be reached
     /// before it (an easy regression: reaping placed after that return
@@ -2417,7 +2506,7 @@ mod tests {
             "a dead tab must be reaped even with no live agent pane anywhere"
         );
         assert!(
-            tabs_from_pane_states(states.values(), tmux_name).is_empty(),
+            tabs_from_pane_states(states.values(), tmux_name, None).is_empty(),
             "no tab may remain discoverable on the dead-agent session after the reap"
         );
     }

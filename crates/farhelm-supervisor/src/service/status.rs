@@ -435,11 +435,15 @@ pub(crate) fn entry_info(
         .terminal
         .as_ref()
         .map(|terminal| {
-            tabs_from_pane_states(pane_states.values(), &terminal.tmux_name)
-                .into_iter()
-                .filter(|tab| !tab.dead)
-                .map(|tab| TabInfo { id: tab.id })
-                .collect()
+            tabs_from_pane_states(
+                pane_states.values(),
+                &terminal.tmux_name,
+                Some(&terminal.pane),
+            )
+            .into_iter()
+            .filter(|tab| !tab.dead)
+            .map(|tab| TabInfo { id: tab.id })
+            .collect()
         })
         .unwrap_or_default();
     match sentinel {
