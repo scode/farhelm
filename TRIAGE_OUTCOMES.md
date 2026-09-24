@@ -867,7 +867,8 @@
   completed payload snapshots usable, use the Farhelm-specific cache name consistently, and verify the cleanup and
   collision boundary with focused tests. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the
   execution change.
-- Execution: `pending`.
+- Execution: implemented in change `tvomkzky` on bookmark `pr/directory-source-staging`;
+  [draft PR #909](https://github.com/scode/farhelm/pull/909/changes).
 
 ## failed-restart-discards-capture.md
 

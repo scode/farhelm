@@ -14,14 +14,41 @@ use super::plan::{PayloadArch, PayloadKind};
 use super::release_payloads::{self, MINISIGN_PUBKEY, ReleasePayloadSource};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
+use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::fs::DirBuilderExt as _;
 #[cfg(unix)]
+use std::os::unix::fs::MetadataExt as _;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tracing::{info, warn};
+
+/// The private cache for operator-supplied payload materialization.
+///
+/// This name is intentionally Farhelm-specific: `.extracted` was used by an
+/// older implementation and may contain operator-owned or otherwise legacy
+/// state, so directory-payload cleanup must never inspect it.
+pub(super) const DIRECTORY_PAYLOAD_CACHE: &str = ".farhelm_extract_tmp";
+
+/// The only temporary-file shape the directory source owns and may sweep.
+///
+/// The release download source still uses its own fixed names and housekeeping
+/// rules. Keeping this prefix separate prevents one source from removing the
+/// other's staging files.
+pub(super) const DIRECTORY_PAYLOAD_STAGE_PREFIX: &str = ".farhelm-stage-";
+pub(super) const DIRECTORY_PAYLOAD_STAGE_SUFFIX: &str = ".tmp";
+const DIRECTORY_PAYLOAD_STAGE_MAX_AGE: Duration = Duration::from_secs(3600);
+
+/// Counts directory-payload materializations currently active for each cache.
+///
+/// The registry is process-local because it closes the race between stale-file
+/// cleanup and a new temporary file in this process. Files left by a crashed
+/// process remain recoverable through the age guard on the next use.
+static ACTIVE_DIRECTORY_MATERIALIZATIONS: OnceLock<Mutex<HashMap<PathBuf, usize>>> =
+    OnceLock::new();
 
 /// Supplies host-architecture-specific artifacts without coupling
 /// provisioning to how they are obtained.
@@ -100,20 +127,21 @@ impl DirectoryPayloads {
         Self { dir }
     }
 
-    /// The private, per-call materialization cache — always below the
-    /// operator-supplied directory. See [`PayloadSource::path`]'s impl for
-    /// why every call gets its OWN uniquely named output here rather than a
-    /// name shared across calls.
+    /// The private materialization cache below the operator-supplied directory.
+    ///
+    /// The cache name is owned by Farhelm so cleanup can distinguish its
+    /// staging files from the legacy `.extracted` directory, which remains
+    /// entirely outside this source's lifecycle.
     fn extracted_dir(&self) -> PathBuf {
-        self.dir.join(".extracted")
+        self.dir.join(DIRECTORY_PAYLOAD_CACHE)
     }
 
     /// A fresh, collision-proof destination for one materialization of
-    /// `asset` — `.extracted/<asset>.<random>.bin`.
+    /// `asset` — `.farhelm_extract_tmp/<asset>.<random>.bin`.
     ///
     /// F2 (review round 2, DECISION: per-call private snapshot): an earlier
     /// version always published to the SAME pathname
-    /// (`.extracted/<asset>.bin`), atomically renamed into place per call.
+    /// (`.farhelm_extract_tmp/<asset>.bin`), atomically renamed into place per call.
     /// Atomic rename stops a reader from ever observing a half-written
     /// file, but it does not stop one caller's freshly renamed output from
     /// being overwritten by a DIFFERENT caller's in-flight materialization
@@ -137,7 +165,7 @@ impl DirectoryPayloads {
 #[async_trait]
 impl PayloadSource for DirectoryPayloads {
     /// Re-materializes `asset` into a brand-new, uniquely named file under
-    /// `.extracted/` on EVERY call (F2, review round 1 and 2) rather than
+    /// `.farhelm_extract_tmp/` on EVERY call (F2, review round 1 and 2) rather than
     /// trusting — or sharing — whatever an earlier call already produced.
     /// Not caching at all is deliberate: an "add host" run is a rare,
     /// operator-initiated action touching at most a couple of payloads, so
@@ -149,10 +177,10 @@ impl PayloadSource for DirectoryPayloads {
     /// network round trip a cache hit is worth avoiding, and this one does
     /// not.
     ///
-    /// Because every call's output is private, nothing here ever expires it
-    /// on the caller's behalf — see [`prune_stale_generations`], run
-    /// best-effort after each success, for the only cleanup this directory
-    /// gets.
+    /// Because every call's output is private, snapshot cleanup remains
+    /// separate from staging cleanup: [`prune_stale_generations`] runs
+    /// best-effort after each success, while [`begin_materialization`] sweeps
+    /// crash-orphaned staging files before a new request begins.
     async fn path(&self, payload: PayloadKind, arch: PayloadArch) -> anyhow::Result<PathBuf> {
         let asset = match payload {
             PayloadKind::Farhelm => assets::archive_name(assets::farhelm_archive_for(arch)),
@@ -162,6 +190,11 @@ impl PayloadSource for DirectoryPayloads {
         require_regular_file(&source, "the published release asset")?;
         let extracted_dir = self.extracted_dir();
         ensure_private_extracted_dir(&extracted_dir)?;
+        // Registration and the stale-file sweep are one synchronized step.
+        // A concurrent request either observes this cache as active and leaves
+        // its staging files alone, or gets the first-use sweep before it
+        // becomes active itself.
+        let materialization = begin_materialization(&extracted_dir);
         let dest = self.unique_extracted_path(&asset);
         // Both branches perform blocking file I/O proportional to a whole
         // binary's size, so both run through `spawn_blocking` rather than
@@ -171,20 +204,24 @@ impl PayloadSource for DirectoryPayloads {
                 let member = assets::farhelm_archive_for(arch).member;
                 let dest_task = dest.clone();
                 tokio::task::spawn_blocking(move || {
-                    extract_single_member(&source, member, &dest_task)
+                    let _materialization = materialization;
+                    extract_single_member_with_directory_staging(&source, member, &dest_task)
                 })
                 .await
                 .context("the archive extraction task panicked")??;
             }
             PayloadKind::Tmux => {
                 let dest_task = dest.clone();
-                tokio::task::spawn_blocking(move || copy_executable(&source, &dest_task))
-                    .await
-                    .context("the payload copy task panicked")??;
+                tokio::task::spawn_blocking(move || {
+                    let _materialization = materialization;
+                    copy_executable_with_directory_staging(&source, &dest_task)
+                })
+                .await
+                .context("the payload copy task panicked")??;
             }
         }
         // Best-effort only: pruning is entirely an optimization (keeping
-        // `.extracted/` from growing forever), never load-bearing for
+        // `.farhelm_extract_tmp/` from growing forever), never load-bearing for
         // correctness, so a panic or error inside it must not fail the
         // provisioning run that just succeeded.
         let prune_dir = extracted_dir.clone();
@@ -197,7 +234,7 @@ impl PayloadSource for DirectoryPayloads {
     }
 }
 
-/// Remove `.extracted/<asset>.*.bin` snapshots older than `max_age`,
+/// Remove `.farhelm_extract_tmp/<asset>.*.bin` snapshots older than `max_age`,
 /// swallowing every error along the way.
 ///
 /// The per-call private-snapshot policy (F2, review round 2) means every
@@ -241,7 +278,95 @@ fn prune_stale_generations(extracted_dir: &Path, asset: &str, max_age: Duration)
     }
 }
 
-/// Create (or reuse) `.extracted` with Unix mode 0700, regardless of the
+/// Register one materialization and sweep crash-orphaned staging files first.
+///
+/// The reference count is keyed by the cache directory. The first request
+/// gets the sweep while the count is zero; concurrent requests only register
+/// themselves, so a sweep can never race a request that has begun staging.
+pub(super) fn begin_materialization(cache_dir: &Path) -> DirectoryMaterializationGuard {
+    let registry = ACTIVE_DIRECTORY_MATERIALIZATIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut active = registry
+        .lock()
+        .expect("directory materialization registry is not poisoned");
+    let count = active.entry(cache_dir.to_path_buf()).or_default();
+    if *count == 0 {
+        prune_stale_staging(cache_dir, DIRECTORY_PAYLOAD_STAGE_MAX_AGE);
+    }
+    *count += 1;
+    DirectoryMaterializationGuard {
+        cache_dir: cache_dir.to_path_buf(),
+    }
+}
+
+/// Releases a cache's active-materialization registration when a request
+/// succeeds, fails, or is cancelled. Removing an idle entry keeps the process
+/// local registry bounded by currently active operator directories.
+pub(super) struct DirectoryMaterializationGuard {
+    cache_dir: PathBuf,
+}
+
+impl Drop for DirectoryMaterializationGuard {
+    fn drop(&mut self) {
+        let registry = ACTIVE_DIRECTORY_MATERIALIZATIONS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut active = registry
+            .lock()
+            .expect("directory materialization registry is not poisoned");
+        let Some(count) = active.get_mut(&self.cache_dir) else {
+            return;
+        };
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            active.remove(&self.cache_dir);
+        }
+    }
+}
+
+/// Remove old, Farhelm-owned staging files from a directory-payload cache.
+///
+/// Only the dedicated prefix and suffix are considered. `symlink_metadata`
+/// prevents a matching symlink from being followed, and Unix hard links are
+/// left alone unless the candidate is the file's sole link, because a second
+/// link is evidence that the entry may be operator-owned. Every filesystem
+/// failure is ignored: this is crash recovery housekeeping and cannot be
+/// allowed to turn an otherwise valid payload request into an error.
+fn prune_stale_staging(cache_dir: &Path, max_age: Duration) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !name.starts_with(DIRECTORY_PAYLOAD_STAGE_PREFIX)
+            || !name.ends_with(DIRECTORY_PAYLOAD_STAGE_SUFFIX)
+        {
+            continue;
+        }
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if !metadata.file_type().is_file() {
+            continue;
+        }
+        #[cfg(unix)]
+        if metadata.nlink() != 1 {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age < max_age {
+            continue;
+        }
+        let _ = std::fs::remove_file(entry.path());
+    }
+}
+
+/// Create (or reuse) `.farhelm_extract_tmp` with Unix mode 0700, regardless of the
 /// helm process's umask, and refuse anything that is not plainly ours: a
 /// pre-existing symlink or non-directory object at that path.
 ///
@@ -249,9 +374,9 @@ fn prune_stale_generations(extracted_dir: &Path, asset: &str, max_age: Duration)
 /// holds is what `prepare_payloads` opens BY PATHNAME and installs onto the
 /// remote host, executed there as the SSH user. `create_dir_all`'s
 /// permissions follow the calling process's umask — under a permissive one
-/// (`000`), `.extracted` could end up world-writable even though the
+/// (`000`), `.farhelm_extract_tmp` could end up world-writable even though the
 /// operator's own `--payload-dir` is otherwise protected. Another local
-/// user able to write into `.extracted` could then substitute their own
+/// user able to write into `.farhelm_extract_tmp` could then substitute their own
 /// binary for a legitimate materialization during the window between this
 /// source publishing a path and `prepare_payloads` reopening it, regardless
 /// of how carefully the WRITE into that directory is made atomic — the
@@ -260,14 +385,14 @@ fn prune_stale_generations(extracted_dir: &Path, asset: &str, max_age: Duration)
 ///
 /// IDEMPOTENT under concurrent first use (F2, review round 3): the
 /// provisioning service runs up to four host installs at once, all sharing
-/// one `DirectoryPayloads`, so two calls can both observe `.extracted`
+/// one `DirectoryPayloads`, so two calls can both observe `.farhelm_extract_tmp`
 /// absent and both attempt to create it. Losing that race is not an error —
 /// `DirBuilder::create` reporting `AlreadyExists` means some other call
 /// already produced the exact directory this one wanted, so the loser just
 /// re-inspects it under the same symlink/non-dir/mode rules an
 /// already-existing cache gets on every other call, rather than turning a
 /// harmless race into a provisioning failure.
-fn ensure_private_extracted_dir(extracted_dir: &Path) -> anyhow::Result<()> {
+pub(super) fn ensure_private_extracted_dir(extracted_dir: &Path) -> anyhow::Result<()> {
     match std::fs::symlink_metadata(extracted_dir) {
         Ok(metadata) => secure_existing_extracted_dir(extracted_dir, &metadata),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -415,6 +540,31 @@ pub(super) fn extract_single_member(
     member: &str,
     dest: &Path,
 ) -> anyhow::Result<()> {
+    extract_single_member_with_staging_prefix(archive, member, dest, None)
+}
+
+/// Directory payloads use a distinct staging namespace so their crash debris
+/// can be swept without touching the release source's `.tmp*` files.
+fn extract_single_member_with_directory_staging(
+    archive: &Path,
+    member: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
+    extract_single_member_with_staging_prefix(
+        archive,
+        member,
+        dest,
+        Some(DIRECTORY_PAYLOAD_STAGE_PREFIX),
+    )
+}
+
+/// Extract one archive member using the selected staging-file naming policy.
+fn extract_single_member_with_staging_prefix(
+    archive: &Path,
+    member: &str,
+    dest: &Path,
+    staging_prefix: Option<&str>,
+) -> anyhow::Result<()> {
     let file =
         std::fs::File::open(archive).with_context(|| format!("opening {}", archive.display()))?;
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
@@ -447,7 +597,7 @@ pub(super) fn extract_single_member(
         }
         matches += 1;
         if staged.is_none() {
-            let mut candidate = tempfile::NamedTempFile::new_in(extracted_dir)
+            let mut candidate = new_staging_file(extracted_dir, staging_prefix)
                 .with_context(|| format!("staging extracted {member}"))?;
             std::io::copy(&mut entry, candidate.as_file_mut())
                 .with_context(|| format!("extracting {member} from {asset_name}"))?;
@@ -485,9 +635,25 @@ pub(super) fn extract_single_member(
 /// the extractor. Synchronous — callers MUST run it through
 /// `spawn_blocking`.
 pub(super) fn copy_executable(source: &Path, dest: &Path) -> anyhow::Result<()> {
-    let mut staged = tempfile::NamedTempFile::new_in(
+    copy_executable_with_staging_prefix(source, dest, None)
+}
+
+/// Directory payloads use a distinct staging namespace so their crash debris
+/// can be swept without touching the release source's `.tmp*` files.
+fn copy_executable_with_directory_staging(source: &Path, dest: &Path) -> anyhow::Result<()> {
+    copy_executable_with_staging_prefix(source, dest, Some(DIRECTORY_PAYLOAD_STAGE_PREFIX))
+}
+
+/// Copy an executable using the selected staging-file naming policy.
+fn copy_executable_with_staging_prefix(
+    source: &Path,
+    dest: &Path,
+    staging_prefix: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut staged = new_staging_file(
         dest.parent()
             .expect("extraction destinations always have a parent"),
+        staging_prefix,
     )
     .with_context(|| format!("staging {}", dest.display()))?;
     let mut input =
@@ -504,6 +670,24 @@ pub(super) fn copy_executable(source: &Path, dest: &Path) -> anyhow::Result<()> 
         .map_err(|error| error.error)
         .with_context(|| format!("installing {}", dest.display()))?;
     Ok(())
+}
+
+/// Create a temporary staging file with the caller's ownership namespace.
+///
+/// Release downloads retain `tempfile`'s historical `.tmp*` names because
+/// their cache housekeeping already owns that pattern. Directory payloads
+/// pass the Farhelm-specific prefix and suffix used by `prune_stale_staging`.
+fn new_staging_file(
+    directory: &Path,
+    prefix: Option<&str>,
+) -> std::io::Result<tempfile::NamedTempFile> {
+    match prefix {
+        Some(prefix) => tempfile::Builder::new()
+            .prefix(prefix)
+            .suffix(DIRECTORY_PAYLOAD_STAGE_SUFFIX)
+            .tempfile_in(directory),
+        None => tempfile::NamedTempFile::new_in(directory),
+    }
 }
 
 /// Collapse `.`/`..` path components using pure text manipulation — no
@@ -680,7 +864,7 @@ fn selected_directory_aliases_legacy_cache(
 ///    cache can be cleaned up on a later run.
 ///
 /// Every source since D2 materializes below a name of its own instead
-/// ([`DirectoryPayloads`]'s `.extracted/` sits inside the operator's own
+/// ([`DirectoryPayloads`]'s `.farhelm_extract_tmp/` sits inside the operator's own
 /// `--payload-dir`, not helm state), so a directory still called
 /// `embedded-payloads` under helm state — an ordinary directory the
 /// operator did NOT just select — can only be dead weight left by the

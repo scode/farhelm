@@ -19,7 +19,6 @@ One line per open item. This file must always match the feedback files in this d
 
 - `ambiguous-restart-misattributes-exit.md` — ambiguously failed restart records the old run's death as the new
   generation's exit.
-- `directory-source-staging-leak.md` — crash-orphaned extraction staging files are never pruned.
 - `duplicate-freeze-clobbers-retarget-nudge.md` — retargeting a duplicate-frozen host loses the edit until a second
   edit.
 - `failed-forwarder-wedges-delete-until-restart.md` — one failed output-forwarder join wedges delete and archive until
