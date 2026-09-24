@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use farhelm_proto::ControlMsg;
 use farhelm_proto::io::{ClosedBeforeHello, FrameReader, FrameWriter, VersionSkew, handshake};
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -15,7 +16,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-const TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
+// A transfer has no observable byte progress until the remote temporary exists.
+// Once it does, only verified growth of that file renews the idle deadline.
+const TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const TRANSFER_PROGRESS_POLL: Duration = Duration::from_secs(2);
 pub(super) const MAX_CHILD_STREAM_BYTES: usize = 64 * 1024;
 const POSITIVE_ABSENCE_EXIT: i32 = 75;
 pub(super) const REMOTE_PROBE_MARKER: &str = "farhelm-probe-command-started-v1";
@@ -692,13 +696,20 @@ impl SystemBackend {
         Ok(ActionOutcome::Completed)
     }
 
-    /// Transfer one local file to one absolute remote temporary path.
+    /// Transfer one staged payload to its nonce-scoped remote temporary.
+    /// The remote file's byte growth is the only progress signal: batch SFTP
+    /// may be quiet while it writes and may print output while it is stuck.
     async fn sftp_put(
         &self,
         destination: &str,
         source: &Path,
         remote: &Path,
     ) -> Result<(), BackendFailure> {
+        let source_bytes = tokio::fs::metadata(source)
+            .await
+            .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
+            .len();
+        let batch = format!("put {} {}\n", sftp_path(source)?, sftp_path(remote)?);
         let mut command = tokio::process::Command::new("sftp");
         command.args(["-b", "-"]);
         command.args(
@@ -716,7 +727,6 @@ impl SystemBackend {
             .launcher
             .spawn(&mut command)
             .map_err(|error| BackendFailure::new("spawning sftp", error.to_string()))?;
-        let batch = format!("put {} {}\n", sftp_path(source)?, sftp_path(remote)?);
         let mut stdin = child.stdin.take().expect("piped sftp stdin");
         use tokio::io::AsyncWriteExt;
         if let Err(error) = stdin.write_all(batch.as_bytes()).await {
@@ -727,7 +737,14 @@ impl SystemBackend {
             ));
         }
         drop(stdin);
-        let output = capture_child(child, TRANSFER_TIMEOUT, "the sftp transfer").await?;
+        let output = capture_sftp_child(
+            child,
+            source_bytes,
+            || self.remote_transfer_size(destination, remote),
+            TRANSFER_IDLE_TIMEOUT,
+            TRANSFER_PROGRESS_POLL,
+        )
+        .await?;
         if output.code != Some(0) {
             return Err(BackendFailure::new(
                 format!("transferring {} with sftp", source.display()),
@@ -735,6 +752,24 @@ impl SystemBackend {
             ));
         }
         Ok(())
+    }
+
+    /// Observe bytes at the remote temporary, not activity in sftp's pipes.
+    /// Missing files and failed probes cannot start or renew the idle deadline;
+    /// an existing zero-byte file is the first observable transfer state.
+    async fn remote_transfer_size(&self, destination: &str, remote: &Path) -> Option<u64> {
+        let target = ProvisioningTarget::Ssh {
+            destination: destination.to_owned(),
+        };
+        let path = shell_path(remote).ok()?;
+        let script = format!("if test -e {path}; then stat -c %s -- {path}; else exit 75; fi");
+        let output = self
+            .run_shell(&target, &script, COMMAND_TIMEOUT)
+            .await
+            .ok()?;
+        (output.code == Some(0))
+            .then_some(output.stdout)
+            .and_then(|bytes| std::str::from_utf8(&bytes).ok()?.trim().parse().ok())
     }
 
     /// Start the stdio proxy without interpreting its bytes. The caller owns
@@ -796,7 +831,7 @@ impl SystemBackend {
 /// Bounded captured result of one local or remote host shell.
 #[derive(Debug)]
 pub(super) struct CommandResult {
-    code: Option<i32>,
+    pub(super) code: Option<i32>,
     signal: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
@@ -1097,6 +1132,112 @@ pub(super) async fn capture_child(
             return Err(BackendFailure::new(format!("{context} timed out"), ""));
         }
     };
+    finish_child_output(status, stdout_task, stderr_task, &mut signal_rx, context).await
+}
+
+/// Supervise sftp using growth of its remote temporary as the progress oracle.
+/// No transfer deadline runs before the nonce file exists: a slow SSH control
+/// connection has no byte-progress signal to distinguish it from a stall.
+/// Failed size probes do not count as progress. An in-flight probe may delay a
+/// stall report by its own bounded command timeout, but cannot extend the
+/// next idle deadline without observed bytes.
+pub(super) async fn capture_sftp_child<F, Fut>(
+    mut child: tokio::process::Child,
+    source_bytes: u64,
+    mut remote_size: F,
+    idle_timeout: Duration,
+    poll_interval: Duration,
+) -> Result<CommandResult, BackendFailure>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Option<u64>>,
+{
+    let context = "the sftp transfer";
+    let stdout = child.stdout.take().expect("captured sftp stdout");
+    let stderr = child.stderr.take().expect("captured sftp stderr");
+    let (signal_tx, mut signal_rx) = tokio::sync::mpsc::unbounded_channel();
+    let _signal_guard = signal_tx.clone();
+    let stdout_task = tokio::spawn(drain_capped(stdout, "stdout", signal_tx.clone()));
+    let stderr_task = tokio::spawn(drain_capped(stderr, "stderr", signal_tx));
+    let mut deadline: Option<tokio::time::Instant> = None;
+    let mut observed_bytes = 0;
+    let status = loop {
+        // A transfer that ended during a bounded size probe is complete even
+        // if its last observation interval crossed the idle deadline.
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                terminate_child(&mut child).await;
+                let _ = stdout_task.await;
+                let _ = stderr_task.await;
+                return Err(BackendFailure::new(
+                    format!("waiting for {context}"),
+                    error.to_string(),
+                ));
+            }
+        }
+        if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
+            terminate_child(&mut child).await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(BackendFailure::new(format!("{context} stalled"), ""));
+        }
+        tokio::select! {
+            result = child.wait() => match result {
+                Ok(status) => break status,
+                Err(error) => {
+                    terminate_child(&mut child).await;
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                    return Err(BackendFailure::new(format!("waiting for {context}"), error.to_string()));
+                }
+            },
+            failure = signal_rx.recv() => {
+                let failure = failure.expect("stream drain signal sender disappeared");
+                terminate_child(&mut child).await;
+                let _ = stdout_task.await;
+                let _ = stderr_task.await;
+                return Err(BackendFailure::new(
+                    format!("reading {context} {} ({})", failure.stream, failure.detail),
+                    String::from_utf8_lossy(&failure.prefix),
+                ));
+            },
+            _ = async {
+                if let Some(at) = deadline {
+                    tokio::time::sleep_until(at).await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                terminate_child(&mut child).await;
+                let _ = stdout_task.await;
+                let _ = stderr_task.await;
+                return Err(BackendFailure::new(format!("{context} stalled"), ""));
+            },
+            _ = tokio::time::sleep(poll_interval) => {
+                if let Some(bytes) = remote_size().await {
+                    deadline.get_or_insert_with(|| tokio::time::Instant::now() + idle_timeout);
+                    if bytes > observed_bytes && bytes <= source_bytes {
+                        observed_bytes = bytes;
+                        deadline = Some(tokio::time::Instant::now() + idle_timeout);
+                    }
+                }
+            },
+        }
+    };
+    finish_child_output(status, stdout_task, stderr_task, &mut signal_rx, context).await
+}
+
+/// Interpret the same bounded stream drains for fixed-deadline commands and
+/// progress-supervised transfers, so neither path can hide an overflow.
+async fn finish_child_output(
+    status: std::process::ExitStatus,
+    stdout_task: tokio::task::JoinHandle<Vec<u8>>,
+    stderr_task: tokio::task::JoinHandle<Vec<u8>>,
+    signal_rx: &mut tokio::sync::mpsc::UnboundedReceiver<DrainFailure>,
+    context: &str,
+) -> Result<CommandResult, BackendFailure> {
     let stdout = stdout_task.await.map_err(|error| {
         BackendFailure::new(format!("joining {context} stdout drain"), error.to_string())
     })?;
@@ -1126,7 +1267,7 @@ pub(super) async fn capture_child(
 
 /// Kill a child and every helper in its isolated process group, then reap
 /// the direct child before releasing a provisioning lock.
-async fn terminate_child(child: &mut tokio::process::Child) {
+pub(super) async fn terminate_child(child: &mut tokio::process::Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
         // SAFETY: every production caller invokes `isolate_process_group`
