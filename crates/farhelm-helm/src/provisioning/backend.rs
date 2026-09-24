@@ -13,6 +13,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tracing::warn;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -325,6 +326,92 @@ pub(super) fn isolate_process_group(command: &mut tokio::process::Command) {
 }
 
 impl SystemBackend {
+    /// Remove only abandoned Farhelm staging files for one destination.
+    ///
+    /// The nonce is part of the filename so a killed install can leave a
+    /// payload behind after its owning task disappears.  Matching the exact
+    /// destination basename and canonical UUID shape keeps this best-effort
+    /// sweep from treating an unrelated dotfile as ours.
+    async fn cleanup_orphaned_temporaries(
+        &self,
+        target: &ProvisioningTarget,
+        destination: &Path,
+    ) -> Result<(), BackendFailure> {
+        let Some(name) = destination.file_name().and_then(|name| name.to_str()) else {
+            return Ok(());
+        };
+        let prefix = format!(".{name}.farhelm-tmp-");
+        match target {
+            ProvisioningTarget::Local => {
+                let Some(parent) = destination.parent() else {
+                    return Ok(());
+                };
+                let mut entries = match tokio::fs::read_dir(parent).await {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        warn!(directory = %parent.display(), %error, "could not inspect Farhelm temporary files");
+                        return Ok(());
+                    }
+                };
+                loop {
+                    let entry = match entries.next_entry().await {
+                        Ok(Some(entry)) => entry,
+                        Ok(None) => break,
+                        Err(error) => {
+                            warn!(directory = %parent.display(), %error, "could not finish inspecting Farhelm temporary files");
+                            break;
+                        }
+                    };
+                    let path = entry.path();
+                    let Some(candidate) = path.file_name().and_then(|name| name.to_str()) else {
+                        continue;
+                    };
+                    let Some(suffix) = candidate.strip_prefix(&prefix) else {
+                        continue;
+                    };
+                    let Ok(uuid) = uuid::Uuid::parse_str(suffix) else {
+                        continue;
+                    };
+                    if uuid.to_string() != suffix {
+                        continue;
+                    }
+                    let metadata = match tokio::fs::symlink_metadata(&path).await {
+                        Ok(metadata) => metadata,
+                        Err(error) => {
+                            warn!(path = %path.display(), %error, "could not inspect a Farhelm temporary file");
+                            continue;
+                        }
+                    };
+                    if !metadata.file_type().is_file() {
+                        continue;
+                    }
+                    if let Err(error) = tokio::fs::remove_file(&path).await {
+                        warn!(path = %path.display(), %error, "could not remove an orphaned Farhelm temporary file");
+                    }
+                }
+            }
+            ProvisioningTarget::Ssh { .. } => {
+                let Some(parent) = destination.parent() else {
+                    return Ok(());
+                };
+                let script = match orphan_cleanup_script(parent, &prefix) {
+                    Ok(script) => script,
+                    Err(error) => {
+                        warn!(directory = %parent.display(), %error, "could not construct Farhelm temporary-file cleanup");
+                        return Ok(());
+                    }
+                };
+                if let Err(error) = self
+                    .require_shell(target, &script, "cleaning orphaned Farhelm temporary files")
+                    .await
+                {
+                    warn!(error = %error, "could not complete orphaned Farhelm temporary-file cleanup");
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Production uses the real optional linger action.
     pub(super) fn new(control_dir: PathBuf) -> Self {
         Self {
@@ -590,6 +677,8 @@ impl SystemBackend {
             mode,
             description,
         } = install;
+        self.cleanup_orphaned_temporaries(target, destination)
+            .await?;
         if let Some(installed) = self.metadata_on_target(target, destination).await?
             && installed.hash == source_hash
         {
@@ -726,6 +815,12 @@ impl SystemBackend {
                 "local plans have no upload action",
             ));
         };
+        // Remote provisioning now reports upload and install separately. Sweep
+        // abandoned nonce files before creating this run's temporary so the
+        // cleanup cannot remove the verified upload that the following install
+        // action must consume.
+        self.cleanup_orphaned_temporaries(target, destination)
+            .await?;
         if let Some(installed) = self.metadata_on_target(target, destination).await?
             && installed.hash == source_hash
         {
@@ -962,6 +1057,15 @@ impl SystemBackend {
             matches!(target.transport, ProvisioningTarget::Ssh { .. }),
         ))
     }
+}
+
+/// Render the bounded remote sweep used for one destination directory.
+pub(super) fn orphan_cleanup_script(parent: &Path, prefix: &str) -> anyhow::Result<String> {
+    let parent = shell_path(parent)?;
+    let prefix = shell_words::quote(prefix);
+    Ok(format!(
+        "prefix={prefix}; for path in {parent}/\"$prefix\"*; do [ -f \"$path\" ] && [ ! -L \"$path\" ] || continue; base=${{path##*/}}; suffix=${{base#\"$prefix\"}}; printf '%s' \"$suffix\" | grep -Eq '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$' || continue; rm -f -- \"$path\" || exit 1; done",
+    ))
 }
 
 /// Bounded captured result of one local or remote host shell.

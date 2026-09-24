@@ -133,7 +133,8 @@
 - Completion criteria: interrupted-install leftovers converge away on a later run, unrelated files cannot be selected
   for deletion, cleanup remains best effort and logged, focused interruption/retry coverage proves the boundary, and
   this feedback file and its index entry are removed in the execution change.
-- Execution: `pending`.
+- Execution: implemented in change `sovswwwl` on bookmark `pr/orphaned-install-temps`; draft PR
+  [#905](https://github.com/scode/farhelm/pull/905/changes).
 
 ## abandon-upload-waits-unboundedly.md
 

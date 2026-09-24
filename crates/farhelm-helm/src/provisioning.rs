@@ -3726,6 +3726,75 @@ mod tests {
         }
     }
 
+    /// Remote cleanup runs before the split upload action creates its current
+    /// nonce. An older Farhelm nonce is removed, while the new upload remains
+    /// available for the following install action to consume.
+    #[farhelm_testtrace::test]
+    async fn remote_upload_sweeps_orphaned_temporary_before_creating_nonce() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("farhelm");
+        let temporary = root
+            .path()
+            .join(".farhelm.farhelm-tmp-550e8400-e29b-41d4-a716-446655440000");
+        let orphan = root
+            .path()
+            .join(".farhelm.farhelm-tmp-123e4567-e89b-12d3-a456-426614174000");
+        let source = root.path().join("source");
+        tokio::fs::write(&destination, b"installed bytes")
+            .await
+            .unwrap();
+        tokio::fs::write(&orphan, b"orphaned bytes").await.unwrap();
+        tokio::fs::write(&source, b"new bytes").await.unwrap();
+        let backend = SystemBackend {
+            control_dir: root.path().to_path_buf(),
+            linger: LingerBehavior::Simulated(Ok(())),
+            launcher: Arc::new(ScriptedSftpLauncher {
+                temporary: temporary.clone(),
+                bytes: "new bytes",
+                exit_status: 0,
+            }),
+            runtime_units: false,
+            fail_before_rename: false,
+        };
+        let target = ProvisioningTarget::Ssh {
+            destination: "scripted.example".to_string(),
+        };
+        let prepared = stage_payload(&source).await.unwrap();
+
+        backend
+            .upload_path(
+                &target,
+                PayloadKind::Farhelm,
+                &prepared,
+                &destination,
+                &temporary,
+            )
+            .await
+            .expect("remote upload should complete after orphan cleanup");
+        assert!(
+            !orphan.exists(),
+            "the old nonce must be swept before upload"
+        );
+        assert!(
+            temporary.exists(),
+            "the current upload must remain for install"
+        );
+
+        backend
+            .install_path(
+                &target,
+                PayloadKind::Farhelm,
+                &prepared,
+                &destination,
+                &temporary,
+                0o755,
+            )
+            .await
+            .expect("the verified upload should be installable");
+        assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"new bytes");
+        assert!(!temporary.exists(), "install consumes the current nonce");
+    }
+
     /// The install step cannot trust the upload step's earlier digest: bytes
     /// at the nonce path may change between separately reported actions.
     /// A mismatch must preserve the installed binary and clean the nonce.
@@ -3803,6 +3872,26 @@ mod tests {
         );
     }
 
+    /// Remote orphan cleanup quotes the directory and prefix while retaining
+    /// a nonrecursive exact-file and canonical-UUID filter.
+    #[farhelm_testtrace::test]
+    fn remote_orphan_cleanup_script_is_narrow_and_quoted() {
+        let script = orphan_cleanup_script(
+            Path::new("/home/user/.local/lib/far helm"),
+            ".far helm.farhelm-tmp-",
+        )
+        .unwrap();
+        assert!(script.contains("for path in '/home/user/.local/lib/far helm'/\"$prefix\"*"));
+        assert!(script.contains("[ ! -L \"$path\" ]"));
+        assert!(
+            script.contains(
+                "grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"
+            )
+        );
+        assert!(!script.contains("find "));
+        assert!(!script.contains("rm -rf"));
+    }
+
     /// Local convergence streams hashes, installs one immutable payload
     /// snapshot, refuses unsafe temporary state, and preserves installed
     /// bytes across every pre-rename failure.
@@ -3819,6 +3908,37 @@ mod tests {
             install_test_payload(&backend, &target, &source, &destination, &temporary, mode)
                 .await
                 .unwrap();
+            let orphan = root.path().join(format!(
+                ".{name}.farhelm-tmp-550e8400-e29b-41d4-a716-446655440000"
+            ));
+            tokio::fs::write(&orphan, b"orphaned payload")
+                .await
+                .unwrap();
+            let near_match = root.path().join(format!(".{name}.farhelm-tmp-not-a-uuid"));
+            tokio::fs::write(&near_match, b"keep me").await.unwrap();
+            #[cfg(unix)]
+            {
+                let victim = root.path().join(format!("{name}-orphan-victim"));
+                let symlink = root.path().join(format!(
+                    ".{name}.farhelm-tmp-123e4567-e89b-12d3-a456-426614174000"
+                ));
+                tokio::fs::write(&victim, b"keep me too").await.unwrap();
+                std::os::unix::fs::symlink(&victim, &symlink).unwrap();
+            }
+            install_test_payload(&backend, &target, &source, &destination, &temporary, mode)
+                .await
+                .unwrap();
+            assert!(!orphan.exists(), "a later install removes an owned orphan");
+            assert!(near_match.exists(), "a near-match remains untouched");
+            #[cfg(unix)]
+            assert!(
+                tokio::fs::symlink_metadata(root.path().join(format!(
+                    ".{name}.farhelm-tmp-123e4567-e89b-12d3-a456-426614174000"
+                )))
+                .await
+                .is_ok(),
+                "symlink candidates are not removed"
+            );
             set_mode(&destination, 0o600).await.unwrap();
             assert!(matches!(
                 install_test_payload(&backend, &target, &source, &destination, &temporary, mode)
