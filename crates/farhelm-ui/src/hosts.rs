@@ -1040,7 +1040,7 @@ pub(crate) fn HostsPanel(
                 }
                 button {
                     r#type: "button",
-                    class: "btn update-all-button",
+                    class: "btn btn-neutral update-all-button",
                     disabled: !update_all_available,
                     onclick: move |_| {
                         // Read the latest snapshot at activation, since the
@@ -1067,7 +1067,7 @@ pub(crate) fn HostsPanel(
                 }
                 button {
                     r#type: "button",
-                    class: "btn add-host-button",
+                    class: "btn btn-neutral add-host-button",
                     // The compact heading spends only the visible word
                     // "add"; assistive technology keeps the object that
                     // action adds, matching the form and existing callers.
@@ -2363,14 +2363,14 @@ fn HostRow(
                     div { class: "host-confirm-remove-actions",
                         button {
                             r#type: "button",
-                            class: "btn confirm-delete host-confirm-remove",
+                            class: "btn btn-danger confirm-delete host-confirm-remove",
                             disabled: busy,
                             onclick: move |_| on_remove_confirm.call(id),
                             "confirm remove"
                         }
                         button {
                             r#type: "button",
-                            class: "btn confirm-cancel host-cancel-remove",
+                            class: "btn btn-neutral confirm-cancel host-cancel-remove",
                             // Focus lands on the way OUT of the
                             // destructive action, through the plain
                             // HTML attribute rather than a fallible
@@ -2516,13 +2516,13 @@ fn HostDestinationForm(
             }
             button {
                 r#type: "submit",
-                class: "btn host-save-destination",
+                class: "btn btn-primary host-save-destination",
                 disabled: busy,
                 "save"
             }
             button {
                 r#type: "button",
-                class: "btn host-cancel-edit",
+                class: "btn btn-neutral host-cancel-edit",
                 disabled: busy,
                 onclick: move |_| {
                     if busy {

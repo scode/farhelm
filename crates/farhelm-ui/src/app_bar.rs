@@ -647,7 +647,7 @@ pub(crate) fn AppBar(
             class: "app-bar",
             button {
                 r#type: "button",
-                class: "btn profiles-toggle",
+                class: "btn btn-neutral profiles-toggle",
                 aria_expanded: profiles_open(),
                 disabled: ops.busy(),
                 onmounted: move |element| toggle_handle.set(Some(element.data())),

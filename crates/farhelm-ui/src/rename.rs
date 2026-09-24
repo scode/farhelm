@@ -189,7 +189,7 @@ pub(crate) fn RenameForm(
             }
             button {
                 r#type: "button",
-                class: "btn rename-cancel",
+                class: "btn btn-neutral rename-cancel",
                 disabled: busy,
                 onclick: move |_| {
                     if busy_now.call(()) {

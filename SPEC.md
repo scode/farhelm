@@ -625,13 +625,15 @@ version` as an advisory; an incompatible protocol handshake remains `needs updat
 be parsed as a semantic version, age is unknown and the row stays `connected`. The host count, its unpersisted details
 checkbox, and the secondary add action share one header row. Host actions open on demand from the row menu, and details
 reveals the version, identity, session count, remedies, diagnostics, and provisioning progress under every row. Profiles
-use secondary buttons, while the host selector stays a native control; session creation remains the blue primary action.
-Sessions on an unreachable host stay in the list from the helm's last-known knowledge (which survives helm restarts),
-clearly marked stale, rather than vanishing. Lifecycle operations against an unreachable host are refused with a clear
-error; nothing queues for later delivery in v1. Opening such a session shows its metadata — title, directory, last-known
-status — behind a clear host-unreachable notice; there is no terminal to show and no pretense of one. Changes made from
-any client — creates, renames, stops, deletes, status transitions — appear in all other connected clients automatically;
-the agent-spawn behavior below is one instance of this general rule, not a special case.
+use the neutral secondary tier for routine row actions and the normal blue tier for popup affirmatives, while the host
+selector stays a native control; session creation remains the blue primary action. Destructive confirmations use the
+danger tier, and explicit menu, tab, and composer controls retain their purpose-built styling. Sessions on an
+unreachable host stay in the list from the helm's last-known knowledge (which survives helm restarts), clearly marked
+stale, rather than vanishing. Lifecycle operations against an unreachable host are refused with a clear error; nothing
+queues for later delivery in v1. Opening such a session shows its metadata — title, directory, last-known status —
+behind a clear host-unreachable notice; there is no terminal to show and no pretense of one. Changes made from any
+client — creates, renames, stops, deletes, status transitions — appear in all other connected clients automatically; the
+agent-spawn behavior below is one instance of this general rule, not a special case.
 
 ### Status
 

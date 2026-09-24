@@ -1,19 +1,10 @@
 /**
- * The two-tier button system's own contract (app.css's "Shared button
- * look" section and SPEC_impl.md's GUI paragraph on it): `.btn` is ghost by
- * default, sidebar heading actions share a grey secondary treatment, and
- * `.btn-primary` is the accent-filled action a given SURFACE gets — never
- * more than one live at a time on
- * the sidebar's resting chrome, and never more than one live at a time
- * inside any single open dialog. Nothing else in the suite reads computed
- * color to check that promise. The launch composer is the deliberate
- * exception: its supplied interaction study calls for a brighter, scoped
- * launch action, so the test reads that role token separately rather than
- * accidentally pulling the dialog back to the sidebar paint. The rest of
- * the browser suite treats CSS as
- * an implementation detail behind whatever text or attribute it asserts
- * on), which is exactly how a specificity bug or a stray literal color
- * could ship unnoticed behind a screenshot nobody diffed pixel-for-pixel.
+ * The button-tier contract (app.css's "Shared button look" section and
+ * SPEC_impl.md) keeps `.btn` as the ghost base while requiring ordinary
+ * actions to opt into `.btn-primary`, `.btn-neutral`, or `.btn-danger`.
+ * Explicit menu, tab, and composer controls remain exemptions. These tests
+ * pin each tier's paint and retain the sidebar hierarchy so a specificity
+ * change cannot silently flatten the distinctions.
  *
  * Four tests: the permitted-primaries/ghost-controls color sweep, the sidebar
  * heading controls, the row kebab's opacity reveal states, and the kebab's
@@ -63,7 +54,7 @@ async function resolveToken(page: Page, token: string): Promise<string> {
 // and "no visible border" with the same value.
 const GHOST = "rgba(0, 0, 0, 0)";
 
-test("the four permitted primaries carry the accent fill; every other sampled button stays ghost, and a destructive item is red text only", async ({
+test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", async ({
   page,
   request,
 }) => {
@@ -112,20 +103,36 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
       await expect(el, `${selector} must be visible to check its resting style`).toBeVisible();
       await expect(
         el,
-        `${selector} is not one of the four permitted primaries and must have no fill at rest`,
+        `${selector} is an explicit ghost exemption and must have no fill at rest`,
       ).toHaveCSS("background-color", GHOST);
       await expect(
         el,
-        `${selector} is not one of the four permitted primaries and must have no visible border at rest`,
+        `${selector} is an explicit ghost exemption and must have no visible border at rest`,
       ).toHaveCSS("border-top-color", GHOST);
     }
 
-    // --- Primary #1: the sidebar's standing "new session" control. Checked
+    async function expectNeutral(selector: string) {
+      const el = page.locator(selector);
+      await expect(el).toBeVisible();
+      await expect(el).toHaveClass(/btn-neutral/);
+      await expect(el).toHaveCSS("background-color", await resolveToken(page, "--bg-2"));
+    }
+
+    async function expectDanger(selector: string) {
+      const el = page.locator(selector);
+      await expect(el).toBeVisible();
+      await expect(el).toHaveClass(/btn-danger/);
+      await expect(el).toHaveCSS("background-color", await resolveToken(page, "--danger-bg"));
+    }
+
+    // --- Normal primary: the sidebar's standing "new session" control. Checked
     // before anything else touches the page, so this is genuinely resting
     // state rather than a post-interaction snapshot.
     await expectPrimary(".new-session-button");
+    await expectNeutral(".add-host-button");
+    await expectNeutral(".profiles-toggle");
 
-    // --- Primary #2: the composer launch action is deliberately brighter
+    // --- Composer exemption: Launch is deliberately brighter
     // than the generic sidebar primary, per the maintainer's composer mockup.
     await page.locator(".new-session-button").click();
     await expect(page.locator(".create-session-form")).toBeVisible();
@@ -139,7 +146,7 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
       .click();
     await expect(page.locator(".create-session-form")).toHaveCount(0);
 
-    // --- Primary #3: the "add a host" dialog's own submit.
+    // --- Normal primary: the "add a host" dialog's own submit.
     await page.getByRole("button", { name: "add host" }).click();
     await expect(page.locator(".add-host-form")).toBeVisible();
     await expectPrimary(".add-host-submit");
@@ -148,7 +155,7 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
     await page.getByRole("button", { name: "add host" }).click();
     await expect(page.locator(".add-host-form")).toHaveCount(0);
 
-    // --- Ghost sample #1 (row-menu item) and the destructive item, both
+    // --- Ghost exemption (row-menu item) and the destructive item, both
     // read straight out of the row's open actions menu without clicking
     // either — clicking "delete" would open ITS OWN confirmation, which is
     // a different control (`.confirm-delete`) than the one under test here.
@@ -165,15 +172,20 @@ test("the four permitted primaries carry the accent fill; every other sampled bu
       "a destructive row action must not also carry a red FILL — that would be a third tier",
     ).toBe(GHOST);
 
-    // --- Primary #4: the rename dialog's own submit, plus the "cancel
-    // buttons" ghost sample living right beside it in the same form.
+    await deleteBtn.click();
+    await expectDanger(".session-row [data-confirm-delete], .session-row .confirm-delete");
+    await expect(target.locator(".confirm-cancel")).toHaveClass(/btn-neutral/);
+    await target.locator(".confirm-cancel").click();
+
+    // --- Normal primary: the rename dialog's own submit, plus the neutral
+    // cancel button living right beside it in the same form.
     // The rename editor is the list-owned modal dialog (#651): the row menu
     // item only opens it, so the dialog and its form live outside the row
     // element and must be located from the page.
     await target.locator(".session-row-rename").click();
     await expect(page.locator(".rename-dialog .rename-form")).toBeVisible();
     await expectPrimary(".rename-submit");
-    await expectGhost(".rename-cancel");
+    await expectNeutral(".rename-cancel");
     await page.locator(".rename-dialog .rename-cancel").click();
     await expect(page.locator(".rename-dialog .rename-form")).toHaveCount(0);
 
