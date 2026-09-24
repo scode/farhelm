@@ -177,7 +177,7 @@ fn stored_selection(preferences: SharedPreferences) -> Option<String> {
 /// then a one-field patch through `api::store_preference`'s serialized
 /// queue. The auto-select fallback never calls this (see
 /// `SharedPreferences`).
-fn remember_selection(base: &str, mut preferences: SharedPreferences, id: &str) {
+pub(crate) fn remember_selection(base: &str, mut preferences: SharedPreferences, id: &str) {
     preferences.0.write().last_selected = Some(id.to_string());
     api::store_preference(base, api::PreferenceValue::Selected(id.to_string()));
 }

@@ -18,7 +18,8 @@ use dioxus::prelude::*;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
 use crate::api::{
-    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, restart_mode_for, restart_session,
+    close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, replace_session, restart_mode_for,
+    restart_session,
 };
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
@@ -327,8 +328,12 @@ pub(crate) fn SessionView(
     /// view-private token would let the two panes mutate this session
     /// under each other.
     gate: crate::ops::PaneGate,
+    /// Reports a replacement's new session to `AppBody`, which owns the
+    /// selected session and therefore controls the keyed view remount.
+    on_replaced: EventHandler<Session>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let preferences = use_context::<crate::list::SharedPreferences>();
     // The session as this view currently understands it. Seeded from the
     // prop and then owned here, because a restart changes it: the reply
     // carries the session's recomputed status and offer, and a REFUSED
@@ -365,6 +370,12 @@ pub(crate) fn SessionView(
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
     let mut restart_error = use_signal(|| None::<String>);
+    // Replace has its own prompt and error because it creates a new session
+    // before deleting this one; sharing restart state would lose the
+    // endpoint's partial-failure wording or make the two operations race.
+    let mut replacing = use_signal(|| false);
+    let mut confirming_replace = use_signal(|| false);
+    let mut replace_error = use_signal(|| None::<String>);
     // One synchronously claimed token covers the restart prompt as well as
     // the request, so two clicks in one render frame cannot authorize
     // operations from two different snapshots. The token
@@ -1048,6 +1059,32 @@ pub(crate) fn SessionView(
     let mut notice_restart = restart.clone();
     let mut fresh_restart = restart;
 
+    let replace_base = base.clone();
+    let replace_preferences = preferences;
+    let replace_session_id = session.id.clone();
+    let replace = move || {
+        if replacing() {
+            return;
+        }
+        replacing.set(true);
+        replace_error.set(None);
+        let base = replace_base.clone();
+        let id = replace_session_id.clone();
+        let preferences = replace_preferences;
+        spawn(async move {
+            match replace_session(&base, &id).await {
+                Ok(new_session) => {
+                    crate::list::remember_selection(&base, preferences, &new_session.id);
+                    on_replaced.call(new_session);
+                }
+                Err(error) => replace_error.set(Some(error)),
+            }
+            replacing.set(false);
+            lifecycle.release();
+        });
+    };
+    let mut confirm_replace = replace.clone();
+
     // The add-tab control. Unlike `ListView`'s create, navigating away
     // while this is in flight is deliberately NOT locked out: a stranded
     // create can cost the user a duplicate AGENT they never see, whereas a
@@ -1596,6 +1633,9 @@ pub(crate) fn SessionView(
             if let Some(err) = restart_error.read().clone() {
                 div { class: "restart-error", "{err}" }
             }
+            if let Some(err) = replace_error.read().clone() {
+                div { class: "replace-error", "replace: {err}" }
+            }
             // Worded to state the FACT (the helm stopped listing this
             // session) and the CONSEQUENCE (what is shown may be stale),
             // then BOTH readings — never a pick between them, because this
@@ -1666,6 +1706,9 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn restart-from-notice",
+                        // The visible choice matches the notice's
+                        // "Restart or Replace" wording; the accessible
+                        // name and tooltip keep the conversation promise.
                         "aria-label": "{restart_label}",
                         title: "{restart_label} — {offer_explanation}",
                         disabled: lifecycle.busy(),
@@ -1675,7 +1718,48 @@ pub(crate) fn SessionView(
                             }
                             notice_restart(false);
                         },
-                        "{restart_label}"
+                        "Restart"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn replace-from-notice",
+                        disabled: lifecycle.busy(),
+                        "aria-expanded": "{confirming_replace()}",
+                        onclick: move |_| {
+                            if !lifecycle.claim() {
+                                return;
+                            }
+                            confirming_replace.set(true);
+                        },
+                        "Replace"
+                    }
+                    if confirming_replace() {
+                        div { class: "replace-confirm",
+                            span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status)}" }
+                            button {
+                                r#type: "button",
+                                class: "btn replace-confirm-submit",
+                                disabled: replacing(),
+                                onclick: move |_| {
+                                    if !confirming_replace() {
+                                        return;
+                                    }
+                                    confirming_replace.set(false);
+                                    confirm_replace();
+                                },
+                                "confirm replace"
+                            }
+                            button {
+                                r#type: "button",
+                                class: "btn replace-cancel",
+                                autofocus: true,
+                                onclick: move |_| {
+                                    confirming_replace.set(false);
+                                    lifecycle.release();
+                                },
+                                "cancel"
+                            }
+                        }
                     }
                 }
             }
@@ -2043,7 +2127,7 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
 /// advertise the wrong action.
 fn interrupted_surface_text(offer: RestartOffer) -> String {
     format!(
-        "this session's terminal did not survive the host reboot — {}.",
+        "the host reboot interrupted this session's terminal; Farhelm will wait for you to choose Restart or Replace — {}.",
         offer_clause(offer)
     )
 }
@@ -2231,7 +2315,7 @@ mod tests {
             let band = interrupted_surface_text(offer);
             let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer);
             assert!(
-                band.starts_with("this session's terminal did not survive the host reboot"),
+                band.starts_with("the host reboot interrupted this session's terminal"),
                 "{band}"
             );
             assert!(
