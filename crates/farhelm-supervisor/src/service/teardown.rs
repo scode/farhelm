@@ -54,7 +54,9 @@
 use super::connection::notify_detached;
 use super::core::{SessionEntry, Supervisor, unknown_pane_owner_refusal};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
-use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree};
+use super::sweep::{
+    ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
+};
 use super::terminals::{ActiveAttach, AttachmentKey};
 use super::uploads::abort_session_uploads;
 use crate::tmux::PaneProbe;
@@ -221,7 +223,13 @@ impl Supervisor {
             },
             None => None,
         };
-        let root_pid = live_pane.filter(|pane| !pane.dead).map(|pane| pane.pid);
+        // Capture the pane's identity before tab discovery, scope
+        // enumeration, and archive work can give the kernel time to recycle
+        // this pid. A failed read intentionally leaves no root for the
+        // marker/scope sweep rather than guessing a replacement process.
+        let root_identity = live_pane
+            .filter(|pane| !pane.dead)
+            .and_then(|pane| capture_process_identity(pane.pid));
         // `WholeSession`: delete is the one lifecycle operation
         // that takes tabs down with the agent (SPEC.md — stop
         // leaves them running), so this
@@ -294,7 +302,7 @@ impl Supervisor {
         reap_process_tree(
             &self.seams.scopes,
             units,
-            root_pid,
+            root_identity,
             session_id,
             &SweepTarget::WholeSession,
             ScopeKillFailure::Refuse,

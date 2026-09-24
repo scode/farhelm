@@ -1261,35 +1261,25 @@ impl ScopeUnits {
 /// manager for the launch, whereas the derived set is not. A still-negative
 /// result skips the recorded names loudly and derived names quietly, then the
 /// sweep remains the whole mechanism.
+///
+/// `root_identity` is captured by the caller immediately after it observes a
+/// live pane and before any asynchronous teardown work. This function
+/// validates the same pair again before the process walk; a changed or
+/// unreadable identity is intentionally treated as a missing pane root while
+/// marker and scope discovery continue.
 pub(crate) async fn reap_process_tree(
     scopes: &crate::scope::ScopeManager,
     units: ScopeUnits,
-    root_pid: Option<u32>,
+    root_identity: Option<(u32, u64)>,
     session_id: &str,
     target: &SweepTarget,
     scope_kill_failure: ScopeKillFailure,
 ) -> anyhow::Result<()> {
-    // Captured BEFORE anything is killed, and this ordering is the whole
-    // point of doing it here rather than inside the sweep: `kill_scope`
-    // below sends SIGTERM and then waits out a grace period, during which
-    // the pane's process can die and the kernel can hand its number to
-    // something unrelated. A bare pid read before that window and trusted
-    // after it is exactly how a sweep signals a stranger.
-    let root = root_pid.and_then(|pid| match procs::read_process(pid) {
-        Ok(Some((_, starttime, _))) => Some((pid, starttime)),
-        // Already gone, or unreadable: either way there is no identity to
-        // carry, and the marker scan is what finds this session's
-        // processes from here on.
-        Ok(None) => None,
-        Err(e) => {
-            debug!(
-                session = %session_id, pid, error = %e,
-                "could not read the pane process's start time before reaping; the sweep will \
-                 rely on the marker scan alone for it"
-            );
-            None
-        }
-    });
+    // The caller captured this pair at its pane liveness boundary, before
+    // any asynchronous teardown work. Re-read it here before adopting the
+    // pane as a PPID root: if the pane exited and the kernel recycled its
+    // number during that gap, the replacement must never seed this sweep.
+    let root = validate_root_identity(root_identity, session_id);
 
     if units.recorded.is_empty() && units.derived.is_empty() {
         debug!(
@@ -1364,6 +1354,56 @@ pub(crate) async fn reap_process_tree(
             "a cgroup scope also could not be fully torn down ({e})"
         ))),
         (Err(sweep), None) => Err(sweep),
+    }
+}
+
+/// Capture a pane process's identity at the liveness decision that authorizes
+/// a teardown. The start time travels with the pid so later work can refuse a
+/// recycled number instead of binding the sweep to an unrelated process.
+pub(crate) fn capture_process_identity(pid: u32) -> Option<(u32, u64)> {
+    match procs::read_process(pid) {
+        Ok(Some((_, starttime, _))) => Some((pid, starttime)),
+        Ok(None) | Err(_) => None,
+    }
+}
+
+/// Admit a carried pane identity only while the process table still reports
+/// the same `(pid, start time)` pair. A missing or changed row deliberately
+/// returns `None`, leaving marker and scope discovery to reap what it can
+/// without walking a recycled pane root.
+fn validate_root_identity(identity: Option<(u32, u64)>, session_id: &str) -> Option<(u32, u64)> {
+    let (pid, expected_starttime) = identity?;
+    match procs::read_process(pid) {
+        Ok(Some((_, starttime, _))) if starttime == expected_starttime => Some((pid, starttime)),
+        Ok(Some((_, actual_starttime, _))) => {
+            debug!(
+                session = %session_id,
+                pid,
+                expected_starttime,
+                actual_starttime,
+                "pane process identity changed before reaping; refusing it as the sweep root"
+            );
+            None
+        }
+        Ok(None) => {
+            debug!(
+                session = %session_id,
+                pid,
+                expected_starttime,
+                "pane process disappeared before reaping; relying on marker and scope discovery"
+            );
+            None
+        }
+        Err(error) => {
+            debug!(
+                session = %session_id,
+                pid,
+                expected_starttime,
+                error = %error,
+                "could not validate pane process identity before reaping; relying on marker and scope discovery"
+            );
+            None
+        }
     }
 }
 
@@ -1720,14 +1760,14 @@ impl StopFailure {
 /// query costs the code, not the annotation, and a later list can still
 /// enrich the record (the store's transitions are monotonic).
 ///
-/// `root_pid` is the pid the caller's own liveness check found, passed in
-/// rather than re-derived here so the pid signaled is the one the aliveness
-/// decision was actually made about.
+/// `root_identity` is the `(pid, start time)` pair the caller captured at its
+/// own liveness check. It is passed in rather than re-derived here so the
+/// sweep validates the exact process the liveness decision authorized.
 pub(crate) async fn stop_live_agent(
     sup: &Supervisor,
     session_id: &str,
     entry: &SessionEntry,
-    root_pid: Option<u32>,
+    root_identity: Option<(u32, u64)>,
 ) -> Result<(), StopFailure> {
     sup.record(session_id, entry, Transition::StopRequested)
         .await
@@ -1738,7 +1778,7 @@ pub(crate) async fn stop_live_agent(
     reap_process_tree(
         &sup.seams.scopes,
         ScopeUnits::recorded(entry.scope.clone()),
-        root_pid,
+        root_identity,
         session_id,
         &SweepTarget::AgentOnly,
         ScopeKillFailure::Warn,
@@ -2379,6 +2419,8 @@ mod tests {
         let session_id = uuid::Uuid::new_v4().to_string();
         let mut child = spawn_marked_process(&session_id);
         let decoy = child.id();
+        let root_identity = capture_process_identity(decoy)
+            .expect("the spawned pane fixture must have a readable identity");
 
         // Each recorded op carries whether the sweep's victim was still
         // alive when it happened.
@@ -2400,7 +2442,7 @@ mod tests {
         reap_process_tree(
             &scopes,
             ScopeUnits::recorded(Some(unit.clone())),
-            None,
+            Some(root_identity),
             &session_id,
             &SweepTarget::AgentOnly,
             ScopeKillFailure::Warn,
@@ -3135,13 +3177,41 @@ mod tests {
         reap_process_tree(
             &scopes,
             ScopeUnits::default(),
-            Some(gone_pid),
+            Some((gone_pid, 1)),
             &session_id,
             &SweepTarget::AgentOnly,
             ScopeKillFailure::Warn,
         )
         .await
         .expect("a dead pane pid must not fail the sweep");
+    }
+
+    /// A pane identity captured before teardown remains eligible when the
+    /// same process is still present at sweep entry. This pins the normal
+    /// path so the recycled-pid guard does not accidentally disable a live
+    /// pane root.
+    #[farhelm_testtrace::test]
+    fn matching_pane_identity_is_admitted_as_a_sweep_root() {
+        let pid = std::process::id();
+        let identity = capture_process_identity(pid).expect("the test process must be readable");
+        assert_eq!(
+            validate_root_identity(Some(identity), "matching"),
+            Some(identity)
+        );
+    }
+
+    /// A changed start time must remove the pane root before enumeration can
+    /// walk its descendants. The marker and scope paths are exercised by the
+    /// surrounding reap tests; this direct boundary test isolates the
+    /// identity decision without signaling the test process.
+    #[farhelm_testtrace::test]
+    fn changed_pane_identity_is_refused_as_a_sweep_root() {
+        let pid = std::process::id();
+        let (_, actual_starttime, _) = procs::read_process(pid)
+            .expect("the test process must be readable")
+            .expect("the test process must have a process row");
+        let changed = (pid, actual_starttime.wrapping_add(1));
+        assert_eq!(validate_root_identity(Some(changed), "changed"), None);
     }
 
     /// `signal_validated`'s entire reason to exist: a pid whose CURRENT

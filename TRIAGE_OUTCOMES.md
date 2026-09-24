@@ -950,7 +950,7 @@
   cannot make the sweep adopt an unrelated pane root; focused regression coverage proves both matching and changed
   identities; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change, or
   retain/narrow it with the documented deferral if the simplicity gate is reached.
-- Execution: `pending`.
+- Execution: `complete`; captured and validated pane identities across delete/archive, stop, restart, and tab teardown; focused recorded nextest coverage passed matching, changed, gone, and end-to-end sweep-root cases. Draft PR [#915](https://github.com/scode/farhelm/pull/915/changes) is on bookmark `pr/pane-pid-identity`, jj change `ntkxxmtq`.
 
 ## refused-delete-discards-in-flight-upload.md
 
