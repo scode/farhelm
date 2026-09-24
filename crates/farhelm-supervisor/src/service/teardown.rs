@@ -60,7 +60,7 @@ use super::uploads::abort_session_uploads;
 use crate::tmux::PaneProbe;
 
 use std::path::PathBuf;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 /// Every way deletion can fail before the session is gone.
 ///
@@ -683,6 +683,28 @@ impl Supervisor {
         let retired_checkouts = match teardown {
             Ok(retired) => retired,
             Err(err_msg) => {
+                // A returned failure is different from a process crash in
+                // the quarantine window: the session row is still live, so
+                // its attachments must be put back where readers can reach
+                // them. The lifecycle claim and completed upload joins make
+                // this rename safe. Keep the original fail-closed error;
+                // restoration is best effort and a failure must be loud
+                // without hiding the operation that refused the delete.
+                if let Some(parked) = quarantined.take()
+                    && let Err(restore_error) = crate::attachments::restore_quarantined(
+                        &self.state_dir,
+                        session_id,
+                        &parked,
+                    )
+                    .await
+                {
+                    error!(
+                        session = %session_id,
+                        parked = %parked.display(),
+                        error = %restore_error,
+                        "failed to restore a retained session's quarantined attachments"
+                    );
+                }
                 for (channel, notify) in &notify_detach {
                     notify_detached(
                         notify,
@@ -981,6 +1003,107 @@ mod tests {
                 .keys()
                 .any(|key| key.session == id),
             "successful Delete must prune failed output-reap evidence"
+        );
+    }
+
+    /// A row-removal refusal occurs after attachment quarantine, so the
+    /// retained session must regain its published files before the supervisor
+    /// can report the failure. Reopening the supervisor exercises startup
+    /// reconciliation too: known-session attachments must survive that sweep,
+    /// while a later successful retry still removes them with the row.
+    #[farhelm_testtrace::test]
+    async fn failed_row_delete_restores_attachments_before_startup_reconciliation() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (state, sup, entry) = scoped_session(working_scopes(), &id).await;
+        crate::attachments::ensure_session_dirs(state.path(), &id)
+            .await
+            .expect("attachment fixture");
+        let attachment = crate::attachments::session_dir(state.path(), &id).join("kept.txt");
+        tokio::fs::write(&attachment, b"retained bytes")
+            .await
+            .expect("attachment fixture bytes");
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("open raw store connection");
+            conn.execute_batch(
+                "CREATE TRIGGER refuse_delete_after_quarantine BEFORE DELETE ON sessions \
+                 BEGIN SELECT RAISE(ABORT, 'refused after quarantine'); END;",
+            )
+            .expect("plant the post-quarantine refusal");
+        }
+
+        let first = sup
+            .teardown_session(&entry, &id, test_admission(&sup).await)
+            .await;
+        assert!(
+            matches!(first, Err(TeardownError::FailClosed(message)) if message.contains("refused after quarantine")),
+            "the deliberate row refusal must remain visible"
+        );
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read retained row")
+                .is_some(),
+            "a failed delete must retain the session row"
+        );
+        assert_eq!(
+            tokio::fs::read(&attachment)
+                .await
+                .expect("restored attachment"),
+            b"retained bytes",
+            "a failed delete must restore the quarantined attachment"
+        );
+
+        drop(sup);
+        {
+            let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
+                .expect("reopen raw store connection");
+            conn.execute_batch("DROP TRIGGER refuse_delete_after_quarantine")
+                .expect("remove the injected refusal before retry");
+        }
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                scopes: Arc::new(working_scopes()),
+                ..SupervisorSeams::default()
+            },
+        )
+        .await
+        .expect("reopen retained session");
+        assert_eq!(
+            tokio::fs::read(&attachment)
+                .await
+                .expect("startup must preserve retained attachment"),
+            b"retained bytes",
+            "startup reconciliation must not remove a known session's files"
+        );
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("retained row reloads for retry");
+        assert!(
+            sup.teardown_session(&entry, &id, test_admission(&sup).await)
+                .await
+                .is_ok(),
+            "successful retry"
+        );
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read deleted row")
+                .is_none(),
+            "successful retry must remove the retained row"
+        );
+        assert!(
+            !crate::attachments::session_dir(state.path(), &id).exists(),
+            "successful retry must remove the attachment directory"
         );
     }
 

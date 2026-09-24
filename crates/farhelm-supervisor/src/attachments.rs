@@ -372,6 +372,49 @@ pub async fn discard_quarantined(parked: &Path) {
     }
 }
 
+/// Restore attachments parked by a delete that failed before its session row
+/// was removed.
+///
+/// Quarantine is normally a one-way handoff: after the row commits, the
+/// caller discards the parked directory. A returned error before that commit
+/// has the opposite ownership result, though — the session is still live and
+/// its files must become reachable at the session path again. The caller
+/// holds the session lifecycle claim while making this best-effort rename, so
+/// no upload can recreate the destination between the quarantine and this
+/// recovery step. An unexpected destination is refused rather than merged or
+/// overwritten; leaving the parked bytes intact is safer than risking another
+/// session's files.
+pub async fn restore_quarantined(
+    state_dir: &Path,
+    session_id: &str,
+    parked: &Path,
+) -> Result<(), String> {
+    let destination = session_dir(state_dir, session_id);
+    match tokio::fs::symlink_metadata(&destination).await {
+        Ok(_) => {
+            return Err(format!(
+                "the session attachment directory already exists ({})",
+                destination.display()
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "checking the session attachment destination ({}): {error}",
+                destination.display()
+            ));
+        }
+    }
+    tokio::fs::rename(parked, &destination)
+        .await
+        .map_err(|error| {
+            format!(
+                "moving quarantined attachments back to {}: {error}",
+                destination.display()
+            )
+        })
+}
+
 /// Reconcile the attachments tree against the sessions that actually
 /// exist — the startup half of every lifecycle rule in this module.
 ///
@@ -736,5 +779,32 @@ mod tests {
             None,
             "a session with no attachments must quarantine nothing, not fail"
         );
+    }
+
+    /// A delete that has already quarantined its files but then refuses the
+    /// row removal must put the published bytes back at the live session path.
+    /// Startup reconciliation must therefore recognize them as belonging to
+    /// the retained session instead of treating them as quarantine debris.
+    #[farhelm_testtrace::test]
+    async fn restoring_quarantined_attachments_preserves_a_retained_session() {
+        let state = tempfile::tempdir().unwrap();
+        let session = "session-retained-after-refusal";
+        ensure_session_dirs(state.path(), session).await.unwrap();
+        let original = session_dir(state.path(), session).join("shot.png");
+        tokio::fs::write(&original, b"keep this").await.unwrap();
+
+        let parked = quarantine_session_dir(state.path(), session)
+            .await
+            .unwrap()
+            .expect("the session directory must be parked");
+        restore_quarantined(state.path(), session, &parked)
+            .await
+            .expect("a retained session's attachments must be restored");
+        assert!(!parked.exists(), "restoration must consume the parked path");
+        assert_eq!(tokio::fs::read(&original).await.unwrap(), b"keep this");
+
+        let known = HashSet::from([session.to_string()]);
+        reconcile_at_startup(state.path(), &known).await;
+        assert_eq!(tokio::fs::read(&original).await.unwrap(), b"keep this");
     }
 }
