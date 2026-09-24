@@ -920,6 +920,11 @@ pub enum HostPhase {
         /// Genuinely optional: a supervisor may report no identity at all.
         identity: Option<String>,
         build_version: String,
+        /// Whether the connected peer's parseable build predates the helm's
+        /// build. Older helms omit this additive field, which means the age
+        /// is unknown and must remain visually connected.
+        #[serde(default)]
+        old_version: bool,
         refresh: RefreshHealth,
     },
     /// Refused at the hello. Both versions are named so the user can see
@@ -2454,6 +2459,7 @@ mod tests {
         assert!(matches!(
             &hosts[0].state,
             HostPhase::Connected {
+                old_version: false,
                 refresh: RefreshHealth::Ok { sessions: 3 },
                 ..
             }
@@ -2506,6 +2512,61 @@ mod tests {
             &hosts[1].state,
             HostPhase::Connected {
                 refresh: RefreshHealth::Unrecognized,
+                ..
+            }
+        ));
+    }
+
+    /// The connected age flag is additive: a current helm's `true` value is
+    /// preserved, while a reply from an older helm that omits it defaults to
+    /// false so the host remains readable and connected.
+    #[farhelm_testtrace::test]
+    fn connected_old_version_defaults_false_and_decodes_true() {
+        let without_flag: Host = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "kind": "local",
+            "destination": null,
+            "name": "this machine",
+            "identity": null,
+            "remote_farhelm": null,
+            "remote_state_dir": null,
+            "state": {
+                "phase": "connected",
+                "identity": null,
+                "build_version": "0.13.0",
+                "refresh": { "status": "pending" }
+            }
+        }))
+        .unwrap();
+        assert!(matches!(
+            without_flag.state,
+            HostPhase::Connected {
+                old_version: false,
+                ..
+            }
+        ));
+
+        let with_flag: Host = serde_json::from_value(serde_json::json!({
+            "id": 2,
+            "kind": "ssh",
+            "destination": "user@older",
+            "name": "user@older",
+            "identity": null,
+            "remote_farhelm": null,
+            "remote_state_dir": null,
+            "state": {
+                "phase": "connected",
+                "identity": null,
+                "build_version": "0.13.0",
+                "old_version": true,
+                "refresh": { "status": "pending" }
+            }
+        }))
+        .unwrap();
+        assert!(matches!(
+            with_flag.state,
+            HostPhase::Connected {
+                old_version: true,
                 ..
             }
         ));

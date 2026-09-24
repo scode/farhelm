@@ -16,7 +16,9 @@
 //! (`retired`). Each row therefore keeps a phase-colored dot in the trailing
 //! gutter. Connected is deliberately quiet; every other phase adds a
 //! humanized word, while the stable wire token remains on `data-host-phase`
-//! for automation and machine-authored diagnostics.
+//! for automation and machine-authored diagnostics. A compatible peer with
+//! an older parseable build is still connected, but gets the advisory
+//! `old version` label and amber status class.
 //!
 //! ## Peer-supplied text is displayed, never trusted to lay itself out
 //!
@@ -116,6 +118,9 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
     match state {
         HostPhase::Connecting { .. } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable, retrying",
+        HostPhase::Connected {
+            old_version: true, ..
+        } => "old version",
         HostPhase::Connected { .. } => "connected",
         HostPhase::VersionSkew { .. } => "needs update",
         HostPhase::IdentityMismatch { .. } => "identity mismatch",
@@ -129,8 +134,9 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
 /// The CSS modifier the row status carries, grouping the phases by what a
 /// person watching the panel should do about them: nothing yet
 /// (`connecting`), nothing at all (`unreachable-reprobing` — it re-probes
-/// forever and recovers unaided), all is well (`connected`), or look at this
-/// (everything else, which stays exactly as it is until someone acts).
+/// forever and recovers unaided), all is well (`connected`), a usable peer is
+/// older (`old-version`), or look at this (everything else, which stays
+/// exactly as it is until someone acts).
 ///
 /// Deliberately coarser than [`phase_label`]: color is a category signal and
 /// eight colors would be noise, while the exact phase is right there in
@@ -140,6 +146,9 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
 /// and a retired row wants a retry.
 pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
     match state {
+        HostPhase::Connected {
+            old_version: true, ..
+        } => "old-version",
         HostPhase::Connected { .. } => "connected",
         HostPhase::Connecting { .. } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable",
@@ -289,6 +298,7 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
             identity,
             build_version,
             refresh,
+            ..
         } => {
             let mut parts = vec![
                 DetailPart::text("farhelm "),
@@ -1898,9 +1908,12 @@ fn HostRow(
                 span {
                     class: "host-status {phase_class(&host.state)}",
                     role: "status",
-                    aria_label: is_connected(&host.state).then_some("connected"),
+                    aria_label: is_connected(&host.state)
+                        .then(|| phase_display_label(&host.state)),
                     span { class: "status-dot", "aria-hidden": "true" }
-                    if !is_connected(&host.state) {
+                    if !is_connected(&host.state)
+                        || matches!(&host.state, HostPhase::Connected { old_version: true, .. })
+                    {
                         span { class: "host-status-label", "{phase_display_label(&host.state)}" }
                     }
                 }
@@ -2757,6 +2770,7 @@ mod tests {
             HostPhase::Connected {
                 identity: Some("sentinel-connected-identity".to_string()),
                 build_version: "sentinel-connected-build".to_string(),
+                old_version: false,
                 refresh: RefreshHealth::Ok { sessions: 4 },
             },
             HostPhase::VersionSkew {
@@ -2839,6 +2853,7 @@ mod tests {
                 HostPhase::Connected {
                     identity: Some("sentinel-connected-identity".to_string()),
                     build_version: "sentinel-connected-build".to_string(),
+                    old_version: false,
                     refresh: RefreshHealth::Ok { sessions: 4 },
                 },
                 vec![
@@ -3326,6 +3341,7 @@ mod tests {
         read.record(Ok(vec![host(HostPhase::Connected {
             identity: None,
             build_version: "0.1.0".to_string(),
+            old_version: false,
             refresh: RefreshHealth::Pending,
         })]));
         assert!(!read.is_loading());
@@ -3465,6 +3481,42 @@ mod tests {
         }
     }
 
+    /// A compatible older peer keeps the connected wire token and all live
+    /// host behavior, while the row exposes an amber advisory label. A
+    /// version-skew refusal remains the separate red “needs update” case.
+    #[farhelm_testtrace::test]
+    fn old_connected_hosts_have_advisory_display_without_skew_classification() {
+        let old = HostPhase::Connected {
+            identity: None,
+            build_version: "0.13.0".to_string(),
+            old_version: true,
+            refresh: RefreshHealth::Pending,
+        };
+        assert_eq!(phase_label(&old), "connected");
+        assert_eq!(phase_display_label(&old), "old version");
+        assert_eq!(phase_class(&old), "old-version");
+        assert!(is_connected(&old));
+
+        let current = HostPhase::Connected {
+            identity: None,
+            build_version: "0.14.0-rc.2".to_string(),
+            old_version: false,
+            refresh: RefreshHealth::Pending,
+        };
+        assert_eq!(phase_display_label(&current), "connected");
+        assert_eq!(phase_class(&current), "connected");
+
+        let skew = HostPhase::VersionSkew {
+            peer_protocol: 1,
+            peer_build: "0.13.0".to_string(),
+            our_protocol: 2,
+            our_build: "0.14.0-rc.2".to_string(),
+            remediation: "update".to_string(),
+        };
+        assert_eq!(phase_display_label(&skew), "needs update");
+        assert_eq!(phase_class(&skew), "needs-attention");
+    }
+
     /// A connected host's row must report how its last cache refresh went,
     /// beside the connection rather than as part of it: a failed refresh
     /// leaves the host perfectly connected while its listed sessions are
@@ -3475,6 +3527,7 @@ mod tests {
         let failing = detail_text(&state_detail(&HostPhase::Connected {
             identity: None,
             build_version: "0.1.0".to_string(),
+            old_version: false,
             refresh: RefreshHealth::Failed {
                 error: "list timed out".to_string(),
             },
@@ -3491,6 +3544,7 @@ mod tests {
         let pending = detail_text(&state_detail(&HostPhase::Connected {
             identity: Some("id".to_string()),
             build_version: "0.1.0".to_string(),
+            old_version: false,
             refresh: RefreshHealth::Pending,
         }));
         assert!(pending.contains("still in flight"), "{pending}");
@@ -3546,6 +3600,7 @@ mod tests {
             state: HostPhase::Connected {
                 identity: Some("stable".to_string()),
                 build_version: "0.1.0".to_string(),
+                old_version: false,
                 refresh: RefreshHealth::Ok { sessions: 0 },
             },
             incarnation: 1,

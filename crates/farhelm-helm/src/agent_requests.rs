@@ -1984,6 +1984,7 @@ mod tests {
             HostStateView::Connected {
                 identity: None,
                 build_version: "0.0.0".to_string(),
+                old_version: true,
                 refresh: RefreshView::Pending,
             },
         );
