@@ -89,12 +89,13 @@ touching the host for initial setup, the helm states exactly what it is about to
 will place and where, the systemd units it will create, and that the supervisor will run persistently and start at boot
 — and proceeds only on confirmation. Remote updates use the same one-use plan mechanism behind the same authority, but
 the user's Update click is the authorization: no plan is shown for confirmation. While a host is updating, that host's
-row alone expands to follow the run's progress; success folds it back unless global details are on, while failure or an
-uncertain outcome stays expanded. V1 provisioning targets any Linux host with a usable systemd user manager, on the two
-architectures cross-compiled supervisor binaries exist for. The distribution is not a requirement — nothing provisioning
-does is distribution-specific — so the plan names whichever one it found rather than refusing; CI exercises Ubuntu.
-Everything else — no usable systemd user manager, or an architecture with no payload — falls back to the manual path
-(run the binary yourself), which always remains available.
+row alone expands to follow the run's progress. Remote binary upload appears as a separate step before installation, so
+the user can tell when network transfer is still underway. Success folds the row back unless global details are on,
+while failure or an uncertain outcome stays expanded. V1 provisioning targets any Linux host with a usable systemd user
+manager, on the two architectures cross-compiled supervisor binaries exist for. The distribution is not a requirement —
+nothing provisioning does is distribution-specific — so the plan names whichever one it found rather than refusing; CI
+exercises Ubuntu. Everything else — no usable systemd user manager, or an architecture with no payload — falls back to
+the manual path (run the binary yourself), which always remains available.
 
 Provisioning is idempotent and doubles as recovery: re-running it against an already-provisioned host — including from a
 brand-new helm whose registry was lost — detects the existing supervisor and re-registers the host with all its sessions

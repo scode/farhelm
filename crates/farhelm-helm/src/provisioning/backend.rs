@@ -200,6 +200,16 @@ pub(super) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         directories: &[DirectorySpec],
     ) -> Result<ActionOutcome, BackendFailure>;
+    /// Transfer a remote binary into its nonce temporary before installation.
+    /// Local plans have no upload action and must not call this method.
+    async fn upload_path(
+        &self,
+        target: &ProvisioningTarget,
+        kind: PayloadKind,
+        payload: &PreparedPayload,
+        destination: &Path,
+        temporary: &Path,
+    ) -> Result<ActionOutcome, BackendFailure>;
     async fn install_path(
         &self,
         target: &ProvisioningTarget,
@@ -694,6 +704,132 @@ impl SystemBackend {
             return Err(primary);
         }
         Ok(ActionOutcome::Completed)
+    }
+
+    /// Upload one remote binary to the plan's temporary and verify its bytes.
+    /// An already-correct destination skips network transfer; the following
+    /// install action still owns mode repair and the final skip record.
+    async fn upload_source(
+        &self,
+        target: &ProvisioningTarget,
+        source: &Path,
+        source_hash: &str,
+        destination: &Path,
+        temporary: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        let ProvisioningTarget::Ssh {
+            destination: ssh_destination,
+        } = target
+        else {
+            return Err(BackendFailure::new(
+                "uploading a local payload",
+                "local plans have no upload action",
+            ));
+        };
+        if let Some(installed) = self.metadata_on_target(target, destination).await?
+            && installed.hash == source_hash
+        {
+            self.remove_temporary(target, temporary).await?;
+            return Ok(ActionOutcome::Skipped(format!(
+                "{} already has the requested payload",
+                destination.display()
+            )));
+        }
+        self.remove_temporary(target, temporary).await?;
+        let upload = async {
+            self.sftp_put(ssh_destination, source, temporary).await?;
+            self.require_shell(
+                target,
+                &format!(
+                    "actual=$({}) || exit; \
+                     [ \"${{actual%% *}}\" = {} ] || {{ \
+                       printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
+                     }}",
+                    remote_sha256sum(&shell_path(temporary)?),
+                    shell_words::quote(source_hash)
+                ),
+                "verifying the uploaded payload",
+            )
+            .await?;
+            Ok::<(), BackendFailure>(())
+        }
+        .await;
+        if let Err(primary) = upload {
+            return Err(self
+                .cleanup_temporary_failure(target, temporary, primary)
+                .await);
+        }
+        Ok(ActionOutcome::Completed)
+    }
+
+    /// Install only the verified remote temporary, without a second upload.
+    /// Rechecking the digest at this boundary protects the bytes across the
+    /// separately reported upload and install actions.
+    async fn install_uploaded_source(
+        &self,
+        target: &ProvisioningTarget,
+        source_hash: &str,
+        destination: &Path,
+        temporary: &Path,
+        mode: u32,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        if let Some(installed) = self.metadata_on_target(target, destination).await?
+            && installed.hash == source_hash
+        {
+            let repaired = installed.mode != mode;
+            if repaired {
+                self.set_target_mode(target, destination, mode).await?;
+            }
+            self.remove_temporary(target, temporary).await?;
+            return Ok(ActionOutcome::Skipped(format!(
+                "{} already has the requested payload{}",
+                destination.display(),
+                if repaired {
+                    format!("; repaired mode to {mode:04o}")
+                } else {
+                    String::new()
+                }
+            )));
+        }
+        let install = self
+            .require_shell(
+                target,
+                &format!(
+                    "actual=$({}) || exit; \
+                     [ \"${{actual%% *}}\" = {} ] || {{ \
+                       printf '%s\\n' 'uploaded payload digest mismatch' >&2; exit 76; \
+                     }}; chmod {mode:o} -- {} && mv -f -- {} {}",
+                    remote_sha256sum(&shell_path(temporary)?),
+                    shell_words::quote(source_hash),
+                    shell_path(temporary)?,
+                    shell_path(temporary)?,
+                    shell_path(destination)?
+                ),
+                "finishing the atomic payload install",
+            )
+            .await;
+        if let Err(primary) = install {
+            return Err(self
+                .cleanup_temporary_failure(target, temporary, primary)
+                .await);
+        }
+        Ok(ActionOutcome::Completed)
+    }
+
+    /// Preserve the first failure while reporting a failed nonce cleanup too.
+    async fn cleanup_temporary_failure(
+        &self,
+        target: &ProvisioningTarget,
+        temporary: &Path,
+        primary: BackendFailure,
+    ) -> BackendFailure {
+        match self.remove_temporary(target, temporary).await {
+            Ok(()) => primary,
+            Err(cleanup) => BackendFailure::new(
+                format!("{}; temporary cleanup also failed", primary.context),
+                format!("{}; {}", primary.stderr, cleanup.rendered()),
+            ),
+        }
     }
 
     /// Transfer one staged payload to its nonce-scoped remote temporary.
@@ -1597,6 +1733,24 @@ impl ProvisioningBackend for SystemBackend {
         Ok(ActionOutcome::Completed)
     }
 
+    async fn upload_path(
+        &self,
+        target: &ProvisioningTarget,
+        _kind: PayloadKind,
+        payload: &PreparedPayload,
+        destination: &Path,
+        temporary: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.upload_source(
+            target,
+            payload.path(),
+            &payload.hash,
+            destination,
+            temporary,
+        )
+        .await
+    }
+
     async fn install_path(
         &self,
         target: &ProvisioningTarget,
@@ -1606,18 +1760,26 @@ impl ProvisioningBackend for SystemBackend {
         temporary: &Path,
         mode: u32,
     ) -> Result<ActionOutcome, BackendFailure> {
-        self.install_source(
-            target,
-            payload.path(),
-            &payload.hash,
-            InstallDestination {
-                path: destination,
-                temporary,
-                mode,
-                description: "payload",
-            },
-        )
-        .await
+        match target {
+            ProvisioningTarget::Local => {
+                self.install_source(
+                    target,
+                    payload.path(),
+                    &payload.hash,
+                    InstallDestination {
+                        path: destination,
+                        temporary,
+                        mode,
+                        description: "payload",
+                    },
+                )
+                .await
+            }
+            ProvisioningTarget::Ssh { .. } => {
+                self.install_uploaded_source(target, &payload.hash, destination, temporary, mode)
+                    .await
+            }
+        }
     }
 
     async fn install_bytes(

@@ -1168,9 +1168,7 @@ impl ProvisioningService {
         };
         for (index, action) in plan.actions.iter().enumerate() {
             self.set_step(host, index, StepStatus::Running, None).await;
-            let outcome = self
-                .execute_action(host, &plan, action, prepared.get(&index))
-                .await;
+            let outcome = self.execute_action(host, &plan, action, &prepared).await;
             let (status, message) = match outcome {
                 Ok(ActionOutcome::Completed) => (StepStatus::Completed, None),
                 Ok(ActionOutcome::Skipped(message)) => (StepStatus::Skipped, Some(message)),
@@ -1200,12 +1198,13 @@ impl ProvisioningService {
     /// A missing release artifact is a planning/execution boundary failure,
     /// not permission to leave newly created directories on the host.
     ///
-    /// The payload actions are prepared CONCURRENTLY. A cold host needs both
+    /// Each payload is prepared once, even though remote plans report upload
+    /// and installation as separate actions. A cold host needs both
     /// a `farhelm` and a `tmux`, the download source locks per asset so
     /// those two never contend, and a serial walk would make cold-provision
     /// latency the sum of two multi-megabyte downloads while holding one of
     /// only `MAX_CONCURRENT_RUNS` fleet-wide slots. The fan-out is bounded
-    /// by the plan itself — a plan carries at most one action per
+    /// by the plan itself — a plan carries at most one payload of each
     /// [`PayloadKind`] — so no explicit limit is needed here; if that ever
     /// stops being true this needs a semaphore rather than a bigger fan-out.
     ///
@@ -1233,13 +1232,17 @@ impl ProvisioningService {
     async fn prepare_payloads(
         &self,
         plan: &ProvisioningPlan,
-    ) -> Result<HashMap<usize, PreparedPayload>, (usize, BackendFailure)> {
+    ) -> Result<HashMap<super::plan::PayloadKind, PreparedPayload>, (usize, BackendFailure)> {
+        let mut seen = std::collections::HashSet::new();
         let preparations =
             plan.actions
                 .iter()
                 .enumerate()
                 .filter_map(|(index, action)| match action {
-                    ProvisioningAction::InstallPayload { payload, arch, .. } => {
+                    ProvisioningAction::UploadPayload { payload, arch, .. }
+                    | ProvisioningAction::InstallPayload { payload, arch, .. }
+                        if seen.insert(*payload) =>
+                    {
                         Some((index, *payload, *arch))
                     }
                     _ => None,
@@ -1252,7 +1255,7 @@ impl ProvisioningService {
                     let staged = stage_payload(&source)
                         .await
                         .map_err(|error| (index, error))?;
-                    Ok::<_, (usize, BackendFailure)>((index, staged))
+                    Ok::<_, (usize, BackendFailure)>((index, payload, staged))
                 });
         let mut prepared = HashMap::new();
         // Reported in plan order rather than completion order, so two
@@ -1260,8 +1263,8 @@ impl ProvisioningService {
         let mut failure: Option<(usize, BackendFailure)> = None;
         for outcome in futures_util::future::join_all(preparations).await {
             match outcome {
-                Ok((index, staged)) => {
-                    prepared.insert(index, staged);
+                Ok((_, payload, staged)) => {
+                    prepared.insert(payload, staged);
                 }
                 Err((index, error)) => {
                     if failure.as_ref().is_none_or(|(first, _)| index < *first) {
@@ -1310,12 +1313,25 @@ impl ProvisioningService {
         host: HostId,
         plan: &ProvisioningPlan,
         action: &ProvisioningAction,
-        prepared: Option<&PreparedPayload>,
+        prepared: &HashMap<super::plan::PayloadKind, PreparedPayload>,
     ) -> Result<ActionOutcome, BackendFailure> {
         match action {
             ProvisioningAction::EnsureDirectories { directories } => {
                 self.backend
                     .ensure_directories(&plan.target, directories)
+                    .await
+            }
+            ProvisioningAction::UploadPayload {
+                payload,
+                destination,
+                temporary,
+                ..
+            } => {
+                let source = prepared.get(payload).ok_or_else(|| {
+                    BackendFailure::new("the prepared payload disappeared before upload", "")
+                })?;
+                self.backend
+                    .upload_path(&plan.target, *payload, source, destination, temporary)
                     .await
             }
             ProvisioningAction::InstallPayload {
@@ -1324,7 +1340,7 @@ impl ProvisioningService {
                 temporary,
                 ..
             } => {
-                let source = prepared.ok_or_else(|| {
+                let source = prepared.get(payload).ok_or_else(|| {
                     BackendFailure::new("the prepared payload disappeared before installation", "")
                 })?;
                 self.backend
