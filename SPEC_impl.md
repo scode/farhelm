@@ -1204,11 +1204,12 @@ failure can leave private evidence, but cannot authorize another directory move.
   chosen over `kern.boottime` because the kernel rewrites boottime on clock steps and a boot id must never change
   mid-boot) is how "interrupted" is classified per SPEC.md.
 - Host identity: generated once at first run, stored in the db.
-- The interrupted-session surface is an explicit handoff after boot recovery: it keeps the terminal absent until the
-  user chooses Restart or confirms Replace. Replace reuses the existing create-then-delete endpoint and, on success,
-  hands the new session back to the page selection owner so the fresh conversation becomes the visible session
-  immediately; refusal remains on the interrupted surface with the endpoint's actionable wording. Its compact choice
-  buttons use the shared secondary style, and an open Replace confirmation keeps its trigger visibly pressed.
+- The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
+  paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
+  Restart is an unconfirmed normal action because no process remains; Replace starts as a normal trigger and keeps its
+  destructive confirmation inline. Replace reuses the existing create-then-delete endpoint and, on success, hands the
+  new session back to the page selection owner so the fresh conversation becomes visible immediately; refusal remains on
+  the card with the endpoint's actionable wording. An open Replace confirmation keeps its trigger visibly pressed.
 - Sessions launch through the user's shell as an interactive login shell inside the PTY —
   `$SHELL -l -i -c 'exec farhelm internal launch ...'` as the window's command, with the shim doing the final exec of
   the profile invocation (see exited-session semantics) — evaluated per launch. The `-i` is load-bearing, by different

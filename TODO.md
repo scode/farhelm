@@ -50,10 +50,6 @@ The earlier cross-harness evidence is preserved in
   indicator and session actions — Restart, Replace, Clone, Clone with, and related buttons — to a more visible bottom
   area while keeping the interface consistent; exact layout is TBD.
 
-- Modernize the interrupted-session view shown after the host running the supervisor or agents restarts. Make clear that
-  the session must be restarted intentionally, then offer clean, Farhelm-styled `Restart` and `Replace` buttons instead
-  of making the state look like a failure.
-
 ## Doc todo
 
 - Bring the README overview/splash content into the main documentation.

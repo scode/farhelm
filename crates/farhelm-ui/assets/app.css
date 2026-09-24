@@ -973,7 +973,7 @@ samp {
    what disables it — and `.btn:disabled`'s 0.5 opacity alone would say
    "unavailable" about the one control the open popover belongs to. */
 .titlebar-actions .btn[aria-expanded="true"],
-.interrupted-notice .replace-from-notice[aria-expanded="true"] {
+.interrupted-card .replace-from-notice[aria-expanded="true"] {
   opacity: 1;
   background: var(--accent-fill-hover);
   border-color: var(--accent-edge);
@@ -3400,32 +3400,38 @@ samp {
 }
 
 /* The surface an interrupted session gets INSTEAD of terminal panes: the
-   host rebooted and took the terminal with it, so there is nothing to
-   attach and nothing to retry (SPEC.md's missing-terminal rule — metadata
-   and the reason, never an empty pane). Same band treatment as the stale
-   notice, since both explain an absent terminal, plus the intentional
-   Restart and Replace choices the interrupted state calls for. The header
-   already carries Restart;
-   this one sits where the terminal was, because that is where the user
-   is looking when they wonder why nothing is there. */
-.interrupted-notice {
+   host rebooted and took the terminal, so there is nothing to attach and
+   nothing to retry. A centered neutral card keeps the explanation and the
+   intentional choices together without making a paused session look like a
+   warning or failure. */
+.interrupted-card {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--warn);
+  gap: 12px;
+  max-width: 42rem;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 2rem;
+  color: var(--fg-0);
   background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
 }
 
-/* The choice buttons sit inside a narrow explanatory band. Give them the
-   header's compact dimensions rather than leaving their padding to each
-   browser's button defaults; the text stays together when the band wraps. */
-.interrupted-notice > .restart-from-notice,
-.interrupted-notice > .replace-from-notice {
-  font-size: 12px;
-  padding: 2px 8px;
+.interrupted-card > .interrupted-card-text {
+  flex: 1 1 100%;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.interrupted-card > .restart-from-notice,
+.interrupted-card > .replace-from-notice {
+  font-size: 13px;
+  padding: 4px 10px;
   white-space: nowrap;
 }
 
