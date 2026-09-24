@@ -1735,10 +1735,20 @@ test("failed UPDATE rerun submits automatically through the host update route", 
   expect(addProbeRequests).toBe(0);
 });
 
-test("two overlapping remote updates track and settle independently", async ({
+/**
+ * One fleet click must retain the individual Update authority and result for
+ * every remote host. The local row is deliberately present: touching it would
+ * be a new provisioning path, not a harmless extra request.
+ */
+test("update all dispatches remote hosts and keeps their results independent", async ({
   page,
   request,
 }, testInfo) => {
+  // The shared stack already has a registered SSH host. The batch contract
+  // includes it too, so capture that fixture before this test adds rows.
+  const inheritedRemoteIds = (await hosts(request))
+    .filter((host) => host.kind === "ssh")
+    .map((host) => host.id);
   const first = destination(testInfo, "overlap-one");
   const second = destination(testInfo, "overlap-two");
   const one = await startAdd(request, first);
@@ -1753,14 +1763,30 @@ test("two overlapping remote updates track and settle independently", async ({
   });
   const updatesOne = countUpdateRequests(page, one.host_id);
   const updatesTwo = countUpdateRequests(page, two.host_id);
+  const inheritedUpdates = inheritedRemoteIds.map((id) => ({
+    id,
+    counts: countUpdateRequests(page, id),
+  }));
   await page.goto("/");
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+  const local = page.locator('.host-row[data-host-kind="local"]');
+  await expect(local).toHaveCount(1);
+  const localIdAttribute = await local.getAttribute("data-host-id");
+  expect(localIdAttribute).not.toBeNull();
+  const localId = Number(localIdAttribute);
+  expect(Number.isInteger(localId)).toBe(true);
+  const localUpdates = countUpdateRequests(page, localId);
   const rowOne = page.locator(`[data-host-id="${one.host_id}"]`);
   const rowTwo = page.locator(`[data-host-id="${two.host_id}"]`);
-  await openHostMenu(rowOne);
-  await rowOne.locator(".provisioning-update").dispatchEvent("click");
-  await openHostMenu(rowTwo);
-  await rowTwo.locator(".provisioning-update").dispatchEvent("click");
+  const updateAll = page.getByRole("button", { name: "update all" });
+  await expect(updateAll).toBeEnabled();
+  // Both activations land before a reactive rerender. Per-row ownership must
+  // consume only one request each, even when the header is clicked twice.
+  await page.evaluate(() => {
+    const button = document.querySelector(".update-all-button")!;
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
   await expect(rowOne.locator(".provisioning-run")).toHaveAttribute(
     "data-provisioning-status",
     "running",
@@ -1770,6 +1796,14 @@ test("two overlapping remote updates track and settle independently", async ({
     "running",
   );
   await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+
+  // The inherited remote can finish while the held test rows remain busy;
+  // that makes the header action available again and is expected. Its own
+  // plan and submission still prove this click covered every remote row.
+  for (const inherited of inheritedUpdates) {
+    await waitForProgress(request, inherited.id, "completed");
+    expect(inherited.counts).toEqual({ plans: 1, confirms: 1 });
+  }
 
   await configureBackend({ targets: { [target(second)]: { hold_actions: true } } });
   await waitForProgress(request, one.host_id, "completed");
@@ -1786,6 +1820,61 @@ test("two overlapping remote updates track and settle independently", async ({
   expect(updatesOne.confirms).toBe(1);
   expect(updatesTwo.plans).toBe(1);
   expect(updatesTwo.confirms).toBe(1);
+  expect(localUpdates).toEqual({ plans: 0, confirms: 0 });
+
+  // The second host fails after the first has already succeeded. Its row
+  // retains the failure while the first row stays folded after its success.
+  await configureBackend({
+    targets: {
+      [target(second)]: { fail_action: "restart-supervisor" },
+    },
+  });
+  await waitForProgress(request, two.host_id, "failed");
+  await expect(rowTwo.locator(".provisioning-run")).toHaveAttribute(
+    "data-provisioning-status",
+    "failed",
+  );
+  await expect(rowTwo.locator(".host-detail")).toBeVisible();
+  await expect(rowOne.locator(".host-detail")).toHaveCount(0);
+  await expect(page.locator(".host-details-toggle")).not.toBeChecked();
+});
+
+/**
+ * A fleet click takes only the Update offers available at that instant.
+ * A setup run already accepted by the helm must never inherit a delayed
+ * UPDATE after it finishes, while another remote host can still proceed.
+ */
+test("update all skips a host already busy with setup", async ({ page, request }, testInfo) => {
+  const ready = destination(testInfo, "update-all-ready");
+  const busy = destination(testInfo, "update-all-busy");
+  const readyHost = await startAdd(request, ready);
+  await waitForProgress(request, readyHost.host_id, "completed");
+  await configureBackend({ targets: { [target(busy)]: { hold_actions: true } } });
+  const busyHost = await startAdd(request, busy);
+  await waitForProgress(request, busyHost.host_id, "running");
+  const readyUpdates = countUpdateRequests(page, readyHost.host_id);
+  const busyUpdates = countUpdateRequests(page, busyHost.host_id);
+
+  await page.goto("/");
+  const busyRow = page.locator(`[data-host-id="${busyHost.host_id}"]`);
+  // An ADD started before this page mounted does not auto-expand its detail
+  // panel. The row's own summary still reports the accepted running setup.
+  await expect(busyRow).toContainText("setup provisioning running");
+  await openHostMenu(busyRow);
+  await expect(busyRow.locator(".provisioning-update")).toHaveCount(0);
+  const updateAll = page.getByRole("button", { name: "update all" });
+  await expect(updateAll).toBeEnabled();
+  await updateAll.click();
+  await expect.poll(() => readyUpdates.confirms).toBe(1);
+  await waitForProgress(request, readyHost.host_id, "completed");
+  expect(readyUpdates).toEqual({ plans: 1, confirms: 1 });
+  expect(busyUpdates).toEqual({ plans: 0, confirms: 0 });
+
+  await configureBackend();
+  await waitForProgress(request, busyHost.host_id, "completed");
+  await openHostMenu(busyRow);
+  await expect(busyRow.locator(".provisioning-update")).toBeVisible();
+  expect(busyUpdates).toEqual({ plans: 0, confirms: 0 });
 });
 
 test("a plan held under a held OpLock submits exactly once on release", async ({
