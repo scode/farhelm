@@ -1382,9 +1382,11 @@ impl Supervisor {
     /// Callers hold `attachments` while removing the corresponding live entry.
     /// Installing a deferred barrier before that lock is released closes the
     /// only gap in which a replacement could see neither the old attachment nor
-    /// its still-running cleanup. Join failure is permanent for this supervisor
-    /// process: the task lost the only proof that its output client reached the
-    /// safe boundary, so retrying an attach would be a guess.
+    /// its still-running cleanup. Join failure is permanent evidence for this
+    /// terminal while its session remains alive: the task lost the only proof
+    /// that its output client reached the safe boundary, so retrying an attach
+    /// would be a guess. A successful whole-session Delete may retire that
+    /// evidence after the session and process tree are gone.
     pub(crate) fn begin_forwarder_shutdown(&self, key: AttachmentKey, attachment: &ActiveAttach) {
         self.track_output_reap(key, attachment.forwarder_cleanup.clone());
         attachment.request_forwarder_shutdown();
@@ -1492,11 +1494,15 @@ impl Supervisor {
         }
     }
 
-    /// Whether any terminal in `session` still has an unresolved output client.
+    /// Whether any runtime-owned terminal client in `session` is still reaping.
     ///
     /// The caller uses this while holding `attachments`; teardown publishes
     /// under that same async lock, making the check atomic with new attachment
     /// installation even though the registry itself uses a synchronous lock.
+    /// A durable `Failed` entry still blocks replacement, but it no longer
+    /// proves that a runtime task is actively holding a client open. Delete
+    /// may kill the owning tmux session and retire that proof only after the
+    /// session and its process tree are gone.
     pub(crate) fn has_output_reap_for_session(&self, session: &str) -> bool {
         let mut registry = self
             .output_reaps
@@ -1521,7 +1527,24 @@ impl Supervisor {
                 }
             }
         }
-        registry.keys().any(|key| key.session == session)
+        registry.iter().any(|(key, entry)| {
+            key.session == session && matches!(entry, OutputReapEntry::Reaping(_))
+        })
+    }
+
+    /// Retire failed replacement barriers after Delete has committed removal.
+    ///
+    /// The caller must have completed the session's process teardown and
+    /// durable row deletion first. Removing a barrier any earlier could let a
+    /// replacement attach overlap an output client whose exit was never
+    /// confirmed; unresolved runtime-owned `Reaping` entries are left intact.
+    pub(crate) fn clear_failed_output_reaps_for_session(&self, session: &str) {
+        self.output_reaps
+            .lock()
+            .expect("output-reap registry poisoned")
+            .retain(|key, entry| {
+                key.session != session || matches!(entry, OutputReapEntry::Reaping(_))
+            });
     }
 
     /// Whether `key` still has an unresolved output client.
@@ -2226,7 +2249,7 @@ mod tests {
             .expect("supervisor");
         let key = AttachmentKey::new("session", TerminalId::Agent);
         let (done, done_rx) = watch::channel(None);
-        sup.track_output_reap(key, done_rx);
+        sup.track_output_reap(key.clone(), done_rx);
 
         let waiting_sup = Arc::clone(&sup);
         let waiting =
@@ -2249,11 +2272,13 @@ mod tests {
         );
     }
 
-    /// Lost cleanup proof remains a durable fail-closed attachment barrier.
+    /// Lost cleanup proof remains a durable replacement barrier without
+    /// masquerading as an active runtime reaper to whole-session Delete.
     ///
     /// Treating a failed reaper like success would recreate the overlapping
     /// control-client race on the next attach. The error must therefore reach
-    /// the waiter and remain in the registry for every later attempt.
+    /// the waiter and remain in the registry for every later attempt, while
+    /// Delete's session-wide check distinguishes it from `Reaping`.
     #[farhelm_testtrace::test]
     async fn a_failed_output_reap_remains_fail_closed() {
         let state = StateDir::new();
@@ -2262,7 +2287,7 @@ mod tests {
             .expect("supervisor");
         let key = AttachmentKey::new("session", TerminalId::Agent);
         let (done, done_rx) = watch::channel(None);
-        sup.track_output_reap(key, done_rx);
+        sup.track_output_reap(key.clone(), done_rx);
         done.send_replace(Some(Err(Arc::<str>::from("injected cleanup loss"))));
 
         let error = sup
@@ -2274,8 +2299,12 @@ mod tests {
             "the refusal must preserve the cause: {error}"
         );
         assert!(
-            sup.has_output_reap_for_session("session"),
-            "a cleanup failure must remain visible after the first waiter returns"
+            !sup.has_output_reap_for_session("session"),
+            "a durable cleanup failure must not masquerade as an active reaper to Delete"
+        );
+        assert!(
+            sup.has_output_reap_for_key(&key),
+            "a cleanup failure must remain visible to replacement attachment"
         );
         assert!(
             sup.wait_for_output_reaps("session").await.is_err(),
