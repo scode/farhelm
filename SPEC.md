@@ -872,10 +872,11 @@ status; an exit during supervisor downtime with no reboot involved shows as exit
 surviving terminal still holds it, unknown code otherwise (reporting a code the terminal genuinely retains is not
 guessing; inventing one where nothing retains it would be). Interrupted sessions' terminal contents are gone — there is
 no history store (see Terminal experience) — but the conversation itself is recoverable. Opening an interrupted session
-explains that the host reboot took away its terminal and offers two intentional choices: Restart, which uses the normal
-restart-with-resume offer, or Replace, which starts a fresh session under the same settings. Nothing respawns unattended
-— an agent (especially one launched with permissive flags) only restarts or replaces when the user chooses and confirms.
-The system must not presume the original OS process survived the reboot.
+shows a centered neutral card in the empty terminal area explaining that the host restart paused the session and that it
+needs an intentional restart. The card offers two choices: Restart, which uses the normal restart-with-resume offer, or
+Replace, which starts a fresh session under the same settings and keeps its inline destructive confirmation. Nothing
+respawns unattended — an agent (especially one launched with permissive flags) only restarts or replaces when the user
+chooses and confirms. The system must not presume the original OS process survived the reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.

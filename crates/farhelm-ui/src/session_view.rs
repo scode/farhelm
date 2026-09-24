@@ -101,7 +101,7 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///   assistive-technology description, which is what had no business being
 ///   permanent chrome on every session forever. The one exception is the
 ///   interrupted surface below: an interrupted session has no terminal to
-///   show, and the band standing where the panes would be states the
+///   show, and the centered card standing where the panes would be states the
 ///   reason and carries the restart, because a tooltip the user has to find
 ///   is what let the old retry overlay advertise the wrong action there.
 ///   Conditional, like the stale band, so the steady state
@@ -1694,18 +1694,17 @@ pub(crate) fn SessionView(
                 }
             }
             // An interrupted session on a reachable host: the reboot took
-            // its terminal, so this band stands where the panes would be
+            // its terminal, so this centered card stands where the panes would be
             // (SPEC.md: metadata and the reason, never an empty pane, and
-            // nothing relaunches until the user asks). The restart control
-            // here is the header's, wired to the same claim and request,
-            // placed where the user is looking when the terminal is
-            // missing. No confirm step: nothing is running.
+            // nothing relaunches until the user asks). Both controls use the
+            // shared lifecycle claim and existing request closures; Restart
+            // remains unconfirmed because nothing is running.
             if terminal_absence(&shown, relaunched()) == Some(TerminalAbsence::Interrupted) {
-                div { class: "interrupted-notice",
-                    span { class: "interrupted-notice-text", "{interrupted_surface_text(shown.restart_offer)}" }
+                div { class: "interrupted-card",
+                    span { class: "interrupted-card-text", "{interrupted_surface_text(shown.restart_offer)}" }
                     button {
                         r#type: "button",
-                        class: "btn restart-from-notice",
+                        class: "btn btn-primary restart-from-notice",
                         // The visible choice matches the notice's
                         // "Restart or Replace" wording; the accessible
                         // name and tooltip keep the conversation promise.
@@ -1722,7 +1721,7 @@ pub(crate) fn SessionView(
                     }
                     button {
                         r#type: "button",
-                        class: "btn replace-from-notice",
+                        class: "btn btn-primary replace-from-notice",
                         disabled: lifecycle.busy(),
                         "aria-expanded": "{confirming_replace()}",
                         onclick: move |_| {
@@ -1738,7 +1737,7 @@ pub(crate) fn SessionView(
                             span { class: "confirm-consequence", "{crate::status::replace_consequence(&shown.status)}" }
                             button {
                                 r#type: "button",
-                                class: "btn replace-confirm-submit",
+                                class: "btn btn-danger replace-confirm-submit",
                                 disabled: replacing(),
                                 onclick: move |_| {
                                     if !confirming_replace() {
@@ -1751,7 +1750,7 @@ pub(crate) fn SessionView(
                             }
                             button {
                                 r#type: "button",
-                                class: "btn replace-cancel",
+                                class: "btn btn-neutral replace-cancel",
                                 autofocus: true,
                                 onclick: move |_| {
                                     confirming_replace.set(false);
@@ -2116,18 +2115,14 @@ fn terminal_absence(session: &Session, relaunched: bool) -> Option<TerminalAbsen
     }
 }
 
-/// The sentence the interrupted surface shows where the terminal was.
+/// The sentence the interrupted card shows where the terminal was.
 ///
-/// Leads with WHY there is no terminal — the reboot took it — and then
-/// says what restart would do, in the same words as the header control's
-/// explanation, so the band and the button never disagree. The reason is
-/// stated on the surface itself rather than left to the header's tooltip
-/// because this is the spot the user is looking at when the terminal is
-/// missing; a tooltip they have to find is what let the old retry overlay
-/// advertise the wrong action.
+/// Names the host restart and the intentional handoff before stating what
+/// Restart would do, so the empty terminal area explains both the missing
+/// terminal and the safe next step without implying automatic recovery.
 fn interrupted_surface_text(offer: RestartOffer) -> String {
     format!(
-        "the host reboot interrupted this session's terminal; Farhelm will wait for you to choose Restart or Replace — {}.",
+        "a host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {}.",
         offer_clause(offer)
     )
 }
@@ -2297,11 +2292,11 @@ mod tests {
         );
     }
 
-    /// The interrupted surface's sentence names the reboot and then
-    /// promises exactly what the header's restart control promises.
+    /// The interrupted card names the host restart and then promises exactly
+    /// what the header's restart control promises.
     ///
     /// The two are built from one `offer_clause`, and this pins that they
-    /// stay so: a band that said "resumes the conversation" beside a
+    /// stay so: a card that said "resumes the conversation" beside a
     /// tooltip that said "launches a fresh agent" would be the exact
     /// silently-wrong-resume claim SPEC.md forbids, for the session whose
     /// capture never landed.
@@ -2312,15 +2307,15 @@ mod tests {
             RestartOffer::FallbackTemplate,
             RestartOffer::FreshOnly,
         ] {
-            let band = interrupted_surface_text(offer);
+            let card = interrupted_surface_text(offer);
             let tooltip = restart_offer_text(&SessionStatus::Interrupted, offer);
             assert!(
-                band.starts_with("the host reboot interrupted this session's terminal"),
-                "{band}"
+                card.starts_with("a host restart paused this session"),
+                "{card}"
             );
             assert!(
-                band.ends_with(&format!("{}.", offer_clause(offer))),
-                "the band must end with the same clause the tooltip carries: {band}"
+                card.ends_with(&format!("{}.", offer_clause(offer))),
+                "the card must end with the same clause the tooltip carries: {card}"
             );
             assert!(
                 tooltip.ends_with(&format!("{}.", offer_clause(offer))),
@@ -2493,7 +2488,7 @@ mod tests {
     /// Pins exactly that pairing, not "the header shows status exactly
     /// once" (an ordinary, non-stale, classified session is the only case
     /// where that phrasing would even be accurate — `Unknown` shows it
-    /// nowhere, and a stale session shows it in the band instead). The
+    /// nowhere, and a stale session shows it in the stale notice instead). The
     /// stale case asserts BOTH halves of the pair on the same value, which
     /// is what a single-destination assertion cannot: the header member
     /// being `None` is only the correct behavior because the stale member

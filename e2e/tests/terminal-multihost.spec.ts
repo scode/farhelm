@@ -2434,9 +2434,9 @@ test.describe("multi-host", () => {
 
       await rebootRemoteHost(request);
 
-      const notice = page.locator(".interrupted-notice");
+      const notice = page.locator(".interrupted-card");
       await expect(notice).toBeVisible({ timeout: 60_000 });
-      await expect(notice).toContainText("did not survive the host reboot");
+      await expect(notice).toContainText("host restart paused this session");
       await expect(page.locator(".titlebar .status-badge")).toHaveText("interrupted");
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
@@ -2462,7 +2462,7 @@ test.describe("multi-host", () => {
       const row = rowByTitle(page, closedTitle);
       await expect(row.locator(".status-badge")).toHaveText("interrupted", { timeout: 60_000 });
       await row.locator(".session-row-open").click();
-      await expect(page.locator(".interrupted-notice")).toBeVisible();
+      await expect(page.locator(".interrupted-card")).toBeVisible();
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);
       await expect(page.locator(".tab-strip")).toHaveCount(0);
@@ -2488,10 +2488,10 @@ test.describe("multi-host", () => {
       test.setTimeout(120_000);
       await page.goto("/");
       await rowByTitle(page, closedTitle).locator(".session-row-open").click();
-      const restart = page.locator(".interrupted-notice .restart-from-notice");
+      const restart = page.locator(".interrupted-card .restart-from-notice");
       await expect(restart).toBeVisible();
       await restart.click();
-      await expect(page.locator(".interrupted-notice")).toHaveCount(0, { timeout: 60_000 });
+      await expect(page.locator(".interrupted-card")).toHaveCount(0, { timeout: 60_000 });
       await waitForSessionRevealed(page, await sessionIdFor(rowByTitle(page, closedTitle), 60_000), {
         timeout: 60_000,
       });

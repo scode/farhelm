@@ -186,11 +186,12 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(page.locator("#term-connecting")).toHaveCount(0);
   await expect(page.locator(".terminal-panes")).toHaveCount(0);
   await expect(page.locator(".tab-strip")).toHaveCount(0);
-  const notice = page.locator(".interrupted-notice");
+  const notice = page.locator(".interrupted-card");
   await expect(notice).toBeVisible();
-  await expect(notice).toContainText("host reboot interrupted this session's terminal");
+  await expect(notice).toContainText("host restart paused this session");
   await expect(notice).toContainText("resumes this session's own conversation");
   await expect(notice.locator(".restart-from-notice")).toHaveText("Restart");
+  await expect(notice.locator(".restart-from-notice")).toHaveClass(/btn-primary/);
   await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "resume conversation");
   expect(counter.restartRequests).toBe(0);
 
@@ -219,12 +220,14 @@ test("Replace confirms inline, can cancel, selects the fresh session, and surfac
 
   await page.goto("/");
   await rowByTitle(page, title).locator(".session-row-open").click();
-  const notice = page.locator(".interrupted-notice");
+  const notice = page.locator(".interrupted-card");
   const replace = notice.locator(".replace-from-notice");
-  await expect(replace).toHaveCSS("padding-top", "2px");
-  await expect(notice.locator(".restart-from-notice")).toHaveCSS("padding-top", "2px");
+  await expect(replace).toHaveCSS("padding-top", "4px");
+  await expect(notice.locator(".restart-from-notice")).toHaveCSS("padding-top", "4px");
   await replace.click();
   await expect(notice.locator(".replace-confirm")).toBeVisible();
+  await expect(replace).toHaveClass(/btn-primary/);
+  await expect(notice.locator(".replace-confirm-submit")).toHaveClass(/btn-danger/);
   await expect(replace).toHaveCSS("opacity", "1");
   await expect(notice.locator(".replace-confirm-submit")).toHaveCSS("font-size", "12px");
   await expect(notice.locator(".replace-confirm-submit")).toHaveCSS("padding-left", "8px");
@@ -272,7 +275,7 @@ test("restart from the interrupted surface sends the resume request exactly once
 
   await page.goto("/");
   await rowByTitle(page, title).locator(".session-row-open").click();
-  const restart = page.locator(".interrupted-notice .restart-from-notice");
+  const restart = page.locator(".interrupted-card .restart-from-notice");
   await expect(restart).toBeVisible();
   await expect(restart).toBeEnabled();
   await restart.click();
@@ -281,11 +284,11 @@ test("restart from the interrupted surface sends the resume request exactly once
   // re-delivered by the surface re-rendering around the in-flight request.
   await expect(page.locator(".restart-confirm")).toHaveCount(0);
   // The reply ends the interrupted surface on its own, ahead of the
-  // listing (which this fixture keeps pinned to `interrupted`): the band
+  // listing (which this fixture keeps pinned to `interrupted`): the card
   // and its control are gone and the terminal element is back for the new
   // run to attach into. A view that waited for the listing would still be
   // showing "did not survive" over a session that is now running.
-  await expect(page.locator(".interrupted-notice")).toHaveCount(0);
+  await expect(page.locator(".interrupted-card")).toHaveCount(0);
   await expect(page.locator("#terminal")).toHaveCount(1);
   await expect(page.locator(".restart-error")).toHaveCount(0);
   // Begin the duplicate-request window only after the reply has replaced
