@@ -1,13 +1,20 @@
 #!/usr/bin/env node
-// Renders the README's drawn blocks (the header mark and the pillars grid) as
-// SVG files, one light and one dark variant each, into this directory, plus
-// the standalone wordmark files beside the app icon in packaging/ and the
-// docs website's header mark under website/src/.
+// Renders the drawn blocks of the project's introduction (the header mark,
+// the pillars grid, and the how-it-works drawing) as SVG files, one light and
+// one dark variant each, into website/src/assets/intro/, plus the standalone
+// wordmark files beside the app icon in packaging/ and the docs website's
+// header mark under website/src/.
+//
+// The intro SVGs have one home and two readers. The website owns them: the
+// docs landing page imports them from src/assets/intro/, so Astro bundles
+// them like any other asset. The README shows the same files by relative
+// path into website/, so the two introductions cannot drift apart and no
+// copy of any drawing is checked in twice.
 //
 // Why a generator instead of four hand-edited files: the light and dark
 // variants share every coordinate and differ only in colors, and the pillars
 // grid is six copies of one cell. Editing that by hand in four places is how
-// the variants drift apart. Run `node docs/readme/render-svgs.mjs` after
+// the variants drift apart. Run `node website/scripts/render-svgs.mjs` after
 // changing anything here and commit the SVGs it writes; nothing in CI runs
 // this, so the checked-in files are the artifact and this script is how they
 // are reproduced.
@@ -415,18 +422,22 @@ function howItWorksSvg(p) {
 `;
 }
 
+// The intro blocks live under src/ rather than public/ so the landing page
+// can import them and Astro fingerprints them; the README reaches into the
+// same directory by relative path.
+const introDir = join(here, "..", "src", "assets", "intro");
 // The standalone wordmark lives beside the app icon it is drawn to match, so
 // anyone looking for the brand marks finds both in one place.
 const brandDir = join(here, "..", "..", "packaging", "farhelm-desktop");
 // The site mark lives with the website source that references it (Starlight
 // resolves the logo path relative to the project), not under public/, so it
 // is bundled and fingerprinted like the rest of the site's assets.
-const siteDir = join(here, "..", "..", "website", "src");
+const siteDir = join(here, "..", "src");
 
 for (const [theme, p] of Object.entries(palettes)) {
-  writeFileSync(join(here, `header-${theme}.svg`), headerSvg(p));
-  writeFileSync(join(here, `pillars-${theme}.svg`), pillarsSvg(p));
-  writeFileSync(join(here, `how-it-works-${theme}.svg`), howItWorksSvg(p));
+  writeFileSync(join(introDir, `header-${theme}.svg`), headerSvg(p));
+  writeFileSync(join(introDir, `pillars-${theme}.svg`), pillarsSvg(p));
+  writeFileSync(join(introDir, `how-it-works-${theme}.svg`), howItWorksSvg(p));
   writeFileSync(join(brandDir, `wordmark-${theme}.svg`), wordmarkSvg(p));
   writeFileSync(join(siteDir, `site-mark-${theme}.svg`), siteMarkSvg(p));
 }

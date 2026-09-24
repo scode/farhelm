@@ -17,7 +17,7 @@ export default defineConfig({
       title: 'Farhelm',
       description: 'Farhelm documentation.',
       // The header mark is the README's: icon plus wordmark, rendered by
-      // docs/readme/render-svgs.mjs, one file per color scheme.
+      // scripts/render-svgs.mjs, one file per color scheme.
       logo: {
         light: './src/site-mark-light.svg',
         dark: './src/site-mark-dark.svg',

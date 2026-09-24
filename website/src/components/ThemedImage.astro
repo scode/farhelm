@@ -1,0 +1,39 @@
+---
+/**
+ * One drawing in two color variants, showing whichever matches the page's
+ * current theme.
+ *
+ * The README picks between a light and a dark SVG with a <picture> media
+ * query, because GitHub gives it nothing else. That query only sees the
+ * operating system's preference, while this site also has Starlight's theme
+ * switcher, which sets `data-theme` on the root element and can disagree with
+ * the OS. So both variants are rendered and Starlight's own `light:sl-hidden`
+ * and `dark:sl-hidden` utilities hide the wrong one, the same mechanism its
+ * header logo uses. The resolved theme is always `light` or `dark` by the
+ * time the page paints (Starlight resolves `auto` before first paint), so
+ * exactly one variant is ever visible.
+ *
+ * The images are plain <img> elements on the imported asset's bundled URL,
+ * not inlined SVG: these are the same files the README shows, and loading
+ * them the same way keeps the two renderings identical.
+ */
+import type { ImageMetadata } from 'astro';
+
+interface Props {
+  /** Variant drawn for a light ground. */
+  light: ImageMetadata;
+  /** Variant drawn for a dark ground. */
+  dark: ImageMetadata;
+  /** Shared alt text; the variants differ only in color. */
+  alt: string;
+  /** Extra classes for the wrapper, e.g. to size or center the drawing. */
+  class?: string;
+}
+
+const { light, dark, alt, class: className } = Astro.props;
+---
+
+<div class:list={['farhelm-themed-image', className]}>
+  <img class="dark:sl-hidden" src={light.src} width={light.width} height={light.height} alt={alt} />
+  <img class="light:sl-hidden" src={dark.src} width={dark.width} height={dark.height} alt={alt} />
+</div>

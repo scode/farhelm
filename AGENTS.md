@@ -437,9 +437,10 @@ before adding or changing a mark; vendored geometry gets an entry in `THIRD_PART
 The app icon is `packaging/farhelm-desktop/icon.svg` (the source of `icon.png` and `Farhelm.icns` beside it). The
 wordmark, "farhelm" in JetBrains Mono Nerd Font Bold with the icon's block cursor after it, is
 `packaging/farhelm-desktop/wordmark-dark.svg` and `wordmark-light.svg`, one per ground. Its letters are outlines pulled
-from the font the UI crate vendors by `docs/readme/outline-wordmark.py` into `docs/readme/wordmark-outline.json`, and
-`docs/readme/render-svgs.mjs` inlines them into the wordmark files, the README's header, pillars, and how-it-works
-blocks under `docs/readme/`, and the docs website's header mark (`website/src/site-mark-dark.svg` and `-light.svg`).
+from the font the UI crate vendors by `website/scripts/outline-wordmark.py` into
+`website/scripts/wordmark-outline.json`, and `website/scripts/render-svgs.mjs` inlines them into the wordmark files, the
+introduction's header, pillars, and how-it-works blocks under `website/src/assets/intro/` (shown by both the docs
+landing page and the README), and the docs website's header mark (`website/src/site-mark-dark.svg` and `-light.svg`).
 Anything that needs the name as a mark uses those files; anything that changes the mark changes the script and re-runs
 it, never the SVGs by hand, and the outline step only reruns when the word or the font changes.
 
@@ -450,13 +451,14 @@ what a bridge-death line looks like. Start there before investigating any "the d
 
 # README hero screenshot
 
-The image at the top of README.md is a real capture of the web UI against a staged fleet, governed by
-`docs/readme-hero/SPEC.md`. "Refresh the README screenshot" means exactly: run `scripts/readme-screenshot.sh`, look at
-the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the one-line README change that leaves behind.
-The design (`docs/readme-hero/scenario.json5` and the transcripts beside it) changes only when the maintainer asks for a
-different picture. The publish script is the only thing that pushes the `readme-assets` branch; never run that push by
-hand, and never commit the PNG on main. Neither script is a gate: nothing in CI runs or checks the image. Changing the
-publish script means running its `--self-test`, which is its whole validation and needs no network.
+The image at the top of README.md, also shown on the docs website's landing page, is a real capture of the web UI
+against a staged fleet, governed by `docs/readme-hero/SPEC.md`. "Refresh the README screenshot" means exactly: run
+`scripts/readme-screenshot.sh`, look at the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the
+one-line URL change it leaves behind in README.md and in the landing page. The design (`docs/readme-hero/scenario.json5`
+and the transcripts beside it) changes only when the maintainer asks for a different picture. The publish script is the
+only thing that pushes the `readme-assets` branch; never run that push by hand, and never commit the PNG on main.
+Neither script is a gate: nothing in CI runs or checks the image. Changing the publish script means running its
+`--self-test`, which is its whole validation and needs no network.
 
 # The live install is off-limits
 

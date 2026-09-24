@@ -299,6 +299,29 @@ header.header {
   margin-bottom: 0;
 }
 
+/* ThemedImage (src/components/ThemedImage.astro): two variants of one drawing,
+   one hidden by Starlight's light:/dark:sl-hidden utilities. Those live in
+   the starlight.utils cascade layer, and any unlayered rule here outranks a
+   layered one regardless of specificity, so nothing below may set `display`
+   on these images or both variants would show at once. Starlight's markdown
+   styles already make them block-level and cap them at the content width;
+   the auto margins center anything narrower than that. */
+.farhelm-themed-image img {
+  margin-inline: auto;
+}
+
+/* The landing page's introduction mirrors the README's, where the header,
+   the tagline under it, and the screenshot caption are centered. */
+.farhelm-intro-header + p {
+  text-align: center;
+}
+
+.farhelm-intro-caption {
+  color: var(--sl-color-gray-3);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
 .right-sidebar {
   border-inline-start-color: var(--farhelm-line);
 }
