@@ -963,7 +963,7 @@
 - Completion criteria: a refused Delete preserves an in-flight upload; a successful Delete still cancels uploads before
   removing the session; focused regression coverage proves both paths; remove this feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; Delete now runs refusal-prone pane, tab, and scope preflights before cancelling uploads while retaining cancellation before the process sweep and destructive teardown. Focused recorded nextest run `398569c5-969b-4e8b-9b22-124b0fbfe979` passed both regressions (372 skipped); formatting, diff, and isolated sleep checks passed. Draft PR [#916](https://github.com/scode/farhelm/pull/916/changes) is on bookmark `pr/refused-delete-upload`, jj change `29021790`.
 
 ## refused-retry-strands-credential-spec.md
 

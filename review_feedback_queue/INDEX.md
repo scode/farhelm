@@ -4,7 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `refused-delete-discards-in-flight-upload.md` — refused delete still destroys an in-flight upload.
 - `refused-retry-strands-credential-spec.md` — refused create retry strands a credential-bearing launch spec on disk.
 - `restart-kills-tabs-reports-present.md` — fresh-terminal restart kills the session's tabs, then reports them as alive.
 - `stale-dial-outcome-publishes-over-retarget-nudge.md` — editing a host mid-dial briefly routes operations to the old

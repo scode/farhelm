@@ -900,6 +900,150 @@ async fn deleting_a_session_removes_its_attachments_directory() {
     );
 }
 
+/// A pane-owner refusal is a read-only Delete preflight. It must leave an
+/// upload usable because the session and its attachment state remain present
+/// for a later retry.
+#[farhelm_testtrace::test]
+async fn a_refused_delete_preserves_an_in_flight_upload() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let mut peer = RawPeer::connect(&h.sup).await;
+    let started = peer.begin(1, &session.id, 1, "kept.txt", 4).await;
+    assert!(matches!(started, ControlMsg::UploadStarted { .. }));
+    peer.chunk(1, b"ke".to_vec()).await;
+    loop {
+        match peer.next_control(20).await {
+            ControlMsg::UploadAck {
+                channel: 1,
+                received,
+                ..
+            } if received >= 2 => break,
+            ControlMsg::UploadAck { .. } => {}
+            other => panic!("the in-flight upload must acknowledge its first chunk: {other:?}"),
+        }
+    }
+
+    let sock = h.state.path().join("tmux.sock");
+    let tmux_name = format!("fh-{}", session.id);
+    let renamed = tmux_query(
+        &sock,
+        &["rename-session", "-t", &tmux_name, "renamed out from under"],
+    )
+    .await;
+    assert!(
+        renamed.status.success(),
+        "test setup: rename-session must succeed, got: {}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
+
+    let err = h
+        .client
+        .delete_session(&session.id)
+        .await
+        .expect_err("a renamed pane must refuse Delete");
+    let supervisor_error = err
+        .downcast_ref::<SupervisorError>()
+        .expect("a failed Delete must carry a SupervisorError");
+    assert_eq!(
+        supervisor_error.kind,
+        ErrorKind::Internal,
+        "a pane-owner refusal is a server-side teardown failure"
+    );
+    assert!(
+        supervisor_error.message.contains("belongs to session")
+            && supervisor_error.message.contains("renamed out from under"),
+        "the refusal must identify the renamed pane owner, got: {}",
+        supervisor_error.message
+    );
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .expect("list retained session")
+            .sessions
+            .iter()
+            .any(|row| row.id == session.id),
+        "a refused Delete must retain the session row"
+    );
+
+    // The transfer survived the refusal: finish it and observe publication,
+    // then restore the tmux name so fixture cleanup can delete the session.
+    peer.chunk(1, b"pt".to_vec()).await;
+    peer.control(&ControlMsg::CommitUpload {
+        req_id: 2,
+        channel: 1,
+    })
+    .await;
+    assert!(
+        matches!(
+            peer.next_outcome(20).await,
+            ControlMsg::UploadCommitted { .. }
+        ),
+        "the upload must remain usable after refused Delete"
+    );
+    let restored = tmux_query(
+        &sock,
+        &["rename-session", "-t", "renamed out from under", &tmux_name],
+    )
+    .await;
+    assert!(
+        restored.status.success(),
+        "test cleanup: restoring the tmux name must succeed, got: {}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    h.client
+        .delete_session(&session.id)
+        .await
+        .expect("the restored session must delete");
+}
+
+/// A successful Delete still cancels the upload after its read-only
+/// preflights and before removing the session's attachment directory.
+#[farhelm_testtrace::test]
+async fn a_successful_delete_cancels_an_in_flight_upload_before_removal() {
+    let h = harness().await;
+    let (session, _work) = basic_session(&h).await;
+    let mut peer = RawPeer::connect(&h.sup).await;
+    let started = peer.begin(1, &session.id, 1, "discarded.txt", 4).await;
+    assert!(matches!(started, ControlMsg::UploadStarted { .. }));
+    peer.chunk(1, b"hold".to_vec()).await;
+    loop {
+        match peer.next_control(20).await {
+            ControlMsg::UploadAck {
+                channel: 1,
+                received,
+            } if received >= 4 => break,
+            ControlMsg::UploadAck { .. } => {}
+            other => panic!("the in-flight upload must acknowledge its chunk: {other:?}"),
+        }
+    }
+
+    h.client
+        .delete_session(&session.id)
+        .await
+        .expect("Delete must cancel the live upload and remove the session");
+    assert!(
+        matches!(
+            peer.next_outcome(20).await,
+            ControlMsg::UploadAborted { channel: 1, .. }
+        ),
+        "a successful Delete must report cancellation on the upload channel"
+    );
+    assert!(
+        h.client
+            .list_sessions()
+            .await
+            .expect("list after deletion")
+            .sessions
+            .is_empty(),
+        "Delete must remove the session after cancelling its upload"
+    );
+    assert!(
+        !farhelm_supervisor::attachments::session_dir(h.state.path(), &session.id).exists(),
+        "Delete must remove the upload directory after cancellation"
+    );
+}
+
 /// A delete racing an in-flight upload leaves no file and no directory —
 /// whether it lands while the transfer is streaming or exactly at its
 /// commit.
