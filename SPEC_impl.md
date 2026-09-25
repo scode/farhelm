@@ -2559,4 +2559,7 @@ against the one compiled into its bundle. A mismatch — including a helm that r
 prompt and, more importantly, withdraws every UNATTENDED behavior that depends on the helm honoring this milestone's
 vocabulary: the terminal heartbeat and automatic reconnect both stop, while anything the user explicitly asks for keeps
 working. The sidebar's app bar shows the helm's build at all times: the client's own compiled build until a mismatching
-stamp is reported (agreement means the two are the same string), and the reported stamp from then on.
+stamp is reported (agreement means the two are the same string), and the reported stamp from then on. The bar leads with
+the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wordmark-dark.svg` (the brand file every
+use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
+without a desktop asset-parity entry.

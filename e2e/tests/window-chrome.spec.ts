@@ -33,6 +33,14 @@ test("the web shell hides the spacer and loads no bridge script", async ({ page 
   await expect(shell).toBeVisible({ timeout: 20_000 });
   await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await expect(bar.locator(".app-version")).not.toHaveText("");
+  // The wordmark leads the bar, named for assistive technology by the brand
+  // file's own label, and sits left of the version.
+  const wordmark = bar.getByRole("img", { name: "farhelm" });
+  await expect(wordmark).toBeVisible();
+  const wordmarkBox = (await wordmark.boundingBox())!;
+  const versionBox = (await bar.locator(".app-version").boundingBox())!;
+  expect(wordmarkBox.x + wordmarkBox.width).toBeLessThanOrEqual(versionBox.x);
+  expect(wordmarkBox.height).toBeGreaterThan(10);
 
   // The spacer exists in production markup (so geometry tests can force
   // the shell class onto it) but is hidden without that class.

@@ -682,6 +682,25 @@ samp {
   }
 }
 
+/* The wordmark leads the bar at the window's top-left corner. Sized by
+   height so the file's own 284x72 viewBox sets the width (about 71px at
+   18px tall), close to the version text's cap height plus the bar's
+   padding, so the bar keeps its single-row height. `flex-shrink: 0`: the
+   version ellipsizes first, since a clipped mark reads as a rendering
+   fault. The brand file fixes a `width` attribute; the `svg` rule overrides
+   it so height alone decides the size. */
+.app-wordmark {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.app-wordmark svg {
+  display: block;
+  width: auto;
+  height: 18px;
+}
+
 /* A reported helm stamp can be up to 64 characters (skew.rs's display cap),
    wider than the sidebar; an ellipsis keeps the bar one line high and the
    skew banner still shows the full stamp when it matters. */

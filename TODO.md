@@ -56,8 +56,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   should still expand is part of the design.
 - **Launch composer shorthands.** Support `yolo` as shorthand for enabling yolo, along with `perms:yolo` and
   `perms:default`.
-- **Top-left Farhelm wordmark.** Add the Farhelm wordmark branding to the top-left of the window, reusing the same SVG
-  used for the wordmark in `docs/readme`.
 - **Session overflow-menu overhaul.** Overhaul the pop-up menus opened by clicking `...` for sessions so they look
   modern and are properly placed. The design is TBD and should be worked out when this TODO is planned.
 
