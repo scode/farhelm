@@ -5235,6 +5235,33 @@ impl HelmStore {
             let tx = conn
                 .transaction()
                 .context("beginning folder-refinement transaction")?;
+            // Several legacy observations can share a display spelling after
+            // that spelling has been repointed. Keep the newest observation
+            // before changing its primary key, so the subsequent bulk rename
+            // cannot make two rows claim the same canonical destination.
+            tx.execute(
+                "DELETE FROM folder_history AS alias
+                 WHERE alias.host_id = ?2 AND alias.host_identity = ?3
+                   AND alias.display_cwd = ?4 AND alias.canonical_cwd <> ?1
+                   AND alias.canonical_proven = 0
+                   AND EXISTS (
+                       SELECT 1 FROM folder_history AS newer
+                       WHERE newer.host_id = alias.host_id
+                         AND newer.host_identity = alias.host_identity
+                         AND newer.display_cwd = alias.display_cwd
+                         AND newer.canonical_cwd <> ?1
+                         AND newer.canonical_proven = 0
+                         AND (newer.ordering_kind > alias.ordering_kind
+                              OR (newer.ordering_kind = alias.ordering_kind
+                                  AND (newer.ordering_value > alias.ordering_value
+                                       OR (newer.ordering_value = alias.ordering_value
+                                           AND (newer.ordering_session_id < alias.ordering_session_id
+                                                OR (newer.ordering_session_id = alias.ordering_session_id
+                                                    AND newer.canonical_cwd < alias.canonical_cwd))))))
+                   )",
+                rusqlite::params![canonical_cwd, host, identity, display_cwd],
+            )
+            .context("discarding superseded folder aliases")?;
             // A prior launch may already have reached this canonical path by
             // another spelling. Move the newer observation's presentation
             // and ordering onto that row before dropping the alias, rather
@@ -7036,6 +7063,133 @@ mod tests {
                 creation_seq: Some(5),
             }],
             "one canonical history row keeps the latest launch's useful spelling and ordering"
+        );
+    }
+
+    /// A repointed legacy spelling can have several folder observations even
+    /// though each create is valid on its own. Refinement must retain the
+    /// newest suggestion, remove the colliding aliases, and remain safe to
+    /// repeat without touching unrelated or accepted destinations.
+    #[tokio::test]
+    async fn browse_refinement_keeps_newest_of_duplicate_display_aliases() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "duplicate-folders.example", "identity-a").await;
+        let first = SessionInfo {
+            cwd: "/submitted/link".to_string(),
+            canonical_cwd: None,
+            creation_seq: Some(1),
+            ..session("first-alias", 100)
+        };
+        store
+            .record_create_history(host, "identity-a", &first)
+            .await
+            .expect("record first spelling observation");
+        store
+            .refine_folder_history(host, "identity-a", &first.cwd, "/older-target")
+            .await
+            .expect("resolve the first observation before the spelling changes");
+
+        let newer = SessionInfo {
+            cwd: first.cwd.clone(),
+            creation_seq: Some(2),
+            ..session("newer-alias", 101)
+        };
+        let unrelated = SessionInfo {
+            cwd: "/unrelated".to_string(),
+            creation_seq: Some(3),
+            ..session("unrelated", 102)
+        };
+        let accepted = SessionInfo {
+            cwd: "/accepted-link".to_string(),
+            canonical_cwd: Some("/accepted-target".to_string()),
+            creation_seq: Some(4),
+            ..session("accepted", 103)
+        };
+        for entry in [&newer, &unrelated, &accepted] {
+            store
+                .record_create_history(host, "identity-a", entry)
+                .await
+                .expect("record another independent folder observation");
+        }
+
+        let before = store
+            .folder_history(host, "identity-a")
+            .await
+            .expect("read duplicate-alias premise");
+        assert_eq!(
+            before
+                .iter()
+                .filter(|folder| folder.display_cwd == first.cwd && !folder.canonical_proven)
+                .map(|folder| folder.canonical_cwd.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/submitted/link", "/older-target"],
+            "the history path leaves two unproven rows for one display spelling"
+        );
+
+        store
+            .refine_folder_history(host, "identity-a", &first.cwd, "/browse-target")
+            .await
+            .expect("refine duplicate display aliases");
+
+        let after = store
+            .folder_history(host, "identity-a")
+            .await
+            .expect("read refined folders");
+        assert_eq!(
+            after
+                .iter()
+                .filter(|folder| folder.display_cwd != first.cwd)
+                .cloned()
+                .collect::<Vec<_>>(),
+            before
+                .iter()
+                .filter(|folder| folder.display_cwd != first.cwd)
+                .cloned()
+                .collect::<Vec<_>>(),
+            "unrelated and accepted folder rows keep their exact presentation and order"
+        );
+        assert_eq!(
+            after
+                .iter()
+                .filter(|folder| folder.display_cwd == first.cwd)
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![FolderHistoryEntry {
+                host,
+                canonical_cwd: "/browse-target".to_string(),
+                canonical_proven: false,
+                display_cwd: first.cwd.clone(),
+                created_at: 101,
+                creation_seq: Some(2),
+            }],
+            "the newest observation supplies the sole row at the refined key"
+        );
+        assert!(
+            after.iter().any(|folder| {
+                folder.canonical_cwd == "/unrelated" && folder.display_cwd == "/unrelated"
+            }),
+            "a different display spelling remains in history"
+        );
+        assert!(
+            after.iter().any(|folder| {
+                folder.canonical_cwd == "/accepted-target"
+                    && folder.display_cwd == "/accepted-link"
+                    && folder.canonical_proven
+            }),
+            "the accepted canonical destination remains proven and unchanged"
+        );
+
+        store
+            .refine_folder_history(host, "identity-a", &first.cwd, "/browse-target")
+            .await
+            .expect("repeating refinement succeeds");
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read folders after repeat"),
+            after,
+            "a repeat browse does not create another observation or reorder history"
         );
     }
 

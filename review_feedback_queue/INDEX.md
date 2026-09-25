@@ -56,7 +56,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- `folder-history-rename-unique-failure.md` — folder-history rename fails the whole refinement on duplicate spellings.
 - `folder-merge-drops-newer-alias-into-proven.md` — folder merge deletes a newer alias without transferring it to a
   proven row.
 - `generic-session-accepts-placeholder-template.md` — placeholder resume template silently accepted for generic sessions
