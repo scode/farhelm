@@ -8292,6 +8292,25 @@ impl Supervisor {
                     .await;
                 if removed.is_ok() {
                     self.sessions.lock().await.remove(&reservation.session_id);
+
+                    // The row is now terminal, so no recovery path can consume
+                    // the previous attempt's launch evidence. Remove its
+                    // generation-zero files before returning the validation
+                    // refusal; if that safety cleanup cannot be confirmed,
+                    // keep the failure visible instead of hiding credentials
+                    // behind the ordinary refusal.
+                    if let Err(cleanup) = clear_launch_artifacts_fail_closed(
+                        &self.state_dir,
+                        &reservation.session_id,
+                        0,
+                    )
+                    .await
+                    {
+                        return Err(refusal.context(format!(
+                            "the retry was refused, but Farhelm could not confirm removal of \
+                             its previous launch artifacts: {cleanup}"
+                        )));
+                    }
                 }
                 removed
             }
@@ -23359,6 +23378,21 @@ exit 0
             .await
             .expect("seed the crashed attempt");
 
+        // A crash after the generation-zero spec was durable but before the
+        // shim consumed it leaves the credential-bearing launch spec behind.
+        // A sentinel would count as positive launch evidence and resolve the
+        // retry before validation, so this fixture deliberately proves that
+        // status file is absent while exercising the stranded-spec case.
+        let launch_spec = crate::launch::spec_path_for_launch(state.path(), "stranded", 0);
+        let launch_sentinel = crate::launch::status_path_for_spec(&launch_spec);
+        std::fs::write(&launch_spec, b"credential-bearing launch spec")
+            .expect("plant the stranded launch spec");
+        assert!(launch_spec.exists(), "fixture premise: launch spec exists");
+        assert!(
+            !launch_sentinel.exists(),
+            "fixture premise: no sentinel means validation can run"
+        );
+
         // The repoint, between the two attempts.
         std::fs::remove_file(&link).expect("unlink");
         std::os::unix::fs::symlink(&replacement, &link).expect("re-link");
@@ -23389,6 +23423,32 @@ exit 0
         assert!(
             sup.sessions.lock().await.is_empty(),
             "and nothing may have been launched"
+        );
+        assert!(
+            !launch_spec.exists() && !launch_sentinel.exists(),
+            "a refused retry must remove both stranded launch artifacts"
+        );
+        assert!(
+            sup.store
+                .session("stranded")
+                .await
+                .expect("read the settled session row")
+                .is_none(),
+            "the refused retry must remove the stranded durable row"
+        );
+        assert!(
+            matches!(
+                sup.store
+                    .reservation("key")
+                    .await
+                    .expect("read the settled intent")
+                    .expect("the intent tombstone remains"),
+                crate::store::Reservation {
+                    outcome: ReservationOutcome::Failed { .. },
+                    ..
+                }
+            ),
+            "the refused retry must settle its intent as Failed"
         );
     }
 
