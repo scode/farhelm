@@ -75,7 +75,9 @@ pub(crate) struct UploadQuery {
 /// empty chunks, and an endless supply of them is exactly the shape a
 /// no-progress transfer takes; rearming on any yielded item would let a
 /// client hold an upload open indefinitely while relaying nothing, so empty
-/// items take the fast path back to this wait without counting as progress.
+/// items must reach the same wait as an absent item without counting as
+/// progress; otherwise an always-ready source can starve both this deadline
+/// and the supervisor-ended notification.
 ///
 /// Sixty seconds matches `WRITER_STALL_TIMEOUT` and
 /// `UPLOAD_ACK_STALL_TIMEOUT` (`client.rs`), so every hop of one transfer
@@ -211,9 +213,15 @@ pub(crate) async fn upload_attachment(
         //
         // `now_or_never` polls with a throwaway waker, so a readiness
         // notification arriving during that poll would be dropped — which
-        // is harmless only because the `None` arm polls the same stream
-        // again, with a real waker, a few lines later.
-        let step = match body.next().now_or_never() {
+        // is harmless only because the wait path polls the same stream
+        // again, with a real waker, a few lines later. An empty fast-path
+        // item is treated like no ready item: it was consumed, but it did
+        // not make progress and must not skip that deadline-driven wait.
+        let ready = match body.next().now_or_never() {
+            Some(Some(Ok(bytes))) if bytes.is_empty() => None,
+            ready => ready,
+        };
+        let step = match ready {
             Some(next) => UploadStep::Body(next),
             None => {
                 if !pending.is_empty() {
@@ -277,10 +285,14 @@ pub(crate) async fn upload_attachment(
             // the browser's framing said so), so it is time to publish.
             UploadStep::Body(None) => break,
         };
-        // An empty chunk is a legal thing for a body stream to yield and
-        // carries no progress, so it neither reaches the supervisor nor
-        // extends the deadline.
+        // An empty chunk selected by the wait path is legal but carries no
+        // progress. Yield after it so an always-ready source cannot keep
+        // this task from being scheduled alongside the already-armed timer
+        // and supervisor notification. The next iteration reuses the same
+        // deadline; the empty item neither reaches the supervisor nor
+        // extends it.
         if chunk.is_empty() {
+            tokio::task::yield_now().await;
             continue;
         }
         // The received bytes end the browser wait. Any time spent checking,
@@ -1737,6 +1749,81 @@ mod tests {
             "a no-progress upload must report the shared stalled reason"
         );
 
+        peer.await.unwrap();
+    }
+
+    /// Empty items from an immediately-ready source must still yield to the
+    /// shared upload wait, where an upstream abort can end the request.
+    /// The stream is intentionally always-ready so only the select path can
+    /// observe the supervisor notification. Its poll-count assertion makes
+    /// a hot-loop regression fail promptly even if that loop starves the
+    /// request timeout itself.
+    #[farhelm_testtrace::test]
+    async fn upload_attachment_immediately_ready_empty_items_observe_supervisor_abort() {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        use tower::ServiceExt;
+
+        const SENTINEL: &str = "supervisor ended during empty upload items";
+        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let ControlMsg::BeginUpload {
+                req_id, channel, ..
+            } = request
+            else {
+                panic!("expected BeginUpload, got {request:?}");
+            };
+            writer
+                .write_control(&ControlMsg::UploadStarted { req_id, channel })
+                .await
+                .unwrap();
+            writer
+                .write_control(&ControlMsg::UploadAborted {
+                    channel,
+                    reason: SENTINEL.to_string(),
+                })
+                .await
+                .unwrap();
+        });
+
+        let harness = rest_harness::spliced_helm(client_side).await;
+        let app = harness.router();
+        let mut ready_items = 0;
+        let body_stream = futures_util::stream::poll_fn(move |_| {
+            ready_items += 1;
+            assert!(
+                ready_items <= 1000,
+                "relay repeatedly polled empty items without entering its wait"
+            );
+            std::task::Poll::Ready(Some(Ok::<Vec<u8>, std::io::Error>(Vec::new())))
+        });
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/sessions/sess-1/attachments")
+            .header("host", "127.0.0.1:7433")
+            .header("content-length", "4096")
+            .body(axum::body::Body::from_stream(body_stream))
+            .unwrap();
+
+        let response = tokio::time::timeout(Duration::from_secs(5), app.oneshot(request))
+            .await
+            .expect("immediately-ready empty items starved the upload wait")
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&body), SENTINEL);
         peer.await.unwrap();
     }
 

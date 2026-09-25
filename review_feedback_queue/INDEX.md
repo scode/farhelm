@@ -24,7 +24,6 @@ One line per open item. This file must always match the feedback files in this d
   edit.
 - `failed-forwarder-wedges-delete-until-restart.md` — one failed output-forwarder join wedges delete and archive until
   restart.
-- `helm-upload-fast-path-spin.md` — the helm's upload fast path can spin without a deadline.
 - `orphaned-install-temps-on-managed-hosts.md` — interrupted installs orphan payload-sized hidden files on managed
   hosts.
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
