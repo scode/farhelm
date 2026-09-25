@@ -43,6 +43,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
 - **Lowercase action buttons.** Use lowercase consistently for the top-right actions: `restart`, `replace`, `clone`, and `replace with`.
+- **Restart with.** Add a "restart with" action that resumes the session's own conversation under changed launch
+  settings, the resumed counterpart to "replace with". The motivating case: a Claude session launched without YOLO by
+  mistake. Today Restart replays the original argv, permission flags included, and "replace with" can switch to YOLO but
+  starts a fresh conversation, so there is no way to get YOLO and keep the conversation. Details to be worked out; this
+  likely depends on separating launch-only from resume-safe arguments, which SPEC.md currently defers, and it amends
+  SPEC.md's statement that Restart is the only relaunch mechanism.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
