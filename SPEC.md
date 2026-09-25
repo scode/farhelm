@@ -154,7 +154,7 @@ Its model is optional, with `auto`, `composer-2.5` and literal custom IDs suppor
 YOLO preserves explicit Cursor denies. There is no separate effort selector. Cursor uses generic activity status and has
 no conversation tracking, automatic Resume, configuration editing, hooks or instruction injection. The launcher states
 that tracking and Resume are unsupported. Restart starts fresh; history and clone preserve launch intent. See
-[Cursor](website/src/content/docs/docs/harnesses/cursor.md).
+[Cursor](website/src/content/docs/docs/agents/cursor.md).
 
 Grok is a structured harness for the official `grok` CLI. A normal launch is `grok --no-leader`; YOLO adds
 `--always-approve`. Farhelm exposes neither a Grok model picker nor an effort picker because those command-line
@@ -162,7 +162,7 @@ contracts have not been verified. Every generated fresh and resume command retai
 outside the tracked process's ownership boundary, while a private leader still permits Grok's native subagents. Grok
 uses generic activity status. The launch layer preserves its exact `grok --no-leader --resume <conversation-id>` argv,
 but it does not offer Resume until the capture integration has verified an exact conversation. See
-[Grok](website/src/content/docs/docs/harnesses/grok.md).
+[Grok](website/src/content/docs/docs/agents/grok.md).
 
 Muse support uses `muse` and `muse --yolo` with generic activity status. The yolo variant skips approval prompts and
 sandboxing and trusts the workspace for the run. Muse-specific hooks, conversation capture/resume, and waiting-state

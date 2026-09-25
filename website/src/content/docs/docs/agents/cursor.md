@@ -1,6 +1,8 @@
 ---
 title: Cursor
 description: Launching Cursor's agent CLI; conversation tracking and Resume are not supported.
+sidebar:
+  order: 10
 ---
 
 Farhelm can launch Cursor's `agent` CLI, with optional model selection and a YOLO permission choice. **Conversation

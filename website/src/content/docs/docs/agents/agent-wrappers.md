@@ -1,6 +1,8 @@
 ---
 title: Agent wrappers
 description: Running agents through a wrapper that changes directory and stays resident as the agent's parent.
+sidebar:
+  order: 60
 ---
 
 Some environments do not start agents directly; they start a wrapper — `wrapper run <dir> <agent...>` — that `cd`s into
@@ -61,7 +63,7 @@ Farhelm never second-guesses it: a generic profile whose invocation happens to s
 because that is what you picked. Basename derivation is the RAW-create rule, for a session started from a command line
 rather than a profile: the basename of the first word, exact equality, `claude` is Claude, `codex` is Codex, everything
 else generic. It is deliberately dumb rather than clever (see
-[Agent hook injection](/docs/concepts/agent-hook-injection/)) because the shapes it would have to be clever about —
+[Agent hook injection](/docs/agents/agent-hook-injection/)) because the shapes it would have to be clever about —
 wrappers, `env`, a command buried in a `bash -c` script string — cannot be recognized reliably, and the kind field is
 there so nothing has to try.
 
@@ -74,7 +76,7 @@ SPEC.md's verbatim fallback, and it is the one thing a generic profile does stil
 ## What the wrapper must pass through
 
 Farhelm appends exactly one thing to the END of the agent command line: the hook flags described in
-[Agent hook injection](/docs/concepts/agent-hook-injection/), on a launch whose kind is integrated and whose argv
+[Agent hook injection](/docs/agents/agent-hook-injection/), on a launch whose kind is integrated and whose argv
 qualifies — that document's table lists the shapes that disqualify it (a bare `--` anywhere, an existing `--settings`,
 codex hook configuration of your own), and a wrapper's own arguments are part of the argv those checks look at. A resume
 is not an exception to any of that. The resume invocation is a complete command line in its own right — farhelm replaces
