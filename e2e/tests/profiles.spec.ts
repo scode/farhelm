@@ -1,4 +1,4 @@
-// Agent profiles in a real browser: the app bar's helm-wide CRUD popup, the
+// Agent profiles in a real browser: the session list header's helm-wide CRUD popup, the
 // create dialog's explicit compatibility-picker transition, and SPEC.md's
 // snapshot rule as the session list shows it.
 //
@@ -66,7 +66,7 @@ function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
-/** The helm-wide profiles popup opened from the sidebar app bar. */
+/** The helm-wide profiles popup opened from the session-list header. */
 function section(page: Page) {
   return page.locator(".profiles-popover");
 }
@@ -219,7 +219,7 @@ async function openProfileEditor(row: Locator): Promise<Locator> {
 }
 
 /**
- * Close the popup with the same app-bar toggle that opened it.
+ * Close the popup with the same profile toggle that opened it.
  *
  * The toggle is a closer only while the popup is open: clicking it on an
  * already-dismissed popup reopens it, and the unmount wait below then fails
@@ -461,13 +461,13 @@ test.describe("agent profiles", () => {
   }
 
   /**
-   * The app-bar trigger opens the helm-wide popup with every release-owned
+   * The session list header trigger opens the helm-wide popup with every release-owned
    * profile, visibly distinguishes its immutable source, and keeps stored
    * rows actionable beside it.
    * This pins both the new entry point and the fact that management consumes
    * the same complete catalog as session creation.
    */
-  test("the app-bar popup distinguishes immutable built-ins from stored profiles", async ({ page, request }) => {
+  test("the session list header popup distinguishes immutable built-ins from stored profiles", async ({ page, request }) => {
     const stored = await createProfile(request, { name: `stored-${Date.now()}` });
     profiles.push(stored.id);
     await listWithStubbedFeed(page);
@@ -542,7 +542,7 @@ test.describe("agent profiles", () => {
   /**
    * The create form has the same attended-retry contract as the management
    * popup. This separately pins its closed-to-open edge so recovery cannot be
-   * accidentally left only on the app-bar entry point.
+   * accidentally left only on the profile entry point.
    */
   test("opening create retries a failed mount read under latched skew", async ({
     page,
@@ -1140,7 +1140,7 @@ test.describe("agent profiles", () => {
         };
         // Release during this trusted event rather than after Playwright makes
         // a second cross-process round trip. Promise continuations run after
-        // propagation, so the app bar has published its synchronous veto
+        // propagation, so the profile control has published its synchronous veto
         // before the held focus commit can continue.
         hold.release();
         document.removeEventListener("pointerdown", observeOutside, true);
@@ -1394,7 +1394,7 @@ test.describe("agent profiles", () => {
    * identical on screen; reading the helm catalog back proves the request
    * reached its authority.
    */
-  test("profile CRUD round-trips from the app-bar popup to the helm", async ({
+  test("profile CRUD round-trips from the session list header popup to the helm", async ({
     page,
     request,
   }) => {
@@ -2065,7 +2065,7 @@ test.describe("agent profiles", () => {
     await expect(section(page)).toHaveCount(1);
   });
 
-  /** Profiles are managed from the app bar, so no host row may advertise a
+  /** Profiles are managed from the session list header, so no host row may advertise a
    * second profile surface in its actions menu. */
   test("the host row menu has no profiles item", async ({ page, request }) => {
     const local = await localHostId(request);

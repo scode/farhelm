@@ -12,7 +12,7 @@ use crate::api::{
     self, ListSort, Preferences, SessionFilter, SessionListing, delete_session, fetch_hosts,
     fetch_session, fetch_sessions, queue_seen_write, rename_session, replace_session, stop_session,
 };
-use crate::app_bar::AppBar;
+use crate::app_bar::{AppBar, ProfilesControl};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostsPanel, HostsRead};
 use crate::ops::{OpLock, ReadGate};
@@ -411,7 +411,7 @@ fn clone_is_refused(
 /// ## One more read, shared (PLAN_M6_75.md item 8)
 ///
 /// Profiles add one always-active reader under exactly the same discipline
-/// (`profiles::use_catalog_surface`). The app-bar popup and create picker
+/// (`profiles::use_catalog_surface`). The list-header popup and create picker
 /// consume its answer together because profiles belong to the helm, not the
 /// selected host. Keeping the reader mounted with this page also means feed
 /// invalidations advance the answer while both consumers are closed.
@@ -800,7 +800,7 @@ pub(crate) fn ListView(
         }
     });
     // Opening the profile popup takes every other floating surface down. Its
-    // own busy guard is enforced by `AppBar`, so a mutation cannot strand the
+    // own busy guard is enforced by `ProfilesControl`, so a mutation cannot strand the
     // form by letting another surface replace it mid-request.
     use_effect(move || {
         if profiles_open() {
@@ -2313,10 +2313,6 @@ pub(crate) fn ListView(
 
     rsx! {
         AppBar {
-            profiles_open,
-            profiles,
-            ops,
-            layout_epoch,
         }
         // The host list is one permanent surface. Keeping the component
         // mounted is a lifecycle requirement, not only a layout choice:
@@ -2431,11 +2427,21 @@ pub(crate) fn ListView(
                 },
                     "new"
                 }
+                // Inside the heading row, immediately after New: the two are
+                // the list's header actions and must read as one pair, and the
+                // popup anchors below this trigger, so a trigger pushed onto a
+                // line of its own would also push the popup down.
+                ProfilesControl {
+                    profiles_open,
+                    profiles,
+                    ops,
+                    layout_epoch,
+                }
             }
-            // Keep the form immediately after its opener in DOM order:
-            // forward Tab from "new" must enter it, not skip past a form
-            // inserted above the heading. The opener remains in view above
-            // the draft and still provides its existing cancellation action.
+            // Keep the form after both header actions in DOM order: forward
+            // Tab visits the profile control beside New before entering the
+            // draft, and the New control remains above the draft with its
+            // existing cancellation action.
             if show_create() {
                 CreateSessionForm {
                     hosts: host_options.clone(),

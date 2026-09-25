@@ -31,7 +31,7 @@ test("the web shell hides the spacer and loads no bridge script", async ({ page 
   const spacer = bar.locator(".window-drag-region");
   // Fixture premise: the production header rendered with its controls.
   await expect(shell).toBeVisible({ timeout: 20_000 });
-  await expect(bar.locator(".profiles-toggle")).toBeVisible();
+  await expect(bar.locator(".profiles-toggle")).toHaveCount(0);
   await expect(bar.locator(".app-version")).not.toHaveText("");
 
   // The spacer exists in production markup (so geometry tests can force
@@ -50,7 +50,7 @@ test("the web shell hides the spacer and loads no bridge script", async ({ page 
   expect(pageErrors, "no page error while asserting the hidden spacer").toEqual([]);
 });
 
-test("the forced-class spacer fills only the gap between Profiles and the version", async ({
+test("the forced-class spacer fills only the gap before the version", async ({
   page,
 }) => {
   const pageErrors: Error[] = [];
@@ -59,10 +59,8 @@ test("the forced-class spacer fills only the gap between Profiles and the versio
   await page.goto("/");
   const shell = page.locator(".app-shell");
   const bar = page.locator(".app-bar");
-  const profiles = bar.locator(".profiles-toggle");
   const version = bar.locator(".app-version");
   const spacer = bar.locator(".window-drag-region");
-  await expect(profiles).toBeVisible({ timeout: 20_000 });
   await expect(version).not.toHaveText("");
 
   // Opt production markup into its macOS CSS, as sidebar.spec.ts's
@@ -71,18 +69,15 @@ test("the forced-class spacer fills only the gap between Profiles and the versio
   await shell.evaluate((element) => element.classList.add("macos-window"));
   await expect(spacer).toBeVisible();
 
-  const profilesBox = (await profiles.boundingBox())!;
   const versionBox = (await version.boundingBox())!;
   const spacerBox = (await spacer.boundingBox())!;
-  expect(profilesBox, "Profiles must have a box").not.toBeNull();
   expect(versionBox, "the version must have a box").not.toBeNull();
   expect(spacerBox, "the spacer must have a box").not.toBeNull();
   // The drag region is the gap and only the gap: strictly between the
   // two controls horizontally, sharing their row vertically.
-  expect(spacerBox.x).toBeGreaterThanOrEqual(profilesBox.x + profilesBox.width - 1);
   expect(spacerBox.x + spacerBox.width).toBeLessThanOrEqual(versionBox.x + 1);
-  expect(spacerBox.y).toBeLessThanOrEqual(profilesBox.y + profilesBox.height);
-  expect(spacerBox.y + spacerBox.height).toBeGreaterThanOrEqual(profilesBox.y);
+  expect(spacerBox.y).toBeLessThanOrEqual(versionBox.y + versionBox.height);
+  expect(spacerBox.y + spacerBox.height).toBeGreaterThanOrEqual(versionBox.y);
   // A zero-area spacer would satisfy the ordering above while owning
   // no pressable surface; the flex minimum is 12px (app.css).
   expect(spacerBox.width).toBeGreaterThan(0);
@@ -103,20 +98,11 @@ test("header controls stay interactive and text stays selectable beside the forc
   await page.goto("/");
   const shell = page.locator(".app-shell");
   const bar = page.locator(".app-bar");
-  const profiles = bar.locator(".profiles-toggle");
   const version = bar.locator(".app-version");
   const spacer = bar.locator(".window-drag-region");
-  await expect(profiles).toBeVisible({ timeout: 20_000 });
   await expect(version).not.toHaveText("");
   await shell.evaluate((element) => element.classList.add("macos-window"));
   await expect(spacer).toBeVisible();
-
-  // Control activation beside the spacer: Profiles still opens its
-  // popup, proving no spacer handler intercepts control presses.
-  await profiles.click();
-  await expect(page.locator(".profiles-popover")).toBeVisible({ timeout: 10_000 });
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".profiles-popover")).toBeHidden({ timeout: 10_000 });
 
   // Real text selection in the header: double-clicking the version
   // selects a word of its own text, proving header text stays

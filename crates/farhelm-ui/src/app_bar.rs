@@ -1,4 +1,4 @@
-//! The sticky sidebar bar: helm build identity and the helm-wide profiles popup.
+//! The sticky sidebar bar and the session-list profile control.
 //!
 //! The helm's reported build is available through the existing skew latch, so
 //! this surface stays a read-only view of that signal. It deliberately shows
@@ -21,7 +21,7 @@ use crate::reader::{Trigger, finish_before, sleep_ms};
 use crate::skew::{self, Skew};
 
 /// Keep the popup inside the viewport while anchoring its left edge to the
-/// app-bar trigger whenever the viewport has room.
+/// profile trigger whenever the viewport has room.
 fn profiles_popover_placement_style(placement: PanelPlacement) -> String {
     const MARGIN: f64 = 8.0;
     const GAP: f64 = 2.0;
@@ -339,7 +339,36 @@ async fn settled_profile_focus(focus: FocusCoordinator, trusted_outside: bool) -
     classify_profile_focus(deadline, trusted_outside).await
 }
 
-/// Render the sticky sidebar bar and its viewport-fixed profile manager.
+/// Render the sticky sidebar bar's build identity.
+#[component]
+pub(crate) fn AppBar() -> Element {
+    let skew = skew::HELM_BUILD_SKEW.read();
+    // A reported stamp is text the helm sent, so it goes through the same
+    // display boundary every relayed value does (`peer.rs`): invisible and
+    // direction-changing characters become visible escapes, and the element
+    // is bidi-isolated. The client build takes the same path for uniformity.
+    let version = display_peer(displayed_version(skew.as_ref()));
+
+    rsx! {
+        div {
+            class: "app-bar",
+            crate::window_chrome::WindowDragRegion {}
+            span {
+                class: "app-version peer-value",
+                dir: "ltr",
+                title: "this client was built as farhelm {skew::CLIENT_BUILD}",
+                "{version}"
+            }
+        }
+    }
+}
+
+/// Render the viewport-fixed helm-wide profile manager beside the session
+/// list's New control.
+///
+/// Keeping this separate from the sticky bar groups helm-wide profile
+/// management with the action that consumes it without changing the popup's
+/// focus and placement state machine.
 ///
 /// The open signal belongs to the list page so every other floating surface
 /// can enforce mutual exclusion. Geometry stays local because this component
@@ -349,19 +378,13 @@ async fn settled_profile_focus(focus: FocusCoordinator, trusted_outside: bool) -
 /// handoff while the popup reports a pending request. Focus-out never restores
 /// the toggle, so a real outside destination keeps the focus the user gave it.
 #[component]
-pub(crate) fn AppBar(
+pub(crate) fn ProfilesControl(
     mut profiles_open: Signal<bool>,
     profiles: CatalogSurface,
     ops: OpLock,
     layout_epoch: ReadSignal<u64>,
 ) -> Element {
     use_hook(install_profiles_outside_intent_tracking);
-    let skew = skew::HELM_BUILD_SKEW.read();
-    // A reported stamp is text the helm sent, so it goes through the same
-    // display boundary every relayed value does (`peer.rs`): invisible and
-    // direction-changing characters become visible escapes, and the element
-    // is bidi-isolated. The client build takes the same path for uniformity.
-    let version = display_peer(displayed_version(skew.as_ref()));
     let mut toggle_handle = use_signal(|| None::<Rc<MountedData>>);
     let mut placement = use_signal(|| PanelPlacement::Unmeasured);
     let mut open_generation = use_signal(|| 0_u64);
@@ -643,8 +666,7 @@ pub(crate) fn AppBar(
     });
 
     rsx! {
-        div {
-            class: "app-bar",
+        Fragment {
             button {
                 r#type: "button",
                 class: "btn btn-neutral profiles-toggle",
@@ -672,81 +694,74 @@ pub(crate) fn AppBar(
                 },
                 "profiles"
             }
-            crate::window_chrome::WindowDragRegion {}
-            span {
-                class: "app-version peer-value",
-                dir: "ltr",
-                title: "this client was built as farhelm {skew::CLIENT_BUILD}",
-                "{version}"
-            }
-        }
-        if profiles_open() {
-            div {
-                class: "profiles-popover",
-                style: profiles_popover_placement_style(placement()),
-                onkeydown: move |evt| {
-                    if evt.key() == Key::Escape && !evt.is_composing() && !ops.busy_now() {
-                        evt.prevent_default();
-                        dismiss_profiles.call(());
-                    }
-                },
-                button {
-                    r#type: "button",
-                    class: "profiles-escape-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| dismiss_profiles.call(()),
-                }
-                button {
-                    r#type: "button",
-                    class: "profiles-focusout-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| record_focus_out(false),
-                }
-                button {
-                    r#type: "button",
-                    class: "profiles-trusted-focusout-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| record_focus_out(true),
-                }
-                button {
-                    r#type: "button",
-                    class: "profiles-focus-recheck-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| reconsider_focus_out(),
-                }
-                button {
-                    r#type: "button",
-                    class: "profiles-focusin-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| {
-                        tentative_keyboard_focus.set(None);
-                        pending_focus_check.set(None);
-                        focus_coordinator.set_outside_obligation(None);
+            if profiles_open() {
+                div {
+                    class: "profiles-popover",
+                    style: profiles_popover_placement_style(placement()),
+                    onkeydown: move |evt| {
+                        if evt.key() == Key::Escape && !evt.is_composing() && !ops.busy_now() {
+                            evt.prevent_default();
+                            dismiss_profiles.call(());
+                        }
                     },
-                }
-                button {
-                    r#type: "button",
-                    class: "profiles-tab-start-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| reserve_keyboard_focus(),
-                }
-                button {
-                    r#type: "button",
-                    class: "profiles-tab-commit-relay",
-                    hidden: true,
-                    tabindex: "-1",
-                    onclick: move |_| commit_keyboard_focus(),
-                }
-                ProfilesPopup {
-                    surface: profiles,
-                    ops,
-                    focus_coordinator,
+                    button {
+                        r#type: "button",
+                        class: "profiles-escape-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| dismiss_profiles.call(()),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "profiles-focusout-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| record_focus_out(false),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "profiles-trusted-focusout-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| record_focus_out(true),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "profiles-focus-recheck-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| reconsider_focus_out(),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "profiles-focusin-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| {
+                            tentative_keyboard_focus.set(None);
+                            pending_focus_check.set(None);
+                            focus_coordinator.set_outside_obligation(None);
+                        },
+                    }
+                    button {
+                        r#type: "button",
+                        class: "profiles-tab-start-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| reserve_keyboard_focus(),
+                    }
+                    button {
+                        r#type: "button",
+                        class: "profiles-tab-commit-relay",
+                        hidden: true,
+                        tabindex: "-1",
+                        onclick: move |_| commit_keyboard_focus(),
+                    }
+                    ProfilesPopup {
+                        surface: profiles,
+                        ops,
+                        focus_coordinator,
+                    }
                 }
             }
         }

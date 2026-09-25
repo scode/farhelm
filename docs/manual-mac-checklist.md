@@ -9,9 +9,9 @@ Run this against the desktop candidate on an actual Mac. Browser WebKit checks c
 The initial implementation deliberately leaves these observations for the maintainer.
 
 - Confirm there is no separate gray app-title strip. Native traffic lights sit within the sidebar header without
-  covering Profiles or the version, and the session header and terminal tabs reach the window's top edge.
-- Drag the empty space between Profiles and the version. Confirm the window moves, while Profiles still opens its popup
-  and selecting header or terminal text does not move the window.
+  covering the version, and the session header and terminal tabs reach the window's top edge.
+- Drag the empty space beside the version. Confirm the window moves, while the Profiles button beside New in the session
+  list header opens its popup and selecting header or terminal text does not move the window.
 - Resize through ordinary and narrow widths, scroll the sidebar, and horizontally scroll a narrow window. Check that the
   traffic lights do not cover active controls, the version remains available, and the sticky header stays usable.
 - Enter and leave fullscreen using the native green button, reveal the fullscreen toolbar, and repeat resizing and
@@ -24,14 +24,14 @@ The initial implementation deliberately leaves these observations for the mainta
 
 Double-click maximize/restore on the same spacer:
 
-- Double-click the empty space between Profiles and the version: the window zooms; double-click again and it restores
-  the prior frame exactly. Repeat with a mouse and with a trackpad, and again after moving and resizing the window.
+- Double-click the empty space beside the version: the window zooms; double-click again and it restores the prior frame
+  exactly. Repeat with a mouse and with a trackpad, and again after moving and resizing the window.
 - Single-click the spacer without moving: nothing zooms. Press and drag: the window moves immediately, with no
   double-click-detection pause before the drag starts.
 - Exercise the awkward sequences: two slow separate clicks (no zoom), a triple click (zoom on press 2, restore on press
   3, no drag on either repeat), rapid repeated pairs, and a double-click with small accidental movement between the
   presses.
-- Probe the spacer's edges: press just beside Profiles and just beside the version; click Profiles (or header text) and
+- Probe the spacer's edges: press just beside the version; click the Profiles button beside New (or header text) and
   then the spacer quickly, and the reverse — a cross-target pair must not zoom or move the window. With the Profiles
   popup open, double-click the spacer and confirm the popup neither zooms the window nor breaks. Select header or
   terminal text, use session actions, and switch and create terminal tabs: none of those may move or zoom the window.
