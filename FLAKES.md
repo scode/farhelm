@@ -1098,3 +1098,19 @@ retain both observations and instrument the owned processes on recurrence.
 Class: unknown
 
 Cause: unknown
+
+## 2026-09-25 — Replace refusal row (e2e/tests/terminal-restart.spec.ts)
+
+`Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` timed out after 60 seconds in
+WebKit while locating the injected refusal row in full browser run `bd3fa658-dcf7-4820-8b68-67be5e4b89ed`. The same test
+passed unchanged on both engines in focused run `8b2b2c31-7608-4b6d-97b7-b11353f26554`. The full run started at
+`ac4e0f30ea54300748ab10e4cf1675669a2fcbba` with pending test and lint edits; the focused selection started clean at
+`25b0cc531551a8abb5e6be06faffdfb2c0c453d9`. Both ran on Linux x86_64 with one browser worker, zero retries, pinned tmux
+3.7c, executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`, and locale `C.UTF-8`.
+Ambient `FARHELM_*` was scrubbed; the recorder supplied `FARHELM_TEST_TRACE_DIR` and `FARHELM_PLAYWRIGHT_POLICY_FILE`.
+The failed boundary does not establish whether the injected listing was delivered; the cause remains unknown.
+Disposition: open (TODO.md); retain the trace and inspect listing interception and refresh on recurrence.
+
+Class: unknown
+
+Cause: unknown

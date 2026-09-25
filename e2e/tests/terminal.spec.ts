@@ -1406,14 +1406,13 @@ test("opening a terminal-less session shows its metadata and the server's own ex
   // there is nothing an upfront `toBeVisible` would add here.
   await rowByTitle(page, title).locator(".session-row-open").click();
 
-  // (a) metadata IS shown — title and titlebar `.meta` (cwd — invocation,
-  // farhelm-ui/src/lib.rs) render from the row's own fields, independent
-  // of whether a terminal ever comes up behind them. `toHaveText` retries
-  // on its own, so this needs no separate mount-readiness wait first.
+  // (a) metadata IS shown — title and the header's copyable cwd and
+  // invocation render from the row's own fields, independent
+  // of whether a terminal ever comes up behind them. Text assertions retry
+  // on their own; the copy controls also contain a clipboard glyph.
   await expect(page.locator(".titlebar .title")).toHaveText(title);
-  await expect(page.locator(".titlebar .meta")).toHaveText(
-    `${cwd} — ${invocation}`,
-  );
+  await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText(cwd);
+  await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText(invocation);
 
   // (b) the banner becomes visible and carries the server's own reason
   // (farhelm-ui/assets/terminal.js's showBanner, fed by serve_term's
@@ -2730,7 +2729,8 @@ test("stale-session-view-with-no-status-renders-metadata-and-no-badge", async ({
   await page.locator(`[data-session-id="${sessionId}"] .session-row-open`).click();
 
   await expect(page.locator(".titlebar .title")).toHaveText(sessionId);
-  await expect(page.locator(".titlebar .meta")).toHaveText("/tmp — sleep 600");
+  await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText("/tmp");
+  await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText("sleep 600");
   await expect(page.locator(".stale-metadata .status-badge")).toHaveCount(0);
   // The notice itself still renders: the point is a MISSING badge inside a
   // present stale surface, not a stale surface that failed to appear.
