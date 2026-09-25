@@ -408,10 +408,16 @@ async fn getent_passwd_shell_with_program(program: &Path, bound: Duration) -> Op
 /// Pull the shell field (the last colon-separated column) out of one
 /// `getent passwd` line (`name:passwd:uid:gid:gecos:home:shell`).
 ///
-/// `None` covers both an empty line and a trailing-empty shell field —
-/// both mean the entry has nothing usable, which the caller must treat
-/// the same way it treats `getent` being entirely absent.
+/// `None` covers a line with no passwd separator and a trailing-empty
+/// shell field. Neither provides a shell value, so the caller warns and
+/// lets the direct `getpwuid_r` lookup try the same account. Requiring a
+/// colon matters because without one the whole malformed line would
+/// otherwise look like a shell when selecting the last field.
 fn parse_getent_passwd_line(line: &str) -> Option<String> {
+    if !line.contains(':') {
+        return None;
+    }
+
     let shell = line.rsplit(':').next()?.trim();
     (!shell.is_empty()).then(|| shell.to_string())
 }
@@ -2308,6 +2314,13 @@ mod tests {
     #[farhelm_testtrace::test]
     fn parse_getent_passwd_line_rejects_empty_shell() {
         assert_eq!(parse_getent_passwd_line("root:x:0:0:root:/root:"), None);
+    }
+
+    /// Separator-free successful output is not a passwd record; treating
+    /// it as a shell would skip the warning and direct database fallback.
+    #[farhelm_testtrace::test]
+    fn parse_getent_passwd_line_rejects_missing_separator() {
+        assert_eq!(parse_getent_passwd_line("weird"), None);
     }
 
     /// A `getent` process that never answers must not hold shell resolution
