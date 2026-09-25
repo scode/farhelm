@@ -371,7 +371,13 @@ impl Supervisor {
                 }
             }
         }
-        if forwarder_error.is_none() && self.has_output_reap_for_session(session_id) {
+        // A live runtime-owned reaper still owns an output client, so the
+        // session cannot be destroyed yet. A durable Failed entry differs:
+        // its replacement barrier remains fail-closed, but no task is known
+        // to be holding the client, so Delete may make the safe tmux progress
+        // before returning its retained diagnostic.
+        let output_reap_blocked = self.has_output_reap_for_session(session_id);
+        if output_reap_blocked && forwarder_error.is_none() {
             forwarder_error = Some(
                 "a terminal-output client is still crossing its safe shutdown boundary".to_string(),
             );
@@ -394,10 +400,19 @@ impl Supervisor {
         // once the row removal has committed (see the
         // quarantining step's own comment).
         let mut quarantined: Option<PathBuf> = None;
+        let forwarder_error = forwarder_error;
         let teardown: Result<Vec<String>, String> = async {
-            if let Some(error) = forwarder_error {
-                return Err(error);
+            if output_reap_blocked {
+                // Reaping is the only state that still proves a runtime task
+                // owns an output client. Leave tmux and all durable state in
+                // place until a later Delete observes a settled barrier.
+                return Err(forwarder_error.expect("blocked output reap has a diagnostic"));
             }
+            // A join failure has already become durable Failed evidence.
+            // Killing tmux is safe progress for this failed attempt, but the
+            // retained diagnostic prevents us from claiming deletion. Resolve
+            // the target below, then return before artifacts or the row are
+            // removed so a retry owns the remaining cleanup.
             // Reload can deliberately retain a row without a terminal when
             // tmux has not exposed its pane yet. The durable name still
             // identifies the whole session, so delete must use it as the
@@ -442,6 +457,9 @@ impl Supervisor {
                     .kill_session(&tmux_name)
                     .await
                     .map_err(|e| format!("killing tmux session: {e:#}"))?;
+            }
+            if let Some(error) = forwarder_error {
+                return Err(error);
             }
             // EVERY generation's launch files, not just the current
             // one: they are named per launch now
@@ -677,6 +695,7 @@ impl Supervisor {
             }
         };
         self.sessions.lock().await.remove(session_id);
+        self.clear_failed_output_reaps_for_session(session_id);
         // Every former member's process teardown has now completed, and the
         // final membership is durably gone. Unlinking a preparation lock any
         // earlier could split a live shim's flock across two different inodes.
@@ -752,9 +771,11 @@ async fn cleanup_retired_preparation(state_dir: &std::path::Path, checkout_id: &
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use tokio::sync::{mpsc, oneshot, watch};
 
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, test_admission};
     use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
+    use super::super::terminals::{SessionSinkHandle, SessionSinkLease, SinkRegistryState};
     use super::*;
     use crate::store::{LastOutcome, StoredSession};
 
@@ -828,6 +849,139 @@ mod tests {
     /// politely does.
     fn working_scopes() -> crate::scope::ScopeManager {
         crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}))
+    }
+
+    /// A failed forwarder join must still kill the session's tmux server, but
+    /// the first Delete remains visibly incomplete so a retry can finish the
+    /// durable row cleanup. The fixture uses a real control client and tmux
+    /// session, then cancels only the forwarder task to reproduce its
+    /// JoinError boundary without changing the test process environment.
+    #[farhelm_testtrace::test]
+    async fn failed_forwarder_join_kills_tmux_then_retry_deletes_the_row() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (_state, sup, entry) = scoped_session(working_scopes(), &id).await;
+        let tmux_name = format!("fh-{id}");
+        let pane = sup
+            .tmux
+            .create_session(
+                &tmux_name,
+                "/",
+                80,
+                24,
+                &[],
+                &["sleep".to_string(), "60".to_string()],
+            )
+            .await
+            .expect("fixture premise: tmux session must be created before Delete");
+        assert!(
+            sup.tmux
+                .has_session(&tmux_name)
+                .await
+                .expect("fixture premise: probe tmux session")
+        );
+        let input = sup
+            .tmux
+            .open_input_client(&tmux_name, &pane)
+            .await
+            .expect("fixture premise: input client must attach");
+        let (_shutdown, _shutdown_rx) = oneshot::channel();
+        let (sink_state, _sink_state_rx) = watch::channel(None);
+        let sink_task = tokio::spawn(async { Ok::<_, anyhow::Error>(()) });
+        let sink = SessionSinkLease::new(
+            Arc::new(SessionSinkHandle {
+                tmux_name: tmux_name.clone(),
+                task: Some(sink_task),
+                shutdown: Some(_shutdown),
+                state: sink_state,
+            }),
+            Arc::new(std::sync::Mutex::new(SinkRegistryState::default())),
+        );
+        let (notify, _notify_rx) = mpsc::channel(2);
+        let (forwarder_shutdown, _shutdown_observer) = watch::channel(false);
+        let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
+        let (pause, _pause_rx) = watch::channel(None);
+        let forwarder = tokio::spawn(async {
+            std::future::pending::<()>().await;
+        });
+        // Inject the JoinError boundary without a panic; the teardown wrapper
+        // observes this cancellation as a failed forwarder join.
+        forwarder.abort();
+        sup.attachments.lock().await.insert(
+            crate::service::terminals::AttachmentKey::new(
+                &id,
+                crate::service::terminals::TerminalId::Agent,
+            ),
+            ActiveAttach {
+                channel: 7,
+                lease: "test".to_string(),
+                notify,
+                forwarder,
+                forwarder_shutdown,
+                forwarder_cleanup: cleanup_rx,
+                input,
+                pause,
+                sink,
+            },
+        );
+        drop(forwarder_cleanup);
+
+        let first = sup
+            .teardown_session(&entry, &id, test_admission(&sup).await)
+            .await;
+        let first_failed = matches!(
+            first,
+            Err(TeardownError::FailClosed(message)) if message.contains("forwarder")
+        );
+        assert!(
+            first_failed,
+            "first Delete must surface the injected forwarder failure"
+        );
+        assert!(
+            !sup.tmux
+                .has_session_for_terminal_less_delete(&tmux_name)
+                .await
+                .expect("tmux liveness after partial Delete"),
+            "first Delete must kill tmux even though it retains the row"
+        );
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read retained row")
+                .is_some(),
+            "first Delete must retain the row for retry"
+        );
+
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&id)
+            .cloned()
+            .expect("retained row reloads for retry");
+        let retry = sup
+            .teardown_session(&entry, &id, test_admission(&sup).await)
+            .await;
+        assert!(
+            retry.is_ok(),
+            "retry must complete after tmux teardown progress"
+        );
+        assert!(
+            sup.store
+                .session(&id)
+                .await
+                .expect("read deleted row")
+                .is_none(),
+            "successful retry must remove the durable row"
+        );
+        assert!(
+            !sup.output_reaps
+                .lock()
+                .expect("output-reap registry")
+                .keys()
+                .any(|key| key.session == id),
+            "successful Delete must prune failed output-reap evidence"
+        );
     }
 
     /// A failed scope kill must block delete without discarding the only row

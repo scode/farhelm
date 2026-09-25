@@ -906,7 +906,8 @@
   implementation requires significant new lifecycle state, recovery machinery, or broader design changes, defer the item
   with the blocker documented in TODO.md instead of expanding scope. Remove the feedback file and its
   `review_feedback_queue/INDEX.md` entry only when the bounded fix is complete; retain or narrow it if deferred.
-- Execution: `pending`.
+- Execution: `complete`; draft PR [#911](https://github.com/scode/farhelm/pull/911/changes) on bookmark
+  `pr/failed-forwarder-delete`, jj change `puuqrxks`.
 
 ## failed-delete-strands-attachments-in-quarantine.md
 

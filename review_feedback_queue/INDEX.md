@@ -21,8 +21,6 @@ One line per open item. This file must always match the feedback files in this d
   generation's exit.
 - `duplicate-freeze-clobbers-retarget-nudge.md` — retargeting a duplicate-frozen host loses the edit until a second
   edit.
-- `failed-forwarder-wedges-delete-until-restart.md` — one failed output-forwarder join wedges delete and archive until
-  restart.
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
   to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
