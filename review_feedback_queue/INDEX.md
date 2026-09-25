@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `pane-pid-recycled-before-sweep-binds-identity.md` — recycled pane pid can bind teardown's kill to an unrelated
-  process tree.
 - `refused-delete-discards-in-flight-upload.md` — refused delete still destroys an in-flight upload.
 - `refused-retry-strands-credential-spec.md` — refused create retry strands a credential-bearing launch spec on disk.
 - `restart-kills-tabs-reports-present.md` — fresh-terminal restart kills the session's tabs, then reports them as alive.

@@ -30,7 +30,10 @@ use super::launch_artifacts::{
 };
 use super::listing::list_all;
 use super::status::{dead_pane_exit_code, entry_info, observe_entry};
-use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree, stop_live_agent};
+use super::sweep::{
+    ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
+    stop_live_agent,
+};
 use super::teardown::TeardownError;
 use super::terminals::{
     ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
@@ -1088,7 +1091,7 @@ async fn handle_stop_session(
         // A dead or absent pane, or a terminal-less (restart-gap)
         // entry, all mean there is no live pid worth walking
         // ancestry from — but the environment-marker sweep still
-        // runs regardless (`root_pid: None`), because SPEC.md
+        // runs regardless (`root_identity: None`), because SPEC.md
         // assigns reaping any leftover descendants of a PAST run
         // to the session's next stop or delete, and the marker
         // scan is the only mechanism that can still find such a
@@ -1164,6 +1167,10 @@ async fn handle_stop_session(
         // stale pid a dead pane still reports is deliberately never
         // read; it may already be recycled.
         let alive_pane = pane_state.filter(|pane| !pane.dead);
+        // Bind the identity at the same liveness boundary as the stop
+        // decision. The stop intent and sweep may wait on durable I/O; a
+        // bare pid carried through that work could name a replacement.
+        let alive_identity = alive_pane.and_then(|pane| capture_process_identity(pane.pid));
 
         // What this stop records, and why the two branches differ.
         //
@@ -1195,7 +1202,7 @@ async fn handle_stop_session(
         // (`stop_live_agent`). The dead-or-absent path is this
         // handler's alone: it records a CLASSIFICATION rather than
         // an intent, and has no annotation to write.
-        let stop_error = if let Some(pane) = alive_pane {
+        let stop_error = if alive_pane.is_some() {
             // Nothing is read off the pane before the kill. A stop
             // used to capture an alternate-screen app's last frame
             // here and replay it on the dead pane afterwards; SPEC.md
@@ -1203,7 +1210,7 @@ async fn handle_stop_session(
             // last frame is not retained after it exits and no
             // snapshot of it is taken or stored. What the dead pane
             // shows is whatever tmux itself still holds.
-            stop_live_agent(&sup, &session_id, &entry, Some(pane.pid))
+            stop_live_agent(&sup, &session_id, &entry, alive_identity)
                 .await
                 .err()
                 .map(|failure| failure.message())

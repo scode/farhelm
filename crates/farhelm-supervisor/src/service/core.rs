@@ -31,8 +31,8 @@ use super::launch_artifacts::{
     wrapper_failure_detail,
 };
 use super::sweep::{
-    ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor, launch_scope_unit,
-    reap_process_tree, stop_live_agent,
+    ScopeKillFailure, ScopeUnits, StopFailure, SweepTarget, TabReapAnchor,
+    capture_process_identity, launch_scope_unit, reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, OutputReapRegistry, SINK_READY_TIMEOUT, SinkRegistry,
@@ -9967,7 +9967,11 @@ impl Supervisor {
             None => None,
         };
         let alive_pane = pane_state.filter(|pane| !pane.dead);
-        if let Some(pane) = alive_pane {
+        // Capture the pane identity before recording the stop intent. That
+        // write and the subsequent sweep may outlive the original process;
+        // the start time prevents a recycled pid from becoming the root.
+        let alive_identity = alive_pane.and_then(|pane| capture_process_identity(pane.pid));
+        if alive_pane.is_some() {
             if !stop_if_running {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
@@ -9977,7 +9981,7 @@ impl Supervisor {
                 )
                 .into());
             }
-            if let Err(failure) = stop_live_agent(self, session_id, &entry, Some(pane.pid)).await {
+            if let Err(failure) = stop_live_agent(self, session_id, &entry, alive_identity).await {
                 match failure {
                     // The tree IS stopped and only the bookkeeping is
                     // behind — and the outcome it failed to write is one
@@ -12003,14 +12007,14 @@ impl Supervisor {
         tab_id: &str,
         anchor: TabReapAnchor,
     ) -> anyhow::Result<()> {
-        let root_pid = match anchor {
+        let root_identity = match anchor {
             TabReapAnchor::PaneIfLive => match self
                 .tmux
                 .pane_process(&terminal.tmux_name, &terminal.pane)
                 .await
                 .context("reading a terminal tab's pane process before reaping it")?
             {
-                PaneProbe::Owned(state) if !state.dead => Some(state.pid),
+                PaneProbe::Owned(state) if !state.dead => capture_process_identity(state.pid),
                 PaneProbe::Owned(_) | PaneProbe::Gone => None,
                 // A RECOGNIZED foreign owner gives no root to walk from —
                 // the recorded pane died with a previous tmux server, and
@@ -12051,7 +12055,7 @@ impl Supervisor {
         reap_process_tree(
             &self.seams.scopes,
             units,
-            root_pid,
+            root_identity,
             session_id,
             &SweepTarget::Tab(tab_id.to_string()),
             ScopeKillFailure::Warn,
