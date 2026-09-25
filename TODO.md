@@ -64,6 +64,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Top-bar path and argument truncation.** Let the home-directory and agent-argument indicators use the available
   horizontal space before truncating with ellipses; they currently truncate far too early and leave a large gap before
   the action buttons.
+- **Profiles button placement and styling.** Move the `profiles` button next to the `new` session button and match its
+  style, using the secondary theme instead of the primary theme.
+- **Top-left Farhelm wordmark.** Add the Farhelm wordmark branding to the top-left of the window, reusing the same SVG
+  used for the wordmark in `docs/readme`.
+- **Session overflow-menu overhaul.** Overhaul the pop-up menus opened by clicking `...` for sessions so they look modern
+  and are properly placed. The design is TBD and should be worked out when this TODO is planned.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
