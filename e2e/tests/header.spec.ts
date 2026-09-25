@@ -128,7 +128,8 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
   // (or truncated one to the other's length) would show up as a mismatch
   // rather than passing by coincidence.
   const title = `${marker}-title-${"a".repeat(250)}`;
-  const invocation = `sleep 300 #${"b".repeat(250)}`;
+  // The readiness marker must come from the process this fixture actually launches.
+  const invocation = `${FAKE_AGENT_INVOCATION} #${"b".repeat(250)}`;
   const session = await createSession(request, {
     title,
     cwd: "/tmp",
@@ -143,7 +144,7 @@ test("oversized title and copy fields overflow their boxes, with full tooltips",
     await waitForTermText(page, "FAKE-AGENT READY");
     await expect(page.locator(".titlebar .title")).toHaveAttribute("title", title);
     await expect(page.locator(".titlebar .header-copy").nth(0)).toHaveAttribute("title", /\/tmp/);
-    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute("title", /sleep 300/);
+    await expect(page.locator(".titlebar .header-copy").nth(1)).toHaveAttribute("title", `${invocation} — click to copy`);
 
     // `scrollWidth > clientWidth` is the DOM's own proof of a truncated
     // single-line box (`white-space: nowrap; overflow: hidden` on both
@@ -243,7 +244,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
 
     await page.getByRole("button", { name: "Replace with", exact: true }).click();
     await expect(form).toBeVisible();
-    await expect(form.locator(".create-session-submit")).toHaveText("replace");
+    await expect(form.locator(".create-session-submit")).toHaveText(/^replace\s+local \(this machine\) · \/tmp$/);
     await form.getByRole("button", { name: "cancel", exact: true }).click();
     await expect(form).toHaveCount(0);
   } finally {

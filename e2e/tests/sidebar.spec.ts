@@ -3696,7 +3696,7 @@ test("the empty-fleet placeholder appears only when proven and yields to auto-se
   await feed.waitForConnection(1);
   feed.notify(1);
 
-  await expect(page.locator(".main-empty")).toHaveText("no active sessions — create one", {
+  await expect(page.locator(".main-empty")).toHaveText("no sessions — create one", {
     timeout: 20_000,
   });
 
@@ -4460,7 +4460,7 @@ test("composer keeps arbitrary model-first choices reviewable", async ({ page, r
   // in this invocation may have set to yolo.
   await form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "default", exact: true }).click();
   await expect(form.locator(".launch-composer-summary")).toHaveText(
-    "model: reviewable-codex · effort: default · permissions: default",
+    "model: reviewable-codex · effort: default · permissions: default · trust: default",
   );
 });
 
@@ -5074,7 +5074,7 @@ test("composer local-home reset takes over a remote open destination", async ({ 
     await expect(form.getByLabel("folder", { exact: true })).toHaveValue("~");
     const localName = hosts.hosts.find((host: { id: number }) => host.id === local).name;
     const destinationPeers = form.locator(".launch-composer-launch-context .peer-value");
-    await expect(destinationPeers.nth(0)).toHaveText(localName);
+    await expect(destinationPeers.nth(0)).toHaveText(`local (${localName})`);
     await expect(destinationPeers.nth(1)).toHaveText("~");
     await form.getByRole("button", { name: "Codex", exact: true }).click(); await form.locator("button[type=submit]").click();
     await expect.poll(() => posts.length).toBe(1); expect(posts[0]).toMatchObject({ host: local, cwd: "~" });
@@ -5150,7 +5150,7 @@ test("composer local-home reset takes over a remote clone destination", async ({
     await form.getByRole("button", { name: "reset destination to local home" }).click();
     await expect(hostSelect).toHaveValue(String(local));
     await expect(folder).toHaveValue("~");
-    await expect(destinationPeers.nth(0)).toHaveText(hosts.hosts.find((host: { id: number }) => host.id === local).name);
+    await expect(destinationPeers.nth(0)).toHaveText(`local (${hosts.hosts.find((host: { id: number }) => host.id === local).name})`);
     await expect(destinationPeers.nth(1)).toHaveText("~");
     await expect(codex, "reset destination must not discard the inherited harness").toHaveAttribute("aria-pressed", "true");
     await expect(form).toHaveAttribute("data-clone-form-identity", "owned");
@@ -5579,7 +5579,7 @@ test("composer Enter on a focused recent launches the filled setup", async ({ pa
     // click that silently did nothing.
     await expect(form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(form, "an admitted recent names the active structured launch, not the dormant command").toHaveAttribute("data-composer-mode", "structured");
-    await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo");
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: enter-model · effort: high · permissions: yolo · trust: default");
     expect(posts, "clicking a recent only fills the draft").toHaveLength(0);
     // Re-enter command mode so keyboard activation proves the same whole-draft
     // transition independently of the pointer path above.
@@ -5856,7 +5856,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · local (this machine) · /composer-reset");
-  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo · trust: default");
   await expect(form.locator(".launch-composer-summary .launch-composer-danger")).toHaveText("yolo");
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await refill();
@@ -5903,7 +5903,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · local (this machine) · /composer-reset");
-  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo · trust: default");
 
   await refill();
   await expect(status).toHaveCount(0);

@@ -28,9 +28,31 @@ After the paragraph, add `Class: <class>` and `Cause: <confidence>` as separate 
 `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new entries. Missing historical fields
 are missing evidence, not an implicit cause classification.
 
+## 2026-09-25 — composer controls inside the initial viewport (e2e/tests/sidebar.spec.ts)
+
+`composer keeps launch and cancel inside the initial viewport at default and narrow width` failed in Chromium during
+interrupted full browser run `946f3bb1-6398-4bbc-9ece-7ab6232be092` on Linux x86_64, then passed unchanged among the
+exact failing-test selections in run `51f444c3-d0db-4e33-bd27-32b6d429c3a7`. The full run used clean release commit
+`c47e3463ec09121492ecf90f8184c69278d59f37`; the rerun used clean test-fix commit
+`2c25bf3ba22719fbe3896b18270d1c0194696379` with unchanged RC application builds. Both used one browser worker and zero
+retries, locale `C.UTF-8`, and scrubbed ambient `FARHELM_*`; only recorder-owned `FARHELM_TEST_TRACE_DIR` was supplied.
+Tmux executable identity is unavailable because these runs did not record it. The original interruption left no final
+assertion report, so the failed geometry condition and cause remain unknown. Disposition: open (TODO.md); reproduce with
+retained layout measurements before changing the bounds assertion.
+
+Class: unknown
+
+Cause: unknown
+
 ## 2026-09-25 — `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` (crates/farhelm-supervisor/src/working_copies.rs)
 
-The workspace nextest battery failed this identity-mismatch test once on the Linux x86_64 worker, while the exact test passed immediately afterward in isolation. Retained full run `131912d5-0ee2-4313-a204-38edf6fc942c`; exact rerun `d7979320-cea3-4707-9f98-e0fbe2df7c67`; tested commit `6f238ccab7ed8420f78c896ba1ed207947b03cdd` with the lifecycle-harness tree dirty. Selection was `workspace Rust targets` versus the exact test, both with four nextest slots and zero retries, pinned tmux 3.7c executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`, locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed. The cause is unknown; retain the full-run failure and investigate the concurrent filesystem premise before changing reconciliation behavior. Disposition: open (TODO.md).
+The workspace nextest battery failed this identity-mismatch test once on the Linux x86_64 worker, while the exact test
+passed immediately afterward in isolation. Retained full run `131912d5-0ee2-4313-a204-38edf6fc942c`; exact rerun
+`c44ac1bf-bcce-49b0-8a44-5d9633c5172f`; tested commit `6f238ccab7ed8420f78c896ba1ed207947b03cdd` with the
+lifecycle-harness tree dirty. Selection was `workspace Rust targets` versus the exact test, both with four nextest slots
+and zero retries, pinned tmux 3.7c executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`,
+locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed. The cause is unknown; retain the full-run failure and investigate
+the concurrent filesystem premise before changing reconciliation behavior. Disposition: open (TODO.md).
 
 Class: process-interference
 
@@ -1060,3 +1082,19 @@ executable SHA256 `ebc01bf8f9226634bda074fc7daf1c13dfbe2a89858eb3c6c32c96342d02f
 Class: fixture-premise
 
 Cause: established
+
+## 2026-09-25 — parent SIGTERM cleanup (scripts/test-start-stack-cleanup.sh)
+
+The isolated browser-stack cleanup check left its HTTP port, state directory, stack-info file and service processes
+alive after its spawner received SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`; parent SIGKILL and direct script
+SIGTERM passed. The unchanged script passed all phases in repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45`. Both ran on
+Linux x86_64 with one stack phase at a time and pinned tmux 3.7c, executable SHA256
+`9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`, locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed;
+the recorder supplied only `FARHELM_TEST_TRACE_DIR`. The working tree contained pending browser-test, lint and
+formatting changes above `2c25bf3ba22719fbe3896b18270d1c0194696379`; application builds used the main-source version.
+Neither run captured watcher state at the failed boundary, so the cause remains unknown. Disposition: open (TODO.md);
+retain both observations and instrument the owned processes on recurrence.
+
+Class: unknown
+
+Cause: unknown
