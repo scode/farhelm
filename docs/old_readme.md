@@ -17,8 +17,8 @@ launches that actually receive the flags — a launch farhelm skips, or one you 
 Codex prints a warning line about the bypass, and any hook in Codex's active configuration home (`$CODEX_HOME` when it
 is set, `~/.codex` otherwise) that you have NOT trusted will run during those sessions. Claude Code sessions get an
 equivalent hook without a trust bypass. See
-[the agent hook injection page](../website/src/content/docs/docs/concepts/agent-hook-injection.md) for what the hook
-does, what it never does, and how to turn it off.
+[the agent hook injection page](../website/src/content/docs/docs/agents/agent-hook-injection.md) for what the hook does,
+what it never does, and how to turn it off.
 
 ## Install
 
@@ -151,7 +151,7 @@ Linux" below).
   helm catalog.
 - If you start agents through a launcher that wants the directory as an argument (`my-wrapper run <dir> claude`), write
   `{cwd}` where the directory goes and set the profile's agent kind — see
-  [the agent wrappers page](../website/src/content/docs/docs/concepts/agent-wrappers.md).
+  [the agent wrappers page](../website/src/content/docs/docs/agents/agent-wrappers.md).
 
 To use an ordinary browser instead of (or alongside) the app window, open `http://127.0.0.1:7433/` and paste the token
 printed by `farhelm helm token show`. `farhelm helm token rotate` replaces that token and invalidates every browser that
