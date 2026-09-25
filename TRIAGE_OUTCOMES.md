@@ -1018,7 +1018,7 @@
 - Completion criteria: no settled old-destination outcome can publish after a retarget nudge; focused deterministic
   tests cover the pending-nudge boundary for connected, mismatch, unverified, and failed outcomes, plus ordinary
   no-nudge behavior; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `complete`; the actor now discards any settled connection result when a retarget nudge is pending, while interrupted outcomes retain their own fresh-window decision. Focused pinned recorder run `a3b9b1b2-3db3-4296-9ae0-1baef377f1ba` passed four boundary tests (820 skipped); the isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed. The first Astra review's High finding was corrected and a fresh follow-up review reported `No entries. OK`. Draft PR [#920](https://github.com/scode/farhelm/pull/920/changes) is on bookmark `pr/stale-dial-publication`, implementation commit `930716226599450e375f016bf002bf4795c3b8c7`.
+- Execution: `complete`; the actor now discards any settled connection result when a retarget nudge is pending, while interrupted outcomes retain their own fresh-window decision. Focused pinned recorder run `a3b9b1b2-3db3-4296-9ae0-1baef377f1ba` passed four boundary tests (820 skipped); the isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed. The first Astra review's High finding was corrected and a fresh follow-up review reported `No entries. OK`. Draft PR [#920](https://github.com/scode/farhelm/pull/920/changes) is on bookmark `pr/stale-dial-publication`, implementation commit `bef928a24cf9`.
 
 ## stripped-agent-marker-forges-killable-tab.md
 
@@ -1044,7 +1044,7 @@
   isolation. Focused pinned recorder run `6bdf9b00-01d6-49f4-ba54-5aa7232092bf` passed four tests (863 skipped); the
   isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed.
   Fresh Astra medium review reported `No entries. OK`. Draft PR [#921](https://github.com/scode/farhelm/pull/921/changes)
-  is on bookmark `pr/stripped-agent-marker`; implementation commit `1ab84dc8b02f794d3247fd3751fded16af5ed92b`.
+  is on bookmark `pr/stripped-agent-marker`; implementation commit `9cd45aea0836`.
 
 ## discard-quarantined-hangs-response.md
 
@@ -1077,4 +1077,10 @@
   edited destination is retried under the fresh-window rules, ordinary duplicate freezing still works, and a focused
   regression covers the race. Remove the feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
   change.
-- Execution: `pending`.
+- Execution: `complete`; both duplicate publication boundaries now consume a pending retarget nudge before restoring the
+  old duplicate state, preserving the fresh retry window and reloading the edited destination. Focused pinned recorder
+  run `54c13d4f-c4d1-4979-b765-9cd0ac597338` passed six duplicate and retarget tests; the isolated sleep checker passed
+  226 delays with zero missing rationales; formatting, diff, and changelog checks passed. The initial assertion-only
+  recorder failure is retained and documented. Fresh Astra medium review reported `No entries. OK`. Draft PR
+  [#924](https://github.com/scode/farhelm/pull/924/changes) is on bookmark `pr/duplicate-freeze-retarget`; the
+  implementation commit is `5f4bdac86887`.
