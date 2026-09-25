@@ -978,7 +978,7 @@
 - Completion criteria: refused retries remove the corresponding launch spec and sentinel; valid retries and ordinary
   launch recovery retain their current behavior; focused regression coverage proves cleanup; remove this feedback file
   and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `pending`.
+- Execution: `complete`; refused keyed retries now remove the stranded generation-zero launch spec and sentinel after settling the durable row, while preserving the original refusal and surfacing cleanup failure. Focused recorded nextest run `fbd09538-c841-47db-99e1-cf7b698d7b9b` passed four retry lifecycle tests (856 skipped); formatting, changelog, and isolated sleep checks passed. Draft PR [#918](https://github.com/scode/farhelm/pull/918/changes) is on bookmark `pr/refused-retry-launch-cleanup`, jj change `2a176be0e560`.
 
 ## restart-kills-tabs-reports-present.md
 
