@@ -42,6 +42,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
+- **Lowercase action buttons.** Use lowercase consistently for the top-right actions: `restart`, `replace`, `clone`, and `replace with`.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
