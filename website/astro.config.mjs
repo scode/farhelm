@@ -1,4 +1,5 @@
 import starlight from '@astrojs/starlight';
+import starlightLinksValidator from 'starlight-links-validator';
 import { defineConfig } from 'astro/config';
 
 // The published site is one Astro project that will eventually carry the
@@ -29,6 +30,16 @@ export default defineConfig({
         root: { label: 'English', lang: 'en' },
       },
       customCss: ['./src/styles/farhelm.css'],
+      // Every internal link, heading anchors included, is checked at build
+      // time, so a moved page or a renamed heading fails `bun run build`
+      // (and with it CI and the Vercel deploy) instead of shipping a dead
+      // link. The pages cross-reference each other heavily by design (see
+      // AGENTS.md next to this file), which is what makes this worth a
+      // hard failure. The defaults already reject relative links, which
+      // the pages do not use; the one change is refusing links written as
+      // full https://farhelm.io URLs, which the plugin would otherwise skip
+      // unchecked, so every internal link stays a checked site path.
+      plugins: [starlightLinksValidator({ sameSitePolicy: 'error' })],
       // The sidebar is the documentation's outline, in reading order: a
       // guided first run, task guides, agents, then the mental model.
       // Groups autogenerate from their directories and pages order

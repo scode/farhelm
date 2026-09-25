@@ -146,10 +146,10 @@ that its required systemd or SSH substrate ran.
   container image and the tmux build are both cached after the first run.
 - `dprint check`
 - `cd website && bun install --frozen-lockfile && bun run build` — the docs website (Astro + Starlight) must build; this
-  is what catches a page with missing frontmatter or a sidebar slug that names no page. Bun is the package manager the
-  Vercel project is configured with, so the lockfile is `bun.lock`; commit it with any dependency change. The build
-  itself runs under Node (the `astro` binary's shebang), and Astro refuses Node older than 22.12; the CI job pins Node
-  for that reason.
+  is what catches a page with missing frontmatter, a sidebar slug that names no page, or a broken internal link or
+  anchor. Bun is the package manager the Vercel project is configured with, so the lockfile is `bun.lock`; commit it
+  with any dependency change. The build itself runs under Node (the `astro` binary's shebang), and Astro refuses Node
+  older than 22.12; the CI job pins Node for that reason.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
