@@ -353,11 +353,13 @@ case the amber `old version` advisory is shown. Other phases use humanized prose
 their data attribute. A protocol-incompatible supervisor remains the red `needs update` case; an unparseable build
 leaves a connected host's age unknown and keeps the ordinary connected label. Each row's effective disclosure is the
 global checkbox OR that row's automatic update disclosure: the checkbox is the user's preference and no update writes
-it, while an update expands only its own row at click acceptance, follows the accepted or observed running run under it,
-and collapses that automatic half only on authoritative success for the exact tracked run. Provisioning commands live in
-the row menu, but setup's confirmation and active or retained progress stay under the row because that lifecycle owns
-more context than a floating menu can safely hold. Starting setup opens details before planning, while a running or
-failed retained run leaves one short trace when details are closed.
+it, while an update keeps its row folded during planning and execution, shows a pending status until a progress snapshot
+is available, and then publishes compact step/count/elapsed progress beside the row status. A failed run or unresolved
+diagnostic opens that row; authoritative success clears the automatic half for the exact tracked run. Provisioning
+commands live in the row menu, but setup's confirmation and active or retained progress stay under the row because that
+lifecycle owns more context than a floating menu can safely hold. Starting setup opens details before planning, while a
+running or failed retained run leaves one short trace when details are closed. The one exception is an update whose
+status is showing inline: the trace would only repeat it, so it is left out until that status clears.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
 contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to

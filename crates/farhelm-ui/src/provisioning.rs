@@ -44,14 +44,17 @@
 //! Effective details for a row is the global checkbox OR that row's automatic
 //! disclosure, and the two are owned separately: the checkbox is the user's
 //! preference and nothing here writes it for an update, while the panel
-//! publishes its own row into the parent's automatic set from the intent,
-//! the tracked run, and any unresolved update diagnostic (see
-//! [`update_auto_disclosed`]). An update expands its row at click acceptance,
-//! follows the accepted or observed running run, and collapses only on an
-//! authoritative success for the exact tracked run id — never on a 202, a
-//! planning success, a bare Connected, or an unrelated run's completion.
+//! publishes its own row's disclosure and compact update status beside one
+//! another (see [`update_auto_disclosed`]). A running update reports progress
+//! in the host row rather than opening its step list; failures and unresolved
+//! outcomes still open that row. While that inline status shows, the folded
+//! row's one-line run trace is not drawn, since it would only repeat it.
+//! Success clears the automatic disclosure only for the exact tracked run
+//! id — never on a 202, a planning success, a bare Connected, or an
+//! unrelated run's completion.
 
 use std::collections::{HashMap, HashSet};
+use web_time::Instant;
 
 use dioxus::prelude::*;
 
@@ -316,6 +319,68 @@ struct TrackedRun {
     /// superseding observation can tell a finished run from one whose
     /// outcome was never seen.
     last_status: Option<ProvisioningStatus>,
+    /// Client-local monotonic origin for elapsed display; the helm's view has
+    /// no timestamps, and a reload intentionally starts a fresh observation.
+    started_at: Instant,
+}
+
+/// The compact status the host row can show without opening the step list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HostUpdateProgress {
+    /// Planning or acceptance is underway, before a usable run snapshot exists.
+    Pending(UpdatePendingPhase),
+    /// A tracked run has a live progress snapshot and a local elapsed origin.
+    Running(UpdateProgressSummary),
+}
+
+/// Which lifecycle stage a pending `updating…` status stands for.
+///
+/// The user sees the same `updating…` in every stage; the stage is published
+/// only as the row's `data-update-phase` attribute. It exists because the
+/// row no longer opens its details while an update runs, so the planning,
+/// waiting-for-claim, and submitting indicators inside those details are
+/// hidden, and browser tests that hold one of those boundaries still need to
+/// observe which one the UI actually reached. A response arriving does not
+/// prove that: the UI may not have processed it yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpdatePendingPhase {
+    /// The update click was accepted and its plan request is in flight.
+    Planning,
+    /// A minted plan is stored, waiting for the page operation lock.
+    WaitingForClaim,
+    /// The plan's submission POST is outstanding.
+    Submitting,
+    /// A live tracked UPDATE run exists, but no running snapshot for that
+    /// exact run has been read yet: the gap between a 202 and the first
+    /// read, or a displayed view that names some other run.
+    AwaitingProgress,
+}
+
+impl UpdatePendingPhase {
+    /// Stable attribute value, a browser handle like `data-provisioning-status`.
+    pub(crate) fn attribute(self) -> &'static str {
+        match self {
+            Self::Planning => "planning",
+            Self::WaitingForClaim => "waiting",
+            Self::Submitting => "submitting",
+            Self::AwaitingProgress => "awaiting-progress",
+        }
+    }
+}
+
+/// The small per-host summary published from the provisioning panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpdateProgressSummary {
+    /// The exact tracked run id, so replacing a run also replaces its clock.
+    pub(crate) run_id: String,
+    /// First executor-ordered `running` step, absent when the view names none.
+    pub(crate) current_step: Option<String>,
+    /// Steps in a terminal state: completed, skipped, degraded, or failed.
+    pub(crate) done: usize,
+    /// All executor steps in the snapshot, including pending work.
+    pub(crate) total: usize,
+    /// Client-local monotonic start; never a helm timestamp or persisted value.
+    pub(crate) started_at: Instant,
 }
 
 /// One unresolved update diagnostic, kept apart from observed progress.
@@ -358,20 +423,100 @@ fn authoritative_update_success(view: &ProvisioningView, tracked: &TrackedRun) -
 
 /// Whether this row's automatic disclosure is currently owed.
 ///
-/// A live intent, a followed UPDATE run that has not authoritatively
-/// succeeded, or any unresolved update diagnostic each independently hold
-/// the row open. ADD runs never hold it: setup confirmation and its global
+/// Only update failures, unresolved diagnostics, or a failed progress read during a live UPDATE open the row.
+/// Running intent and progress stay inline; ADD confirmation and its global
 /// reveal are unchanged, and a merely observed ADD run is trace enough.
 fn update_auto_disclosed(
-    intent: Option<&UpdateIntent>,
     tracked: Option<&TrackedRun>,
     error: Option<&UpdateDiagnostic>,
     warning: Option<&UpdateDiagnostic>,
+    progress_error: Option<&str>,
 ) -> bool {
-    intent.is_some()
-        || tracked.is_some_and(|run| run.operation == Some(ProvisioningOperation::Update))
-        || error.is_some()
+    tracked.is_some_and(|run| {
+        run.operation == Some(ProvisioningOperation::Update)
+            && (run.last_status == Some(ProvisioningStatus::Failed) || progress_error.is_some())
+    }) || error.is_some()
         || warning.is_some()
+}
+
+/// Derive the row-sized progress facts from the exact live UPDATE snapshot.
+///
+/// A mismatched, terminal, or non-UPDATE view cannot be presented as current
+/// work. Unknown step statuses remain unfinished so a newer executor status
+/// does not accidentally inflate the done count.
+fn update_progress_summary(
+    view: &ProvisioningView,
+    tracked: &TrackedRun,
+) -> Option<UpdateProgressSummary> {
+    if tracked.operation != Some(ProvisioningOperation::Update)
+        || tracked.run_id.is_empty()
+        || view.run_id.as_deref() != Some(tracked.run_id.as_str())
+        || view.operation != Some(ProvisioningOperation::Update)
+        || view.status != ProvisioningStatus::Running
+    {
+        return None;
+    }
+
+    let done = view
+        .steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.status.as_str(),
+                "completed" | "skipped" | "degraded" | "failed"
+            )
+        })
+        .count();
+    let current_step = view
+        .steps
+        .iter()
+        .find(|step| step.status == "running")
+        .map(|step| step.step.clone());
+
+    Some(UpdateProgressSummary {
+        run_id: tracked.run_id.clone(),
+        current_step,
+        done,
+        total: view.steps.len(),
+        started_at: tracked.started_at,
+    })
+}
+
+/// The compact update status this row publishes to its host row, if any.
+///
+/// A live automatic-update intent always wins and names its own phase, so
+/// the click shows `updating…` from the moment it is accepted and never
+/// falls back to the ordinary label while the POST is outstanding. After the
+/// intent ends, only a live tracked UPDATE run keeps a status: full progress
+/// when the displayed view is that exact run running, otherwise the
+/// awaiting-progress stage. Terminal runs, ADD runs, and rows with nothing
+/// tracked publish nothing, which is what returns the ordinary label.
+///
+/// The same answer also decides whether the collapsed trace line is drawn:
+/// while the row carries this inline status, a second line saying the update
+/// is running would only repeat it.
+fn derive_row_update_progress(
+    intent: Option<&UpdateIntent>,
+    tracked: Option<&TrackedRun>,
+    view: Option<&ProvisioningView>,
+) -> Option<HostUpdateProgress> {
+    if let Some(live) = intent {
+        return Some(HostUpdateProgress::Pending(match live.phase {
+            IntentPhase::Planning => UpdatePendingPhase::Planning,
+            IntentPhase::WaitingForClaim => UpdatePendingPhase::WaitingForClaim,
+            IntentPhase::Submitting => UpdatePendingPhase::Submitting,
+        }));
+    }
+    let run = tracked.filter(|run| {
+        run.operation == Some(ProvisioningOperation::Update) && retained_run_live(Some(run))
+    })?;
+    Some(
+        view.and_then(|view| update_progress_summary(view, run))
+            .map_or(
+                HostUpdateProgress::Pending(UpdatePendingPhase::AwaitingProgress),
+                HostUpdateProgress::Running,
+            ),
+    )
 }
 
 /// Whether a retained tracked run still owns its row.
@@ -908,6 +1053,7 @@ async fn submit_accepted<R>(
         source: RunSource::Submitted { epoch },
         binding: plan.binding.clone(),
         last_status: None,
+        started_at: Instant::now(),
     }));
     on_running.call(true);
     release_outstanding(outstanding, epoch);
@@ -1003,10 +1149,12 @@ fn invalidate_intent_for_run(
         }
         return;
     }
-    let ours = tracked
-        .peek()
+    let previous = tracked.peek().clone();
+    let started_at = previous
         .as_ref()
-        .is_some_and(|old| old.run_id == run_id);
+        .filter(|old| old.run_id == run_id)
+        .map_or_else(Instant::now, |old| old.started_at);
+    let ours = previous.as_ref().is_some_and(|old| old.run_id == run_id);
     tracked.set(Some(TrackedRun {
         host: host_id,
         run_id,
@@ -1014,6 +1162,7 @@ fn invalidate_intent_for_run(
         source: RunSource::Observed,
         binding: binding.clone(),
         last_status: Some(ProvisioningStatus::Running),
+        started_at,
     }));
     // Owned snapshot, as in the retired branch above.
     let held = update_warning.peek().clone();
@@ -1166,6 +1315,7 @@ fn reconcile_tracked(
                 source: RunSource::Observed,
                 binding: binding.clone(),
                 last_status: Some(view.status),
+                started_at: Instant::now(),
             }));
         }
         return;
@@ -1217,6 +1367,7 @@ fn reconcile_tracked(
             source: RunSource::Observed,
             binding: binding.clone(),
             last_status: Some(view.status),
+            started_at: Instant::now(),
         }));
     } else if view.run_id.is_none()
         && old
@@ -1312,13 +1463,15 @@ pub(crate) fn ProvisioningPanel(
     /// Collapsed traces whose presence changes fixed-surface geometry.
     mut trace_shapes: Signal<HashMap<HostId, ProvisioningTraceShape>>,
     /// Rows whose automatic disclosure currently holds them open. Published
-    /// from the update intent, the tracked run, and unresolved update
-    /// diagnostics; the parent ORs this with the global checkbox per row.
+    /// for update failures and unresolved diagnostics; the parent ORs this
+    /// with the global checkbox per row.
     mut auto_details: Signal<HashSet<HostId>>,
-    /// Reveal the global details disclosure when ADD preparation produces a
-    /// confirmation or a diagnostic that would otherwise be hidden. Update
-    /// initiation, planning, progress, and success never call this; the
-    /// row's automatic disclosure carries update visibility instead.
+    /// Compact row status published beside the automatic-disclosure set.
+    mut row_update_progress: Signal<HashMap<HostId, HostUpdateProgress>>,
+    /// Reveal global details when ADD preparation produces a confirmation or
+    /// hidden diagnostic. Updates keep their running status inline and rely
+    /// on automatic row disclosure only when a failure or uncertainty needs
+    /// the full trace.
     on_reveal_details: EventHandler<()>,
     /// Paint-only busy bookkeeping for this row in the parent. It never
     /// excludes a run.
@@ -1379,6 +1532,7 @@ pub(crate) fn ProvisioningPanel(
         menu_states.write().remove(&host_id);
         trace_shapes.write().remove(&host_id);
         auto_details.write().remove(&host_id);
+        row_update_progress.write().remove(&host_id);
     });
 
     // One reader per row. A feed bump says only that something changed, so
@@ -1558,9 +1712,10 @@ pub(crate) fn ProvisioningPanel(
     };
 
     // Accept one automatic-update click: capture its binding and a fresh
-    // intent epoch synchronously, expand the row through the intent, and
-    // enter Planning. Planning mutates nothing, so this never consults the
-    // page lock; the submission claim retries reactively instead.
+    // intent epoch synchronously, publish the row's `updating…` status
+    // through the intent (the row stays folded), and enter Planning.
+    // Planning mutates nothing, so this never consults the page lock; the
+    // submission claim retries reactively instead.
     let update_base = base.clone();
     let update_host = host.clone();
     let update_progress = request_progress.clone();
@@ -1864,22 +2019,41 @@ pub(crate) fn ProvisioningPanel(
         }
     }));
 
-    // Publish this row's automatic disclosure from its update lifecycle: a
-    // live intent, a followed UPDATE run, or any unresolved update
-    // diagnostic. The parent ORs this with the global checkbox per row;
-    // the checkbox itself is never written here.
+    // Publish the row's disclosure and compact status together. Running work
+    // remains folded unless the user opened global details; errors, warnings,
+    // and retained failed runs keep the step list visible for diagnosis.
     use_effect(move || {
+        let current_intent = intent();
+        let current_tracked = tracked();
+        let current_progress = progress();
+        let error = update_error();
+        let warning = update_warning();
+        let read_error = progress_error();
         let disclosed = update_auto_disclosed(
-            intent().as_ref(),
-            tracked().as_ref(),
-            update_error().as_ref(),
-            update_warning().as_ref(),
+            current_tracked.as_ref(),
+            error.as_ref(),
+            warning.as_ref(),
+            read_error.as_deref(),
         );
         let held = auto_details.peek().contains(&host_id);
         if disclosed && !held {
             auto_details.write().insert(host_id);
         } else if !disclosed && held {
             auto_details.write().remove(&host_id);
+        }
+
+        let row_progress = derive_row_update_progress(
+            current_intent.as_ref(),
+            current_tracked.as_ref(),
+            current_progress.as_ref(),
+        );
+        let previous = row_update_progress.peek().get(&host_id).cloned();
+        if previous != row_progress {
+            if let Some(row_progress) = row_progress {
+                row_update_progress.write().insert(host_id, row_progress);
+            } else {
+                row_update_progress.write().remove(&host_id);
+            }
         }
     });
 
@@ -2060,7 +2234,18 @@ pub(crate) fn ProvisioningPanel(
             .then_some(view.operation)
             .flatten()
     });
-    let visible_trace = (!details_open)
+    // The folded row's one-line trace stands down while the host row shows
+    // inline update status (see `derive_row_update_progress`); every other
+    // running or failed retained run keeps it. Suppressing it here, where the trace
+    // shape is also published, keeps fixed-surface geometry in step with
+    // what is actually drawn.
+    let inline_update_status = derive_row_update_progress(
+        live_intent.as_ref(),
+        tracked.read().as_ref(),
+        snapshot.as_ref(),
+    )
+    .is_some();
+    let visible_trace = (!details_open && !inline_update_status)
         .then(|| {
             snapshot.as_ref().and_then(|view| {
                 let operation = view.operation?;
@@ -2170,7 +2355,7 @@ pub(crate) fn ProvisioningPanel(
                     if local_setup { "checking automatic setup…" } else { "planning…" }
                 }
             } else if is_waiting_claim {
-                // The minted plan is stored and the row stays expanded;
+                // The minted plan is stored while the row stays folded;
                 // submission follows as soon as the page token frees.
                 div {
                     class: "provisioning-waiting",
@@ -2451,6 +2636,7 @@ mod tests {
             source: RunSource::Submitted { epoch: 2 },
             binding: ssh_binding(7),
             last_status: Some(ProvisioningStatus::Running),
+            started_at: Instant::now(),
         };
         assert!(authoritative_update_success(
             &view(Some("run-9"), Some(ProvisioningOperation::Update)),
@@ -2484,42 +2670,229 @@ mod tests {
         assert!(!authoritative_update_success(&running, &tracked));
     }
 
-    /// Each disclosure holder — a live intent, a followed UPDATE run, an
-    /// unresolved diagnostic — independently keeps the row open. ADD runs
-    /// never hold it: setup keeps its confirmation and its global reveal.
+    /// A live update stays folded, while failures and unresolved outcomes keep the row open.
+    ///
+    /// This truth table protects the distinction between compact progress and
+    /// diagnostic evidence; losing it either hides a failure or restores the
+    /// unwanted expansion for every ordinary update.
     #[farhelm_testtrace::test]
-    fn automatic_disclosure_follows_intent_run_and_diagnostics() {
+    fn automatic_disclosure_opens_only_for_failure_or_diagnostic() {
         let binding = ssh_binding(7);
-        let intent = UpdateIntent {
-            epoch: 1,
-            binding: binding.clone(),
-            phase: IntentPhase::WaitingForClaim,
-            plan: None,
-        };
-        let run = TrackedRun {
+        let running = TrackedRun {
             host: 7,
             run_id: "run-9".to_string(),
             operation: Some(ProvisioningOperation::Update),
             source: RunSource::Observed,
             binding: binding.clone(),
             last_status: Some(ProvisioningStatus::Running),
+            started_at: Instant::now(),
+        };
+        let failed = TrackedRun {
+            last_status: Some(ProvisioningStatus::Failed),
+            ..running.clone()
+        };
+        let add_failed = TrackedRun {
+            operation: Some(ProvisioningOperation::Add),
+            ..failed.clone()
         };
         let diagnostic = UpdateDiagnostic {
             epoch: 1,
             sticky: true,
             text: "outcome unknown".to_string(),
         };
-        assert!(update_auto_disclosed(Some(&intent), None, None, None));
-        assert!(update_auto_disclosed(None, Some(&run), None, None));
-        assert!(update_auto_disclosed(None, None, Some(&diagnostic), None));
-        assert!(update_auto_disclosed(None, None, None, Some(&diagnostic)));
-        assert!(!update_auto_disclosed(None, None, None, None));
 
+        assert!(!update_auto_disclosed(None, None, None, None));
+        assert!(!update_auto_disclosed(Some(&running), None, None, None));
+        assert!(update_auto_disclosed(
+            Some(&running),
+            None,
+            None,
+            Some("read failed")
+        ));
+        assert!(update_auto_disclosed(Some(&failed), None, None, None));
+        assert!(update_auto_disclosed(None, Some(&diagnostic), None, None));
+        assert!(update_auto_disclosed(None, None, Some(&diagnostic), None));
+        assert!(!update_auto_disclosed(
+            Some(&add_failed),
+            None,
+            None,
+            Some("read failed")
+        ));
+    }
+
+    /// Inline progress counts terminal steps and names only a currently running step.
+    ///
+    /// The row cannot show the full trace while folded, so this summary must
+    /// preserve executor order and reject stale snapshots that name another run.
+    #[farhelm_testtrace::test]
+    fn update_progress_summary_counts_steps_and_requires_the_tracked_live_run() {
+        let started_at = Instant::now();
+        let tracked = TrackedRun {
+            host: 7,
+            run_id: "run-9".to_string(),
+            operation: Some(ProvisioningOperation::Update),
+            source: RunSource::Observed,
+            binding: ssh_binding(7),
+            last_status: Some(ProvisioningStatus::Running),
+            started_at,
+        };
+        let view = ProvisioningView {
+            run_id: Some("run-9".to_string()),
+            operation: Some(ProvisioningOperation::Update),
+            status: ProvisioningStatus::Running,
+            steps: vec![
+                crate::api::ProvisioningStep {
+                    step: "check-host".to_string(),
+                    status: "completed".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "upload-farhelm".to_string(),
+                    status: "running".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "install-supervisor".to_string(),
+                    status: "pending".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "optional-step".to_string(),
+                    status: "skipped".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "degraded-step".to_string(),
+                    status: "degraded".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "failed-step".to_string(),
+                    status: "failed".to_string(),
+                    message: None,
+                },
+                crate::api::ProvisioningStep {
+                    step: "future-step".to_string(),
+                    status: "new-status".to_string(),
+                    message: None,
+                },
+            ],
+            message: None,
+        };
+        let summary = update_progress_summary(&view, &tracked).expect("live run has progress");
+        assert_eq!(summary.current_step.as_deref(), Some("upload-farhelm"));
+        assert_eq!((summary.done, summary.total), (4, 7));
+        assert_eq!(summary.started_at, started_at);
+
+        let mut other_run = view.clone();
+        other_run.run_id = Some("run-8".to_string());
+        assert_eq!(update_progress_summary(&other_run, &tracked), None);
+        let mut terminal = view;
+        terminal.status = ProvisioningStatus::Failed;
+        assert_eq!(update_progress_summary(&terminal, &tracked), None);
+    }
+
+    /// The row's inline status covers the whole update lifecycle and names each pending stage.
+    ///
+    /// Browser tests hold planning, the claim wait, and submission at exact
+    /// boundaries while the row stays folded, and they read the published
+    /// stage to know which boundary the UI reached. The status must also
+    /// stand from the click until a terminal observation — never dropping to
+    /// the ordinary label mid-update — and must vanish for terminal, ADD, or
+    /// absent runs so the ordinary label (and the collapsed trace for ADD)
+    /// returns.
+    #[farhelm_testtrace::test]
+    fn row_update_progress_names_each_stage_and_clears_after_the_run() {
+        let intent = |phase| UpdateIntent {
+            epoch: 1,
+            binding: ssh_binding(7),
+            phase,
+            plan: None,
+        };
+        let pending = |phase| Some(HostUpdateProgress::Pending(phase));
+        assert_eq!(
+            derive_row_update_progress(Some(&intent(IntentPhase::Planning)), None, None),
+            pending(UpdatePendingPhase::Planning)
+        );
+        assert_eq!(
+            derive_row_update_progress(Some(&intent(IntentPhase::WaitingForClaim)), None, None),
+            pending(UpdatePendingPhase::WaitingForClaim)
+        );
+
+        let started_at = Instant::now();
+        let running_run = TrackedRun {
+            host: 7,
+            run_id: "run-9".to_string(),
+            operation: Some(ProvisioningOperation::Update),
+            source: RunSource::Submitted { epoch: 1 },
+            binding: ssh_binding(7),
+            last_status: Some(ProvisioningStatus::Running),
+            started_at,
+        };
+        let running_view = ProvisioningView {
+            run_id: Some("run-9".to_string()),
+            operation: Some(ProvisioningOperation::Update),
+            status: ProvisioningStatus::Running,
+            steps: vec![crate::api::ProvisioningStep {
+                step: "create-directories".to_string(),
+                status: "running".to_string(),
+                message: None,
+            }],
+            message: None,
+        };
+        // A live intent outranks whatever run and view are also present.
+        assert_eq!(
+            derive_row_update_progress(
+                Some(&intent(IntentPhase::Submitting)),
+                Some(&running_run),
+                Some(&running_view)
+            ),
+            pending(UpdatePendingPhase::Submitting)
+        );
+
+        // Accepted but not yet read, or displaying some other run's view.
+        let accepted = TrackedRun {
+            last_status: None,
+            ..running_run.clone()
+        };
+        assert_eq!(
+            derive_row_update_progress(None, Some(&accepted), None),
+            pending(UpdatePendingPhase::AwaitingProgress)
+        );
+        let mut other_view = running_view.clone();
+        other_view.run_id = Some("run-8".to_string());
+        assert_eq!(
+            derive_row_update_progress(None, Some(&running_run), Some(&other_view)),
+            pending(UpdatePendingPhase::AwaitingProgress)
+        );
+
+        let Some(HostUpdateProgress::Running(summary)) =
+            derive_row_update_progress(None, Some(&running_run), Some(&running_view))
+        else {
+            panic!("the tracked run's own running view shows full progress");
+        };
+        assert_eq!(summary.current_step.as_deref(), Some("create-directories"));
+        assert_eq!((summary.done, summary.total), (0, 1));
+
+        for status in [ProvisioningStatus::Completed, ProvisioningStatus::Failed] {
+            let terminal = TrackedRun {
+                last_status: Some(status),
+                ..running_run.clone()
+            };
+            assert_eq!(
+                derive_row_update_progress(None, Some(&terminal), None),
+                None
+            );
+        }
         let add_run = TrackedRun {
             operation: Some(ProvisioningOperation::Add),
-            ..run
+            ..running_run
         };
-        assert!(!update_auto_disclosed(None, Some(&add_run), None, None));
+        assert_eq!(derive_row_update_progress(None, Some(&add_run), None), None);
+        assert_eq!(
+            derive_row_update_progress(None, None, Some(&running_view)),
+            None
+        );
     }
 
     /// Ownership outlives the intent: admission, the menu, and busy paint all
@@ -2549,6 +2922,7 @@ mod tests {
                 source: RunSource::Submitted { epoch: 1 },
                 binding: ssh_binding(7),
                 last_status,
+                started_at: Instant::now(),
             }
         }
 

@@ -68,8 +68,8 @@ use crate::menu_panel::{
 use crate::ops::OpLock;
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::provisioning::{
-    ActionRequest, HostBinding, PlanConfirmation, ProvisioningMenuState, ProvisioningPanel,
-    ProvisioningTraceShape,
+    ActionRequest, HostBinding, HostUpdateProgress, PlanConfirmation, ProvisioningMenuState,
+    ProvisioningPanel, ProvisioningTraceShape, UpdateProgressSummary,
 };
 use crate::{ApiBase, Host, HostId, HostKind, HostPhase, RefreshHealth};
 
@@ -769,6 +769,9 @@ pub(crate) fn HostsPanel(
     on_changed: EventHandler<()>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    // The parent owns one compact update status per row and passes it to both
+    // the renderer and the provisioning child that publishes it.
+    let row_update_progress = use_signal(HashMap::<HostId, HostUpdateProgress>::new);
     // Per-host rather than one shared slot, the discipline `ListView` keeps
     // for its session errors and for the same reason: a retry failing on one
     // host must not blank out an adopt refusal on another that the user has
@@ -1157,6 +1160,7 @@ pub(crate) fn HostsPanel(
                             },
                             details_open: details_open()
                                 || provisioning_auto_details.read().contains(&host.id),
+                            update_progress: row_update_progress.read().get(&host.id).cloned(),
                             provisioning_menu: provisioning_menu_states
                                 .read()
                                 .get(&host.id)
@@ -1175,6 +1179,7 @@ pub(crate) fn HostsPanel(
                                     menu_states: provisioning_menu_states,
                                     trace_shapes: provisioning_trace_shapes,
                                     auto_details: provisioning_auto_details,
+                                    row_update_progress,
                                     on_reveal_details: move |_| {
                                                                         details_open.set(true);
                                         host_menu_open.set(None);
@@ -1241,11 +1246,10 @@ pub(crate) fn HostsPanel(
                                 // Setup still confirms explicitly, and its
                                 // confirmation must be visible: reveal the
                                 // global disclosure past the page lock, as
-                                // before. An update expands only its own row
-                                // through automatic disclosure at acceptance,
-                                // and its planning never consults the lock —
-                                // so neither the reveal nor the lock check
-                                // applies to it here.
+                                // before. Update progress stays in its row's
+                                // status spot, and planning never consults the
+                                // lock — so neither the reveal nor the lock
+                                // check applies to it here.
                                 if request.operation == ProvisioningOperation::Add {
                                     if ops.busy_now() {
                                         return;
@@ -1563,6 +1567,61 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
     HOST_ROW_RENDERS.with(|renders| renders.borrow().iter().map(|(id, n)| (*id, *n)).collect())
 }
 
+/// Render one live update's inline progress inside the row that owns it.
+///
+/// The one-second clock's future belongs to this keyed component: when the
+/// run completes, is replaced, or the row unmounts, Dioxus drops the task
+/// instead of leaving a page-wide interval behind.
+///
+/// Each part is its own flex item because the status spot has to fit the
+/// fixed-width sidebar beside the host name and the always-present `⋯`
+/// toggle (see `.host-status.updating` in `app.css`). Only the step name may
+/// give up width: `updating: N/M` and the clock are what the user reads at
+/// a glance, so they never truncate, and the full step name stays reachable
+/// through the step's `title`. The leading spaces in the text nodes are for
+/// the text content (what assistive technology and tests read); the visible
+/// spacing comes from the flex gap, since a flex item's leading space
+/// collapses.
+#[component]
+fn UpdateProgressLabel(summary: UpdateProgressSummary) -> Element {
+    let started_at = summary.started_at;
+    let mut elapsed = use_signal(|| started_at.elapsed().as_secs());
+    use_future(move || async move {
+        loop {
+            crate::reader::sleep_ms(1_000).await;
+            elapsed.set(started_at.elapsed().as_secs());
+        }
+    });
+    let elapsed_text = format_elapsed(elapsed());
+
+    rsx! {
+        UpdateProgressDot {}
+        span { class: "host-update-count", "updating: {summary.done}/{summary.total}" }
+        if let Some(step) = summary.current_step {
+            span { class: "host-update-step", title: "{step}", " {step}" }
+        }
+        span { class: "host-update-elapsed", "aria-hidden": "true", " {elapsed_text}" }
+    }
+}
+
+/// A small status-color dot that uses the app's existing reduced-motion-aware pulse.
+#[component]
+fn UpdateProgressDot() -> Element {
+    rsx! { span { class: "host-update-dot", "aria-hidden": "true" } }
+}
+
+/// Keep short elapsed times readable without capping long-running updates.
+fn format_elapsed(seconds: u64) -> String {
+    let hours = seconds / 3_600;
+    let minutes = (seconds / 60) % 60;
+    let seconds = seconds % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
 /// One host's row: name, state, the evidence, the remedy, and whichever
 /// controls that state actually offers.
 ///
@@ -1634,10 +1693,12 @@ fn host_row_renders() -> Vec<(HostId, usize)> {
 /// the same shaped interaction (one text field, submit, cancel, an error
 /// line) with different validation and a different API call underneath.
 ///
-/// Every actionable item closes the menu when chosen. Provisioning commands
+/// Every actionable item closes the menu when chosen. Setup commands
 /// additionally open the global details disclosure before sending their
 /// one-shot request to the permanently mounted provisioning component, so
-/// planning feedback and confirmation never appear invisibly.
+/// planning feedback and confirmation never appear invisibly. An update
+/// needs no confirmation and leaves details alone: it reports through this
+/// row's status spot, and only a failure or uncertain outcome opens the row.
 ///
 /// `edit destination` and `remove` disable the toggle and open subordinate
 /// blocks, so closing is a correctness requirement: cancelling either flow
@@ -1666,6 +1727,8 @@ fn HostRow(
     /// This row's effective details disclosure: the global checkbox OR the
     /// row's automatic update disclosure, ORed by the parent.
     details_open: bool,
+    /// The provisioning panel's compact status for a running update, if any.
+    update_progress: Option<HostUpdateProgress>,
     /// Provisioning commands currently offered in this row's menu.
     provisioning_menu: ProvisioningMenuState,
     /// The feed-driven setup/update surface built by the panel.
@@ -1701,6 +1764,7 @@ fn HostRow(
     #[cfg(test)]
     HOST_ROW_RENDERS.with(|renders| *renders.borrow_mut().entry(host.id).or_insert(0) += 1);
     let id = host.id;
+    let update_is_active = update_progress.is_some();
     // The binding this row rendered with, captured for provisioning clicks:
     // a request queued behind a retarget must not become work against the
     // retargeted row, so each click site below clones this into its own
@@ -1973,15 +2037,41 @@ fn HostRow(
                 }
                 span { class: "host-name peer-value", dir: "ltr", "{shown_name}" }
                 span {
-                    class: "host-status {phase_class(&host.state)}",
+                    // `updating` lets the status group shrink so the step
+                    // name, not the `⋯` toggle, absorbs width pressure.
+                    class: if update_is_active {
+                        "host-status {phase_class(&host.state)} updating"
+                    } else {
+                        "host-status {phase_class(&host.state)}"
+                    },
                     role: "status",
-                    aria_label: is_connected(&host.state)
-                        .then(|| phase_display_label(&host.state)),
+                    aria_label: if update_is_active {
+                        None
+                    } else {
+                        is_connected(&host.state).then(|| phase_display_label(&host.state))
+                    },
                     span { class: "status-dot", "aria-hidden": "true" }
-                    if !is_connected(&host.state)
-                        || matches!(&host.state, HostPhase::Connected { old_version: true, .. })
-                    {
-                        span { class: "host-status-label", "{phase_display_label(&host.state)}" }
+                    match update_progress {
+                        Some(HostUpdateProgress::Pending(phase)) => rsx! {
+                            span {
+                                class: "host-status-label host-update-pending",
+                                "data-update-phase": phase.attribute(),
+                                UpdateProgressDot {}
+                                "updating…"
+                            }
+                        },
+                        Some(HostUpdateProgress::Running(summary)) => rsx! {
+                            span { class: "host-status-label host-update-running",
+                                UpdateProgressLabel { key: "{summary.run_id}", summary }
+                            }
+                        },
+                        None => rsx! {
+                            if !is_connected(&host.state)
+                                || matches!(&host.state, HostPhase::Connected { old_version: true, .. })
+                            {
+                                span { class: "host-status-label", "{phase_display_label(&host.state)}" }
+                            }
+                        },
                     }
                 }
                 // The line always keeps its three children. Edit and remove
@@ -3740,6 +3830,7 @@ mod tests {
                         warning: None,
                     },
                     details_open: false,
+                    update_progress: None,
                     provisioning_menu: ProvisioningMenuState::default(),
                     provisioning_section: dioxus::core::VNode::empty(),
                     destination_draft,
@@ -3962,5 +4053,15 @@ mod tests {
             "a handler built fresh each render never compares equal, so the child \
              repaints on every parent render — one per refresh plus the build"
         );
+    }
+
+    /// Elapsed time stays compact for ordinary updates and remains unambiguous after an hour.
+    #[farhelm_testtrace::test]
+    fn host_update_elapsed_time_uses_minute_or_hour_clock() {
+        assert_eq!(format_elapsed(0), "0:00");
+        assert_eq!(format_elapsed(42), "0:42");
+        assert_eq!(format_elapsed(3_599), "59:59");
+        assert_eq!(format_elapsed(3_600), "1:00:00");
+        assert_eq!(format_elapsed(93_784), "26:03:04");
     }
 }
