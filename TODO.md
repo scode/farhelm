@@ -56,11 +56,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tasteful in-progress animation. Something like `updating: 3/9 upload-farhelm <animation> 0:42`. Exact design TBD. This
   changes SPEC.md's rule that an updating host's row expands to follow progress; whether failure or an uncertain outcome
   should still expand is part of the design.
-- **Launch composer shorthands.** Support `yolo` as shorthand for enabling yolo, along with `perms:yolo` and `perms:default`.
+- **Launch composer shorthands.** Support `yolo` as shorthand for enabling yolo, along with `perms:yolo` and
+  `perms:default`.
 - **Launch composer reset button styling.** Make the `reset choices` button follow the current secondary button style.
-- **GUI button styling audit.** During planning, research the entire GUI to identify every button still using the old style of
-  “just grey text” with no indication that it is a button, then update all of them to the current button styles. The
-  planning research must establish the complete set of affected buttons before implementation starts.
+- **GUI button styling audit.** During planning, research the entire GUI to identify every button still using the old
+  style of “just grey text” with no indication that it is a button, then update all of them to the current button
+  styles. The planning research must establish the complete set of affected buttons before implementation starts.
 - **Top-bar path and argument truncation.** Let the home-directory and agent-argument indicators use the available
   horizontal space before truncating with ellipses; they currently truncate far too early and leave a large gap before
   the action buttons.
@@ -68,8 +69,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   style, using the secondary theme instead of the primary theme.
 - **Top-left Farhelm wordmark.** Add the Farhelm wordmark branding to the top-left of the window, reusing the same SVG
   used for the wordmark in `docs/readme`.
-- **Session overflow-menu overhaul.** Overhaul the pop-up menus opened by clicking `...` for sessions so they look modern
-  and are properly placed. The design is TBD and should be worked out when this TODO is planned.
+- **Session overflow-menu overhaul.** Overhaul the pop-up menus opened by clicking `...` for sessions so they look
+  modern and are properly placed. The design is TBD and should be worked out when this TODO is planned.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
