@@ -5268,7 +5268,9 @@ impl HelmStore {
             // than updating a primary key into a uniqueness conflict. The
             // canonical row is the durable deduplication identity; its
             // display spelling always belongs to the newest launch users can
-            // still choose from the composer.
+            // still choose from the composer. A newer alias may update that
+            // presentation without revoking an accepted-create proof of the
+            // canonical destination.
             tx.execute(
                 "UPDATE folder_history AS canonical
                      SET display_cwd = alias.display_cwd,
@@ -5286,7 +5288,6 @@ impl HelmStore {
                    AND alias.display_cwd = ?4
                    AND alias.canonical_cwd <> ?1
                    AND alias.canonical_proven = 0
-                   AND canonical.canonical_proven = 0
                    AND (alias.ordering_kind > canonical.ordering_kind
                         OR (alias.ordering_kind = canonical.ordering_kind
                             AND (alias.ordering_value > canonical.ordering_value
@@ -7063,6 +7064,86 @@ mod tests {
                 creation_seq: Some(5),
             }],
             "one canonical history row keeps the latest launch's useful spelling and ordering"
+        );
+    }
+
+    /// Browsing a newer spelling of an accepted destination must keep that
+    /// spelling and its recency visible without weakening the accepted path
+    /// proof. The alias disappears only after its presentation has moved to
+    /// the canonical suggestion.
+    #[tokio::test]
+    async fn browse_refinement_carries_newer_alias_into_proven_history() {
+        let (_dir, store) = fresh_store().await;
+        let host = host_with_identity(&store, "proven-merge.example", "identity-a").await;
+        let proven = SessionInfo {
+            cwd: "/old-link/project".to_string(),
+            canonical_cwd: Some("/resolved/project".to_string()),
+            creation_seq: Some(1),
+            ..session("proven-session", 100)
+        };
+        let newer_alias = SessionInfo {
+            cwd: "/new-link/project".to_string(),
+            canonical_cwd: None,
+            creation_seq: Some(2),
+            ..session("newer-alias-session", 101)
+        };
+        for entry in [&proven, &newer_alias] {
+            store
+                .record_create_history(host, "identity-a", entry)
+                .await
+                .expect("record the folder observation");
+        }
+
+        let before = store
+            .folder_history(host, "identity-a")
+            .await
+            .expect("read the merge premise");
+        assert_eq!(
+            before.len(),
+            2,
+            "both suggestions must exist before browsing"
+        );
+        assert_eq!(before[0].display_cwd, newer_alias.cwd);
+        assert_eq!(before[0].canonical_cwd, newer_alias.cwd);
+        assert!(!before[0].canonical_proven);
+        assert_eq!(before[0].creation_seq, Some(2));
+        assert_eq!(before[1].display_cwd, proven.cwd);
+        assert_eq!(before[1].canonical_cwd, "/resolved/project");
+        assert!(before[1].canonical_proven);
+        assert_eq!(before[1].creation_seq, Some(1));
+
+        store
+            .refine_folder_history(host, "identity-a", &newer_alias.cwd, "/resolved/project")
+            .await
+            .expect("merge a newer alias into the proven destination");
+
+        let expected = vec![FolderHistoryEntry {
+            host,
+            canonical_cwd: "/resolved/project".to_string(),
+            canonical_proven: true,
+            display_cwd: newer_alias.cwd.clone(),
+            created_at: 101,
+            creation_seq: Some(2),
+        }];
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read merged suggestions"),
+            expected,
+            "the proven destination keeps the newer spelling and order after the alias is removed"
+        );
+        store
+            .refine_folder_history(host, "identity-a", &newer_alias.cwd, "/resolved/project")
+            .await
+            .expect("repeat browsing the surviving spelling");
+        assert_eq!(
+            store
+                .folder_history(host, "identity-a")
+                .await
+                .expect("read suggestions after repeat"),
+            expected,
+            "repeat browsing does not change the accepted proof or recency"
         );
     }
 

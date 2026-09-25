@@ -60,7 +60,8 @@
 - Completion criteria: browsing cannot discard a newer folder suggestion in this case; focused regression coverage
   proves the visible name and ordering survive; remove this feedback file and its index entry in the execution change,
   or retain and narrow it if the simplicity gate requires deferral.
-- Execution: `pending`.
+- Execution: implemented in change `vuszlpuxxxvqvtywrusyyrzttwqnvmkr` on bookmark
+  `pr/folder-history-proven-presentation`; [draft PR #890](https://github.com/scode/farhelm/pull/890/changes).
 
 ## generic-session-accepts-placeholder-template.md
 
