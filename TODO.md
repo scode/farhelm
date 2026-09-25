@@ -96,7 +96,22 @@ The earlier cross-harness evidence is preserved in
 
 ## Deflake
 
-- **Working-copy identity reconciliation under the workspace battery.** `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` failed once in retained full Rust run `131912d5-0ee2-4313-a204-38edf6fc942c` and passed in the exact-test rerun `d7979320-cea3-4707-9f98-e0fbe2df7c67`; investigate the concurrent filesystem premise before changing the reconciliation contract.
+- **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
+  processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
+  repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Capture watcher and startup-process state at the
+  failed cleanup boundary before changing the teardown contract.
+
+- **Composer viewport controls.**
+  `composer keeps launch and cancel inside the initial viewport at default and narrow width` in
+  `e2e/tests/sidebar.spec.ts` failed during browser run `946f3bb1-6398-4bbc-9ece-7ab6232be092` and passed unchanged in
+  focused run `51f444c3-d0db-4e33-bd27-32b6d429c3a7`. Reproduce with retained geometry measurements; the interrupted
+  original run did not retain the final assertion report.
+
+- **Working-copy identity reconciliation under the workspace battery.**
+  `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` failed
+  once in retained full Rust run `131912d5-0ee2-4313-a204-38edf6fc942c` and passed in the exact-test rerun
+  `c44ac1bf-bcce-49b0-8a44-5d9633c5172f`; investigate the concurrent filesystem premise before changing the
+  reconciliation contract.
 
 - Watch the island-cap readiness residual in `e2e/tests/terminal-tabs.spec.ts`:
   `a tab list past the island cap is listed in full but only partly attached`. Its original first-mount shape — a

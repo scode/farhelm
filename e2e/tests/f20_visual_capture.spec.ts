@@ -169,7 +169,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
     // The caption claims the explicit choices are visible; prove the draft
     // holds them before the screenshot rather than trusting the clicks.
-    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo · trust: default");
     await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
   }, ["Codex/Astra/High/YOLO summary", "recent heading and first row at scrollTop 0"]);
@@ -177,7 +177,7 @@ test("F20 visual capture matrix", async ({ page, browserName }, testInfo) => {
     await prefillCompleteRecent(form);
     await form.evaluate((node) => { node.scrollTop = 0; });
     await expect.poll(() => form.evaluate((node) => node.scrollTop)).toBe(0);
-    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo");
+    await expect(form.locator(".launch-composer-summary")).toHaveText("model: gpt-6-astra · effort: high · permissions: yolo · trust: default");
     await expect(form.getByText("recent setups", { exact: true })).toBeVisible();
     await expect(form.locator(".launch-composer-recent-slots > button").first()).toBeVisible();
   }, ["complete recent prefill", "recent heading and first row at scrollTop 0"]);
