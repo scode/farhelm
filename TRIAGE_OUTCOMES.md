@@ -998,7 +998,11 @@
   the execution change. Gate execution on the solution remaining within the bounded, moderate-complexity shape above. If
   implementation requires materially more lifecycle state, recovery machinery, or design scope, defer it during
   execution with the blocker and proposed follow-up documented in TODO.md, retaining or narrowing the queue item.
-- Execution: `pending`.
+- Execution: `complete`; fresh-terminal restart now preserves a surviving tmux session and replaces only the dead
+  agent window, while marker-only ambiguity never authorizes destructive cleanup. Focused recorded nextest run
+  `f9c9714d-833e-47cc-86ad-ac4f44e9db97` passed four restart lifecycle tests (860 skipped); the final Astra review
+  found no remaining defects. Draft PR [#919](https://github.com/scode/farhelm/pull/919/changes) is on bookmark
+  `pr/restart-preserves-tabs`, jj change `knrrtwzvvlyrvtvnvmmxnpzlkykwnwwl`.
 
 ## stale-dial-outcome-publishes-over-retarget-nudge.md
 
