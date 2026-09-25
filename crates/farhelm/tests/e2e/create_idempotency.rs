@@ -556,10 +556,9 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
         vec![format!("fh-{}", session.id)],
         "tmux must hold exactly the session the retry handed back"
     );
-    // Waited for rather than read once: the agent must be running in it,
-    // and a single list landing on a tolerated tmux diagnostic reports a
-    // live session as `Exited { None }` (see `wait_for_listing`).
-    wait_for_live_status(&client2, &session.id, 30).await;
+    // The retry must own a live pane. This reloaded in-process supervisor
+    // has no serve-loop sampler, so cached status cannot prove that premise.
+    wait_for_live_pane(&sock, &format!("fh-{}", session.id), 30).await;
     // The retried session is a normal session: deleting it tears down
     // everything the retry built (the other half of item 6's
     // retry-versus-delete ordering — when the retry wins, the delete that
@@ -752,9 +751,14 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
         .await
         .expect("the retry must perform the create the crash never did");
     // The session it hands back must be a real, running one — not the
-    // interrupted placeholder the reboot left. Waited for rather than read
-    // once, for the reason `wait_for_listing` documents.
-    wait_for_live_status(&client2, &session.id, 30).await;
+    // interrupted placeholder the reboot left. Inspect the pane directly:
+    // this in-process supervisor has no serve-loop status sampler.
+    wait_for_live_pane(
+        &state.path().join("tmux.sock"),
+        &format!("fh-{}", session.id),
+        30,
+    )
+    .await;
     assert_eq!(
         stored_sessions(state.path()).await.len(),
         1,

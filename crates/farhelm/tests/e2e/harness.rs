@@ -1196,6 +1196,35 @@ pub(crate) async fn wait_for_live_status(
     .expect("the predicate above matched this id")
 }
 
+/// Wait until a reloaded session's tmux pane is live without consulting the
+/// sampler-owned status classification.
+///
+/// In-process restart tests connect directly to `handle_connection`, so they
+/// do not run `Supervisor::serve` and therefore have no activity ticker to
+/// clear a reloaded entry's deliberate provisional `Unknown` status. These
+/// tests still need a readiness barrier before asserting reboot or retry
+/// behavior; tmux liveness is the exact fact those scenarios require.
+pub(crate) async fn wait_for_live_pane(sock: &std::path::Path, tmux_name: &str, secs: u64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+    let target = format!("={tmux_name}");
+    loop {
+        let out = tmux_query(sock, &["list-panes", "-t", &target, "-F", "#{pane_dead}"]).await;
+        if out.status.success()
+            && String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .any(|line| line.trim() == "0")
+        {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {tmux_name} did not expose a live tmux pane within {secs}s"
+        );
+        // sleep-ok: tmux reports pane death asynchronously; poll until its live state is observable.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// Whether this host's tmux reliably records a dead pane's exit status.
 ///
 /// tmux 3.4 (Ubuntu 24.04's package, so CI's) can PERMANENTLY report a
