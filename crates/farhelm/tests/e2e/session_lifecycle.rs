@@ -3654,28 +3654,27 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
     .expect("second supervisor construction on the same state dir");
     let client2 = connect_client(&sup2).await;
 
-    // The listing asserted on is the one the wait SETTLED, not a fresh
-    // read taken afterwards: re-listing would put an unguarded single-shot
-    // observation back in front of the equality below, which is exactly
-    // what a tolerated tmux diagnostic (see `wait_for_listing`) turns into
-    // a spurious `Exited` on the status field.
-    let listed = wait_for_listing(
-        &client2,
+    // The in-process replacement has no activity ticker, so its deliberately
+    // provisional status remains `Unknown` even though tmux already proves
+    // the pane is live. Assert the lifecycle fact directly before reading the
+    // durable row whose status may still await sampler evidence.
+    wait_for_live_pane(
+        &h.state.path().join("tmux.sock"),
+        &format!("fh-{}", session.id),
         30,
-        "the restarted supervisor lists the session as live",
-        |sessions| {
-            sessions
-                .iter()
-                .any(|s| s.id == session.id && s.status.is_live())
-        },
     )
     .await;
+    let listed = client2
+        .list_sessions()
+        .await
+        .expect("the restarted supervisor must list the persisted session")
+        .sessions;
     let [row] = listed.as_slice() else {
         panic!("exactly one session must be listed, got {listed:?}");
     };
     assert!(
-        row.status.is_live(),
-        "a session whose tmux server survived the restart must still list as live"
+        row.status.is_live() || row.status == SessionStatus::Unknown,
+        "a session whose tmux server survived the restart must not list as exited: {row:?}"
     );
     assert_eq!(
         *row,
@@ -4103,7 +4102,7 @@ async fn restart_succeeds_when_the_recorded_pane_was_recycled_onto_another_sessi
             );
     assert_eq!(restarted.id, w.old.id);
 
-    wait_for_live_status(&w.h.client, &w.old.id, 30).await;
+    wait_for_live_pane(&sock, &format!("fh-{}", w.old.id), 30).await;
     let restarted_pane = pane_id_of(&sock, &format!("fh-{}", w.old.id)).await;
     assert_ne!(
         restarted_pane, w.pane,
@@ -4271,22 +4270,14 @@ async fn restart_gap_is_decided_per_session() {
     .expect("second supervisor construction after one session's tmux died");
     let client2 = connect_client(&sup2).await;
 
-    // One settled listing carries both rows, for the same reason as the
-    // sibling test above: the assertion is an equality over the WHOLE
-    // reply, so it has to be the reply the wait accepted rather than a
-    // fresh single-shot read that a tolerated tmux diagnostic (see
-    // `wait_for_listing`) could catch mid-degradation on the live half.
-    let mut listed = wait_for_listing(
-        &client2,
-        30,
-        "the surviving session lists as live after a partial restart gap",
-        |sessions| {
-            sessions
-                .iter()
-                .any(|s| s.id == alive_session.id && s.status.is_live())
-        },
-    )
-    .await;
+    // As above, the replacement has no sampler task in this in-process
+    // harness. Tmux is the lifecycle oracle; status may remain provisional.
+    wait_for_live_pane(&sock, &format!("fh-{}", alive_session.id), 30).await;
+    let mut listed = client2
+        .list_sessions()
+        .await
+        .expect("the replacement supervisor must list both sessions")
+        .sessions;
     listed.sort_by(|a, b| a.id.cmp(&b.id));
     let find = |id: &str| {
         listed
@@ -4300,8 +4291,8 @@ async fn restart_gap_is_decided_per_session() {
     // code" is a specific claim about a session whose tmux really is gone.
     let survivor = find(&alive_session.id);
     assert!(
-        survivor.status.is_live(),
-        "the session whose tmux survived must still list as live: {survivor:?}"
+        survivor.status.is_live() || survivor.status == SessionStatus::Unknown,
+        "the session whose tmux survived must not list as exited: {survivor:?}"
     );
     assert_eq!(
         *survivor,

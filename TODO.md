@@ -96,6 +96,8 @@ The earlier cross-harness evidence is preserved in
 
 ## Deflake
 
+- **Working-copy identity reconciliation under the workspace battery.** `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` failed once in retained full Rust run `131912d5-0ee2-4313-a204-38edf6fc942c` and passed in the exact-test rerun `d7979320-cea3-4707-9f98-e0fbe2df7c67`; investigate the concurrent filesystem premise before changing the reconciliation contract.
+
 - Watch the island-cap readiness residual in `e2e/tests/terminal-tabs.spec.ts`:
   `a tab list past the island cap is listed in full but only partly attached`. Its original first-mount shape — a
   handshake that stalled, was bannered and closed at 5s, and never retried — was fixed by the maintainer's 2026-09-17

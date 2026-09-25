@@ -28,6 +28,14 @@ After the paragraph, add `Class: <class>` and `Cause: <confidence>` as separate 
 `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new entries. Missing historical fields
 are missing evidence, not an implicit cause classification.
 
+## 2026-09-25 — `working_copies::tests::reconcile_fails_closed_when_a_stranger_holds_the_destination_and_the_source_is_gone` (crates/farhelm-supervisor/src/working_copies.rs)
+
+The workspace nextest battery failed this identity-mismatch test once on the Linux x86_64 worker, while the exact test passed immediately afterward in isolation. Retained full run `131912d5-0ee2-4313-a204-38edf6fc942c`; exact rerun `d7979320-cea3-4707-9f98-e0fbe2df7c67`; tested commit `6f238ccab7ed8420f78c896ba1ed207947b03cdd` with the lifecycle-harness tree dirty. Selection was `workspace Rust targets` versus the exact test, both with four nextest slots and zero retries, pinned tmux 3.7c executable SHA256 `9a78dcb53a791edaf7de8ba3a9a65544d14c5a88e99bd69d3f1f12b60fc41e11`, locale `C.UTF-8`, and ambient `FARHELM_*` scrubbed. The cause is unknown; retain the full-run failure and investigate the concurrent filesystem premise before changing reconciliation behavior. Disposition: open (TODO.md).
+
+Class: process-interference
+
+Cause: unknown
+
 ## 2026-09-02 — `agent_relay::a_helm_that_dies_mid_upcall_ends_the_request_at_once` (crates/farhelm/tests/e2e)
 
 Fails with `the supervisor never answered the agent request: Elapsed(())`, the peer's 20 s `answer()` budget running

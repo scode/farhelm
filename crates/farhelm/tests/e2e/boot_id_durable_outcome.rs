@@ -231,10 +231,14 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
         "nothing survived this session to hold a code, and none may be invented"
     );
     // An untouched session continues live across a supervisor restart.
-    // Waited for rather than read once: a single list can degrade to an
-    // empty pane map on a tolerated tmux diagnostic and report a live
-    // session exited (see `wait_for_listing`).
-    wait_for_live_status(&client2, &untouched.id, 30).await;
+    // This in-process supervisor has no serve-loop sampler; inspect the
+    // pane directly rather than waiting for a cached live status.
+    wait_for_live_pane(
+        &h.state.path().join("tmux.sock"),
+        &format!("fh-{}", untouched.id),
+        30,
+    )
+    .await;
 }
 
 /// M3 acceptance 3 and 5: after a reboot, sessions that were live become
@@ -298,9 +302,14 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         Some("stopped by user"),
         "the annotation survives a supervisor restart, not merely a reboot"
     );
-    // No reboot happened yet, so the live session is untouched. Waited for
-    // rather than read once, for the reason `wait_for_listing` documents.
-    wait_for_live_status(&client_restarted, &live.id, 30).await;
+    // No reboot happened yet, so the pane must remain live. This reloaded
+    // in-process supervisor has no serve-loop sampler to refresh its status.
+    wait_for_live_pane(
+        &h.state.path().join("tmux.sock"),
+        &format!("fh-{}", live.id),
+        30,
+    )
+    .await;
 
     // Older tmux versions can first report an exited pane without its code,
     // then enrich that durable outcome on a later list. Accept only that
@@ -444,12 +453,16 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     wait_for_agent_ready(&state.path().join("tmux.sock"), &session.id).await;
 
     let sup2 = supervisor_believing_boot(state.path(), Some("boot-b")).await;
-    let client2 = connect_client(&sup2).await;
+    let _client2 = connect_client(&sup2).await;
     // With nothing stored to compare against, a differing boot id is not
     // evidence of a reboot — and the live tmux session proves the point
-    // independently. Waited for rather than read once, for the reason
-    // `wait_for_listing` documents.
-    wait_for_live_status(&client2, &session.id, 30).await;
+    // independently of cached status, which has no sampler in this fixture.
+    wait_for_live_pane(
+        &state.path().join("tmux.sock"),
+        &format!("fh-{}", session.id),
+        30,
+    )
+    .await;
 
     // `boot-b` is stored now, so a THIRD boot id is a real reboot.
     kill_tmux_server_and_wait(&state.path().join("tmux.sock")).await;
