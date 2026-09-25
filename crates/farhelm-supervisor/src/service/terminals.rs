@@ -183,10 +183,11 @@ pub(crate) struct DiscoveredTab {
 ///   never an option.
 /// - **The marker must be complete and minted-shaped**, validated where it
 ///   is read (`tmux/control_codec.rs`) rather than here.
-/// - **An AGENT-marked window is never a tab**, whatever else is written
-///   on it. Nothing stops a pane from adding a tab marker to the agent's
-///   own window, and adopting it would offer a "tab" whose close would
-///   reap the agent.
+/// - **The recorded agent window is never a tab**, whatever else is written
+///   on it. The pane id is tmux-assigned and therefore the trusted local
+///   identity available here; a mutable agent marker is only a recovery aid.
+///   If the recorded pane is stale or missing, it provides no exclusion —
+///   the helper must not guess from another window's marker or ordinal.
 /// - **A tab id claimed by two WINDOWS is ambiguous and drops BOTH.** Ids
 ///   are minted unique, so a duplicate means one of them was written by
 ///   something else — and there is no basis for preferring either. Picking
@@ -209,6 +210,7 @@ pub(crate) struct DiscoveredTab {
 pub(crate) fn tabs_from_pane_states<'a>(
     states: impl IntoIterator<Item = &'a crate::tmux::PaneState>,
     tmux_name: &str,
+    recorded_agent_pane: Option<&str>,
 ) -> Vec<DiscoveredTab> {
     /// One tab id's accumulated evidence: the window claiming it and every
     /// pane seen in that window, deferred so the HANDLE pane can be chosen
@@ -218,10 +220,28 @@ pub(crate) fn tabs_from_pane_states<'a>(
         /// `(pane_ordinal, dead)` for every pane of the claiming window.
         panes: Vec<(u64, bool)>,
     }
+    // Resolve the pane identity to a window before filtering claims. The
+    // recorded pane itself may be one split of the agent window, so dropping
+    // only that row would leave a sibling pane able to carry a forged tab
+    // marker into discovery. A stale or cross-session pane deliberately
+    // resolves to no window and therefore excludes nothing.
+    let states: Vec<&crate::tmux::PaneState> = states.into_iter().collect();
+    let recorded_agent_ordinal = recorded_agent_pane
+        .and_then(|pane| pane.strip_prefix('%'))
+        .and_then(|ordinal| ordinal.parse::<u64>().ok());
+    let excluded_agent_window = recorded_agent_ordinal.and_then(|pane_ordinal| {
+        states
+            .iter()
+            .find(|state| state.session_name == tmux_name && state.pane_ordinal == pane_ordinal)
+            .map(|state| state.window_ordinal)
+    });
     let mut found: HashMap<String, Claim> = HashMap::new();
     let mut ambiguous: HashSet<String> = HashSet::new();
     for state in states {
-        if state.session_name != tmux_name || state.agent.is_some() {
+        if state.session_name != tmux_name
+            || state.agent.is_some()
+            || excluded_agent_window == Some(state.window_ordinal)
+        {
             continue;
         }
         let Some(tab_id) = state.tab.as_deref() else {
@@ -488,7 +508,7 @@ async fn resolve_terminal_inner(
                     format!("could not ask tmux which terminal tabs this session has: {e:#}"),
                 )
             })?;
-            tabs_from_pane_states(states.values(), &agent.tmux_name)
+            tabs_from_pane_states(states.values(), &agent.tmux_name, Some(&agent.pane))
                 .into_iter()
                 .find(|tab| tab.id == *id)
                 // An exited-but-unreaped tab answers exactly like a reaped
@@ -2817,7 +2837,7 @@ mod tests {
             ),
         ]);
 
-        let tabs = tabs_from_pane_states(states.values(), "fh-mine");
+        let tabs = tabs_from_pane_states(states.values(), "fh-mine", None);
         assert_eq!(
             tabs.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
             vec![tab(9), tab(10)],
@@ -2826,7 +2846,7 @@ mod tests {
         assert_eq!(tabs[0].pane, "%1");
         assert_eq!(tabs[1].pane, "%2");
         assert!(
-            tabs_from_pane_states(states.values(), "fh-nobody").is_empty(),
+            tabs_from_pane_states(states.values(), "fh-nobody", None).is_empty(),
             "a session with no windows on this server has no tabs"
         );
     }
@@ -2852,11 +2872,63 @@ mod tests {
         // would pick `%10`, and the pane the tab resolves to must not
         // depend on how many panes happen to have been created first.
         let states = HashMap::from([state("%9"), state("%10"), state("%11")]);
-        let tabs = tabs_from_pane_states(states.values(), "fh-mine");
+        let tabs = tabs_from_pane_states(states.values(), "fh-mine", None);
         assert_eq!(tabs.len(), 1, "one window is one tab: {tabs:?}");
         assert_eq!(
             tabs[0].pane, "%9",
             "the lowest pane is chosen NUMERICALLY: %9 precedes %10"
+        );
+    }
+
+    /// Pane identity must survive a removed or malformed agent marker.
+    ///
+    /// A forged tab marker on a sibling pane of the agent window is exactly
+    /// the shape that marker-only filtering would adopt. Passing the
+    /// recorded pane excludes the whole window, while a stale pane leaves
+    /// unrelated genuine tabs discoverable and does not guess an exclusion.
+    #[farhelm_testtrace::test]
+    fn recorded_agent_pane_excludes_a_forged_tab_in_its_whole_window() {
+        let forged = "9c3d5a71-0000-4000-8000-0000000000fa".to_string();
+        let genuine = "9c3d5a71-0000-4000-8000-0000000000fb".to_string();
+        let states = HashMap::from([
+            // The marker was removed or malformed, so `agent` is absent;
+            // the durable pane identity remains the trusted exclusion.
+            ("%0".to_string(), PaneState::for_test("fh-mine", "%0", "@0")),
+            (
+                "%1".to_string(),
+                PaneState::for_test("fh-mine", "%1", "@0").with_tab(&forged),
+            ),
+            (
+                "%2".to_string(),
+                PaneState::for_test("fh-mine", "%2", "@1").with_tab(&genuine),
+            ),
+        ]);
+
+        let marker_only = tabs_from_pane_states(states.values(), "fh-mine", None);
+        assert_eq!(
+            marker_only
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![forged.as_str(), genuine.as_str()],
+            "without the pane exclusion the forged marker is discoverable"
+        );
+        let protected = tabs_from_pane_states(states.values(), "fh-mine", Some("%0"));
+        assert_eq!(
+            protected
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![genuine.as_str()],
+            "the recorded pane excludes every pane in its window"
+        );
+        assert_eq!(
+            tabs_from_pane_states(states.values(), "fh-mine", Some("%99"))
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![forged.as_str(), genuine.as_str()],
+            "a stale recorded pane must not authorize excluding another window"
         );
     }
 

@@ -11273,11 +11273,13 @@ impl Supervisor {
     /// [`Self::session_tabs_including_dead`].
     pub(crate) async fn session_tabs(&self, terminal: &Terminal) -> anyhow::Result<Vec<TabInfo>> {
         let states = self.tmux.pane_states().await?;
-        Ok(tabs_from_pane_states(states.values(), &terminal.tmux_name)
-            .into_iter()
-            .filter(|tab| !tab.dead)
-            .map(|tab| TabInfo { id: tab.id })
-            .collect())
+        Ok(
+            tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
+                .into_iter()
+                .filter(|tab| !tab.dead)
+                .map(|tab| TabInfo { id: tab.id })
+                .collect(),
+        )
     }
 
     /// Rediscover tabs after adding a replacement agent window.
@@ -11310,13 +11312,15 @@ impl Supervisor {
             state.agent = None;
             candidates.push(state);
         }
-        Ok(
-            tabs_from_pane_states(candidates.iter(), &replacement.tmux_name)
-                .into_iter()
-                .filter(|tab| !tab.dead)
-                .map(|tab| TabInfo { id: tab.id })
-                .collect(),
+        Ok(tabs_from_pane_states(
+            candidates.iter(),
+            &replacement.tmux_name,
+            Some(&replacement.pane),
         )
+        .into_iter()
+        .filter(|tab| !tab.dead)
+        .map(|tab| TabInfo { id: tab.id })
+        .collect())
     }
 
     /// [`Self::session_tabs`] with dead tabs INCLUDED — the teardown
@@ -11332,10 +11336,12 @@ impl Supervisor {
         terminal: &Terminal,
     ) -> anyhow::Result<Vec<TabInfo>> {
         let states = self.tmux.pane_states().await?;
-        Ok(tabs_from_pane_states(states.values(), &terminal.tmux_name)
-            .into_iter()
-            .map(|tab| TabInfo { id: tab.id })
-            .collect())
+        Ok(
+            tabs_from_pane_states(states.values(), &terminal.tmux_name, Some(&terminal.pane))
+                .into_iter()
+                .map(|tab| TabInfo { id: tab.id })
+                .collect(),
+        )
     }
 
     /// Find a pane through which the dead agent window can be removed after
@@ -12006,6 +12012,10 @@ impl Supervisor {
         // resize already treat it as gone.
         let terminal =
             resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
+        let recorded_agent_pane = entry
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.pane.clone());
 
         // Supervisor-owned, like the open: a client disconnecting between
         // the first sweep and the window kill must not leave a half-reaped
@@ -12015,7 +12025,13 @@ impl Supervisor {
         let tab_id = tab_id.to_string();
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
-            sup.close_tab_window(&session_id, &terminal, &tab_id).await
+            sup.close_tab_window(
+                &session_id,
+                &terminal,
+                &tab_id,
+                recorded_agent_pane.as_deref(),
+            )
+            .await
         });
         match task.await {
             Ok(result) => result,
@@ -12033,7 +12049,45 @@ impl Supervisor {
         session_id: &str,
         terminal: &Terminal,
         tab_id: &str,
+        recorded_agent_pane: Option<&str>,
     ) -> Result<(), RequestError> {
+        // Recheck the pane-to-window identity immediately before any process
+        // reap or window kill. Discovery already excludes the recorded agent
+        // window, but a same-account process can change mutable markers after
+        // that read; pane identity is the trusted local exclusion that still
+        // holds at this destructive boundary. A stale or missing recorded
+        // pane supplies no evidence, so it deliberately does not block an
+        // otherwise valid tab close.
+        if let Some(recorded_agent_pane) = recorded_agent_pane {
+            let states = self.tmux.pane_states().await.map_err(|e| {
+                RequestError::new(
+                    error_kind(&e),
+                    format!(
+                        "could not recheck terminal identity before closing tab {}: {e:#}",
+                        truncate_for_error(tab_id)
+                    ),
+                )
+            })?;
+            let agent_window = states
+                .get(recorded_agent_pane)
+                .filter(|state| state.session_name == terminal.tmux_name)
+                .map(|state| state.window_ordinal);
+            let target_is_agent_window = agent_window.is_some_and(|agent_window| {
+                states
+                    .get(&terminal.pane)
+                    .filter(|state| state.session_name == terminal.tmux_name)
+                    .is_some_and(|state| state.window_ordinal == agent_window)
+            });
+            if target_is_agent_window {
+                return Err(RequestError::new(
+                    ErrorKind::NotFound,
+                    format!(
+                        "terminal tab {} is the session's recorded agent window",
+                        truncate_for_error(tab_id)
+                    ),
+                ));
+            }
+        }
         self.reap_tab_tree(session_id, terminal, tab_id, TabReapAnchor::PaneIfLive)
             .await
             .map_err(|e| {
@@ -16171,7 +16225,7 @@ pub(crate) mod tests {
             .expect("session entry");
         let agent = entry.terminal.clone().expect("agent terminal");
         let states = sup.tmux.pane_states().await.expect("pane states");
-        let tab_pane = tabs_from_pane_states(states.values(), &agent.tmux_name)
+        let tab_pane = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
             .into_iter()
             .find(|candidate| candidate.id == tab.id)
             .expect("tab marker is discoverable")
@@ -16227,6 +16281,88 @@ pub(crate) mod tests {
         assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
     }
 
+    /// A same-account pane can remove the agent marker and forge a tab marker
+    /// on the live agent window. Listing and explicit close must still use
+    /// the durable pane identity, while an unrelated genuine tab keeps its
+    /// ordinary discover-and-close behavior.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_forged_tab_on_the_agent_window_cannot_be_listed_or_closed() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("agent session");
+        let genuine = sup.open_tab(&created.id).await.expect("terminal tab");
+        let entry = sup
+            .sessions
+            .lock()
+            .await
+            .get(&created.id)
+            .cloned()
+            .expect("session entry");
+        let agent = entry.terminal.clone().expect("agent terminal");
+        let forged = uuid::Uuid::new_v4().to_string();
+
+        // A malformed agent marker parses as absent, and the forged tab
+        // marker is otherwise shaped exactly like a supervisor-minted id.
+        sup.tmux
+            .mark_window(
+                &agent.tmux_name,
+                &agent.pane,
+                AGENT_WINDOW_OPTION,
+                "malformed-agent-marker",
+            )
+            .await
+            .expect("corrupt the mutable agent marker");
+        sup.tmux
+            .mark_window(&agent.tmux_name, &agent.pane, TAB_WINDOW_OPTION, &forged)
+            .await
+            .expect("forge a tab marker on the agent window");
+
+        let listed = sup.session_tabs(&agent).await.expect("tab listing");
+        assert_eq!(
+            listed,
+            vec![genuine.clone()],
+            "the forged marker must not expose the agent window as a tab"
+        );
+        let close = sup
+            .close_tab(&created.id, &forged)
+            .await
+            .expect_err("closing the forged agent tab must refuse");
+        assert_eq!(close.kind, ErrorKind::NotFound);
+        assert!(
+            sup.tmux
+                .has_session(&agent.tmux_name)
+                .await
+                .expect("session liveness"),
+            "refusing the forged tab must retain the agent's tmux session"
+        );
+        assert!(
+            sup.tmux
+                .pane_states()
+                .await
+                .expect("agent pane probe")
+                .contains_key(&agent.pane),
+            "refusing the forged tab must not destroy the agent window"
+        );
+
+        // A genuine tab still follows the ordinary close path after the
+        // forged marker has been rejected.
+        sup.close_tab(&created.id, &genuine.id)
+            .await
+            .expect("close genuine tab");
+        assert!(
+            sup.session_tabs(&agent)
+                .await
+                .expect("tab listing after genuine close")
+                .is_empty(),
+            "the genuine tab remains closeable"
+        );
+    }
+
     /// Restarting while the recorded agent pane is still live reuses that
     /// pane, so the tab list must come from the preflight snapshot and the
     /// tab shell must remain untouched.
@@ -16250,7 +16386,7 @@ pub(crate) mod tests {
             .expect("session entry");
         let agent = entry.terminal.clone().expect("agent terminal");
         let states = sup.tmux.pane_states().await.expect("pane states");
-        let tab = tabs_from_pane_states(states.values(), &agent.tmux_name)
+        let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
             .into_iter()
             .find(|candidate| candidate.id == tab.id)
             .expect("tab marker is discoverable");
@@ -16304,7 +16440,7 @@ pub(crate) mod tests {
             .expect("session entry");
         let agent = entry.terminal.clone().expect("agent terminal");
         let states = sup.tmux.pane_states().await.expect("pane states");
-        let tab = tabs_from_pane_states(states.values(), &agent.tmux_name)
+        let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
             .into_iter()
             .find(|candidate| candidate.id == tab.id)
             .expect("tab marker is discoverable");
@@ -16423,7 +16559,7 @@ pub(crate) mod tests {
                 .expect("session entry");
             let agent = entry.terminal.clone().expect("agent terminal");
             let states = sup.tmux.pane_states().await.expect("pane states");
-            let tab = tabs_from_pane_states(states.values(), &agent.tmux_name)
+            let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
                 .into_iter()
                 .find(|candidate| candidate.id == tab.id)
                 .expect("tab marker is discoverable");

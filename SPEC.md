@@ -1327,10 +1327,13 @@ either removing agent parent/child relationships or making them useful; neither 
 
 ### Local authority and trust between hosts
 
-The local security boundary is the Unix account on a particular host. Farhelm does not isolate an agent from other
-processes or state accessible to that account. Session credentials identify and admit interface requests; they do not
-provide same-account containment. Running agents without permission checks in disposable remote environments is an
-intended use. Future container or sandbox support would require a new, explicit isolation contract.
+The local security boundary is the Unix account on a particular host. Processes the user runs on the target host,
+including same-account processes that can reach Farhelm's private tmux server, are trusted by this threat model.
+Farhelm does not provide strong same-account isolation against deliberate interference with agents or that private
+session, and session credentials do not provide same-account containment. Running agents without permission checks in
+disposable remote environments is an intended use. Farhelm still keeps simple local guards against accidental
+interference where their identity is available, such as excluding a session's recorded agent pane from tab discovery
+and destructive tab cleanup. Future container or sandbox support would require a new, explicit isolation contract.
 
 A supervisor trusts its attached helm to administer it, launch processes, and forward user input. That trust is
 directional: the helm and GUI must treat remote supervisor messages and agent-controlled output as untrusted. A remote

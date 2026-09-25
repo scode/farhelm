@@ -1038,7 +1038,13 @@
   each destructive path; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution
   change. If the code or spec work requires materially more complexity than this bounded guard and clarification, defer
   with the blocker documented in TODO.md instead of expanding scope.
-- Execution: `pending`.
+- Execution: `complete`; the supervisor now excludes the entire window containing the recorded agent pane from tab
+  discovery and destructive cleanup, even when mutable markers are missing or malformed, and rechecks that identity
+  before explicit close. `SPEC.md` records the trusted-target-process boundary and the absence of strong same-account
+  isolation. Focused pinned recorder run `6bdf9b00-01d6-49f4-ba54-5aa7232092bf` passed four tests (863 skipped); the
+  isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed.
+  Fresh Astra medium review reported `No entries. OK`. Draft PR [#921](https://github.com/scode/farhelm/pull/921/changes)
+  is on bookmark `pr/stripped-agent-marker`; implementation commit `1ab84dc8b02f794d3247fd3751fded16af5ed92b`.
 
 ## discard-quarantined-hangs-response.md
 
