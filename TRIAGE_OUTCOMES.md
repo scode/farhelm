@@ -993,6 +993,10 @@
   nextest run `fbd09538-c841-47db-99e1-cf7b698d7b9b` passed four retry lifecycle tests (856 skipped); formatting,
   changelog, and isolated sleep checks passed. Draft PR [#918](https://github.com/scode/farhelm/pull/918/changes) is on
   bookmark `pr/refused-retry-launch-cleanup`, jj change `2a176be0e560`.
+- Execution (2026-09-25, supersedes the entry above): `in progress`. #918 merged carrying only this ledger update; the
+  fix, its changelog fragment, and the queue removal never reached main, and `v0.16.0-rc.1` shipped without them. The
+  unchanged fix is restored on bookmark `pr/restore-refused-retry-cleanup`, draft PR
+  [#953](https://github.com/scode/farhelm/pull/953/changes).
 
 ## restart-kills-tabs-reports-present.md
 
