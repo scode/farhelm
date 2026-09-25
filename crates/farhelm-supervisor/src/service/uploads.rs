@@ -1253,8 +1253,9 @@ async fn abandon_upload(sup: &Arc<Supervisor>, staged: crate::files::StagedStrea
 /// Cancel every upload in flight for `session_id` and wait for each to
 /// finish cleaning up.
 ///
-/// A whole-session teardown's first step. Once this returns, the async
-/// transfer tasks have ended. Blocking disk operations abandoned by those
+/// The cancellation step after a whole-session teardown's refusal-prone
+/// read-only preflights and before destructive cleanup. Once this returns,
+/// the async transfer tasks have ended. Blocking disk operations abandoned by those
 /// tasks may still finish, including publication; this wait does not join
 /// them or undo a completed attachment. Delete removes attachments through
 /// its ordinary directory teardown. A late commit is told that the session

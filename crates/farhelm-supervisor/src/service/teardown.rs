@@ -3,8 +3,9 @@
 //!
 //! Delete is the slowest and least reversible thing this supervisor does,
 //! and its steps are ordered against each other for reasons that are not
-//! recoverable from reading any one of them: uploads are cancelled before
-//! the multi-second process sweep so nothing goes on writing into a
+//! recoverable from reading any one of them: refusal-prone read-only
+//! preflights happen before uploads are cancelled; cancellation still comes
+//! before the multi-second process sweep so nothing goes on writing into a
 //! directory that is about to vanish; tab and past-launch scope units are
 //! enumerated from the manager because a tmux server that died first leaves
 //! no windows to read tab ids from while a scrubbed daemon keeps running
@@ -143,23 +144,6 @@ impl Supervisor {
         session_id: &str,
         _directory_admission: tokio::sync::OwnedMutexGuard<()>,
     ) -> Result<(), TeardownError> {
-        // In-flight uploads are cancelled FIRST — before the
-        // process sweep, not after it. The sweep is where a delete
-        // spends its seconds (a grace period plus several /proc
-        // walks), and a transfer left running through it goes on
-        // writing into the directory this delete is about to take
-        // away, for as long as the sweep lasts. Cancelling first
-        // costs nothing (the transfer is doomed either way) and stops
-        // further chunks once each task notices. An already-running
-        // blocking disk operation can still finish.
-        //
-        // `abort_session_uploads` waits for the async tasks, not abandoned
-        // blocking operations. A late publication can still race the
-        // directory teardown below; cancellation itself is not rollback.
-        // The lifecycle claim keeps new transfers from staging here
-        // (see `stage_upload`).
-        abort_session_uploads(self, session_id, "the session was deleted").await;
-
         // The process-tree sweep runs BEFORE any lock is held: it can
         // take seconds (a grace period plus several /proc walks), and
         // holding `attachments` for that long would stall every OTHER
@@ -299,6 +283,22 @@ impl Supervisor {
             }
         }
         units.normalize();
+
+        // All refusal-prone, read-only preflights have passed: pane
+        // ownership, terminal-tab rediscovery, and scope enumeration. Now
+        // cancel in-flight uploads, still before the process sweep and every
+        // destructive step below. A refused preflight therefore leaves the
+        // transfer and its staged bytes available to the session, while a
+        // successful Delete still stops new chunks before teardown can remove
+        // the attachment directory. The lifecycle claim keeps new transfers
+        // from staging between this cancellation and teardown (see
+        // `stage_upload`).
+        //
+        // `abort_session_uploads` waits for the async tasks, not abandoned
+        // blocking operations. A late publication can still race the
+        // directory teardown below; cancellation itself is not rollback.
+        abort_session_uploads(self, session_id, "the session was deleted").await;
+
         reap_process_tree(
             &self.seams.scopes,
             units,
