@@ -1265,7 +1265,7 @@ samp {
    lines beside the small actions-menu toggle) over an optional
    per-session error line — see the SessionRow doc in lib.rs for why an
    error needs its own line. The lifecycle buttons themselves live in
-   the conditionally mounted floating panel (`.session-row-menu-panel`),
+   the conditionally mounted floating flyout (`.session-row-menu-flyout`),
    not on the row. `.session-row` itself is a plain flex container (a
    <div>, not a <button>: a <button> could not legally nest the toggle
    <button> beside the open one). */
@@ -1282,24 +1282,19 @@ samp {
      scrolling/clipping ancestor — `.session-list`'s `overflow-y: auto`,
      `.app-sidebar`'s `overflow: hidden auto` — clipped the panel along
      with everything else outside the visible scroll window (the reported
-     bug: opening the menu on a row near the bottom of the list cut the
-     panel off mid-button). The panel is `position: fixed` now, positioned
-     from the toggle's own measured viewport rect instead of this row's
-     box, so it escapes that clip by construction and this row no longer
-     needs to BE an anchor for anything. */
+   bug: opening the menu on a row near the bottom of the list cut the
+   panel off mid-button). The session flyout wrapper is `position: fixed`,
+   positioned from the toggle's own measured viewport rect instead of this
+   row's box, so it escapes that clip by construction and this row no longer
+   needs to BE an anchor for anything. */
 }
 
 /* The row whose actions menu is open, for as long as it is open (the
    `menu-open` class comes from `row_class` in list/row.rs, and from
-   `hosts::host_row_class` for the host row's own menu). The panel hangs
-   below-LEFT of its own "⋯" and covers the rows under it — their toggles
-   stay clear, deliberately (see `menu_panel_style`'s anchor doc in
-   `menu_panel.rs`, shared by both rows), which is exactly why several live
-   "⋯" can be on screen at once with one menu up. That makes "which one did
-   I open?" a question the ROW has to answer rather than the small glyph
-   alone, and it is exactly the question the menu redesign was asked to
-   fix — the host row inherits the same answer once its own "⋯" existed to
-   ask it of.
+   `hosts::host_row_class` for the host row's own menu). The session flyout
+   leaves the list visible beside it. The host panel still hangs below-left
+   of its toggle. In both cases the row tint identifies ownership when
+   several visible toggles could otherwise look alike.
 
    This tint belongs to menu ownership, not to focus alone. A menu can close
    while its toggle remains focused — especially when a row reorder removes
@@ -1590,95 +1585,22 @@ samp {
 
 /* ===== Row actions menu =========================================== */
 
-/* The floating panel the toggle anchors: rename/stop/delete, and
-   the in-menu confirm that replaces them for a destructive action. Floats
-   over the rows below rather than pushing them down — a menu that
-   reflowed the list would move the very row the user is acting on.
+/* Both row menus use a viewport-fixed surface to escape the sidebar scroll
+   clip. Their shared placement lifecycle measures a toggle once per open,
+   hides the surface while that measurement is pending, and pins a visible
+   fallback at the viewport top-left if measurement fails. The host menu is
+   itself fixed below-left of its toggle; the session menu uses a fixed
+   non-scrolling flyout wrapper beside the sidebar and puts its scrollable
+   panel and row pointer inside that wrapper. Their inline styles own every
+   positional property. A class-level left or right inset would survive into
+   a measured state and stretch the box across the sidebar.
 
-   `position: fixed`, not `absolute`: an absolutely positioned panel can
-   only ever be clipped by an ancestor's `overflow` — `.session-list`'s
-   `overflow-y: auto` and `.app-sidebar`'s `overflow: hidden auto` both
-   qualify — which cut the panel off at the scroll container's edge for
-   any row near the bottom of a full list (the reported bug: opening the
-   menu there showed only "rename" and half of "stop"). `fixed` resolves
-   `top`/`right`/`left` against the VIEWPORT instead, which is what
-   actually escapes that clip; it does so ONLY because no ancestor between
-   here and the viewport establishes a containing block or clipping
-   context for fixed-position descendants (several unrelated CSS
-   properties can do this — `transform`, `filter`, `perspective`, and some
-   but not all values of `contain`, among others — so this is a property
-   of the whole chain's CSS, not a fixed enumeration to grep for). This
-   file sets none of them on any ancestor here, and that absence is a real
-   invariant future ancestor CSS on this panel's chain must not break.
-
-   `top`/`right` are NOT set here for the MEASURED case: `SessionRow`
-   (list/row.rs) and `HostRow` (hosts.rs) each measure their own toggle's
-   `get_client_rect()` on open and write the result as an inline `style`,
-   computed by `menu_panel_style` via `menu_panel_placement_style` (both in
-   `menu_panel.rs`) — see `PanelPlacement`'s own doc for the three states
-   that function renders and why. This rule's own
-   `top`/`left` below apply in exactly one of those states —
-   `PanelPlacement::Fallback`, when the measurement itself FAILED (no
-   mounted handle, or the renderer's `get_client_rect()` returned `Err`)
-   — and are a PERSISTENT fallback, not a one-render bridge: a renderer
-   that cannot answer this query will fail on every future measurement
-   too, so a toggle stuck in that state keeps opening to these coordinates
-   for as long as it stays open, rather than ever resolving to something
-   better. `left`, not `right`: the panel lives in a 340px sidebar
-   anchored at the viewport's OWN left edge, so a fallback pinned to the
-   viewport's right edge (as an earlier version of this rule had it) would
-   land the unmeasurable panel far from the row it belongs to — clear on
-   the OTHER side of a wide window's main pane — where `left: 8px` keeps
-   it directly over the sidebar instead. The other unmeasured state
-   (`PanelPlacement::Unmeasured`, the always-first state on open) does not
-   reach these coordinates at all — see the `opacity`/`pointer-events`
-   paragraph below for what it renders instead and why.
-
-   The `max-height` below is only the FALLBACK state's backstop; the
-   measured state carries its own exact `max-height`, derived from the
-   same clamped top (`calc(100vh - var(--menu-top) - 8px)` — see
-   `menu_panel_style`), so a mode taller than the clamp's reserve still
-   ends at the viewport edge and scrolls inside `overflow-y: auto` instead
-   of running off screen. `max-width` below is the same story on the
-   horizontal axis: the measured state derives its own narrower cap when
-   the toggle sits close to the viewport's left edge (see
-   `menu_panel_style`'s own doc for the `.app-shell`-scrolled extreme that
-   clamp exists for); this rule's static `288px` only backstops the
-   FALLBACK state, whose toggle position (and therefore how much room is
-   actually available) was never measured at all.
-
-   Every state `menu_panel_placement_style` can produce EXPLICITLY
-   restates `opacity`/`pointer-events` (never omits them to "fall through"
-   to this rule's own values) for a reason specific to this renderer:
-   Dioxus's shared JS interpreter (`dioxus-interpreter-js`,
-   `setAttributeInner`'s `"style"` case, loaded unmodified by both the
-   `web` and `desktop` targets) does NOT treat a `style` attribute update
-   as a plain replace the way `Element.setAttribute` normally would — it
-   snapshots the element's CURRENT inline style properties first, applies
-   the new attribute string, and then RESTORES any property from the old
-   snapshot that the new string left unset. A state that merely omitted
-   `opacity`/`pointer-events` to mean "use the CSS default" would instead
-   silently inherit whatever the PREVIOUS render's inline style said —
-   which, coming from `Unmeasured`'s `opacity: 0; pointer-events: none;`,
-   would leave a successfully measured panel invisible and unclickable
-   forever. `PanelPlacement::Unmeasured` itself is exempt from this
-   concern: it is always the FIRST state on every fresh mount (a brand
-   new DOM node with no prior style to restore from), which is also why
-   only it may still safely omit a property.
-
-   Closing on scroll (or resize, or an internal layout shift this
-   component causes itself) is NOT wired here or in `.session-list`
-   (list.rs tried scroll-only, on `.session-list` itself, once —
-   `.session-list` has no height constraint of its own, so it never
-   scrolls, and the `onscroll` never fired). `AppBody` (lib.rs) listens on
-   the sidebar's actual scrolling/resizing ancestors — `.app-sidebar` and
-   `.app-shell` — and bumps a shared `layout_epoch` counter; `ListView`
-   reacts to that AND to its own on-demand panels by closing any open menu
-   (see `layout_epoch`'s own doc in list.rs): a `fixed` panel does not
-   move WITH its row the way the old `absolute` one did, so leaving a
-   stale one open across any of these would visibly detach it from the
-   toggle it supposedly belongs to — a regression this fix must not trade
-   the clipping bug for. */
+   Both menus close on sidebar scroll, resize, or a list layout change because
+   fixed coordinates would otherwise detach from their rows. The measured
+   styles compute max-height from the same clamped top they paint; the class
+   max-height is only the failed-measurement backstop. Dioxus restores omitted
+   inline properties from the previous style update, so each visible state
+   restates opacity and pointer-events after the hidden opening state. */
 .session-row-menu-panel,
 .host-row-menu-panel {
   position: fixed;
@@ -1689,8 +1611,8 @@ samp {
      sizing keeps `max-height` describing the box actually painted. */
   box-sizing: border-box;
   /* NO positional properties here, deliberately: coordinates are emitted
-     per placement state by `menu_panel_placement_style` (menu_panel.rs) — the
-     measured state anchors to the toggle's rect, the fallback state pins
+     per placement state by menu_panel.rs — the measured states use each
+     menu's own anchor, and the fallback state pins
      top-left over the sidebar. A class-level `top`/`left` fallback (an
      earlier revision of this fix) leaked into the MEASURED state too:
      measured placement sets `right` but a class-level `left` stayed in
@@ -1702,18 +1624,12 @@ samp {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  /* No gap and no side padding: the item rows below are full-bleed, so
-     their own hover fill has to reach the panel's edges — a gap would cut
-     the highlighted row into a floating stripe, which is precisely the
-     stack-of-outlined-buttons look this redesign replaced. The 4px above
-     and below keeps the first and last rows off the panel's own corners.
-     The confirm and rename sub-states are NOT a list of rows and get the
-     padded box back — see the `:not([role="menu"])` rule directly
-     below. */
+  /* Host items remain full bleed. Session items override their margins and
+     radius below; confirmation prompts receive their own padding. */
   gap: 0;
   padding: 4px 0;
-  /* The floating level, literally: this panel is `position: fixed` over
-     the rows it belongs to, and a panel painted at the rows' own level
+  /* The floating level, literally: this panel is painted over the rows it
+     belongs to, and a panel painted at the rows' own level
      would have only its 1px border to say it is in front of them. The
      shadow is the other half of that claim — see `--shadow-menu`, which
      exists for exactly this one KIND of surface (both row menus' panels,
@@ -1727,16 +1643,121 @@ samp {
   overflow-y: auto;
 }
 
-/* The same box in its OTHER two lives. A confirm prompt and a rename
-   field are not lists of full-bleed rows, so the geometry above is wrong
-   for them; restoring the padded, gapped box they were designed in here
-   keeps that change local instead of pushing an inset onto each of the
-   eight elements those two states can contain.
+/* Session commands sit beside the list. The 246px width follows design C;
+   the inline placement shrinks it when that much room is unavailable. The
+   host menu keeps the full-width rows and anchor defined above. */
+.session-row-menu-panel:not(.menu-prompt) {
+  width: 246px;
+  padding: 4px 0;
+}
+
+/* The flyout owns the fixed placement and the panel owns its scroll. Keeping
+   those boxes separate means the pointer can use the wrapper's actual height
+   when a short viewport clamps the panel, without being clipped by the
+   panel's scrolling content. The wrapper's height is the panel's only while
+   the panel is its sole in-flow child, so the refusal line renders inside
+   the panel: as a sibling it once stretched the wrapper, let the pointer sit
+   beside the error below the painted panel, and hung a long error past the
+   viewport outside the panel's scroll. */
+.session-row-menu-flyout {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 246px;
+  max-width: 288px;
+  max-height: calc(100vh - 16px);
+}
+
+.session-row-menu-flyout > .session-row-menu-panel {
+  position: relative;
+  inset: auto;
+  z-index: 1;
+  width: 100%;
+  max-width: none;
+  max-height: inherit;
+  overflow-y: auto;
+}
+
+.session-row-menu-flyout > .session-row-menu-panel:not(.menu-prompt) {
+  width: 100%;
+}
+
+/* The pointer is inside the non-scrolling wrapper so its vertical clamp is
+   relative to the panel's actual rendered extent. A failed row measurement
+   renders no pointer. */
+.session-row-menu-pointer {
+  position: absolute;
+  z-index: 0;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transform: rotate(45deg);
+  left: -5px;
+  pointer-events: none;
+}
+
+/* Below the sidebar plus flyout width there is no edge-to-edge tether:
+   the clamped panel overlaps the list, so a left-edge notch would point
+   away from the toggle it claims to identify. Placement stays the same. */
+@media (max-width: 601px) {
+  .session-row-menu-pointer {
+    display: none;
+  }
+}
+
+/* The header is context for the command list, outside its menu role.
+   Truncation keeps an unbounded title or profile from changing placement;
+   the full values remain on the header's native tooltips. */
+.session-row-menu-header {
+  padding: 6px 11px 7px;
+  border-bottom: 1px solid var(--border-dim);
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+/* The ellipsis belongs on the block whose own line box holds the text.
+   `text-overflow` neither inherits nor reaches into a child block, and the
+   summary's text lives in `PeerLine`'s block (`-runs`), so the same three
+   declarations on the outer summary only clipped the line without an
+   ellipsis. The title's text is an inline child of the title itself. */
+.session-row-menu-title,
+.session-row-menu-summary-runs {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row-menu-title {
+  color: var(--fg-0);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.session-row-menu-summary {
+  color: var(--fg-1);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.session-row-menu-summary-runs {
+  min-width: 0;
+}
+
+.session-row-menu-summary[data-profile-existence="renamed"],
+.session-row-menu-summary[data-profile-existence="unrecognized"] {
+  color: var(--warn);
+}
+
+/* The same box in its confirmation lives. Delete and replace prompts are
+   compact exchanges rather than command lists, so they retain padding.
 
    Keyed off a class the component sets rather than off the panel's own
    role, which is where this selector used to look: `role="menu"` has
    moved INWARD, onto the item list, so that the panel can stay a neutral
-   positioned box while the profile footer and the error line sit outside
+   positioned box while the session header and error line sit outside
    the menu they are not part of (see list/row.rs). A selector on a role
    the element no longer carries would have kept matching every state and
    silently un-padded the prompts. The class is emitted in the same
@@ -1749,18 +1770,17 @@ samp {
 
 /* The `role="menu"` element itself. It exists so the accessibility tree
    can say where the list of commands starts and stops — which the panel
-   could not, once it also held a profile footer and an error line — and
+   could not, once it also held a session header and an error line — and
    it carries only enough geometry to be transparent: the same column the
-   panel is, at the panel's own full width, so the items' full-bleed hover
-   fill still reaches both edges.
+   panel is, at the panel's own full width, without adding a tab stop.
 
    NOT `display: contents`, which would be the tidier way to say "no box
    here": several engines have historically dropped `display: contents`
    elements from the accessibility tree entirely, and this element exists
    for no other reason than to be IN that tree. A real box that adds
    nothing is the safe version of the same intent — needed by
-   `.host-row-menu-items` too, even though the host panel never grows a
-   profile footer or error line to separate the `role="menu"` list from in
+   `.host-row-menu-items` too, even though the host panel has no header
+   or error line to separate the `role="menu"` list from in
    the first place. */
 .session-row-menu-items,
 .host-row-menu-items {
@@ -1813,27 +1833,10 @@ samp {
 
 /* ===== Row actions and confirmations ============================== */
 
-/* The items of either row's actions menu. Host rows conditionally offer Retry,
-   Adopt, Re-run, Automatic setup, Update, Edit destination, and Remove; see
-   `hosts::host_menu_order`. Full-width
-   rows that light up edge to edge on hover, not a stack of small centered
-   boxes: with a border and a padded box each, they read as unrelated
-   buttons that happened to land in the same rectangle, which is the
-   complaint the menu redesign answers — see SPEC_impl.md's session-row
-   actions menu for the contract this implements; the shape itself is a
-   property of being a full-bleed row in a `role="menu"` panel, not of being
-   a session's row specifically. The look is `.btn`'s ghost tier already —
-   transparent border, `--control-hover-bg` on hover AND focus — so this
-   rule only has to change the SHAPE.
-
-   `display: block` plus `width: 100%` rather than letting the panel's
-   flex column stretch them: a stretched flex item still centers its own
-   text, and left alignment is what makes several rows scannable as a list.
-
-   The square corners are structural, not a design choice the token block
-   should have to name: these rows run the full width of a container that
-   has its own radius and clips them, so a rounded item inside would show
-   its corners against the panel's fill as four notches. */
+/* Both menus start with a borderless, left-aligned command row. The host
+   menu keeps these full-width square rows. The session menu overrides the
+   shape below for inset rounded focus and hover fills while preserving the
+   button class and keyboard behavior shared by both. */
 .session-row-menu-item,
 .host-row-menu-item {
   display: block;
@@ -1849,9 +1852,61 @@ samp {
   border-radius: 0;
   padding: 5px 10px;
   font-size: 12px;
-  /* Louder than `.btn`'s resting `--fg-1`: these are the actions the menu
-     exists for, and the muted tone is for the footer under them. */
+  /* Commands read louder than the session header's metadata and the item
+     descriptions. */
   color: var(--fg-0);
+}
+
+/* A session command's fill is inset rather than full bleed. The icon and
+   two-line copy share a stable left edge; a focused item gets the same fill
+   as a hovered one, while the existing focus-visible ring remains intact. */
+.session-row-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  line-height: 1.25;
+}
+
+.session-row-menu-item:hover,
+.session-row-menu-item:focus {
+  background: var(--control-hover-bg);
+}
+
+.session-row-menu-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--fg-1);
+}
+
+.session-row-delete .session-row-menu-icon {
+  color: var(--danger);
+}
+
+.session-row-menu-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.session-row-menu-label {
+  color: inherit;
+}
+
+.session-row-menu-description {
+  color: var(--fg-1);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-row-menu-items > .session-row-menu-separator {
+  margin: 4px 10px;
 }
 
 /* An item the shared operation token has made inert. It is
@@ -1876,20 +1931,11 @@ samp {
   background: transparent;
 }
 
-/* The divider before the destructive item — the one place in either menu
-   where the reading has to slow down. A rule, not a red box: menu actions
-   stay ghost (see `.session-row-delete` and `.host-remove` for their red
-   text), while confirmation controls use
-   the explicit danger tier; the separation is done by the quiet
-   `--border-dim` rule rather than by dressing a menu item up as a box.
-
-   Its own element, carrying `role="separator"`, rather than a `border-top`
-   on the delete/remove item: drawn on the item, the boundary existed for
-   sighted users only, and the accessibility tree showed the destructive
-   command as just another one in the list with nothing to mark it as
-   different in kind. The element is not focusable and is not counted by
-   either menu's focus arithmetic (see `MenuOrder` in `menu_panel.rs`), so
-   arrow keys step straight past it in both menus. */
+/* Session actions use three rules between their four kinds of command;
+   the host menu keeps its rule before Remove. A separate `role="separator"`
+   announces each boundary without entering either menu's roving focus
+   order. The quiet border distinguishes groups without turning a command
+   into a confirmation button. */
 .session-row-menu-separator,
 .host-row-menu-separator {
   margin: 4px 0 0;
@@ -2427,58 +2473,10 @@ samp {
 }
 
 /* A renamed or unrecognized profile-named badge carries the same amber the
-   host status does. A deleted catalog row stays plain: the snapshotted name
-   is useful history, not a warning about the session. Kept in step with
-   `.session-profile`'s rule below rather than folded into it, because the two
-   live on different surfaces and only the color is shared. */
+   menu header summary does. A deleted catalog row stays plain: the
+   snapshotted name is useful history, not a warning about the session. */
 .session-invocation[data-profile-existence="renamed"],
 .session-invocation[data-profile-existence="unrecognized"] {
-  color: var(--warn);
-}
-
-/* The profile a session was created FROM, as it snapshotted the name
-   (PLAN_M6_75.md item 8). Lives in the row's actions panel (a column flex
-   container) since the sidebar redesign dropped it from the row proper, so
-   it must NOT be a flexible item: `flex: 1 1 0` in a column context is a
-   zero flex-basis HEIGHT, which collapsed the chip to an invisible
-   zero-height span. It ellipsizes against the panel's max-width instead.
-
-   It is the menu's FOOTER, not one of its items, and every declaration
-   below the flex ones says so: its own divider above it, a size below the
-   items' 12px, and the muted `--fg-1` they were lifted off. This is a
-   fact ABOUT the session, sitting under a list of things you can DO to
-   it, and reading it as a fifth clickable row was the confusion the menu
-   redesign set out to end. The horizontal padding matches the items' so
-   the two align down the panel's left edge; the divider is full-bleed for
-   the same reason theirs is (see `.session-row-menu-panel`'s zero side
-   padding).
-
-   The ellipsis rules are load-bearing, not tidiness: a profile name has
-   no length bound the UI enforces, and the browser suite pins that a
-   near-limit one is genuinely clipped inside the panel rather than
-   widening it out of the sidebar. */
-.session-profile {
-  color: var(--fg-1);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: none;
-  min-width: 0;
-  margin-top: 4px;
-  padding: 6px 10px 2px;
-  border-top: 1px solid var(--border-dim);
-}
-
-/* A profile renamed since the snapshot, or in a state this build cannot read.
-   Deleted rows are deliberately omitted: their immutable names render like
-   present ones so sessions from old or foreign catalogs do not look broken.
-
-   Amber rather than red for the stale badge's reason: nothing has failed —
-   the session is unaffected and still runs what it snapshotted — but the
-   name beside it is no longer a statement about today's catalog. */
-.session-profile[data-profile-existence="renamed"],
-.session-profile[data-profile-existence="unrecognized"] {
   color: var(--warn);
 }
 

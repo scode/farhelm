@@ -49,6 +49,7 @@ import {
   forceBuildSkew,
   hideSeenState,
   localHostId,
+  listSessions,
   openHostMenu,
   openHostsPanel,
   openRowMenu,
@@ -876,6 +877,43 @@ async function waitForHostsListSettled(page: Page): Promise<void> {
 }
 
 /**
+ * Wait until every listed fixture session reports `state` through the API,
+ * so the rows stop moving before a test measures them or opens a menu.
+ *
+ * The list's default Activity order puts running and waiting sessions in a
+ * group ahead of everything else, so a fresh `sleep 300` fixture moves when
+ * its classification settles from running to idle, and a `true` fixture
+ * moves when it exits. A reorder under an open menu closes it by design
+ * (`commit_listing`'s reflow check in list/view.rs), and a reorder before
+ * the menu opens silently changes which row sits at the sidebar's bottom
+ * edge. Browser probes of these menu tests saw exactly that: a menu opened
+ * on a freshly created fixture closed about a second later as the list
+ * reordered. Settling in the API first, before `page.goto`, keeps both the
+ * geometry premise and the open menu stable.
+ */
+async function waitForFixtureStates(
+  request: APIRequestContext,
+  sessions: { id: string }[],
+  state: string,
+): Promise<void> {
+  const ids = sessions.map((session) => session.id);
+  await expect
+    .poll(
+      async () => {
+        const listed = await listSessions(request);
+        return ids.map(
+          (id) => listed.sessions.find((session) => session.id === id)?.status?.state ?? "missing",
+        );
+      },
+      {
+        timeout: 30_000,
+        message: `fixture sessions must all settle to ${state} before the page measures them`,
+      },
+    )
+    .toEqual(ids.map(() => state));
+}
+
+/**
  * Selecting a session keeps BOTH panes on screen, non-overlapping, at the
  * agreed geometry: sidebar at its fixed 340px, main pane with real width
  * and the full shell height.
@@ -1496,22 +1534,12 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
     // "replace with" sits between clone and replace (row.rs's
     // `MENU_ACTIONS`), the row menu's other "make a new session from this
     // one" verb.
-    await expect(menu.getByRole("menuitem")).toHaveText([
-      "rename",
-      "clone",
-      "replace with",
-      "replace",
-      "stop",
-      "delete",
-    ]);
-    // The boundary before the destructive item exists in the tree, not
-    // only in the paint — six consecutive commands with nothing marking
-    // the last as different in kind is what this replaces.
-    await expect(menu.getByRole("separator")).toHaveCount(1);
-    // The profile footer and any refusal line are the panel's, not the
-    // menu's: a `role="menu"` whose children are not all commands is a
-    // grouping a screen reader has to guess at.
-    await expect(menu.locator(".session-profile")).toHaveCount(0);
+    for (const name of ["rename", "clone", "replace with", "replace", "stop", "delete"]) {
+      await expect(menu.getByRole("menuitem", { name, exact: true })).toHaveCount(1);
+    }
+    // Descriptions contribute context through aria-describedby; the
+    // action words remain concise accessible names for quick navigation.
+    await expect(menu.getByRole("separator")).toHaveCount(3);
 
     await target.locator(".session-row-delete").click();
     // The prompt is a named exchange, not a menu with no items in it.
@@ -1545,8 +1573,8 @@ test("the actions menu exposes a real menu-button relationship", async ({ page, 
  * then replace joined the walk when each joined the menu, for the same
  * reason.
  *
- * The separator before delete is part of what is being checked: it is not
- * focusable and not counted, so ArrowDown must step straight over it.
+ * The group separators are not focusable and not counted, so ArrowDown
+ * steps straight across each boundary.
  */
 test("the actions menu walks every item and wraps at both ends", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -2058,16 +2086,10 @@ test("a reopened busy menu stays navigable while refusing to act", async ({ page
 /**
  * An open panel leaves every OTHER row's "⋯" clickable.
  *
- * This is the anchor's reason for existing, stated as the failure it
- * prevents. The panel extends downward over the rows below it, and at the
- * point where those rows draw their own toggle it is showing `stop` and
- * `delete` — a click aimed at a neighbouring session's menu would stop
- * that session's process tree or delete the row outright, for the WRONG
- * session, with no confirmation step in between. Anchoring the panel to
- * the LEFT of the toggle column is what makes that impossible, and only a
- * coordinate-level click can prove it: a Playwright `click()` on the
- * locator would helpfully scroll and retarget, hiding exactly the overlap
- * this test is about.
+ * The side flyout must leave the sidebar's own controls exposed. A click
+ * aimed at a neighbouring row's toggle must reach that toggle, even when
+ * the first row's menu is open. Only a coordinate-level click proves it:
+ * Playwright's locator click may scroll or retarget around an overlap.
  */
 test("an open menu leaves the other rows' toggles clickable", async ({ page, request }) => {
   const a = await createSession(request, {
@@ -2096,12 +2118,13 @@ test("an open menu leaves the other rows' toggles clickable", async ({ page, req
     const panelBox = (await panel.boundingBox())!;
     const coveredToggle = second.locator(".session-row-menu");
     const toggleBox = (await coveredToggle.boundingBox())!;
-    // The geometric statement of the anchor: the panel's right edge stops
-    // before the toggle column starts.
+    // The panel begins beyond the sidebar, leaving every row control in
+    // the column available while the menu is open.
+    const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
     expect(
-      panelBox.x + panelBox.width,
-      "the panel must not extend into the column the rows below draw their own toggles in",
-    ).toBeLessThanOrEqual(toggleBox.x);
+      panelBox.x,
+      "the flyout must not cover the rows' toggle column",
+    ).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width);
 
     // And the behavioral one. A raw coordinate click is what a user aiming
     // at the visible "⋯" actually does.
@@ -2124,8 +2147,8 @@ test("an open menu leaves the other rows' toggles clickable", async ({ page, req
  * The row and its toggle say which menu is open, in computed style, after
  * the pointer and the keyboard have both moved away.
  *
- * The panel covers the rows below it, so "which of the several visible ⋯
- * did I open?" has to be answerable from the row itself. Existing tests
+ * Several rows have visible ⋯ toggles, so "which did I open?" has to be
+ * answerable from the row itself. Existing tests
  * check the class string and the toggle's opacity, neither of which would
  * notice a missing selector or a specificity regression that let the
  * hover rule win — and the cue that matters most is precisely the one
@@ -2225,22 +2248,13 @@ test("an open menu tints its own row and presses its own toggle", async ({ page,
 });
 
 /**
- * The menu is a RAISED surface of full-bleed rows, not a stack of
- * outlined buttons in a box.
+ * The menu is a raised surface with inset, rounded choices.
  *
- * That is the entire visual half of the redesign, and nothing else
- * asserts it: the old appearance — a bordered box per item, each inset
- * from the panel's edges — would come back without breaking a single
- * behavioral test. The shadow is the load-bearing one, because this panel
- * floats over other session rows and would otherwise read as part of the
- * list rather than in front of it.
- *
- * The width assertions are also the regression for a real box-model bug:
- * an item is `width: 100%` and carries 10px of padding plus a 1px border
- * on each side, so without `box-sizing: border-box` every row is 22px
- * wider than the panel and spills past its rounded corners.
+ * The shadow separates the flyout from the page behind it. The item bounds
+ * catch a return to edge-to-edge rows, while the hover and focus checks
+ * prove the fill stays inside each rounded choice.
  */
-test("the actions menu is a raised surface of full-bleed rows", async ({ page, request }) => {
+test("the actions menu has a raised surface and inset choices", async ({ page, request }) => {
   const session = await createSession(request, {
     title: `menu-visuals-${Date.now()}`,
     cwd: "/tmp",
@@ -2269,39 +2283,49 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
     expect(surface.borderWidth).toBe("1px");
     expect(surface.shadow, "the shadow is what says this is in FRONT of the rows").not.toBe("none");
 
-    // Items: borderless, left-aligned, and exactly as wide as the panel's
-    // content box, so their hover fill reaches both edges.
+    // Each choice has room for an inset hover/focus fill, including its
+    // icon and description, without spilling over the panel's corners.
     const items = await panel.evaluate((element) => {
       const panelBox = element.getBoundingClientRect();
       return [...element.querySelectorAll(".session-row-menu-item")].map((item) => {
         const style = getComputedStyle(item);
         const box = item.getBoundingClientRect();
         return {
-          borderColor: style.borderTopColor,
           textAlign: style.textAlign,
-          overhangLeft: panelBox.left - box.left,
-          overhangRight: box.right - panelBox.right,
+          insetLeft: box.left - panelBox.left,
+          insetRight: panelBox.right - box.right,
+          radius: parseFloat(style.borderTopLeftRadius),
+          iconCount: item.querySelectorAll("svg").length,
         };
       });
     });
     expect(items).toHaveLength(6);
     for (const item of items) {
-      // `.btn` reserves a 1px border so an opaque edge costs no layout
-      // shift; on a menu item it must stay fully transparent.
-      expect(item.borderColor).toBe("rgba(0, 0, 0, 0)");
       expect(item.textAlign).toBe("left");
-      expect(item.overhangLeft).toBeLessThanOrEqual(0);
-      expect(item.overhangRight).toBeLessThanOrEqual(0);
+      expect(item.insetLeft).toBeGreaterThan(0);
+      expect(item.insetRight).toBeGreaterThan(0);
+      expect(item.radius).toBeGreaterThan(0);
+      expect(item.iconCount).toBe(1);
     }
 
-    // The one rule in the list, on its own element before delete rather
-    // than drawn on delete itself.
+    const clone = panel.locator(".session-row-clone");
+    const restingFill = await clone.evaluate((element) => getComputedStyle(element).backgroundColor);
+    await clone.hover();
+    await expect.poll(() => clone.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .not.toBe(restingFill);
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("ArrowDown");
+    await expect(clone).toBeFocused();
+    await expect.poll(() => clone.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .not.toBe(restingFill);
+
+    // Three rules separate rename, creation/replacement, stop, and delete.
     const separator = panel.locator(".session-row-menu-separator");
-    await expect(separator).toHaveCount(1);
+    await expect(separator).toHaveCount(3);
     expect(
-      await separator.evaluate((element) => getComputedStyle(element).borderTopColor),
+      await separator.first().evaluate((element) => getComputedStyle(element).borderTopColor),
     ).toBe(await tokenColor(page, "--border-dim"));
-    const separatorBox = (await separator.boundingBox())!;
+    const separatorBox = (await separator.last().boundingBox())!;
     const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
     expect(separatorBox.y).toBeLessThanOrEqual(deleteBox.y);
   } finally {
@@ -2310,24 +2334,85 @@ test("the actions menu is a raised surface of full-bleed rows", async ({ page, r
 });
 
 /**
- * The panel stays inside a NARROW viewport, and no wider than the room
- * actually left in it.
+ * The session flyout must preserve the visible list and point to its row
+ * while giving each action a short name and optional spoken explanation.
+ * This measures a row with room for the whole menu below it, where
+ * viewport clamping does not have to move the panel away from its
+ * row-aligned position.
  *
- * The measured placement derives its `max-width` from the toggle's own
- * coordinate, while the `right` inset it is paired with is separately
- * floored at 8px. When the two disagree — a narrow shell where the toggle
- * sits at or past the viewport's right edge — the width can be computed
- * from space that is not there and take the panel's LEFT edge off screen.
- * The fix is a `calc(100vw - 16px)` term the engine resolves at paint
- * time, which is exactly what this asserts.
+ * The shared stack's list can be longer than the viewport, so the row is
+ * not assumed to be on screen: it is brought to the sidebar's middle and
+ * its toggle hovered (the pointer move `openRowMenu` makes) before anything
+ * is measured. A WebKit run once failed here because that hover scrolled
+ * a far-down row to the viewport's bottom edge, where the clamp correctly
+ * lifted the panel 328px above it; the premise check below turns that
+ * situation into a named fixture failure instead of a misplacement.
+ */
+test("the session flyout sits beside its row with a titled, described menu", async ({ page, request }) => {
+  const title = `menu-flyout-${Date.now()}`;
+  const session = await createSession(request, { title, cwd: "/tmp", invocation: "sleep 300" });
+  try {
+    await hideSeenState(page);
+    await waitForFixtureStates(request, [session], "idle");
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.goto("/");
+    const target = row(page, session.id);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    await waitForHostsListSettled(page);
+    await target.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await target.locator(".session-row-menu").hover();
+    // The flyout keeps SESSION_MENU_PANEL_MIN_RESERVE_PX (380px) below its
+    // top before clamping upward; a row lower than that is the clamp's
+    // case, which the scrolled-list tests below own.
+    const restingRow = (await target.boundingBox())!;
+    expect(
+      restingRow.y + 380,
+      "the row must leave the full menu's reserve below it, or this test measures the clamp",
+    ).toBeLessThanOrEqual(900);
+    await openRowMenu(target);
+
+    const panel = target.locator(".session-row-menu-panel");
+    const panelBox = (await panel.boundingBox())!;
+    const sidebarBox = (await page.locator(".app-sidebar").boundingBox())!;
+    const rowBox = (await target.boundingBox())!;
+    expect(rowBox.y, "opening the menu must not scroll its row").toBe(restingRow.y);
+    expect(panelBox.x).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width);
+    expect(Math.abs(panelBox.y - rowBox.y)).toBeLessThanOrEqual(4);
+    const pointer = target.locator(".session-row-menu-pointer");
+    await expect(pointer).toBeVisible();
+    const pointerBox = (await pointer.boundingBox())!;
+    expect(pointerBox.x).toBeLessThan(panelBox.x);
+    expect(pointerBox.y).toBeGreaterThanOrEqual(rowBox.y);
+    expect(pointerBox.y).toBeLessThan(rowBox.y + rowBox.height);
+    const headerTitle = panel.locator(".session-row-menu-title");
+    await expect(headerTitle).toHaveText(title);
+    expect(Number(await headerTitle.evaluate((element) => getComputedStyle(element).fontWeight)))
+      .toBeGreaterThanOrEqual(600);
+    await expect(panel.locator(".session-row-menu-summary")).not.toBeEmpty();
+
+    const menu = target.getByRole("menu", { name: `session actions for ${title}` });
+    for (const name of ["clone", "replace with", "replace", "stop", "delete"]) {
+      const item = menu.getByRole("menuitem", { name, exact: true });
+      const descriptionId = await item.getAttribute("aria-describedby");
+      expect(descriptionId, `${name} must refer to its explanation`).toBeTruthy();
+      await expect(panel.locator(`[id="${descriptionId}"]`)).toHaveClass(/session-row-menu-description/);
+      await expect(panel.locator(`[id="${descriptionId}"]`)).not.toBeEmpty();
+    }
+    await expect(menu.getByRole("menuitem", { name: "rename", exact: true })).not.toHaveAttribute(
+      "aria-describedby",
+      /.+/,
+    );
+  } finally {
+    await cleanupSession(request, session.id);
+  }
+});
+
+/**
+ * The same side placement stays inside a narrow viewport after clamping.
  *
- * Honest about what it does NOT do: the arithmetic band where the old
- * clamp actually overflowed needs a viewport narrower than the sidebar's
- * fixed 340px by enough that the toggle is no longer reachable to click,
- * so this is an invariant check at the narrowest width the menu can still
- * be opened at, not a reproduction. The clamp's own shape is pinned
- * exactly in `menu_panel.rs`'s unit tests, which is where the emitted
- * expression can be read directly.
+ * The sidebar leaves little horizontal room at this size. The panel may
+ * overlap the sidebar after viewport clamping, but it must remain reachable
+ * and must not overflow the window in either its menu or confirm state.
  */
 test("the actions panel stays inside a narrow viewport", async ({ page, request }) => {
   const session = await createSession(request, {
@@ -2370,10 +2455,17 @@ test("the actions panel stays inside a narrow viewport", async ({ page, request 
  * The panel FLOATS: opening one row's menu must not move the rows below
  * it.
  *
- * The whole reason the panel is absolutely positioned is that a menu that
+ * The flyout uses viewport-fixed positioning so a menu that
  * reflowed the list would move the very row the user is acting on;
  * geometry inside the panel cannot catch a regression to normal-flow
- * positioning, only the next row's box can.
+ * positioning, only the next row's box can. Opening must not scroll the
+ * sidebar either, which would move every row at once.
+ *
+ * The "before" boxes are taken only after the opening row is hovered, the
+ * same pointer move `openRowMenu` makes: on a shared stack whose list is
+ * longer than the viewport that hover scrolls an off-screen toggle into
+ * view. A WebKit run once measured a lower row at y=1595, let the hover
+ * scroll the sidebar by 927px, and blamed the menu for the move.
  */
 test("opening a menu does not move the rows below it", async ({ page, request }) => {
   const a = await createSession(request, {
@@ -2388,9 +2480,11 @@ test("opening a menu does not move the rows below it", async ({ page, request })
       cwd: "/tmp",
       invocation: "sleep 300",
     });
+    await waitForFixtureStates(request, [a, b], "idle");
     await page.goto("/");
     await expect(row(page, a.id)).toBeVisible({ timeout: 20_000 });
     await expect(row(page, b.id)).toBeVisible({ timeout: 20_000 });
+    await waitForHostsListSettled(page);
 
     // Rows sort newest-first or by some stable order; whichever of the
     // two is FIRST gets its menu opened, and the OTHER is the one that
@@ -2399,9 +2493,16 @@ test("opening a menu does not move the rows below it", async ({ page, request })
     const first = firstIsA ? row(page, a.id) : row(page, b.id);
     const second = firstIsA ? row(page, b.id) : row(page, a.id);
 
+    await first.locator(".session-row-menu").hover();
+    const sidebar = page.locator(".app-sidebar");
+    const scrollBefore = await sidebar.evaluate((element) => element.scrollTop);
     const before = (await second.boundingBox())!;
     await openRowMenu(first);
     await expect(first.locator(".session-row-menu-panel")).toBeVisible();
+    expect(
+      await sidebar.evaluate((element) => element.scrollTop),
+      "opening a menu must not scroll the sidebar",
+    ).toBe(scrollBefore);
     const after = (await second.boundingBox())!;
     expect(after.y).toBe(before.y);
     expect(after.x).toBe(before.x);
@@ -3818,13 +3919,116 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
   // character (`display_peer`). The tooltip uses the same safe rendering,
   // so its native UI cannot reinterpret a peer-controlled direction mark.
   await expect(badge).toHaveAttribute("title", `command: <U+202E>evil-agent — /opt/bin/<U+202E>evil-agent --some-flag`);
+
+  // The session menu repeats both the persisted title and the executable
+  // basename in its header. Opening it here keeps the existing hostile
+  // invocation fixture responsible for proving that the new surface uses
+  // the same escaped, direction-isolated peer runs as the row.
+  await openRowMenu(target);
+  const menuTitle = target.locator(".session-row-menu-title");
+  await expect(menuTitle).toHaveAttribute("title", "bidi-invocation");
+  const titlePeer = menuTitle.locator("span.peer-value");
+  await expect(titlePeer).toHaveText("bidi-invocation");
+  await expect(titlePeer).toHaveAttribute("dir", "ltr");
+  expect(await titlePeer.evaluate((element) => getComputedStyle(element).unicodeBidi)).toContain("isolate");
+
+  const summary = target.locator(".session-row-menu-summary");
+  const summaryPeer = summary.locator("span.peer-value");
+  await expect(summaryPeer).toHaveText("<U+202E>evil-agent");
+  await expect(summaryPeer).toHaveAttribute("title", "<U+202E>evil-agent");
+  await expect(summary).toHaveAttribute("title", "<U+202E>evil-agent");
+  await expect(summaryPeer).toHaveAttribute("dir", "ltr");
+  expect(await summaryPeer.evaluate((element) => getComputedStyle(element).unicodeBidi)).toContain("isolate");
 });
 
 /**
- * PR #162's own regression, proven directly: opening the menu on a row near
- * the bottom of a SCROLLED list keeps the panel — including its last action
- * button — entirely inside the browser VIEWPORT, not merely inside the
- * sidebar's own clipped scroll window.
+ * Where the session flyout's row pointer would sit if it aimed at its row
+ * with no bound: `session_menu_pointer_style` (menu_panel.rs) sets its top to
+ * the measured toggle top, minus the 4px row offset, plus 11px, measured from
+ * the flyout's top. In viewport coordinates that is the toggle's top plus 7.
+ *
+ * Tests compare this against the painted panel's bottom to prove a clamp was
+ * actually needed: when this spot lies at or below the panel's bottom, a
+ * pointer bounded only by the viewport (the round-1 defect) or by a wrapper
+ * taller than the panel (the misplaced refusal line) would hang below the
+ * panel, detached.
+ */
+function rowAimedPointerTop(toggleBox: { y: number }): number {
+  return toggleBox.y - 4 + 11;
+}
+
+/**
+ * Scroll this test's own last fixture row to the sidebar's bottom edge and
+ * return it with its menu toggle's box, as measured after hovering it.
+ *
+ * The bottom-row menu tests need a specific geometry: a row whose toggle
+ * sits so low that the flyout's reserve clamp lifts the panel and the
+ * pointer's row-aimed spot falls below the panel. Scrolling the whole list
+ * to its end and walking up to an owned row left that to the shared stack's
+ * ordering: foreign rows listed after the fixtures could leave the chosen row
+ * well inside the panel's vertical extent, where even a broken pointer clamp
+ * passes. Placing the row explicitly, checking it is fully visible against
+ * BOTH sidebar edges, and reading the toggle only after the hover that
+ * `openRowMenu` also performs (Playwright's hover can scroll a toggle into
+ * view) makes the returned box the one the menu will be measured against.
+ *
+ * The caller must already have loaded the page with settled fixtures and
+ * confirmed the sidebar scrolls; the row picked is the last of `created` in
+ * document order, which a list longer than one screen places below the
+ * first screen.
+ */
+async function placeOwnRowAtSidebarBottom(
+  page: Page,
+  created: { id: string }[],
+): Promise<{ target: Locator; toggleBox: { x: number; y: number; width: number; height: number } }> {
+  const ownIds = created.map((session) => session.id);
+  const targetId = await page.evaluate((ownIds) => {
+    const rows = [...document.querySelectorAll(".session-row")].filter((candidate) =>
+      ownIds.includes(candidate.getAttribute("data-session-id") ?? ""),
+    );
+    const last = rows[rows.length - 1];
+    if (!last) return null;
+    last.scrollIntoView({ block: "end" });
+    return last.getAttribute("data-session-id");
+  }, ownIds);
+  expect(targetId, "at least one of this test's own fixture rows must be listed").not.toBeNull();
+  // Two animation frames: the scroll's own close-on-scroll effect must have
+  // run before a menu opens, or a late effect could close the new menu.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+
+  const sidebar = page.locator(".app-sidebar");
+  expect(
+    await sidebar.evaluate((el) => el.scrollTop),
+    "placing the row must have scrolled the sidebar, or the row was never near the bottom",
+  ).toBeGreaterThan(0);
+
+  const target = row(page, targetId!);
+  const toggle = target.locator(".session-row-menu");
+  await toggle.hover();
+  const sidebarBox = (await sidebar.boundingBox())!;
+  const rowBox = (await target.boundingBox())!;
+  // Fully visible means both edges, and "at the bottom" means the row's
+  // bottom is the sidebar's: a row resting higher up would keep its pointer
+  // inside the panel with no clamp involved at all.
+  expect(rowBox.y, "the placed row's top must be inside the sidebar").toBeGreaterThanOrEqual(sidebarBox.y);
+  expect(rowBox.y + rowBox.height, "the placed row's bottom must be inside the sidebar").toBeLessThanOrEqual(
+    sidebarBox.y + sidebarBox.height + 1,
+  );
+  expect(
+    rowBox.y + rowBox.height,
+    "the placed row must sit at the sidebar's bottom edge",
+  ).toBeGreaterThanOrEqual(sidebarBox.y + sidebarBox.height - 4);
+  return { target, toggleBox: (await toggle.boundingBox())! };
+}
+
+/**
+ * Opening the menu on a row near the bottom of a scrolled list keeps the
+ * panel — including its last action — entirely inside the viewport.
  *
  * The pre-fix scheme anchored the panel with `position: absolute` inside
  * its row, so `.session-list`'s and `.app-sidebar`'s `overflow` clipped it
@@ -3833,13 +4037,18 @@ test("a bidi override in the invocation basename renders escaped and isolated", 
  * this, only near the bottom of what is currently scrolled into view. The
  * sidebar spans the shell's full height (app.css's height:100% chain), so
  * that scroll-container edge and the viewport's own bottom edge are nearly
- * the same line — which is what makes a plain "bottom edge inside the
- * viewport" assertion a faithful stand-in for "not clipped by the old
- * scheme": under the old positioning this would have failed for the same
- * reason the panel was invisible, just observed as geometry rather than as
- * a screenshot. The fix (`menu_panel_style` in list.rs) escapes that clip
- * by positioning `fixed` against the viewport instead, clamped on every
- * edge.
+ * the same line. The side flyout still needs a vertical clamp, since its
+ * described actions make it far taller than a row.
+ *
+ * The row pointer must stay on the panel's edge while the clamp lifts the
+ * panel above its row. The menu here is the six-item one (the seen toggle
+ * is hidden), shorter than the reserve sized for all seven items, so for a
+ * row at the very bottom the spot the pointer aims at lies below the
+ * panel's bottom and the pointer has to be held inside the panel's
+ * extent; the test asserts that premise before checking the pointer. Every
+ * fixture is a live `sleep` on purpose: an ended session's delete runs
+ * without a confirmation, which once made this test delete its own target
+ * and wait out the timeout for a prompt that could never appear.
  */
 test("opening the last visible row's menu in a scrolled list stays inside the viewport", async ({
   page,
@@ -3853,25 +4062,11 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     // "bottom edge inside the viewport" assertion below is measured
     // against.
     await page.setViewportSize({ width: 900, height: 500 });
-    // The geometry under test is the panel's height at its FIXED six-item
-    // count (rename, clone, replace with, replace, stop, delete)
-    // against `MENU_PANEL_MIN_RESERVE_PX` in menu_panel.rs, the room the
-    // placement keeps below the panel's clamped top. A menu taller than
-    // that reserve is clamped to the viewport edge and scrolls inside its
-    // own panel (see the `max-height` note above `.session-row-menu-panel`
-    // in app.css), which leaves the bottom-most item's box past the edge
-    // this test measures — that is how the reserve sized for five items
-    // was caught when replace made it six, and the failure is the same at
-    // any viewport height, since the clamp measures from the bottom. The
-    // reserve now holds the eighth row too ("replace with" added a
-    // seventh on top of mark seen's own eighth), but the count here is
-    // still pinned at seven: an extra "mark unread" row (this fleet's
-    // fixture sessions do reach a live status under enough real
-    // wall-clock time — 18 of them, outliving every other test in the
-    // file) would make the measured height depend on the classifier's
-    // timing rather than on the geometry under test. See `hideSeenState`'s
-    // own doc.
+    // The fixture keeps a fixed action count: an extra seen-state action
+    // would make the panel's height depend on the classifier's timing.
+    // The height reserve must fit the described menu at this viewport size.
     await hideSeenState(page);
+    await waitForFixtureStates(request, created, "idle");
     await page.goto("/");
     await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
     // Settled BEFORE any scroll or menu open: the permanent host list's
@@ -3888,90 +4083,28 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
       })
       .toBe(true);
 
-    // Actually scroll: the reported bug was about a row scrolled INTO
-    // view near the bottom of a long list, not merely one that happens to
-    // sit near the fold at rest. Scrolling all the way down also makes
-    // "the last visible row" and "the list's real last row" the same row
-    // — the truest reproduction of the original geometry.
-    await sidebar.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    const scrollTop = await sidebar.evaluate((el) => el.scrollTop);
-    expect(
-      scrollTop,
-      "the sidebar must have actually scrolled for this regression to be meaningful",
-    ).toBeGreaterThan(0);
-    // Let the scroll's own dismissal effect (proven by its own test below)
-    // fully settle before opening any menu: opening one while THIS
-    // scroll's `layout_epoch` bump is still being processed would race the
-    // very close-on-scroll behavior this test does not mean to exercise
-    // here (no menu is open yet to close, but a late-landing effect run
-    // could still catch a menu opened moments later). Two animation
-    // frames is a generous, standard barrier for "whatever this scroll
-    // was going to trigger has already run".
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
-    );
-
-    // The last row FULLY visible in the now-scrolled window that is one of
-    // THIS TEST'S OWN fixture rows — not one whose top merely peeks above
-    // the fold, and never the shared `e2e-session` row. Scrolling all the
-    // way down (above) means the bottom-most fully-visible row is the
-    // fleet's own last row in whatever order the helm lists it, and on
-    // this shared stack that can genuinely be `e2e-session` itself — the
-    // stack's oldest session, and the one every later test in this suite
-    // depends on still existing. Walking upward from the bottom until
-    // landing on one of `created`'s own ids is what keeps the delete
-    // confirmation below aimed at a fixture this test made and cleans up
-    // itself; the geometry under test (a panel measured near the
-    // sidebar's own clipped bottom edge) holds identically for whichever
-    // row that walk lands on, since every row in a scrolled-to-bottom list
-    // is equally "near the bottom".
-    const ownIds = created.map((session) => session.id);
-    const targetId = await page.evaluate((ownIds) => {
-      const sidebarBottom = document.querySelector(".app-sidebar")!.getBoundingClientRect().bottom;
-      const rows = [...document.querySelectorAll(".session-row")];
-      const fullyVisible = rows.filter(
-        (candidate) => candidate.getBoundingClientRect().bottom <= sidebarBottom,
-      );
-      for (let i = fullyVisible.length - 1; i >= 0; i--) {
-        const id = fullyVisible[i].getAttribute("data-session-id");
-        if (id && ownIds.includes(id)) return id;
-      }
-      return null;
-    }, ownIds);
-    // Asserted loudly and separately from the evaluate's own `null` case:
-    // a regression that let the walk drift back onto a foreign row (a
-    // logic slip in the filter above, say) must name exactly which id it
-    // picked, not merely fail a later, unrelated-looking assertion three
-    // steps downstream with no hint this was the actual cause.
-    expect(
-      targetId,
-      "expected at least one of this test's own fixture rows fully visible after scrolling",
-    ).not.toBeNull();
-    expect(
-      ownIds,
-      `the chosen row ${JSON.stringify(targetId)} must be one of this test's own fixture sessions, never the shared stack's`,
-    ).toContain(targetId);
-
-    const target = row(page, targetId!);
+    // Actually scroll: the reported bug was about a row scrolled INTO view
+    // near the bottom of a long list, not merely one that happens to sit
+    // near the fold at rest. The helper places one of this test's own rows
+    // there, never the shared `e2e-session` row every later test in this
+    // suite depends on, so the delete confirmation below stays aimed at a
+    // fixture this test made and cleans up itself.
+    const { target, toggleBox } = await placeOwnRowAtSidebarBottom(page, created);
     await openRowMenu(target);
+    expect(
+      (await target.locator(".session-row-menu").boundingBox())!.y,
+      "opening the menu must not move its row",
+    ).toBeCloseTo(toggleBox.y, 0);
 
     const panel = target.locator(".session-row-menu-panel");
-    // `openRowMenu` already refuses to return on a `Fallback` placement
-    // (see its own doc in fleet.ts), but this is the one test whose whole
-    // point IS the measured geometry, so it also asserts the discriminant
-    // directly: a silent regression back to the top-left fallback corner
-    // must fail HERE, loudly and specifically, rather than merely time out
-    // somewhere upstream with a less legible message.
-    const panelStyle = (await panel.getAttribute("style")) ?? "";
+    // The inline placement is derived from the row measurement. Check its
+    // side-placement variable on the non-scrolling flyout before measuring
+    // the panel's painted box.
+    const panelStyle = (await target.locator(".session-row-menu-flyout").getAttribute("style")) ?? "";
     expect(
       panelStyle,
-      "the panel must have measured against its real toggle, not fallen back to the top-left corner placement",
-    ).toContain("left: auto");
+      "the panel must use the measured side placement",
+    ).toContain("--menu-left:");
 
     const viewport = page.viewportSize()!;
     const panelBox = (await panel.boundingBox())!;
@@ -3983,6 +4116,27 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
     expect(panelBox.y).toBeGreaterThanOrEqual(0);
     expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(viewport.height);
     expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
+
+    // The pointer case needs a row so low that aiming straight at it would
+    // leave the panel: only then does a pointer bounded by the viewport
+    // alone differ from one bounded by the panel.
+    expect(
+      rowAimedPointerTop(toggleBox),
+      "the row-aimed pointer spot must lie below the panel's bottom, or the pointer clamp is not exercised",
+    ).toBeGreaterThanOrEqual(panelBox.y + panelBox.height);
+
+    // The rotated diamond must overlap the panel's left edge vertically and
+    // cross that edge horizontally; a viewport-only clamp could leave it
+    // below the panel while still satisfying the panel containment checks.
+    // Asserted visible first: `boundingBox()` on an absent element waits
+    // out the whole test timeout instead of returning null.
+    const pointer = target.locator(".session-row-menu-pointer");
+    await expect(pointer, "a measured session menu must render its row pointer").toBeVisible();
+    const pointerBox = (await pointer.boundingBox())!;
+    expect(pointerBox.x).toBeLessThanOrEqual(panelBox.x + 1);
+    expect(pointerBox.x + pointerBox.width).toBeGreaterThanOrEqual(panelBox.x - 1);
+    expect(pointerBox.y).toBeLessThan(panelBox.y + panelBox.height);
+    expect(pointerBox.y + pointerBox.height).toBeGreaterThan(panelBox.y);
 
     // The LAST action button specifically (rename → stop → delete, per
     // SessionRow's own doc): if the panel's bottom clipped at
@@ -4050,10 +4204,152 @@ test("opening the last visible row's menu in a scrolled list stays inside the vi
 });
 
 /**
+ * A retained refusal reopened in a bottom-row menu stays inside the painted
+ * panel: the pointer touches that panel, and a long refusal scrolls with it
+ * instead of hanging past the viewport.
+ *
+ * The open menu shows the row's last action error under its controls. It
+ * once rendered as a sibling of the panel inside the flyout wrapper, whose
+ * height the pointer's `calc(100% - 18px)` bound reads as the panel's. For a
+ * bottom row that let the pointer settle beside the error, below the raised
+ * panel, and a refusal taller than the room left sat outside the panel's
+ * scroll, overflowing the viewport. The refusal here is a route-intercepted
+ * stop failure, deliberately long enough to overflow the panel on its own,
+ * so one reopen exercises both the pointer bound and the scroll containment.
+ */
+test("a retained refusal stays inside a bottom-row menu's scrolling panel", async ({
+  page,
+  request,
+}) => {
+  const marker = `refusal-${Date.now()}`;
+  const created = await fillSidebarPastOneScreen(request, marker);
+  try {
+    // Same geometry as the scrolled-list test above: a short viewport, a
+    // fixed six-item menu, settled rows, and a settled host list.
+    await page.setViewportSize({ width: 900, height: 500 });
+    await hideSeenState(page);
+    await waitForFixtureStates(request, created, "idle");
+    await page.goto("/");
+    await expect(row(page, created[0].id)).toBeVisible({ timeout: 20_000 });
+    await waitForHostsListSettled(page);
+    const sidebar = page.locator(".app-sidebar");
+    await expect
+      .poll(() => sidebar.evaluate((el) => el.scrollHeight > el.clientHeight + 1), {
+        timeout: 20_000,
+        message: "the sidebar must actually need to scroll to place a row at its bottom",
+      })
+      .toBe(true);
+    const { target, toggleBox } = await placeOwnRowAtSidebarBottom(page, created);
+    const targetId = (await target.getAttribute("data-session-id"))!;
+
+    // The refusal is the helm's own shape: a stamped plain-text 500 whose
+    // body the row shows verbatim. Spaced words so it wraps into many lines
+    // in the panel's width rather than one unbreakable run.
+    const stamp = (await request.get("/api/sessions")).headers()["x-farhelm-build"] ?? "";
+    expect(stamp, "the live helm must stamp its replies").toBeTruthy();
+    const refusal = Array.from({ length: 120 }, (_, i) => `refusal-sentinel-${i}`).join(" ");
+    await page.route(`**/api/sessions/${targetId}/stop`, (route) =>
+      route.fulfill({
+        status: 500,
+        headers: { "x-farhelm-build": stamp, "content-type": "text/plain" },
+        body: refusal,
+      }),
+    );
+    await openRowMenu(target);
+    await target.locator(".session-row-stop").click();
+    // Acceptance closes the menu; the failure lands in the closed row's
+    // own error line, which is the state a user reopens the menu over.
+    await expect(target.getByRole("menu")).toHaveCount(0);
+    await expect(target.locator(".action-error")).toContainText("refusal-sentinel-119");
+
+    await openRowMenu(target);
+    expect(
+      (await target.locator(".session-row-menu").boundingBox())!.y,
+      "reopening the menu must not move its row",
+    ).toBeCloseTo(toggleBox.y, 0);
+
+    const flyout = target.locator(".session-row-menu-flyout");
+    const panel = target.locator(".session-row-menu-panel");
+    const error = target.locator(".action-error");
+    // Exactly one copy of the refusal while the menu is open: the closed
+    // row's own line yields to the open menu's.
+    await expect(error).toHaveCount(1);
+    await expect(error).toContainText("refusal-sentinel-0");
+
+    // Premises: the refusal alone is taller than the whole reserve the
+    // flyout keeps below its top, so it cannot fit unscrolled; and the row
+    // sits so low that the pointer's row-aimed spot is below every command,
+    // where a wrapper taller than the panel could put it beside the refusal.
+    expect(
+      (await error.boundingBox())!.height,
+      "the refusal must be taller than the flyout's height reserve",
+    ).toBeGreaterThan(380);
+    const deleteBox = (await panel.locator(".session-row-delete").boundingBox())!;
+    expect(
+      rowAimedPointerTop(toggleBox),
+      "the row-aimed pointer spot must lie below the last command, or the pointer bound is not exercised",
+    ).toBeGreaterThanOrEqual(deleteBox.y + deleteBox.height);
+
+    // The pointer overlaps the painted panel's left edge, not the space
+    // below it.
+    const viewport = page.viewportSize()!;
+    const panelBox = (await panel.boundingBox())!;
+    const pointer = target.locator(".session-row-menu-pointer");
+    await expect(pointer, "a measured session menu must render its row pointer").toBeVisible();
+    const pointerBox = (await pointer.boundingBox())!;
+    expect(pointerBox.x).toBeLessThanOrEqual(panelBox.x + 1);
+    expect(pointerBox.x + pointerBox.width).toBeGreaterThanOrEqual(panelBox.x - 1);
+    expect(pointerBox.y, "the pointer must not sit below the painted panel").toBeLessThan(
+      panelBox.y + panelBox.height,
+    );
+    expect(pointerBox.y + pointerBox.height).toBeGreaterThan(panelBox.y);
+
+    // The refusal is part of the panel, the wrapper and the painted panel
+    // share one extent inside the viewport, and the panel scrolls to hold
+    // what does not fit.
+    await expect(panel.locator(".action-error"), "the refusal must render inside the panel").toHaveCount(1);
+    const flyoutBox = (await flyout.boundingBox())!;
+    expect(flyoutBox.y).toBeCloseTo(panelBox.y, 0);
+    expect(flyoutBox.height, "the flyout must be exactly as tall as its panel").toBeCloseTo(
+      panelBox.height,
+      0,
+    );
+    expect(panelBox.y).toBeGreaterThanOrEqual(0);
+    expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(
+      await panel.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+      "the panel must scroll to hold the refusal",
+    ).toBe(true);
+
+    // Scrolled to its end, the panel shows the refusal's last line inside
+    // its own box. The panel is scrolled directly: `scrollIntoView` on the
+    // error could also scroll the sidebar, which closes the menu by design.
+    await panel.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    // Two frames so any effect the scroll triggers has run before the menu
+    // is checked; a close landing later would otherwise pass unseen.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await expect(target.getByRole("menu"), "scrolling the panel itself must not close the menu").toBeVisible();
+    const errorBox = (await panel.locator(".action-error").boundingBox())!;
+    const scrolledPanelBox = (await panel.boundingBox())!;
+    expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(scrolledPanelBox.y + scrolledPanelBox.height + 1);
+    expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(viewport.height);
+  } finally {
+    await cleanupAll(request, created);
+  }
+});
+
+/**
  * Scrolling the sidebar — the panel's real invalidation trigger, not merely
  * "something happened somewhere" — closes an open row menu.
  *
- * The panel is positioned `fixed` against the viewport from a ONE-TIME
+ * The flyout is positioned `fixed` against the viewport from a ONE-TIME
  * measurement of the toggle's rect (list.rs's `PanelPlacement`); once the
  * row scrolls, that snapshot is stale and the panel would float over
  * whatever content the scroll left behind. `AppBody`'s `onscroll` on

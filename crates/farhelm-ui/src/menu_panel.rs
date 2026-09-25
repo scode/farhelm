@@ -1,16 +1,13 @@
-//! Floating row-actions menu: the geometry, focus, and keyboard mechanics
-//! shared by every row that gets a "⋯" menu — the session row (`list::row`,
-//! PR #239) and the host row (`hosts`).
+//! Floating row-actions menus share measurement and keyboard mechanics;
+//! session and host rows choose their own measured placement.
 //!
 //! ## Why this lives outside both rows
 //!
 //! The two menus render completely different ITEMS (rename/stop/delete
 //! versus retry/adopt/edit/remove) with completely different
 //! visibility rules, so nothing here decides what a menu contains or what
-//! its items do. What the two rows share instead is everything about a menu
-//! that has NOTHING to do with what it lists: a `position: fixed` panel has
-//! to escape its sidebar ancestor's `overflow: hidden` the same way regardless
-//! of contents (see `menu_panel_style`'s own doc for why), the panel's own
+//! its items do. What the two rows share is the menu lifecycle: a
+//! `position: fixed` panel escapes sidebar clipping, the panel's own
 //! screen position is a three-state measurement race (`PanelPlacement`)
 //! whether the toggle belongs to a session or a host, and a `role="menu"`'s
 //! roving-tabindex keyboard contract (arrows, Home/End, Escape, Tab) is the
@@ -27,8 +24,8 @@
 //! each one currently have" — and every operation built on that (arrow
 //! navigation, Home/End, filing a freshly-mounted item's handle, moving focus
 //! to a computed position) is IDENTICAL once that question can be asked,
-//! whether the answer is the session row's six actions or the host row's
-//! four (today's maxima, not assumptions baked in
+//! whether the answer is the session row's seven actions or the host row's
+//! current action set (counts are not assumptions baked in
 //! anywhere here — see `MenuOrder`'s own doc for why `N` is still a
 //! per-row compile-time constant rather than a shared one). Rather
 //! than write that logic twice against two concrete enums, it is written
@@ -49,7 +46,8 @@
 //! `*_menu_order` constructor, built on the shared [`MenuOrder::pack`]),
 //! what each item's label and click handler are (each row's own `rsx!`),
 //! and how many keyboard-driven sub-states the open panel can show (the
-//! session row's confirm/rename swap the panel's CONTENTS in place; the
+//! session row's confirmations swap the panel's CONTENTS in place; rename
+//! opens the list's separately owned modal dialog, while the
 //! host row has no such sub-state at all — its confirm/edit surfaces
 //! replace the whole row line instead, a design difference `hosts::HostRow`
 //! records where it applies). A shared abstraction that tried to also cover
@@ -88,46 +86,28 @@ const MENU_PANEL_TOGGLE_GAP_PX: f64 = 4.0;
 /// has to be arithmetic rather than CSS.
 const MENU_PANEL_VIEWPORT_MARGIN_PX: f64 = 8.0;
 
-/// A conservative reserve, in pixels, subtracted from the viewport height
-/// when clamping the panel's `top`. This is a CEILING on the clamp, not a
-/// claim about the panel's real height — the panel's mode (menu / confirm
-/// / rename) changes that height at runtime, and it is
-/// `.session-row-menu-panel`'s own `max-height` + `overflow-y: auto` in
-/// app.css that actually guarantees the panel stays on screen regardless
-/// of how far off this estimate runs. This constant only keeps the clamp
-/// from placing the panel's TOP so close to the viewport's bottom that
-/// the everyday mode — the plain command list — would be pushed off and
-/// left scrolling inside its own panel.
-///
-/// Sized for the session row's FULL menu, eight items (rename, mark seen,
-/// clone, replace with, replace, stop, delete) plus the separator
-/// and the panel's own padding and border. The number is empirical, not
-/// derived from the stylesheet: a six-item menu measured 178px from the
-/// panel's top to the bottom of its last item on Chromium (62px of slack
-/// over the previous 240px reserve), one item is about 28px, and the
-/// remainder is slack for engine differences in line height. The previous
-/// value, 160px, was sized when the menu had five items; the sixth
-/// (replace) was the one that first overran it, and the clipping showed up
-/// as a delete item sitting below the viewport edge whenever the menu
-/// opened on the last visible row of a scrolled list.
-///
-/// "Replace with" added a seventh item, then mark seen (already offered on
-/// a live session, independent of this feature) an eighth — measured
-/// directly rather than assumed: a throwaway `boundingBox()` on the panel
-/// in `sidebar.spec.ts`'s "the mark-seen item is reachable and operable by
-/// role and keyboard" test (the one fixture already reliably reaching a
-/// live, seen-state-answered session — see that test's own
-/// `pinAutoSelect`/45s-wait setup) read 239px on Chromium for the full
-/// eight-item panel, one pixel under the OLD 240px reserve. That is not the
-/// six-item measurement's 62px of slack; it is next to none, so the
-/// constant is raised to 301px (239px measured + the six-item
-/// measurement's own 62px of slack) rather than left at a value the eighth
-/// item had already all but consumed. A larger reserve costs nothing when
-/// the toggle has room below it — the clamp only bites within this many
-/// pixels of the viewport's bottom.
+/// The host menu's unchanged vertical reserve. Its earlier value came from
+/// a 239px measured session menu plus 62px of engine slack. The host still
+/// uses this below-left clamp so its appearance does not move with the
+/// session redesign. Its actual viewport guarantee comes from max-height
+/// and internal scrolling, not this estimate.
 const MENU_PANEL_MIN_RESERVE_PX: f64 = 301.0;
 
-/// The panel's own floor on how narrow `menu_panel_style`'s horizontal
+/// Height kept free below the session flyout's clamped top, sized to show
+/// the full menu near the viewport bottom without internal scrolling.
+///
+/// Measured, not derived: the tallest ordinary menu (header, then rename,
+/// mark read/unread, clone, replace with, replace, stop and delete, with
+/// the five descriptions and three separators) renders 341.6px tall in both
+/// Chromium and WebKit under the browser suite. 380px leaves about 38px of
+/// slack for font-metric differences between renderers and platforms.
+/// Re-measure when an item, description, or the header changes height.
+/// Shorter menus and the confirm prompts fit inside the same reserve;
+/// `max-height` with internal scrolling is what keeps a viewport shorter
+/// than the reserve safe.
+const SESSION_MENU_PANEL_MIN_RESERVE_PX: f64 = 380.0;
+
+/// The host panel's floor on how narrow `menu_panel_style`'s horizontal
 /// clamp (below) may shrink it to. Below this, the panel could no longer
 /// show its own button labels without wrapping every word — a worse
 /// failure than the few pixels of edge overflow this floor accepts
@@ -135,7 +115,7 @@ const MENU_PANEL_MIN_RESERVE_PX: f64 = 301.0;
 /// own doc).
 const MENU_PANEL_MIN_WIDTH_PX: f64 = 96.0;
 
-/// Computes the fixed-position panel's `top`/`right`/`max-width` inline
+/// Computes the host panel's below-left `top`/`right`/`max-width` inline
 /// style from the toggle button's own viewport rect
 /// (`MountedData::get_client_rect`, measured on open — see the row's own
 /// toggle `onclick`). Callers reach this only through
@@ -145,24 +125,17 @@ const MENU_PANEL_MIN_WIDTH_PX: f64 = 96.0;
 ///
 /// ## The anchor
 ///
-/// The panel hangs BELOW-LEFT of the toggle: its top-right corner meets
+/// The host panel hangs BELOW-LEFT of the toggle: its top-right corner meets
 /// the toggle's bottom-left corner, `MENU_PANEL_GAP_PX` down and
 /// `MENU_PANEL_TOGGLE_GAP_PX` left. The toggle COLUMN — the narrow strip
 /// every row's "⋯" occupies at the sidebar's trailing edge — is therefore
 /// never covered by an open panel, no matter how far the panel extends
 /// down over the rows below.
 ///
-/// That is the whole reason for the offset, and it is a safety property
-/// rather than a taste one. The rows this panel covers are session rows
-/// whose own "⋯" sits at a fixed x, and the panel's items at that point
-/// in its list are Stop and Delete: Stop kills a running process tree and
-/// Delete removes an ended session outright. A user reaching for a
-/// neighboring row's menu aims at a toggle they can see; if the panel
-/// covered that spot, the click would land on this row's destructive item
-/// instead of the other row's toggle — the wrong session, and a click the
-/// user never intended to be an action at all. The host row's menu keeps
-/// the same anchor for the same reason once `remove` moved into it: the
-/// hosts panel stacks rows exactly as densely as the session list does.
+/// The offset protects neighbouring host toggles. Host rows stack densely,
+/// and their menu includes Remove; placing that command over another row's
+/// toggle would turn a click meant to open a different host's menu into an
+/// action on this one. The session flyout uses a separate side anchor.
 ///
 /// The flush anchor (panel's right edge aligned with the toggle's, the
 /// ordinary menu-button placement) was written first and REJECTED for
@@ -173,7 +146,7 @@ const MENU_PANEL_MIN_WIDTH_PX: f64 = 96.0;
 /// 340px sidebar's width on a 288px surface, so three other cues carry
 /// "which row owns this menu" instead: the opening toggle holds a pressed
 /// state and its row a highlight (see
-/// `.session-row-menu[aria-expanded="true"]` and `.session-row.menu-open`
+/// `.host-row-menu[aria-expanded="true"]` and `.host-row.menu-open`
 /// in app.css), and the panel is a raised surface with a shadow rather
 /// than a flat box, so it reads as being in front of the rows it covers.
 /// With the toggle column clear, switching menus stays ONE click on the
@@ -181,11 +154,8 @@ const MENU_PANEL_MIN_WIDTH_PX: f64 = 96.0;
 /// suite's existing multi-row helpers assume.
 ///
 /// `position: fixed` resolves these axes against the VIEWPORT, which is
-/// exactly what lets the panel escape `.session-list`'s and
-/// `.app-sidebar`'s `overflow` clipping that an absolutely-positioned,
-/// row-anchored panel could never escape (opening the menu on a row near
-/// the bottom of a full list used to cut the panel off at the scroll
-/// container's edge — see `.session-row-menu-panel` in app.css). Each
+/// exactly what lets the panel escape `.app-sidebar`'s `overflow`
+/// clipping that an absolutely-positioned panel could not escape. Each
 /// axis is clamped for a DIFFERENT reason:
 ///
 /// - `top` is clamped on BOTH ends: `min()` keeps a toggle near the
@@ -277,7 +247,7 @@ fn menu_panel_style(toggle_rect: PixelsRect) -> String {
 /// by the time a measurement can even start. `Unmeasured` is what that
 /// first render is — the panel exists in the DOM (so its own height is
 /// ready and tab order includes it, and any `autofocus` element inside it
-/// — the delete confirm's cancel button, the rename field — can
+/// — the delete confirm's cancel button — can
 /// actually RECEIVE that focus; see `menu_panel_placement_style`'s own
 /// doc for why hiding via `visibility` would have silently broken that)
 /// but paints nothing, which is what keeps a still-pending measurement
@@ -308,15 +278,15 @@ pub(crate) enum PanelPlacement {
     Fallback,
 }
 
-/// Maps a row's current `PanelPlacement` to the actions panel's inline
+/// Maps a host row's `PanelPlacement` to its actions panel's inline
 /// `style` attribute — the presentation half of the state machine
 /// `PanelPlacement` itself documents.
 ///
 /// `Unmeasured` hides the panel with `opacity: 0; pointer-events: none;`,
 /// NOT `visibility: hidden`. This is load-bearing, not a style
-/// preference: the confirm/rename sub-states use the plain HTML
+/// preference: the confirmation sub-states use the plain HTML
 /// `autofocus` attribute (see the session row's own doc) to land keyboard
-/// focus the instant they mount, and confirm/rename state SURVIVES
+/// focus the instant they mount, and confirmation state SURVIVES
 /// closing and reopening the panel (`list::view::ListView` tracks them
 /// independently of `menu_open`) — so a row mid-confirmation that gets
 /// closed and reopened remounts its `autofocus` cancel button while
@@ -369,6 +339,61 @@ pub(crate) fn menu_panel_placement_style(placement: PanelPlacement) -> String {
                                      max-width: 288px; max-height: calc(100vh - 16px);"
             .to_string(),
     }
+}
+
+/// Place the session flyout beside its sidebar while retaining the shared
+/// measurement and focus lifecycle used by host menus.
+///
+/// A session toggle ends two pixels inside the sidebar edge. Ten pixels
+/// beyond that measured edge puts the panel eight pixels outside the list
+/// on an ordinary viewport. CSS clamps the same side placement on narrow
+/// windows; it never changes the menu to a different anchor mode. The
+/// pointer tracks the opening row even when the taller menu moves upward.
+pub(crate) fn session_menu_placement_style(placement: PanelPlacement) -> String {
+    match placement {
+        PanelPlacement::Unmeasured => "opacity: 0; pointer-events: none;".to_string(),
+        PanelPlacement::Measured(rect) => {
+            let left = rect.max_x() + 10.0;
+            let row_top = rect.min_y() - 4.0;
+            format!(
+                "opacity: 1; pointer-events: auto; right: auto; \
+                 --menu-left: max(8px, min({left}px, calc(100vw - 254px))); \
+                 left: var(--menu-left); \
+                 --menu-top: max(8px, min({row_top}px, calc(100vh - {SESSION_MENU_PANEL_MIN_RESERVE_PX}px))); \
+                 top: var(--menu-top); \
+                 max-width: calc(100vw - var(--menu-left) - 8px); \
+                 max-height: calc(100vh - var(--menu-top) - 8px);"
+            )
+        }
+        // A failed measurement has no trustworthy row coordinate. Preserve
+        // the visible fallback; the host menu uses this same failure state.
+        PanelPlacement::Fallback => "opacity: 1; pointer-events: auto; \
+                                     top: 8px; left: 8px; right: auto; \
+                                     max-width: 288px; max-height: calc(100vh - 16px);"
+            .to_string(),
+    }
+}
+
+/// Keep the row pointer outside the panel's scroll clipping boundary.
+///
+/// Only a measured anchor can make the pointer's claim about its row. The
+/// panel and pointer share the measured anchor, while the pointer's vertical
+/// clamp is resolved by CSS against the flyout wrapper's actual height.
+///
+/// `100%` here is the wrapper's height, which equals the painted panel's only
+/// because the panel is the wrapper's sole in-flow child (the pointer itself
+/// is absolutely positioned). Everything the open menu shows, the refusal
+/// line included, must render inside the panel: a sibling below it would
+/// stretch the wrapper and let the pointer settle beside that sibling,
+/// detached from the panel it belongs to.
+pub(crate) fn session_menu_pointer_style(placement: PanelPlacement) -> Option<String> {
+    let PanelPlacement::Measured(rect) = placement else {
+        return None;
+    };
+    let row_top = rect.min_y() - 4.0;
+    Some(format!(
+        "top: clamp(12px, calc({row_top}px - var(--menu-top) + 11px), calc(100% - 18px));"
+    ))
 }
 
 /// Whether the toggle's `onmounted` should start its OWN measurement
@@ -902,8 +927,8 @@ pub(crate) fn focus_menu_item<A: Copy + Eq + Hash, Id: 'static, const N: usize>(
 /// CANNOT report the one case that matters most here: an item that is
 /// UNMOUNTED while it holds focus fires no `focusout` at all (a removed
 /// node's events never reach the delegated listener), and the session
-/// row's panel unmounts its whole item list every time it swaps to the
-/// rename field or a confirm prompt. Focus then lands wherever that
+/// row's panel unmounts its whole item list when it swaps to a confirm
+/// prompt. Focus then lands wherever that
 /// sub-state puts it while both signals still name the item that used to
 /// hold it.
 ///
@@ -1321,6 +1346,29 @@ pub(crate) fn reconcile_menu_focus<A: Copy + Eq, const N: usize>(
 mod tests {
     use super::*;
 
+    /// Session placement must move beside the measured row while the host
+    /// retains its below-left style. A failed measurement cannot claim a
+    /// row pointer, and opening must remain invisible until measurement.
+    #[farhelm_testtrace::test]
+    fn session_flyout_uses_its_own_side_anchor_and_pointer() {
+        let rect = PixelsRect::new(
+            dioxus::html::geometry::euclid::point2(310.0, 50.0),
+            dioxus::html::geometry::euclid::size2(24.0, 20.0),
+        );
+        let placement = PanelPlacement::Measured(rect);
+        let style = session_menu_placement_style(placement);
+        assert!(style.contains("--menu-left: max(8px, min(344px, calc(100vw - 254px)))"));
+        assert!(style.contains("min(46px, calc(100vh - 380px))"));
+        assert!(style.contains("right: auto"));
+        assert!(
+            session_menu_pointer_style(placement)
+                .is_some_and(|pointer| pointer.contains("top: clamp(12px"))
+        );
+        assert!(session_menu_pointer_style(PanelPlacement::Fallback).is_none());
+        assert!(session_menu_pointer_style(PanelPlacement::Unmeasured).is_none());
+        assert!(menu_panel_placement_style(placement).contains("left: auto"));
+    }
+
     /// Pins the geometry contract behind the actions-menu panel's
     /// viewport-fixed positioning (see `menu_panel_style`'s own doc): the
     /// panel's top sits just below the toggle EXCEPT where the top-clamp
@@ -1404,7 +1452,7 @@ mod tests {
     /// `Unmeasured` hides via `opacity`/`pointer-events`, NOT `visibility`
     /// (see `menu_panel_placement_style`'s own doc for why
     /// `visibility: hidden` would silently break `autofocus` on a reopened
-    /// confirm/rename panel); and every positional property one state sets
+    /// confirmation panel); and every positional property one state sets
     /// is explicitly restated (or `auto`-reset) by the others — Dioxus's
     /// JS interpreter restores an omitted property from the PREVIOUS
     /// inline style rather than treating a `style` update as a plain
@@ -1766,11 +1814,11 @@ mod tests {
     ///
     /// This is the regression the browser suite caught after `requested`
     /// and `focused` were given priority over the event's own origin. The
-    /// session row's panel swaps its item list out for the rename field
+    /// session row's panel swaps its item list out for a confirmation
     /// without closing, so the item holding focus is unmounted and its
     /// `focusout` never fires; both signals were left naming it, and the
     /// next arrow pressed on the toggle skipped the first command entirely
-    /// (rename → cancel → focus the toggle → ArrowDown landed on `stop`).
+    /// (delete → cancel → focus the toggle → ArrowDown landed past rename).
     /// The second half below is that exact miscomputation, kept as the
     /// statement of what the toggle's `onfocusin` clear is for: nothing
     /// about the arithmetic changed, only whether the signals are honest

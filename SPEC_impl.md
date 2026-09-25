@@ -360,30 +360,38 @@ more context than a floating menu can safely hold. Starting setup opens details 
 failed retained run leaves one short trace when details are closed.
 
 Every per-session action lives in one floating actions menu behind the row's `⋯`, and four decisions about it are
-contract rather than styling. **Anchor:** the panel hangs below-LEFT of the toggle that opened it — its top-right corner
-at the toggle's bottom-left, clamped inside the viewport — so that the toggle COLUMN of every row below stays uncovered
-and clickable. The tidier flush-under-the-toggle placement was written and rejected: it puts the panel's `stop` and
-`delete` exactly where the neighbouring rows draw their own `⋯`, turning a click aimed at another session's menu into a
-destructive action on this one. Because the panel therefore floats over rows that look just like its own, ownership is
-carried by three cues instead of by proximity alone — the toggle holds a pressed accent state, its row holds a tint, and
-the panel is a raised surface with a shadow. **One at a time:** at most one row's menu is open, and it closes on any
-layout change that could have moved the row it was measured against (a sidebar scroll or resize, the host list's shape
-changing, the create form opening, the row reordering under a refresh), because the panel's coordinates are a one-time
-snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it (pointer, Enter, Space, ArrowDown)
-lands focus on the first command and ArrowUp opens onto the last; arrows step and wrap, Home/End jump; the whole menu is
-a single tab stop via roving `tabindex`, so Tab leaves rather than walking the commands; Escape closes; and every close
-that took the menu away from a focused item hands focus back to the toggle rather than dropping it on the document body
-— except the two transfers, Rename and a clone/replace-with acceptance, whose newly mounted dialogs own focus instead,
-so the teardown retires its return rather than racing their mount handoff. An item made inert by an in-flight operation
-stays focusable and refuses on activation (`aria-disabled`) rather than going natively `disabled`, because a browser
-cannot focus a disabled control and a menu that went busy under the user would otherwise swallow every navigation key.
-The row tint is owned by the menu's open state, not by `:focus-within`: a dismissal may return focus to the toggle while
-the pointer is elsewhere, and that focused toggle must not make the row look as though its menu is still open. The
-focused toggle or menu item retains the normal `:focus-visible` indicator, so pointer-return focus and keyboard focus
-remain visually distinct without changing the dismissal or focus-return contract. **Confirm in place:** a destructive
-item swaps the panel's own contents for the consequence line and a confirm/cancel pair with focus on cancel, rather than
-opening a second surface; that sub-state is a `role="dialog"` inside the same positioned box, and it survives the panel
-closing, which is why it deliberately does not answer Escape.
+contract rather than styling. **Anchor:** the panel opens just beyond the sidebar's right edge, with its top aligned to
+the row and a small pointer toward it. It stays beside the session list instead of covering neighbouring rows and their
+action toggles. One side placement is clamped to the viewport, including when there is too little room to keep the
+sidebar fully uncovered or to keep the panel top aligned with a row near the bottom. The toggle holds a pressed accent
+state, its row holds a tint, and the panel is a raised surface with a shadow. The action list starts with the session
+title and a muted summary of its stored launch selection or legacy profile snapshot, followed by the concise state. The
+summary uses the same launch-choice wording as the session launcher; a legacy session without a profile uses its agent
+label. A structured session also keeps any source-profile snapshot in that line, and an unclassified session omits the
+state word. There is no profile footer. The pointer is hidden when horizontal clamping makes the panel overlap the
+sidebar, where it could no longer indicate the opening row. Commands have small decorative line icons and form groups
+separated by non-focusable rules: rename and mark read/unread; clone, replace with, and replace; stop; delete. Only
+groups with available commands contribute rules. Clone, replace with, replace, stop, and delete each have a visible
+muted description exposed as an accessible description, so the accessible command name remains the action word. Hover
+and focus fill each command inside the panel with rounded inset corners. **One at a time:** at most one row's menu is
+open, and it closes on any layout change that could have moved the row it was measured against (a sidebar scroll or
+resize, the host list's shape changing, the create form opening, the row reordering under a refresh), because the
+panel's coordinates are a one-time snapshot. **Keyboard:** it is a real `role="menu"` and behaves like one — opening it
+(pointer, Enter, Space, ArrowDown) lands focus on the first command and ArrowUp opens onto the last; arrows step and
+wrap, Home/End jump; the whole menu is a single tab stop via roving `tabindex`, so Tab leaves rather than walking the
+commands; Escape closes; and every close that took the menu away from a focused item hands focus back to the toggle
+rather than dropping it on the document body — except the two transfers, Rename and a clone/replace-with acceptance,
+whose newly mounted dialogs own focus instead, so the teardown retires its return rather than racing their mount
+handoff. An item made inert by an in-flight operation stays focusable and refuses on activation (`aria-disabled`) rather
+than going natively `disabled`, because a browser cannot focus a disabled control and a menu that went busy under the
+user would otherwise swallow every navigation key. The row tint is owned by the menu's open state, not by
+`:focus-within`: a dismissal may return focus to the toggle while the pointer is elsewhere, and that focused toggle must
+not make the row look as though its menu is still open. The focused toggle or menu item retains the normal
+`:focus-visible` indicator, so pointer-return focus and keyboard focus remain visually distinct without changing the
+dismissal or focus-return contract. **Confirm in place:** a destructive item swaps the panel's own contents for the
+consequence line and a confirm/cancel pair with focus on cancel, rather than opening a second surface; that sub-state is
+a `role="dialog"` inside the same positioned box, and it survives the panel closing, which is why it deliberately does
+not answer Escape.
 
 Mark read/unread and stop close the menu as soon as the handler accepts the choice. Their asynchronous failures still
 appear in the row's error line; completion does not close a subsequently opened menu or reclaim focus. In-place

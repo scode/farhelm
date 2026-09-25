@@ -1037,8 +1037,8 @@ export async function openHostsPanel(page: Page): Promise<void> {
  * a shortcut only available to automation.
  *
  * Hovers the TOGGLE, not the row's center: another row's already-open
- * menu panel is `position: fixed` (see `.session-row-menu-panel`'s own
- * comment in app.css for why) and can float directly over this row's
+ * menu surface is viewport-fixed (see the row-menu surface comment in
+ * app.css for why) and can float directly over this row's
  * center point, which would make Playwright's actionability check land
  * the hover on the covering panel instead of this row. The toggle sits at
  * the row's trailing edge, clear of where a neighboring panel opens. Only
@@ -1057,7 +1057,7 @@ export async function openHostsPanel(page: Page): Promise<void> {
  * `openRowMenu(row)` / `openHostMenu(row)`.
  *
  * `toggleSelector`/`panelSelector` name the row's own toggle and floating
- * panel (`.session-row-menu`/`.session-row-menu-panel` for a session row,
+ * surface (`.session-row-menu`/`.session-row-menu-flyout` for a session row,
  * `.host-row-menu`/`.host-row-menu-panel` for a host row); `waitMessage` is
  * the row-specific wording surfaced if the poll below times out.
  *
@@ -1083,8 +1083,8 @@ export async function openHostsPanel(page: Page): Promise<void> {
  * available to automation.
  *
  * Hovers the TOGGLE, not the row's center: another row's already-open menu
- * panel is `position: fixed` (see `.session-row-menu-panel`'s own comment
- * in app.css for why) and can float directly over this row's center point,
+ * surface is viewport-fixed (see the row-menu surface comment in app.css
+ * for why) and can float directly over this row's center point,
  * which would make Playwright's actionability check land the hover on the
  * covering panel instead of this row. The toggle sits at the row's
  * trailing edge, clear of where a neighboring panel opens. Only hovered
@@ -1097,20 +1097,21 @@ async function openMenuPanel(
   toggleSelector: string,
   panelSelector: string,
   waitMessage: string,
+  measuredMarker: string,
 ): Promise<void> {
   const menu = row.locator(toggleSelector);
   if ((await menu.getAttribute("aria-expanded")) !== "true") {
     await menu.hover();
     await menu.click();
   }
-  // Await the panel itself, not just the click: the toggle's signal write
+  // Await the floating surface itself, not just the click: the toggle's signal write
   // and the panel's mount land on a LATER render, and several callers go
   // straight into bare-DOM `querySelector(...).click()` calls (the
   // actionability-bypass tests), where a not-yet-mounted button turns
   // into a silent no-op via `?.click()` rather than a visible failure.
   const panel = row.locator(panelSelector);
   await expect(panel).toBeVisible();
-  // `toBeVisible()` alone is not the MEASURED state: the panel mounts the
+  // `toBeVisible()` alone is not the MEASURED state: the surface mounts the
   // instant the toggle opens, at `opacity: 0; pointer-events: none` —
   // genuinely present and painted-nothing (`PanelPlacement::Unmeasured` in
   // menu_panel.rs, while the toggle's own async `get_client_rect()`
@@ -1119,10 +1120,9 @@ async function openMenuPanel(
   // this panel's geometry immediately after this function used to return
   // could be racing that measurement.
   //
-  // Detected by reading the panel's own inline `style` for a literal
-  // `left: auto` — the one substring ONLY `PanelPlacement::Measured` ever
-  // writes (`Unmeasured` sets no `left` at all; `Fallback`, the renderer-
-  // could-not-measure-at-all state, sets a literal `left: 8px` instead) —
+  // Detected by reading the surface's own inline `style` for the marker
+  // its placement emits: `left: auto` for hosts and `--menu-left` for
+  // sessions. Neither appears in `Unmeasured` or the failure fallback —
   // rather than by comparing the panel's box to the toggle's own. Geometry
   // would be the wrong test here: a genuinely MEASURED panel can still be
   // clamped far from its toggle on a short viewport (`menu_panel.rs`'s
@@ -1139,7 +1139,7 @@ async function openMenuPanel(
           opacity: getComputedStyle(el).opacity,
           style: el.getAttribute("style") ?? "",
         }));
-        return info.opacity === "1" && info.style.includes("left: auto");
+        return info.opacity === "1" && info.style.includes(measuredMarker);
       },
       { message: waitMessage },
     )
@@ -1160,8 +1160,9 @@ export async function openRowMenu(row: Locator): Promise<void> {
   await openMenuPanel(
     row,
     ".session-row-menu",
-    ".session-row-menu-panel",
+    ".session-row-menu-flyout",
     "waiting for the actions panel to finish measuring against its own toggle",
+    "left: var(--menu-left)",
   );
 }
 
@@ -1187,6 +1188,7 @@ export async function openHostMenu(row: Locator): Promise<void> {
     ".host-row-menu",
     ".host-row-menu-panel",
     "waiting for the host actions panel to finish measuring against its own toggle",
+    "left: auto",
   );
 }
 
