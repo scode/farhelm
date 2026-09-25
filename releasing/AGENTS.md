@@ -54,7 +54,9 @@ sections; the checker accepts the historical formats that are already present.
 - One paragraph per physical line, however long. `CHANGELOG.md`, the fragments, and local curation drafts are excluded
   from dprint in `dprint.json` for this reason: GitHub renders a release body the way it renders a comment, with every
   newline as a line break, so a section hard-wrapped at 120 columns shows up ragged on the release page. The checker
-  tolerates indented continuation lines as part of an item, but do not write them.
+  tolerates indented continuation lines as part of an item, but do not write them. The curation draft is the one
+  exception: it is wrapped for reading and unwrapped when it moves into `CHANGELOG.md` (step 2 of the stable release
+  procedure).
 - A Breaking entry says what the user must do about it (update both halves together, re-run provisioning, drop a flag),
   not only what changed.
 - Entries are written for someone running Farhelm. Name the feature as the UI or CLI names it, say what changed for
@@ -138,9 +140,13 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments and from whatever the user and the
    agent agree on in conversation, following that guidance. Write the whole proposed `## vX.Y.Z - YYYY-MM-DD` section to
    `releasing/drafts/vX.Y.Z.md` and give the maintainer its absolute path. This ignored local Markdown file is the
-   review surface. The maintainer edits it in a text editor and tells the agent when to read it back. Read the file
-   again after each editing round; do not reconstruct its contents from conversation or an earlier read. Continue until
-   the maintainer approves the text. Keep the file until the changelog section is committed, then delete it.
+   review surface. Unlike `CHANGELOG.md`, the draft is hard-wrapped at 120 columns, with each continuation line of an
+   entry indented two spaces under its `-`, so the maintainer can read and edit it as raw Markdown. Keep that wrapping
+   through every editing round, and rewrap an entry the maintainer's edits push past 120 columns only by moving line
+   breaks, never by changing words. The maintainer edits it in a text editor and tells the agent when to read it back.
+   Read the file again after each editing round; do not reconstruct its contents from conversation or an earlier read.
+   Continue until the maintainer approves the text. Keep the file until the changelog section is committed, then delete
+   it.
 
    Treat the file's text and any wording the maintainer supplies as authoritative. Reproduce supplied wording and file
    edits exactly: do not summarize, paraphrase, polish, reorder, or silently correct them. If the agent proposes wording
@@ -148,9 +154,12 @@ after it merges, so the bump commit keeps its three-file shape and main is the o
    them as permission for other changes. An explicit request to write or rewrite text grants that latitude only for the
    requested text. Ask when an instruction is ambiguous. Format or checker problems must be brought back to the
    maintainer rather than silently changing reviewed wording. When transferring the approved section into
-   `CHANGELOG.md`, copy the section verbatim, including its headings, whitespace, and line breaks; add only the
-   separation needed between it and the surrounding changelog sections. Verify the copied section against the draft. Do
-   not run a formatter over the draft or the approved section.
+   `CHANGELOG.md`, the one permitted transformation is unwrapping: join each entry's continuation lines onto its `-`
+   line, replacing each line break and the indentation after it with a single space, so every paragraph is one physical
+   line as the format requires. Copy everything else verbatim, including headings, blank lines, and every word; add only
+   the separation needed between the section and the surrounding changelog sections. Verify the copied section by
+   unwrapping the draft the same way and comparing it against the copy. Do not run a formatter over the draft or the
+   approved section.
 3. While iterating, watch for feedback that generalizes beyond the entry it was given on: a word the maintainer calls
    internal jargon, a shape of sentence they keep rewriting, a kind of detail they keep cutting or adding. Two ways a
    rule gets into `releasing/EDITORIAL_GUIDANCE.md`, and only two: the maintainer states it as a rule in so many words
