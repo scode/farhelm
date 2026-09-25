@@ -4,15 +4,16 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Ten buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove —
-the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
+Eleven buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
+— the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
 review triage within each item's stated scope; "near term" is what should be picked up next; "doc todo" holds
 documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
 test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
 deterministically, with the failure and the evidence that it predates any in-flight work; "code review" is the residue
-of the September 2026 review swarms after the policy pass, ordered by confidence and risk; "maybe later" is wanted but
-not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either way.
-Within a bucket, no order unless the bucket explicitly says so.
+of the September 2026 review swarms after the policy pass, ordered by confidence and risk; "code cleanup" holds
+structural code smells from a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted
+but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either
+way. Within a bucket, no order unless the bucket explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -231,6 +232,204 @@ Real enough to keep, not established enough to act on. Each names what would set
 - **Local install path without fsync.** `A2-C19`. backend.rs:620-644 renames a payload into place after `flush()` with
   no `sync_all`; the panel refuses local provisioning outright, so production reachability is doubtful. Trivial if ever
   wanted; no blanket power-loss guarantee and no remote-branch change.
+
+## Code cleanup
+
+NOTE: This is not a bug list and not a demand for perfection. It is the output of a code-smell assessment of the whole
+workspace at `1867aed` on 2026-09-25, deliberately skipping nits, and keeping only things with a real cost in bug risk,
+change cost, or comprehension. Five agent reviewers covered the supervisor, the helm, the UI, the CLI with proto and
+test tooling, and cross-crate duplication. Six claims were re-checked by hand against the code (the escaping sets, the
+`has_session` text match, the helm client's `{other:?}` replies, the stale lock-order paragraph, the duplicated "Version
+20" paragraph, and the product binary's `farhelm-teststate` dependency); the rest are the reviewers' reports, which were
+told to verify against the code. Line numbers are as of the anchor commit and will drift. Efforts are agent judgments.
+
+The dominant pattern is not sloppy code. It is the same small rule reimplemented in several places, where the copies
+have since diverged. Those come first because they are latent bugs and mostly cheap. Suggested order: the diverged
+copies as small independent PRs; then the handlers reply path and the `SessionEntry` split (contained, and they reduce
+ongoing cost); then the shared store helper for both stores at once; then the big mechanical carve-outs of `core.rs`
+(with `launch_reserved` and `reload_sessions`) and `CreateSessionForm`, at a time when no other stacks are touching
+those files.
+
+Checked and found fine, so nobody re-raises them: state-dir resolution, the tmux version floor, and frame I/O are each
+in one place; supervisor state machines are proper enums and the helm actor loop is clean; every declared dependency is
+used, and the duplicate versions in `Cargo.lock` all come from dioxus, gtk, and ring; `setup.rs` and `provisioning.rs`
+are large mostly because of their tests.
+
+### Diverged copies of the same rule
+
+- **Terminal-safety escaping.** Low effort. The predicate that escapes peer-supplied text before printing exists five
+  times with three different character sets: `farhelm/src/main.rs:2062` and `farhelm/src/hook.rs:851` cover only line
+  separators and bidi controls; `farhelm-helm/src/agent_requests.rs:726` and `farhelm-ui/src/peer.rs:71` also catch
+  zero-width characters, U+00AD, and U+061C (and disagree with each other on U+180E and U+2061–2064);
+  `farhelm-helm/src/manager.rs:690` uses `{:?}`. So `farhelm agent sessions` and `farhelm agent hosts` print
+  fleet-supplied text unescaped that the helm and UI deliberately escape, which is drift in a spoofing defense. Fix: one
+  shared predicate with one table test (the UI can keep a mirror if it cannot depend on it, pinned by the same table).
+- **tmux "session absent" by error-text match.** Low-medium effort. `has_session`
+  (`farhelm-supervisor/src/tmux.rs:2470`) decides absence with `e.to_string().contains("can't find session")` on the
+  rendered error. The function right below it documents why that is unsafe: the rendered text includes a
+  caller-controlled socket path, so the other paths classify typed raw stderr instead. The tolerated-phrase lists also
+  live separately (`WINDOW_ALREADY_GONE_DIAGNOSTICS`, `SESSION_ALREADY_GONE_DIAGNOSTICS`, three `LIST_PANES_*`
+  constants, the terminal-less-delete prefixes). Fix: one `classify(&TmuxCommandFailure) -> TmuxRefusal` enum and let
+  each caller pick which variants it tolerates.
+- **Takeover and stall detected by comparing English sentences.** Medium effort. The helm
+  (`farhelm-helm/src/terminal.rs:295`) and `farhelm-ui/assets/terminal.js:982` both compare message text against
+  `ATTACH_REFUSED_TAKEN_OVER`; `DETACH_REASON_STALLED` works the same way, and `Detached { reason: String }` carries no
+  code. Rewording the message silently breaks takeover latching and the stall carve-out, and only the browser suite
+  (disabled in CI) would notice. Fix: a reason code on the wire (a new `ErrorKind` or a `reason_code` enum), text for
+  display only. The handshake is exact-match, so this is an ordinary protocol bump.
+- **Shell quoting.** Low effort. `farhelm-helm/src/ssh.rs:141-146` documents that `shell_words::quote` leaves some shell
+  syntax bare and uses its own always-single-quote helper. `farhelm-supervisor/src/launch.rs:604` still builds the
+  `$SHELL -l -i -c` command with `shell_words::quote` while its comment claims the same encoding, and
+  `farhelm-helm/src/provisioning/backend.rs:460` does too; `farhelm-ui/src/profiles.rs:615` has a third quoter. Low risk
+  today since most inputs are Farhelm-controlled, but `--state-dir` is user-chosen. Fix: one always-single-quote helper
+  for every string that reaches a shell.
+- **Helm error construction and unexpected replies.** Medium effort. Six supervisor-client calls
+  (`farhelm-helm/src/client.rs:2840, 2872, 2903, 3033, 3227, 3451`) fail with `bail!("unexpected reply …: {other:?}")`,
+  the unbounded Debug rendering that `wrong_reply` was introduced to replace, and which can reach HTTP bodies through
+  `http_error`. Separately, the docs at `client.rs:200-212` say `request()` is the only constructor of
+  `SupervisorError`, but it is built about 61 more times across `sessions.rs`, `agent_requests.rs`, `profiles.rs` and
+  others, so a helm-originated refusal is indistinguishable from a supervisor reply; `client.rs:960-971` also
+  contradicts itself about which calls are routed. Fix: one `expect_reply!` path for all request wrappers, and a neutral
+  helm-side classified error distinct from the supervisor's.
+- **Harness-to-agent-kind tables.** Low effort. The `LaunchHarness` → `AgentKind` match is written out five times
+  (`farhelm-supervisor/src/service/handlers.rs:332` and `:456`, `farhelm-supervisor/src/store.rs:2627`,
+  `farhelm-helm/src/launches.rs:464`, `farhelm-helm/src/sessions.rs:2027`); the workspace-trust harness set is repeated
+  at `launches.rs:506` and helm `store.rs:5049`, and the permission words at helm `store.rs:795` and `:5045`. Fix:
+  `LaunchHarness::agent_kind()` in `farhelm-proto`, and expose the other two from `launches.rs`.
+- **Small shared helpers.** Low effort. `civil_from_days` exists three times (`farhelm-ui/src/activity.rs:279`,
+  `farhelm-supervisor/src/working_copies.rs:1618`, `farhelm-supervisor/src/agent_kind/capture.rs:839`), a Unix-now
+  helper five times (one returning `u64`, the rest `i64`), and env var names such as `FARHELM_SESSION_ID`,
+  `FARHELM_TMUX` are spelled as literals next to existing constants. Fold into whichever shared home the escaping
+  predicate gets.
+
+### Oversized modules and functions
+
+- **Supervisor `service/core.rs`.** Medium-high effort. 29k lines, 14.4k of them production; one `impl Supervisor` (from
+  `core.rs:4536`) spans about 9.8k lines and 95 methods covering create validation, launch, relaunch and restart, tabs,
+  GitHub checkouts, startup reload, and conversation reports. `launch_reserved` (`core.rs:8455`) is 1,226 lines,
+  `reload_sessions` (`core.rs:5305`) is 782 with at least four phases, and `relaunch_into_terminal`, `restart_session`,
+  `spawn_agent`, and `new_with_seams` are each 300-470. The M4.5 carve-out stopped short. Fix: continue it into
+  `create.rs`, `relaunch.rs`, `tabs.rs`, `reports.rs`, `startup.rs`, `github.rs`, each with its own `impl Supervisor`
+  and the tests beside it, and split the long functions into phase functions along the phases their comments already
+  name.
+- **Supervisor handler reply path.** Medium effort. Non-test `handlers.rs` has 64 hand-built `ControlMsg::Error`
+  literals and 52 bare `return;`, and the fallback error kind for the same failure class differs per handler
+  (`GithubCheckoutPreview` falls back to `InvalidRequest`, `ReconcileGithubCheckout` to `Internal`).
+  `handle_restricted_control` (`handlers.rs:3098`) is 685 lines, `handle_attach` 558, and `handle_create_session`
+  (`handlers.rs:542`) takes 21 positional arguments that both control handlers destructure field by field. The
+  session-credential check is copied three times (`:3154`, `:3367`, `:3666`). Fix: handlers return
+  `Result<ControlMsg, RequestError>` with one place that sends the reply, pass the request payload instead of 21
+  arguments, and factor out `require_session_auth`.
+- **Per-agent-kind behaviour smeared across the supervisor.** Medium-high effort. About 114 non-test `AgentKind::`
+  sites, a third of them in `core.rs` and `handlers.rs`; kind-specific argv surgery lives in `core.rs`
+  (`with_hook_argv_using`, `goose_launch_shape`, `pi_interactive_invocation`); `report_codex_conversation`,
+  `report_grok_conversation`, and `report_omp_conversation` (`core.rs:13556`, `:13708`, `:13865`) are about 150 lines
+  each with the same skeleton, alongside parallel `*_foreground` and `refresh_*_capture_claimed` helpers and a
+  coexisting legacy admission path. Adding or changing a kind is a shotgun edit. Fix: after the harness table above, a
+  per-kind trait or table in `agent_kind` for hook argv, locator verify, and foreground lookup, leaving one generic
+  report pipeline in core.
+- **Helm `HelmStore`.** Medium effort. About 6.2k production lines, one struct with about 65 methods over nine concerns
+  (web tokens, device sessions, preferences, seen table, host registry, session cache, create and launch history,
+  profiles, remembered default). `apply_schema` (`farhelm-helm/src/store.rs:1508`) is one ~1,100-line function whose
+  version-history doc stops at v17 while migrations reach v30. `record_create_history_with_destination` (`:4813`, ~410
+  lines) pastes the same SQL "is newer" tie-break predicate six times in one upsert beside a Rust twin
+  (`history_order_is_newer`, `:106`), behind a three-layer wrapper chain with a positional bool. Session list filter and
+  sort types live in the storage layer. Fix: split into per-concern `impl HelmStore` modules as `checkout_config.rs`
+  already does, one function per migration, a single tie-break fragment, per-table helpers sharing the transaction.
+- **UI `CreateSessionForm`.** High effort. `farhelm-ui/src/list/create_form.rs:1431-5150` is one component with 62
+  signals and a ~2,200-line markup body; the submit handler runs inline, and `apply_composer_search_result` (`:148`)
+  takes 28 parameters. Seeded fields are spread over three signals each (`cwd`/`cwd_raw_seed`/`cwd_edited`, likewise
+  invocation, title, model) where `profiles.rs` already uses one `ProfileDraft` struct; the folder lives in both `cwd`
+  and `destination_draft` and submit reads one then overwrites from the other (`:3170`, `:3203`); and the create target
+  is computed three times because `ListView` derives it in a `use_effect` (`list/view.rs:882-907`) with a documented
+  one-render lag the form then patches over (`:1653-1661`). Fix: a shared `SeededField` type, one source of truth for
+  the folder, a `use_memo` for the target in `ListView`, then split destination/browse, composer search, and submit out
+  of the component.
+- **UI `ListView` per-row state.** Medium effort. Seven parallel `HashSet<String>`/`HashMap<String, _>`/`Option`
+  collections (`list/view.rs:583-694`) are recombined into each row's state, and the "is this row locked" triple is
+  passed to five call sites; exclusivity rules such as confirm-delete versus confirm-replace hold only by call-site
+  discipline. Session, tab, and profile ids are bare strings (`api::close_tab(base, session_id, tab_id)` can be called
+  with the two swapped). Fix: one `HashMap<SessionId, RowPhase>` and id newtypes like the existing `HostId`.
+- **CLI `main.rs`.** Medium effort. `main()` is ~540 lines (`farhelm/src/main.rs:688-1225`) mixing dispatch with env
+  reads and the hook-log path derivation copied between `Hook` and `GooseHook`. `spawn_session` and `agent_request` each
+  hand-roll connect, handshake, one request, one reply, but treat failures differently: `spawn` prints the supervisor's
+  message unescaped and gives no "outcome unknown" warning on a lost reply to a mutating create, where `agent create`
+  does. About 400 lines of table rendering live alongside. Fix: an agent-client module with one `one_shot_request`, a
+  render module, and a `SessionEnv::from_env()`.
+- **`desktop.rs` bundle.** Low-medium effort. ~2,450 production lines covering window geometry, the asset server, device
+  token exchange, supervisor lifecycle, tmux preflight, clipboard, and state. `write_window_state` (`:701`) and
+  `write_state` (`:2428`) are diverged copies of the atomic-write helper (only one fsyncs the parent, only the other
+  cleans up its temp file and avoids the rename behaviour its own doc warns about). The desktop cfg predicate is written
+  out 30 times. Fix: split into submodules, one `atomic_write_json`, and a cfg alias.
+
+### Duplicated infrastructure
+
+- **SQLite store plumbing, twice.** Medium effort. Both stores hand-write `Arc::clone` → `spawn_blocking` →
+  `lock().expect(..)` about 123 times (helm 70, supervisor 53) and separately reimplement busy timeout, open flags with
+  the 0600 fix, and the `user_version` migration chain with its fresh-equals-migrated test. They have drifted:
+  `foreign_keys` is on only in the helm, and only the helm has an open-existing-never-migrate mode. The supervisor's
+  `working_copies` also queries the store's connection directly, so table ownership is split. Fix: a shared
+  `Db::call`/`with_tx`, `open(path, OpenMode)`, and migration runner, with consistent pragmas.
+- **Two helm session caches with one set of rules.** Medium-high effort. Hosts with an identity cache sessions in SQLite
+  (`store::remember_session`, `farhelm-helm/src/store.rs:4575`), hosts without keep them in memory
+  (`manager::remember_session`, `manager.rs:1834`), and merge, sort, cap, eviction, and the truncated flag are written
+  once in SQL and once in Rust; `forget_session` and `refresh_once` each branch on identity. Helpers point the wrong way
+  (store calls `manager::merge_cached_session`, manager calls `sessions::resolve_session_profiles_from_store`), and the
+  session id length bound is checked in five places. Fix: one pure policy module both backends call, or a cache type
+  with two backends behind the manager.
+- **Subprocess runners.** Medium-high effort. At least four timeout-and-cap runners with different kill semantics:
+  `farhelm-supervisor/src/tmux.rs:663` (sync, process-group kill), `farhelm-helm/src/provisioning/backend.rs:1474`
+  (async, process-group kill), `farhelm-supervisor/src/repository_discovery.rs:234` (async, output cap, no process
+  group), and `farhelm-teststate/src/process.rs:234`; `farhelm-supervisor/src/scope.rs:1271` uses bare `.output()` with
+  no cap. Fix: one async runner with process-group kill and output caps as options. Payoff grows with each new caller.
+- **Hand-rolled fake supervisors in tests.** Medium effort, test code only. About 180 inline duplex + handshake +
+  hand-matched reply setups in the helm (`sessions_tests.rs` ~65, `client.rs` 49, `agent_requests.rs` 23, `uploads.rs`
+  19, `terminal.rs` 13) while only `manager.rs` has a reusable scripted peer; about 16 more in the e2e tests (`RawPeer`,
+  `MarkerPeer`, `SessionPeer`, seven in `session_lifecycle.rs`); and the CLI mock supervisor with its four self-tests is
+  copied between `tests/agent_cli.rs` and `tests/spawn_cli.rs` despite `tests/cli_support/`. A wire or handshake change
+  fans out across hundreds of test bodies. Fix: a shared scripted fake in `rest_harness`, a `harness::raw_peer`, and the
+  CLI mock moved into `cli_support`.
+- **UI wire-type mirrors without a contract test.** Medium effort. `farhelm-ui` hand-mirrors 16 proto/helm types (plus
+  `effective_activity` logic) because `farhelm-proto` pulls tokio net and process for its I/O and cannot build for wasm.
+  Nothing decodes a real helm reply with the UI types; only Playwright would catch drift. Fix: gate `proto/io.rs` behind
+  a default feature so the UI can share types, or at minimum add serialize-with-helm, decode-with-UI contract tests on
+  the native side.
+
+### Invariants held by convention
+
+- **`SessionEntry` sharing policy.** Medium effort. The 14-field struct (`farhelm-supervisor/src/service/core.rs:3734`)
+  is built literally at six production sites, each re-deciding which `Arc` cells a rename shares versus which a relaunch
+  replaces; the doc around `:2998` warns the next person to decide correctly, and a wrong choice breaks the generation
+  fence. The cells are locked directly from core, capture, terminals, and ticker. Fix: split into `SessionCells` and
+  `RunCells` behind two `Arc`s, so rename clones both and relaunch replaces one, with accessor methods.
+- **Supervisor lock ordering.** Low-medium effort. With four mutexes, four keyed locks, working-copy operations, and
+  three semaphores, the order is written down piecemeal in about eight comments (`core.rs:4146`, `:4296`, `:4350`,
+  `:4382`, `:4426`, `:9850`, `handlers.rs:1422`, `teardown.rs:94`), and the struct doc at `core.rs:4019` still says
+  attachments-before-sessions is the only rule needed. Fix: one authoritative lock-order table, the stale paragraph
+  corrected.
+
+### Test hooks in production code
+
+- **Fault hooks mixed into configuration.** Medium effort. `SupervisorSeams` (`core.rs:662-1004`) has about 36 public
+  fields, about 25 of them test fault or gate hooks alongside real config; six type aliases name the same gate type;
+  more `#[cfg(test)]` fields and branches sit in tmux, scope (`Mode::Fake`), repository discovery, stream, sink, and
+  `agent_relay.rs`. The helm grows one bespoke seam per test (`fail_registry_sync`, `fail_before_rename`, the
+  `DUPLICATE_PUBLICATION_GATE` global static, `*_for_test` store methods). The UI ships 32 `window.__farhelmTest*` hooks
+  and test-observation signals. Fix: a `SupervisorConfig`/`FaultHooks` split behind a `test-seams` feature the e2e crate
+  enables, one failpoint mechanism in the helm, and a `test-hooks` feature for the Playwright build.
+- **Test fixtures in the release binary.** Medium effort, lower payoff. `internal fake-agent` (~3.8k lines with
+  `codex_conversation.rs`) and `internal sweep-test-state` ship in the product binary, and `crates/farhelm/Cargo.toml`
+  depends on `farhelm-teststate` although that crate's docs say product code must never depend on it. Fix: a cargo
+  feature or a second `[[bin]]` for the e2e harness and `start-stack.sh`.
+
+### Stale in-code documentation
+
+- **Proto changelog docstring.** Low effort. `PROTOCOL_VERSION`'s docstring is a 175-line changelog that has rotted:
+  "Version 20" appears twice (`farhelm-proto/src/lib.rs:181`, `:184`), and it calls `DETACH_REASON_STALLED` reserved and
+  unsent while `farhelm-supervisor/src/service/connection.rs:1558` sends it. Also, 25 of the 95 proto tests decode
+  across protocol versions with hand-written `Legacy*`/`Future*` shadow types, yet `Hello` refuses any version mismatch,
+  so those paths cannot occur between peers. Fix: move the changelog to lore, prune the cross-version tests except those
+  guarding stored rows or the `Hello` decode, and split `lib.rs` by message family.
 
 ## Maybe later
 
