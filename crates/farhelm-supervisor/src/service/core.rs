@@ -936,6 +936,10 @@ pub type TabOpenFault = Arc<dyn Fn(TabOpenStage) -> anyhow::Result<()> + Send + 
 /// that a window created before marking or confirmation failure is cleaned up
 /// without touching the session's existing tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    clippy::enum_variant_names,
+    reason = "fault injection runs before each named side effect, not after it"
+)]
 pub enum ReplacementStage {
     /// Immediately before adding the replacement window.
     BeforeCreation,
@@ -10844,6 +10848,10 @@ impl Supervisor {
     /// run's: `systemd-run` can have created the scope and placed processes
     /// in it before whatever made tmux fail, so the sweep this performs
     /// must be able to reach them.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "cleanup needs the failed attempt state and the preserved terminal identities together"
+    )]
     async fn unwind_failed_relaunch(
         &self,
         id: &str,

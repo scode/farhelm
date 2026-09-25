@@ -12,7 +12,11 @@
 - Completion criteria: update both live status and observation paths, add focused regression coverage for the ambiguous
   dead-pane case, preserve genuine launch-error and ordinary exited-session behavior, and remove this feedback file and
   its index entry in the execution change.
-- Execution: `complete`; `Launching` rows with a matching dead pane now remain `Unknown` and emit no observed-exit transition, while sentinel errors and established exits retain their behavior. Focused recorded nextest run `0d370584-9618-4571-bd07-80f8fe81b34a` passed both status regressions (858 skipped); formatting and isolated sleep checks passed. Draft PR [#917](https://github.com/scode/farhelm/pull/917/changes) is on bookmark `pr/ambiguous-restart-unknown`, jj change `8ad56228854a`.
+- Execution: `complete`; `Launching` rows with a matching dead pane now remain `Unknown` and emit no observed-exit
+  transition, while sentinel errors and established exits retain their behavior. Focused recorded nextest run
+  `0d370584-9618-4571-bd07-80f8fe81b34a` passed both status regressions (858 skipped); formatting and isolated sleep
+  checks passed. Draft PR [#917](https://github.com/scode/farhelm/pull/917/changes) is on bookmark
+  `pr/ambiguous-restart-unknown`, jj change `8ad56228854a`.
 
 ## failure-suppressor-never-resets.md
 
@@ -929,9 +933,9 @@
   file and its `review_feedback_queue/INDEX.md` entry only when the bounded fix is complete; retain or narrow the item
   if it is deferred.
 - Execution: `complete`; focused recorded nextest coverage passed for the post-quarantine row refusal and restoration,
-  startup preservation of retained attachments, successful retry deletion, and existing quarantine cleanup paths.
-  Draft PR [#914](https://github.com/scode/farhelm/pull/914/changes) is on bookmark `pr/failed-delete-attachments`,
-  jj change `kmlmqnpm`.
+  startup preservation of retained attachments, successful retry deletion, and existing quarantine cleanup paths. Draft
+  PR [#914](https://github.com/scode/farhelm/pull/914/changes) is on bookmark `pr/failed-delete-attachments`, jj change
+  `kmlmqnpm`.
 
 ## pane-pid-recycled-before-sweep-binds-identity.md
 
@@ -950,7 +954,9 @@
   cannot make the sweep adopt an unrelated pane root; focused regression coverage proves both matching and changed
   identities; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change, or
   retain/narrow it with the documented deferral if the simplicity gate is reached.
-- Execution: `complete`; captured and validated pane identities across delete/archive, stop, restart, and tab teardown; focused recorded nextest coverage passed matching, changed, gone, and end-to-end sweep-root cases. Draft PR [#915](https://github.com/scode/farhelm/pull/915/changes) is on bookmark `pr/pane-pid-identity`, jj change `ntkxxmtq`.
+- Execution: `complete`; captured and validated pane identities across delete/archive, stop, restart, and tab teardown;
+  focused recorded nextest coverage passed matching, changed, gone, and end-to-end sweep-root cases. Draft PR
+  [#915](https://github.com/scode/farhelm/pull/915/changes) is on bookmark `pr/pane-pid-identity`, jj change `ntkxxmtq`.
 
 ## refused-delete-discards-in-flight-upload.md
 
@@ -963,7 +969,11 @@
 - Completion criteria: a refused Delete preserves an in-flight upload; a successful Delete still cancels uploads before
   removing the session; focused regression coverage proves both paths; remove this feedback file and its
   `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `complete`; Delete now runs refusal-prone pane, tab, and scope preflights before cancelling uploads while retaining cancellation before the process sweep and destructive teardown. Focused recorded nextest run `398569c5-969b-4e8b-9b22-124b0fbfe979` passed both regressions (372 skipped); formatting, diff, and isolated sleep checks passed. Draft PR [#916](https://github.com/scode/farhelm/pull/916/changes) is on bookmark `pr/refused-delete-upload`, jj change `513d1a650bc9`.
+- Execution: `complete`; Delete now runs refusal-prone pane, tab, and scope preflights before cancelling uploads while
+  retaining cancellation before the process sweep and destructive teardown. Focused recorded nextest run
+  `398569c5-969b-4e8b-9b22-124b0fbfe979` passed both regressions (372 skipped); formatting, diff, and isolated sleep
+  checks passed. Draft PR [#916](https://github.com/scode/farhelm/pull/916/changes) is on bookmark
+  `pr/refused-delete-upload`, jj change `513d1a650bc9`.
 
 ## refused-retry-strands-credential-spec.md
 
@@ -978,7 +988,11 @@
 - Completion criteria: refused retries remove the corresponding launch spec and sentinel; valid retries and ordinary
   launch recovery retain their current behavior; focused regression coverage proves cleanup; remove this feedback file
   and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `complete`; refused keyed retries now remove the stranded generation-zero launch spec and sentinel after settling the durable row, while preserving the original refusal and surfacing cleanup failure. Focused recorded nextest run `fbd09538-c841-47db-99e1-cf7b698d7b9b` passed four retry lifecycle tests (856 skipped); formatting, changelog, and isolated sleep checks passed. Draft PR [#918](https://github.com/scode/farhelm/pull/918/changes) is on bookmark `pr/refused-retry-launch-cleanup`, jj change `2a176be0e560`.
+- Execution: `complete`; refused keyed retries now remove the stranded generation-zero launch spec and sentinel after
+  settling the durable row, while preserving the original refusal and surfacing cleanup failure. Focused recorded
+  nextest run `fbd09538-c841-47db-99e1-cf7b698d7b9b` passed four retry lifecycle tests (856 skipped); formatting,
+  changelog, and isolated sleep checks passed. Draft PR [#918](https://github.com/scode/farhelm/pull/918/changes) is on
+  bookmark `pr/refused-retry-launch-cleanup`, jj change `2a176be0e560`.
 
 ## restart-kills-tabs-reports-present.md
 
@@ -998,10 +1012,10 @@
   the execution change. Gate execution on the solution remaining within the bounded, moderate-complexity shape above. If
   implementation requires materially more lifecycle state, recovery machinery, or design scope, defer it during
   execution with the blocker and proposed follow-up documented in TODO.md, retaining or narrowing the queue item.
-- Execution: `complete`; fresh-terminal restart now preserves a surviving tmux session and replaces only the dead
-  agent window, while marker-only ambiguity never authorizes destructive cleanup. Focused recorded nextest run
-  `f9c9714d-833e-47cc-86ad-ac4f44e9db97` passed four restart lifecycle tests (860 skipped); the final Astra review
-  found no remaining defects. Draft PR [#919](https://github.com/scode/farhelm/pull/919/changes) is on bookmark
+- Execution: `complete`; fresh-terminal restart now preserves a surviving tmux session and replaces only the dead agent
+  window, while marker-only ambiguity never authorizes destructive cleanup. Focused recorded nextest run
+  `f9c9714d-833e-47cc-86ad-ac4f44e9db97` passed four restart lifecycle tests (860 skipped); the final Astra review found
+  no remaining defects. Draft PR [#919](https://github.com/scode/farhelm/pull/919/changes) is on bookmark
   `pr/restart-preserves-tabs`, jj change `knrrtwzvvlyrvtvnvmmxnpzlkykwnwwl`.
 
 ## stale-dial-outcome-publishes-over-retarget-nudge.md
@@ -1018,7 +1032,13 @@
 - Completion criteria: no settled old-destination outcome can publish after a retarget nudge; focused deterministic
   tests cover the pending-nudge boundary for connected, mismatch, unverified, and failed outcomes, plus ordinary
   no-nudge behavior; remove this feedback file and its `review_feedback_queue/INDEX.md` entry in the execution change.
-- Execution: `complete`; the actor now discards any settled connection result when a retarget nudge is pending, while interrupted outcomes retain their own fresh-window decision. Focused pinned recorder run `a3b9b1b2-3db3-4296-9ae0-1baef377f1ba` passed four boundary tests (820 skipped); the isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed. The first Astra review's High finding was corrected and a fresh follow-up review reported `No entries. OK`. Draft PR [#920](https://github.com/scode/farhelm/pull/920/changes) is on bookmark `pr/stale-dial-publication`, implementation commit `bef928a24cf9`.
+- Execution: `complete`; the actor now discards any settled connection result when a retarget nudge is pending, while
+  interrupted outcomes retain their own fresh-window decision. Focused pinned recorder run
+  `a3b9b1b2-3db3-4296-9ae0-1baef377f1ba` passed four boundary tests (820 skipped); the isolated sleep checker passed 226
+  delays with zero missing rationales; formatting, diff, and changelog checks passed. The first Astra review's High
+  finding was corrected and a fresh follow-up review reported `No entries. OK`. Draft PR
+  [#920](https://github.com/scode/farhelm/pull/920/changes) is on bookmark `pr/stale-dial-publication`, implementation
+  commit `bef928a24cf9`.
 
 ## stripped-agent-marker-forges-killable-tab.md
 
@@ -1043,8 +1063,9 @@
   before explicit close. `SPEC.md` records the trusted-target-process boundary and the absence of strong same-account
   isolation. Focused pinned recorder run `6bdf9b00-01d6-49f4-ba54-5aa7232092bf` passed four tests (863 skipped); the
   isolated sleep checker passed 226 delays with zero missing rationales; formatting, diff, and changelog checks passed.
-  Fresh Astra medium review reported `No entries. OK`. Draft PR [#921](https://github.com/scode/farhelm/pull/921/changes)
-  is on bookmark `pr/stripped-agent-marker`; implementation commit `9cd45aea0836`.
+  Fresh Astra medium review reported `No entries. OK`. Draft PR
+  [#921](https://github.com/scode/farhelm/pull/921/changes) is on bookmark `pr/stripped-agent-marker`; implementation
+  commit `9cd45aea0836`.
 
 ## discard-quarantined-hangs-response.md
 
