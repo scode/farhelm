@@ -28,6 +28,7 @@ use crate::ops::ReadGate;
 use crate::peer::PeerLine;
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
+use crate::restart_with::RestartWithDialog;
 use crate::status::{StatusBadge, StatusBadgeView, status_badge};
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
@@ -35,7 +36,7 @@ use crate::tabs::{
     sorted_tab_errors, tab_banner_element_id, tab_connecting_element_id, tab_label,
     tab_terminal_element_id, terminal_ws_path, terminal_ws_unowned_path, visible_tabs,
 };
-use crate::{ApiBase, RestartOffer, Session, SessionStatus};
+use crate::{ApiBase, LaunchHarness, LaunchSelection, RestartOffer, Session, SessionStatus};
 
 /// The DOM id of the element carrying the restart offer's explanation, which
 /// the restart button names through `aria-describedby`.
@@ -51,6 +52,51 @@ use crate::{ApiBase, RestartOffer, Session, SessionStatus};
 /// element id in this view is fixed (see `tabs`): exactly one `SessionView`
 /// is mounted at a time.
 const RESTART_OFFER_DESCRIPTION_ID: &str = "restart-offer-description";
+const RESTART_WITH_DESCRIPTION_ID: &str = "restart-with-description";
+
+/// Return keyboard focus to the header action after its modal unmounts.
+///
+/// The dialog's isolation is released first, synchronously. The trigger is
+/// outside the dialog and so `inert` while it is isolated, and `focus()` on an
+/// inert element silently does nothing. Waiting for the isolation's own
+/// unmount observer is not enough: nothing orders Dioxus's removal of the
+/// dialog against this animation frame. Release is idempotent, so the
+/// observer firing afterwards is harmless.
+fn focus_restart_with_trigger() {
+    document::eval(&format!(
+        "{} requestAnimationFrame(() => document.querySelector('.restart-with-trigger')?.focus({{ preventScroll: true }}))",
+        crate::modal_isolation::release_js(crate::restart_with::RESTART_WITH_DIALOG_SELECTOR),
+    ));
+}
+
+/// Explain the first fact that prevents editing a resumed launch.
+///
+/// Provenance takes priority because a raw/profile session cannot supply the
+/// structured choices even if its conversation is captured later. The three
+/// generic integrations are named only in the explanation; the actual
+/// availability rule does not maintain a harness capability list.
+fn restart_with_unavailable(session: &Session) -> Option<String> {
+    let launch = session.launch.as_ref()?;
+    if session.restart_offer == RestartOffer::Resume {
+        return None;
+    }
+    match launch.harness {
+        LaunchHarness::Muse | LaunchHarness::Cursor | LaunchHarness::OpenCode => Some(format!(
+            "{} sessions can't be resumed",
+            crate::launch_composer::harness_word(launch.harness)
+        )),
+        _ => Some("no captured conversation to resume".to_string()),
+    }
+}
+
+/// Preserve the legacy-session explanation when there is no saved selection.
+fn restart_with_reason(session: &Session) -> Option<String> {
+    if session.launch.is_none() {
+        Some("restart with needs a session launched from structured settings".to_string())
+    } else {
+        restart_with_unavailable(session)
+    }
+}
 
 /// Ask for consent when the agent may still be running. `Unknown` can be a
 /// reloaded live pane whose status sampler has not caught up; sending an
@@ -71,8 +117,8 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///
 /// Everything that identifies the session lives in ONE ~40px row: the status
 /// badge, session title, last-activity age, copyable directory and command
-/// line, and four always-visible lifecycle actions — Restart, Replace, Clone,
-/// and Replace with. Rename stays in the sidebar, which owns navigation, and
+/// line, and five always-visible lifecycle actions — Restart, Restart with,
+/// Replace, Clone, and Replace with. Rename stays in the sidebar, which owns navigation, and
 /// tabs stay in the strip below. This replaced a stack of four bands that
 /// cost ~170px of chrome before the terminal started, on a surface whose
 /// whole point is the terminal.
@@ -116,9 +162,9 @@ fn restart_needs_confirmation(status: &SessionStatus) -> bool {
 ///   has no badge and still has an age.
 ///
 /// - **The action order is part of the keyboard contract.** The DOM places
-///   Restart, Replace, Clone, and Replace with in that order, so pointer,
+///   Restart, Restart with, Replace, Clone, and Replace with in that order, so pointer,
 ///   keyboard, and assistive-technology users encounter the same controls.
-///   There is deliberately no overflow `⋯` menu: all four actions remain
+///   There is deliberately no overflow `⋯` menu: all five actions remain
 ///   visible in the row, even when the identity fields have to ellipsize.
 /// - **Directory and command line are copy buttons, not passive metadata.**
 ///   Their full values remain in the tooltip while the fields shrink before
@@ -378,6 +424,10 @@ pub(crate) fn SessionView(
     let mut restarting = use_signal(|| false);
     let mut confirming = use_signal(|| false);
     let mut restart_error = use_signal(|| None::<String>);
+    // One opening owns a fixed comparison baseline. Detail refreshes may
+    // change the current offer, but they must not rewrite a draft in progress.
+    let mut restart_with_open = use_signal(|| None::<Session>);
+    let mut restart_with_error = use_signal(|| None::<String>);
     // Replace has its own prompt and error because it creates a new session
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
@@ -972,23 +1022,31 @@ pub(crate) fn SessionView(
     let restart_base = base.clone();
     // The detail door, for the refresh a restart owes (see below).
     let refresh_after_restart = request_detail.clone();
-    let restart = move |stop_if_running: bool| {
+    let restart = move |stop_if_running: bool, with: Option<LaunchSelection>| {
         if restarting() {
-            lifecycle.release();
+            if with.is_none() {
+                lifecycle.release();
+            }
             return;
         }
         restarting.set(true);
         restart_error.set(None);
+        restart_with_error.set(None);
         restart_epoch += 1;
         let base = restart_base.clone();
         let id = current.read().id.clone();
-        let mode = restart_mode_for(current.read().restart_offer);
+        let mode = if with.is_some() {
+            "resume"
+        } else {
+            restart_mode_for(current.read().restart_offer)
+        };
         // Cloned per click: the spawned task owns what it captures, and this
         // closure runs again for the next restart.
         let refresh_after_restart = refresh_after_restart.clone();
         spawn(async move {
-            let outcome = restart_session(&base, &id, mode, stop_if_running).await;
+            let outcome = restart_session(&base, &id, mode, stop_if_running, with.as_ref()).await;
             match &outcome {
+                Err(e) if with.is_some() => restart_with_error.set(Some(e.clone())),
                 Err(e) => restart_error.set(Some(e.clone())),
                 // The reply says the relaunch happened, and that fact
                 // outruns the listing: the supervisor answers `Unknown`
@@ -998,7 +1056,13 @@ pub(crate) fn SessionView(
                 // surface — and its restart control — over a session
                 // that is now running. `relaunched` is what lets the
                 // terminal mount at once instead (see `terminal_absence`).
-                Ok(_) => relaunched.set(true),
+                Ok(_) => {
+                    relaunched.set(true);
+                    if with.is_some() {
+                        restart_with_open.set(None);
+                        focus_restart_with_trigger();
+                    }
+                }
             }
             // Remounted on both paths. A success obviously needs it (new
             // pane, or a respawned one, and the server tore the old
@@ -1029,7 +1093,9 @@ pub(crate) fn SessionView(
             // that is the safe direction, because the status it still holds
             // is the pre-restart one, which confirms.
             restarting.set(false);
-            lifecycle.release();
+            if with.is_none() || outcome.is_ok() {
+                lifecycle.release();
+            }
             // The authoritative refresh, asked for through the SAME door
             // every other read uses and issued after the final bump so it
             // carries the epoch it will be judged against.
@@ -1060,14 +1126,14 @@ pub(crate) fn SessionView(
             refresh_after_restart(Trigger::Explicit);
         });
     };
-    // One closure, two call sites (the confirm button and the direct
-    // restart), cloned rather than duplicated so both send exactly the
-    // same request shape and share the same in-flight guard.
+    // One lifecycle closure serves ordinary restart's direct and confirmed
+    // paths, the interrupted card, and restart-with. Keeping the result
+    // handling shared makes every successful relaunch reattach the terminal
+    // and refresh the same way.
     let mut confirm_restart = restart.clone();
-    // A third caller since the interrupted surface: its band carries the
-    // same restart control the header does, wired to this same closure so
-    // the two can never send different requests for one click.
+    // The interrupted card carries the same restart control as the header.
     let mut notice_restart = restart.clone();
+    let mut with_restart = restart.clone();
     let mut fresh_restart = restart;
 
     let replace_base = base.clone();
@@ -1496,6 +1562,10 @@ pub(crate) fn SessionView(
     // promise to `aria-label` and to the hover `title`, in front of the
     // further elaboration `offer_explanation` provides.
     let restart_label = restart_button_label(shown.restart_offer);
+    let with_reason = restart_with_reason(&shown);
+    let restart_with_description = with_reason.clone().unwrap_or_else(|| {
+        "resume this session's conversation with changed launch settings".to_string()
+    });
     let copied_directory = use_signal(|| false);
     let copied_command = use_signal(|| false);
     let copy_value = move |value: String, mut copied: Signal<bool>| {
@@ -1603,7 +1673,7 @@ pub(crate) fn SessionView(
                                     // consent before sending that request.
                                     confirming.set(true);
                                 } else {
-                                    fresh_restart(false);
+                                    fresh_restart(false, None);
                                 }
                             },
                             "restart"
@@ -1649,7 +1719,7 @@ pub(crate) fn SessionView(
                                         // consent onto the wire, which the
                                         // supervisor then checks against
                                         // liveness it rechecks itself.
-                                        confirm_restart(true);
+                                        confirm_restart(true, None);
                                     },
                                     "confirm restart"
                                 }
@@ -1665,6 +1735,32 @@ pub(crate) fn SessionView(
                                 }
                             }
                         }
+                    }
+                    button {
+                        r#type: "button",
+                        class: "btn btn-primary restart-with-trigger",
+                        title: "{restart_with_description}",
+                        "aria-describedby": RESTART_WITH_DESCRIPTION_ID,
+                        "aria-disabled": with_reason.is_some(),
+                        disabled: lifecycle.busy(),
+                        onclick: {
+                            let opening = shown.clone();
+                            move |_| {
+                                // `aria-disabled` keeps the tooltip hoverable;
+                                // the handler is what actually refuses activation.
+                                if with_reason.is_some() || !lifecycle.claim() {
+                                    return;
+                                }
+                                restart_with_error.set(None);
+                                restart_with_open.set(Some(opening.clone()));
+                            }
+                        },
+                        "restart with"
+                    }
+                    span {
+                        id: RESTART_WITH_DESCRIPTION_ID,
+                        class: "visually-hidden",
+                        "{restart_with_description}"
                     }
                     div { class: "header-replace-anchor",
                         button {
@@ -1717,6 +1813,39 @@ pub(crate) fn SessionView(
                         onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()))),
                         "replace with"
                     }
+                }
+            }
+            if let Some(opening) = restart_with_open.read().clone() {
+                RestartWithDialog {
+                    session: opening.clone(),
+                    busy: restarting(),
+                    error: restart_with_error(),
+                    stop_first: restart_needs_confirmation(&shown.status),
+                    stop_uncertain: shown.status == SessionStatus::Unknown,
+                    offer_label: restart_button_label(shown.restart_offer).to_string(),
+                    on_cancel: move |_| {
+                        if restarting() { return; }
+                        restart_with_open.set(None);
+                        restart_with_error.set(None);
+                        lifecycle.release();
+                        focus_restart_with_trigger();
+                    },
+                    on_submit: move |selection: LaunchSelection| {
+                        if restarting() { return; }
+                        if let Some(reason) = restart_with_reason(&current.read()) {
+                            restart_with_error.set(Some(reason));
+                            return;
+                        }
+                        if current.read().launch != opening.launch {
+                            restart_with_error.set(Some("this session's launch settings changed; close and reopen restart with".to_string()));
+                            return;
+                        }
+                        if opening.launch.as_ref().is_none_or(|saved| selection.harness != saved.harness) {
+                            restart_with_error.set(Some("the session harness cannot be changed here".to_string()));
+                            return;
+                        }
+                        with_restart(restart_needs_confirmation(&current.read().status), Some(selection));
+                    },
                 }
             }
             // Both failures are full-width lines under the header rather than
@@ -1810,7 +1939,7 @@ pub(crate) fn SessionView(
                             if !lifecycle.claim() {
                                 return;
                             }
-                            notice_restart(false);
+                            notice_restart(false, None);
                         },
                         "restart"
                     }
@@ -2238,6 +2367,40 @@ fn restart_button_label(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Restart-with needs both saved structured settings and a captured
+    /// conversation; the disabled explanation must identify which fact is
+    /// missing without treating a generic integration as resumable.
+    #[farhelm_testtrace::test]
+    fn restart_with_availability_explains_each_unavailable_case() {
+        let mut session = live_session();
+        session.restart_offer = RestartOffer::Resume;
+        assert_eq!(
+            restart_with_reason(&session).as_deref(),
+            Some("restart with needs a session launched from structured settings")
+        );
+
+        session.launch = Some(LaunchSelection {
+            harness: LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: None,
+            workspace_trust: None,
+        });
+        assert_eq!(restart_with_reason(&session), None);
+        for offer in [RestartOffer::FreshOnly, RestartOffer::FallbackTemplate] {
+            session.restart_offer = offer;
+            assert_eq!(
+                restart_with_reason(&session).as_deref(),
+                Some("no captured conversation to resume")
+            );
+        }
+        session.launch.as_mut().unwrap().harness = LaunchHarness::Muse;
+        assert_eq!(
+            restart_with_reason(&session).as_deref(),
+            Some("muse sessions can't be resumed")
+        );
+    }
 
     /// An uncached startup row has no badge yet, but its live pane may
     /// still need stopping. Restart must offer consent for that uncertain

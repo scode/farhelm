@@ -2461,11 +2461,29 @@
       // focus itself (see `mount()`), and `mountWhenReady` may resolve
       // arbitrarily later, so the intent has to be recorded first for that
       // deferred mount to see it.
+      //
+      // The intent is recorded even when the focus itself is withheld. A
+      // mounted restart-with dialog is modal, and the target can change
+      // under it without the user doing anything: a selected tab whose
+      // shell exits (or that another client closes) drops out of the
+      // listing, the view falls back to the agent tab, and the agent island
+      // is already mounted, so this call — not a reveal — is what would
+      // pull focus out of the dialog and send the next keystroke to the
+      // agent beneath the scrim. That is the same theft `takesFocus()`
+      // vetoes for reveals, and like that veto it is not replayed when the
+      // dialog closes. Only the dialog vetoes here: the rest of
+      // `takesFocus()`'s rules would break select-then-type, because
+      // selecting a tab leaves focus on its strip button.
+      //
+      // This veto is the second layer. The dialog marks the rest of the
+      // page `inert` while mounted (restart_with.rs, modal_isolation.rs),
+      // which already turns this `focus()` into a no-op; the veto keeps the
+      // guarantee in an engine that does not implement `inert`.
       const focusEl = specs.find((spec) => spec.focus)?.el ?? null;
       if (focusEl !== focusedEl) {
         focusedEl = focusEl;
         const island = focusEl === null ? null : islands.get(focusEl);
-        if (island) island.term.focus();
+        if (island && !document.querySelector(".restart-with-dialog")) island.term.focus();
       }
 
       for (const spec of specs) {
@@ -3681,6 +3699,23 @@
          * replaced through `body`. The reveal gets no retry after dismissal;
          * the user can click the terminal when they want to type there.
          *
+         * A mounted restart-with dialog is the same kind of veto, and it
+         * matters more there: the dialog is modal, focus usually sits on
+         * one of its buttons (which the button rule below would otherwise
+         * surrender), and a refused restart remounts this very terminal
+         * behind the still-open dialog. Without the veto, that reattach
+         * would focus the pty under the scrim, and the next keystroke
+         * aimed at the dialog would go to the agent instead. As with the
+         * popup, closing the dialog does not replay the vetoed reveal: a
+         * cancel hands focus back to the header action that opened it.
+         * `sync()` focuses an already-revealed island when the selection
+         * changes, which is the other way a terminal can take focus, and
+         * it carries the same dialog veto. Both vetoes are the dialog's
+         * second layer: while mounted it marks everything outside itself
+         * `inert` (restart_with.rs, modal_isolation.rs), so this `focus()`
+         * would be a no-op anyway, and the vetoes cover engines without
+         * `inert`.
+         *
          * Other focused buttons do not hold the reveal back. The tab-strip
          * selector is the concrete case: selecting a tab leaves focus on its
          * button, and the point of that selection is to type into the tab once
@@ -3690,6 +3725,7 @@
         function takesFocus() {
           if (!focusOnReveal || focusedEl !== spec.el) return false;
           if (document.querySelector(".profiles-popover")) return false;
+          if (document.querySelector(".restart-with-dialog")) return false;
           const active = document.activeElement;
           if (!active || active === document.body) return true;
           if (el && el.contains(active)) return true;

@@ -2006,19 +2006,36 @@ pub(crate) async fn fetch_session(base: &str, id: &str) -> Result<Option<Session
 /// the supervisor rechecks real liveness before honoring it. Same
 /// error-surfacing shape as `stop_session` above, including the
 /// body-read-failure context.
+///
+/// An override is sent only for restart-with. Plain restart omits `with`
+/// entirely so an older request keeps its original wire shape and semantics.
 pub(crate) async fn restart_session(
     base: &str,
     id: &str,
     mode: &str,
     stop_if_running: bool,
+    with: Option<&LaunchSelection>,
 ) -> Result<Session, String> {
     let url = format!("{base}/api/sessions/{}/restart", encode_path_segment(id));
-    let body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
+    let body = restart_request_body(mode, stop_if_running, with);
     let resp = send(client().post(&url).json(&body)).await?;
     if !resp.status().is_success() {
         return Err(refusal_text("POST", &url, resp).await);
     }
     resp.json::<Session>().await.map_err(|e| e.to_string())
+}
+
+/// Preserve the absent-versus-present override distinction on the restart wire.
+fn restart_request_body(
+    mode: &str,
+    stop_if_running: bool,
+    with: Option<&LaunchSelection>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "mode": mode, "stop_if_running": stop_if_running });
+    if let Some(with) = with {
+        body["with"] = serde_json::to_value(with).expect("LaunchSelection is serializable");
+    }
+    body
 }
 
 /// POST the rename endpoint for one session, returning the session as the
@@ -3253,6 +3270,30 @@ pub(crate) fn restart_mode_for(offer: RestartOffer) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plain restart must retain its old JSON shape; restart-with carries the
+    /// complete edited selection so the helm can compile the new launch.
+    #[farhelm_testtrace::test]
+    fn restart_request_only_includes_selection_for_restart_with() {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Claude,
+            model: Some("example-model".into()),
+            effort: None,
+            permissions: Some(crate::LaunchPermission::Yolo),
+            workspace_trust: None,
+        };
+        let plain = restart_request_body("resume", false, None);
+        assert_eq!(
+            plain,
+            serde_json::json!({"mode": "resume", "stop_if_running": false})
+        );
+        assert!(plain.get("with").is_none());
+
+        let edited = restart_request_body("resume", true, Some(&selection));
+        assert_eq!(edited["mode"], "resume");
+        assert_eq!(edited["stop_if_running"], true);
+        assert_eq!(edited["with"], serde_json::to_value(selection).unwrap());
+    }
 
     /// Saved fresh launches preserve repository intent independently of their
     /// old allocation path. Old helm replies still decode as ordinary folders.
