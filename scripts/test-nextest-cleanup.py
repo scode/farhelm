@@ -104,8 +104,18 @@ def main() -> None:
                 raise AssertionError("fixture timeout adaptation needs updating for the current policy")
             config_path.write_text(config.replace(original, 'period = "1s", terminate-after = 1'))
         (root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["supervisor"]\n'
             '[package]\nname = "farhelm"\nversion = "0.0.0"\nedition = "2024"\n'
             '[[test]]\nname = "e2e"\npath = "fixture.rs"\n', encoding="utf-8")
+        # Nextest validates every package selector even when this command
+        # selects only the e2e target. Keep the supervisor selector resolvable
+        # without copying product code or weakening the maintained policy.
+        supervisor = root / "supervisor"
+        supervisor.mkdir()
+        (supervisor / "Cargo.toml").write_text(
+            '[package]\nname = "farhelm-supervisor"\nversion = "0.0.0"\nedition = "2024"\n'
+            '[lib]\npath = "lib.rs"\n', encoding="utf-8")
+        (supervisor / "lib.rs").write_text("", encoding="utf-8")
         # Match the real policy's package/binary selectors. This tiny crate
         # contains no product code; it exercises the same nextest group policy.
         (root / "fixture.rs").write_text(RUST, encoding="utf-8")
