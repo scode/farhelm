@@ -26,7 +26,7 @@ use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{HostLookup, HostsRead, is_connected, stale_session_notice};
 use crate::ops::ReadGate;
 use crate::peer::PeerLine;
-use crate::reader::{SurfaceReader, Trigger, request_read};
+use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
 use crate::status::{StatusBadge, StatusBadgeView, status_badge};
 use crate::tabs::{
@@ -1510,7 +1510,9 @@ pub(crate) fn SessionView(
         document::eval(&js);
         spawn(async move {
             copied.set(true);
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            // `sleep_ms` rather than tokio directly: the web build targets
+            // wasm, where tokio's timer is not linked (see `reader::sleep_ms`).
+            sleep_ms(1500).await;
             copied.set(false);
         });
     };
