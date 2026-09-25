@@ -56,9 +56,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   should still expand is part of the design.
 - **Launch composer shorthands.** Support `yolo` as shorthand for enabling yolo, along with `perms:yolo` and
   `perms:default`.
-- **Top-bar path and argument truncation.** Let the home-directory and agent-argument indicators use the available
-  horizontal space before truncating with ellipses; they currently truncate far too early and leave a large gap before
-  the action buttons.
 - **Profiles button placement and styling.** Move the `profiles` button next to the `new` session button and match its
   style, using the secondary theme instead of the primary theme.
 - **Top-left Farhelm wordmark.** Add the Farhelm wordmark branding to the top-left of the window, reusing the same SVG
