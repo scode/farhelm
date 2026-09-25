@@ -4,8 +4,6 @@ One line per open item. This file must always match the feedback files in this d
 
 ## Highest priority: security or data loss
 
-- `failed-delete-strands-attachments-in-quarantine.md` — failed delete strands attachments in quarantine until startup
-  destroys them.
 - `pane-pid-recycled-before-sweep-binds-identity.md` — recycled pane pid can bind teardown's kill to an unrelated
   process tree.
 - `refused-delete-discards-in-flight-upload.md` — refused delete still destroys an in-flight upload.

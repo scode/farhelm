@@ -928,7 +928,10 @@
   quarantine-crash recovery, and stop for documented deferral if the simplicity gate is reached. Remove the feedback
   file and its `review_feedback_queue/INDEX.md` entry only when the bounded fix is complete; retain or narrow the item
   if it is deferred.
-- Execution: `pending`.
+- Execution: `complete`; focused recorded nextest coverage passed for the post-quarantine row refusal and restoration,
+  startup preservation of retained attachments, successful retry deletion, and existing quarantine cleanup paths.
+  Draft PR [#914](https://github.com/scode/farhelm/pull/914/changes) is on bookmark `pr/failed-delete-attachments`,
+  jj change `kmlmqnpm`.
 
 ## pane-pid-recycled-before-sweep-binds-identity.md
 
