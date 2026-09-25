@@ -1109,3 +1109,8 @@
   recorder failure is retained and documented. Fresh Astra medium review reported `No entries. OK`. Draft PR
   [#924](https://github.com/scode/farhelm/pull/924/changes) is on bookmark `pr/duplicate-freeze-retarget`; the
   implementation commit is `5f4bdac86887`.
+- Execution (2026-09-25, supersedes the entry above): `in progress`. #924 merged carrying only this ledger update; the
+  fix, its changelog fragment, and the queue removal never reached main, and `v0.16.0-rc.1` shipped without them. The
+  cited `5f4bdac86887` is a ledger commit, not the implementation, which was `f4e9f8202ac3`. That fix is restored on
+  bookmark `pr/restore-duplicate-freeze-retarget`, changed only by two test lint fixes the current toolchain requires;
+  draft PR [#954](https://github.com/scode/farhelm/pull/954/changes).

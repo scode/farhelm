@@ -2777,6 +2777,36 @@ fn taken_nudge(nudge: &mut watch::Receiver<Nudge>) -> Option<Nudge> {
         .then(|| *nudge.borrow_and_update())
 }
 
+#[cfg(test)]
+/// Test-only gate for freezing the actor immediately before it publishes a
+/// duplicate result. The production state machine has no reason to pause at
+/// this boundary; the gate makes the retarget race deterministic without
+/// adding a runtime channel or lifecycle state.
+struct DuplicatePublicationGate {
+    destination: String,
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+static DUPLICATE_PUBLICATION_GATE: std::sync::OnceLock<
+    Mutex<Option<Arc<DuplicatePublicationGate>>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+async fn before_duplicate_publication(destination: &str) {
+    let gate = DUPLICATE_PUBLICATION_GATE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("duplicate publication gate mutex poisoned")
+        .clone();
+    let Some(gate) = gate.filter(|gate| gate.destination == destination) else {
+        return;
+    };
+    gate.reached.notify_one();
+    gate.release.notified().await;
+}
+
 /// How one connection attempt ended — the actor's whole decision surface,
 /// named so [`HostActor::run`]'s loop reads as the state machine it is
 /// rather than as nested error handling.
@@ -2925,6 +2955,17 @@ impl HostActor {
             if let Some(identity) = frozen_as_duplicate {
                 match self.twin_holding(&identity).await {
                     Ok(Some(twin)) => {
+                        #[cfg(test)]
+                        before_duplicate_publication(&self.destination()).await;
+                        // The manager may have published a retargeted
+                        // Connecting state while the registry re-check was
+                        // in flight. Consume that nudge before restoring the
+                        // old duplicate result, or this publication would
+                        // freeze the actor against the stale identity again.
+                        if let Some(request) = taken_nudge(&mut nudge) {
+                            active |= request.fresh_window;
+                            continue;
+                        }
                         self.set_state(HostState::Duplicate { twin, identity });
                         active = self.hold(&mut nudge, self.cadence.reprobe).await;
                         continue;
@@ -3032,6 +3073,17 @@ impl HostActor {
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
                 AttemptOutcome::Duplicate { twin, identity } => {
+                    #[cfg(test)]
+                    before_duplicate_publication(&self.destination()).await;
+                    // A retarget can land after the duplicate answer settles
+                    // but before this arm publishes it. Keep the manager's
+                    // new Connecting state and retry from the reloaded row;
+                    // publishing this old answer would re-freeze the actor
+                    // on the destination and identity it no longer uses.
+                    if let Some(request) = taken_nudge(&mut nudge) {
+                        active |= request.fresh_window;
+                        continue;
+                    }
                     self.set_state(HostState::Duplicate { twin, identity });
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
@@ -4146,6 +4198,45 @@ mod tests {
             nudge.fresh_window = fresh_window;
         });
         (sender, receiver)
+    }
+
+    /// Install a one-shot gate at the duplicate publication boundary. The
+    /// gate is scoped by destination so another concurrently running fixture
+    /// cannot pause its own duplicate actor.
+    fn install_duplicate_gate(destination: &str) -> Arc<DuplicatePublicationGate> {
+        let gate = Arc::new(DuplicatePublicationGate {
+            destination: destination.to_string(),
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *DUPLICATE_PUBLICATION_GATE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("duplicate publication gate mutex poisoned") = Some(Arc::clone(&gate));
+        gate
+    }
+
+    /// Remove the test gate before releasing the actor so a second loop pass
+    /// cannot consume the same one-shot synchronization point.
+    fn clear_duplicate_gate() {
+        *DUPLICATE_PUBLICATION_GATE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("duplicate publication gate mutex poisoned") = None;
+    }
+
+    /// Subscribe to one actor's status without exposing the watch channel in
+    /// the production manager API.
+    fn status_receiver(manager: &ConnectionManager, host: HostId) -> watch::Receiver<ActorStatus> {
+        manager
+            .actors
+            .lock()
+            .expect("actor map mutex poisoned")
+            .actors
+            .get(&host)
+            .expect("actor is running")
+            .status
+            .subscribe()
     }
 
     /// A settled mismatch must be discarded when the manager has already
@@ -6926,6 +7017,181 @@ mod tests {
                 .state(first)
                 .is_some_and(|state| state.is_connected()),
             "the twin must still be connected"
+        );
+    }
+
+    /// A retarget that lands while the initial duplicate answer is waiting to
+    /// publish must keep the manager's new row state and retry the new
+    /// destination with a fresh active window.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn retargeting_during_duplicate_attempt_drops_the_stale_freeze() {
+        let old_destination = "duplicate-old.example";
+        let new_destination = "duplicate-new.example";
+        let gate = install_duplicate_gate(old_destination);
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let first = store
+                .add_ssh_host("duplicate-owner.example", None, None)
+                .await
+                .unwrap();
+            record_contact(&store, first, "shared").await;
+            let second = store
+                .add_ssh_host(old_destination, None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                first,
+                Script {
+                    reachable: false,
+                    ..Script::default()
+                },
+            );
+            transport.set_script(
+                second,
+                Script {
+                    identity: Some("shared".to_string()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let rows = fixture.store.list_hosts().await.unwrap();
+        let second = rows[2].id;
+        let mut status = status_receiver(&fixture.manager, second);
+        let _ = status.borrow_and_update();
+
+        // The gate is after the duplicate answer settles but before the
+        // post-attempt arm publishes it, so the edit and its nudge are known
+        // to the actor at exactly the publication boundary.
+        gate.reached.notified().await;
+        fixture.transport.edit(second, |script| {
+            script.reachable = false;
+            script.identity = Some("edited-identity".to_string());
+        });
+        fixture
+            .store
+            .update_ssh_destination(second, new_destination)
+            .await
+            .expect("retarget the duplicate entry");
+        fixture.manager.sync_registry().await.unwrap();
+        clear_duplicate_gate();
+        gate.release.notify_one();
+
+        let mut saw_unreachable = false;
+        while !saw_unreachable {
+            status
+                .changed()
+                .await
+                .expect("the duplicate actor is still running");
+            let state = status.borrow().state.clone();
+            assert!(
+                !matches!(state, HostState::Duplicate { .. }),
+                "the stale duplicate state must not be republished after the retarget"
+            );
+            saw_unreachable = matches!(state, HostState::Unreachable { .. });
+        }
+
+        let attempts = fixture.transport.wait_for_attempts(second, 8).await;
+        assert_eq!(
+            seconds(&attempts),
+            vec![0, 0, 1, 3, 7, 15, 30, 60],
+            "the edited destination must receive a fresh active window"
+        );
+        assert_eq!(
+            fixture.transport.dialed_destinations(second),
+            [old_destination.to_string()]
+                .into_iter()
+                .chain(std::iter::repeat_n(new_destination.to_string(), 7))
+                .collect::<Vec<_>>(),
+            "every retry after the edit must use the edited destination"
+        );
+    }
+
+    /// A retarget that lands while a frozen duplicate is being re-checked
+    /// must take the same path as the post-attempt race: discard the old
+    /// publication and retry the edited destination under a fresh window.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn retargeting_during_duplicate_recheck_drops_the_stale_freeze() {
+        let old_destination = "duplicate-recheck-old.example";
+        let new_destination = "duplicate-recheck-new.example";
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let first = store
+                .add_ssh_host("duplicate-recheck-owner.example", None, None)
+                .await
+                .unwrap();
+            record_contact(&store, first, "shared").await;
+            let second = store
+                .add_ssh_host(old_destination, None, None)
+                .await
+                .unwrap();
+            transport.set_script(
+                first,
+                Script {
+                    reachable: false,
+                    ..Script::default()
+                },
+            );
+            transport.set_script(
+                second,
+                Script {
+                    identity: Some("shared".to_string()),
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let rows = fixture.store.list_hosts().await.unwrap();
+        let second = rows[2].id;
+        fixture
+            .manager
+            .wait_for_state(second, |state| matches!(state, HostState::Duplicate { .. }))
+            .await
+            .expect("the actor is frozen as a duplicate");
+        let mut status = status_receiver(&fixture.manager, second);
+        let _ = status.borrow_and_update();
+        let gate = install_duplicate_gate(old_destination);
+
+        tokio::time::advance(REPROBE_INTERVAL).await;
+        gate.reached.notified().await;
+        fixture.transport.edit(second, |script| {
+            script.reachable = false;
+            script.identity = Some("edited-recheck-identity".to_string());
+        });
+        fixture
+            .store
+            .update_ssh_destination(second, new_destination)
+            .await
+            .expect("retarget the frozen duplicate");
+        fixture.manager.sync_registry().await.unwrap();
+        clear_duplicate_gate();
+        gate.release.notify_one();
+
+        let mut saw_unreachable = false;
+        while !saw_unreachable {
+            status
+                .changed()
+                .await
+                .expect("the duplicate actor is still running");
+            let state = status.borrow().state.clone();
+            assert!(
+                !matches!(state, HostState::Duplicate { .. }),
+                "the stale duplicate state must not be republished after the retarget"
+            );
+            saw_unreachable = matches!(state, HostState::Unreachable { .. });
+        }
+
+        let attempts = fixture.transport.wait_for_attempts(second, 8).await;
+        assert_eq!(
+            seconds(&attempts),
+            vec![0, 45, 46, 48, 52, 60, 75, 105],
+            "the edited destination must receive a fresh active window"
+        );
+        assert_eq!(
+            fixture.transport.dialed_destinations(second),
+            [old_destination.to_string()]
+                .into_iter()
+                .chain(std::iter::repeat_n(new_destination.to_string(), 7))
+                .collect::<Vec<_>>(),
+            "every retry after the edit must use the edited destination"
         );
     }
 
