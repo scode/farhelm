@@ -137,6 +137,10 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     await page.locator(".new-session-button").click();
     await expect(page.locator(".create-session-form")).toBeVisible();
     await expectPrimary(".create-session-submit", composerLaunchFill, composerLaunchEdge);
+    // Reset is the action row's secondary control. It was once bare grey
+    // text with nothing to say it was clickable until hovered; the neutral
+    // tier is what makes it read as a button at rest.
+    await expectNeutral(".launch-composer-reset");
     // Close it again rather than leaving it open into the next section —
     // an open create form is its own dialog surface and this test has no
     // further business with it.

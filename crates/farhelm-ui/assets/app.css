@@ -3634,28 +3634,20 @@ samp {
 
 /* Reset shares the action row but sits at its far end: it clears the launch
    choices (never the host or folder that make up the destination), and a
-   clearing action next to Launch would read as a peer of it. */
-.launch-composer-reset {
-  border: 0;
-  background: transparent;
-  /* Quiet until approached. Reset is the row's escape hatch, not one of its
-     two actions, and it used to outweigh both: `font: inherit` with no size
-     gave it the dialog's 16px, larger than Launch's own label, underlined
-     and in the primary text color. It keeps `font: inherit` for the face and
-     sets the secondary size and color the composer's other quiet text uses;
-     the underline arrives with hover or keyboard focus, which is when "this
-     is a link-like control" is worth saying. */
-  color: var(--fg-1);
-  font: inherit;
-  font-size: 12px;
-  margin-left: auto;
-  cursor: pointer;
-}
+   clearing action next to Launch would read as a peer of it.
 
-.launch-composer-reset:hover:not(:disabled),
-.launch-composer-reset:focus-visible:not(:disabled) {
-  color: var(--fg-0);
-  text-decoration: underline;
+   It wears the neutral tier (`.btn-neutral`) so it reads as a button at
+   rest. It used to be bare grey text that only underlined on hover, which
+   left nothing to say it was clickable until the pointer found it. Distance
+   and size now carry "secondary" instead of invisibility: it sits apart from
+   Launch and Cancel and stays smaller than both, so it still cannot be
+   mistaken for one of the row's two decisions. The tier supplies colour,
+   border, and hover; this rule supplies only placement and size. */
+.launch-composer-reset {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .launch-composer-recents,
@@ -4378,18 +4370,17 @@ samp {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* Reset is secondary, so a narrow row gives it the trailing line instead
-     of squeezing the launch decision into an unreadable button. */
+  /* Reset is secondary, so a narrow row lets it wrap to the trailing line
+     instead of squeezing the launch decision into an unreadable button.
+     Reset gets no full-line flex basis here: now that it is a bordered
+     button, that would stretch it across the dialog. Wrapping alone moves
+     it down when the row runs out of room, and its own `margin-left: auto`
+     keeps it flush right on that line. */
   .launch-composer-actions {
     flex-wrap: wrap;
   }
 
-  .launch-composer-reset {
-    flex-basis: 100%;
-    text-align: right;
-  }
-
-  /* On a phone the row already wraps (Reset takes its own line), so the
+  /* On a phone the row already wraps (Reset drops to its own line), so the
      launch context may wrap too: reading the whole destination beats an
      ellipsis when there is no second column of controls to protect. This
      reverses the base rule's single-line cap on purpose. */

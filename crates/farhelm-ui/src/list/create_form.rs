@@ -3593,7 +3593,7 @@ pub(super) fn CreateSessionForm(
                 if *creation_surface.read() == CreationSurface::Structured {
                     button {
                         r#type: "button",
-                        class: "launch-composer-reset",
+                        class: "btn btn-neutral launch-composer-reset",
                         disabled: busy,
                         onclick: move |_| {
                             if !draft_transition_allowed(ops) {
