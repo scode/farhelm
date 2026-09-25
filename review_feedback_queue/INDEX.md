@@ -24,8 +24,6 @@ One line per open item. This file must always match the feedback files in this d
   edit.
 - `failed-forwarder-wedges-delete-until-restart.md` — one failed output-forwarder join wedges delete and archive until
   restart.
-- `orphaned-install-temps-on-managed-hosts.md` — interrupted installs orphan payload-sized hidden files on managed
-  hosts.
 - `pi-resume-downgrade-on-read-error.md` — Pi resume check destroys a valid locator when the session file merely fails
   to read.
 - `plain-retry-erases-pending-fresh-window.md` — plain retry downgrades a pending fast reconnect to a slow probe.
