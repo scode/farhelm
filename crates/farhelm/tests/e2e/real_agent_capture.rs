@@ -126,7 +126,16 @@ async fn wait_for_agent_ready(
             "timed out waiting for {ready_marker:?}; rendered pane:\n{text}"
         );
         if trust_dialog_markers.iter().any(|m| text.contains(m)) {
-            client.send_input(chan, b"\r".to_vec()).await;
+            // Claude's trust menu can default to refusal. Move only when
+            // the rendered selection proves that Enter would exit; older
+            // affirmative defaults still need only Enter.
+            let answer: &[u8] =
+                if text.contains("❯ No, exit") && text.contains("Yes, I trust this folder") {
+                    b"\x1b[B\r"
+                } else {
+                    b"\r"
+                };
+            client.send_input(chan, answer.to_vec()).await;
             // sleep-ok: pace dialog-answer retries; the next rendered marker decides readiness.
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
@@ -876,8 +885,8 @@ async fn real_codex_session_reports_its_identity_across_new() {
     // what the pane shows rather than by sleeps, with retype/re-press on a
     // cadence: individual keystroke bursts were observed to vanish on a
     // loaded machine. The popup line proves the composer holds the
-    // command; the `codex resume <old id>` line codex prints when it
-    // closes a conversation proves Enter executed it — and it names the id
+    // command; the resume notice codex prints when it closes a
+    // conversation proves Enter executed it — and it names the id
     // this test already holds, so the wait cannot pass early.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     let news = |text: &str| text.matches("/new").count();
@@ -900,7 +909,15 @@ async fn real_codex_session_reports_its_identity_across_new() {
         // against a baseline taken before anything was typed, because
         // codex's own chrome may already name the command and a bare
         // `contains` would then never type it at all.
-        if news(&text) <= baseline {
+        if text.contains("Approaching rate limits")
+            && text.contains("Switch to")
+            && text.contains("esc back")
+        {
+            // This vendor prompt can cover the composer after the reply.
+            // Dismiss it without changing the model or saving preferences;
+            // the next pane observation must still prove `/new` is ready.
+            client.send_input(chan, b"\x1b".to_vec()).await;
+        } else if news(&text) <= baseline {
             client.send_input(chan, b"/new".to_vec()).await;
         }
         // sleep-ok: poll the command popup and pace guarded retyping between deadline checks.
@@ -912,7 +929,22 @@ async fn real_codex_session_reports_its_identity_across_new() {
         // sleep-ok: pace Enter retries before checking the old conversation's resume marker.
         tokio::time::sleep(Duration::from_secs(2)).await;
         let text = pane_within(&sock, &tmux_name, deadline).await;
-        if text.contains(&format!("codex resume {}", resume_identity(&first))) {
+        // Codex may offer a titled picker entry instead of a direct resume
+        // command, and the terminal can wrap its UUID. The closing notice
+        // must still name this exact old conversation; a generic ready
+        // composer would not establish that `/new` actually closed it.
+        let closing_notice = text
+            .split_once("To continue this session, run codex resume")
+            .map(|(_, notice)| {
+                notice
+                    .lines()
+                    .take_while(|line| !line.trim().is_empty())
+                    .flat_map(|line| line.chars().filter(|c| !c.is_whitespace()))
+                    .collect::<String>()
+            });
+        if text.contains(&format!("codex resume {}", resume_identity(&first)))
+            || closing_notice.is_some_and(|notice| notice.contains(&resume_identity(&first)))
+        {
             break;
         }
         assert!(
