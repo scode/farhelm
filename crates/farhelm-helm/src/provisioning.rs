@@ -5468,8 +5468,8 @@ mod tests {
         builder.into_inner().unwrap().finish().unwrap();
     }
 
-    /// List `.extracted/<asset>.*.bin` snapshot files for `asset` inside
-    /// `dir`. `DirectoryPayloads`' per-call snapshots are uniquely named
+    /// List `<cache>/<asset>.*.bin` snapshot files for `asset` inside `dir`.
+    /// `DirectoryPayloads`' per-call snapshots are uniquely named
     /// (F2, review round 2), so there is no single fixed destination path
     /// left to assert about — tests instead assert about the whole
     /// matching SET. Built on `read_dir`, which enumerates directory
@@ -5478,7 +5478,7 @@ mod tests {
     /// `Path::exists()`, which follows symlinks and would report `false`
     /// for exactly that broken case (F11, review round 2).
     fn extracted_snapshot_files(dir: &Path, asset: &str) -> Vec<PathBuf> {
-        let Ok(entries) = std::fs::read_dir(dir.join(".extracted")) else {
+        let Ok(entries) = std::fs::read_dir(dir.join(DIRECTORY_PAYLOAD_CACHE)) else {
             return Vec::new();
         };
         let prefix = format!("{asset}.");
@@ -5496,13 +5496,13 @@ mod tests {
 
     /// Spec: `DirectoryPayloads` extracts the `farhelm` binary out of the
     /// published archive and copies the bare tmux binary verbatim, for both
-    /// provisioning architectures, landing under `dir/.extracted/` with
+    /// provisioning architectures, landing under the Farhelm-owned cache with
     /// mode 0755 — the happy path plan lines 467–475 ask for, run against
     /// tiny real archives built in-test rather than committed binary
     /// fixtures (3b commits the signed release fixture set).
     ///
     /// F12 (review round 1) pins the RETURNED PATH's shape — inside
-    /// `.extracted/`, named after the published asset — without pinning an
+    /// `.farhelm_extract_tmp/`, named after the published asset — without pinning an
     /// exact filename, since F2 (review round 2) makes every call's
     /// destination a uniquely named private snapshot rather than a name
     /// shared across calls. F9 (review round 2) also assigns the SOURCE
@@ -5551,14 +5551,14 @@ mod tests {
         let payloads = DirectoryPayloads::new(dir.path().to_path_buf());
         for arch in [PayloadArch::X86_64, PayloadArch::Aarch64] {
             let archive = farhelm_archive_for(arch);
-            let extracted_dir = dir.path().join(".extracted");
+            let extracted_dir = dir.path().join(DIRECTORY_PAYLOAD_CACHE);
             let farhelm_asset = archive_name(archive);
 
             let farhelm_path = payloads.path(PayloadKind::Farhelm, arch).await.unwrap();
             assert_eq!(
                 farhelm_path.parent(),
                 Some(extracted_dir.as_path()),
-                "the returned path must live in dir/.extracted/"
+                "the returned path must live in the Farhelm-owned materialization cache"
             );
             assert!(
                 farhelm_path
@@ -5587,7 +5587,7 @@ mod tests {
             assert_eq!(
                 tmux_path.parent(),
                 Some(extracted_dir.as_path()),
-                "the returned path must live in dir/.extracted/"
+                "the returned path must live in the Farhelm-owned materialization cache"
             );
             assert!(
                 tmux_path
@@ -5722,7 +5722,7 @@ mod tests {
     /// plan line 460 specifies — an archive whose one file happens not to
     /// be called `farhelm` must not be silently accepted as if it were.
     /// F13 (review round 1) / F11 (review round 2): also proves no
-    /// destination is EVER created — checked by listing `.extracted/` for
+    /// destination is EVER created — checked by listing the Farhelm cache for
     /// this asset rather than a single fixed path, per F2's per-call
     /// unique naming.
     #[farhelm_testtrace::test]
@@ -5793,7 +5793,7 @@ mod tests {
     /// symlink, or hard link entry makes the archive malformed rather than
     /// silently dropping out of the count or becoming staged content —
     /// refused for each shape. F11 (review round 2): the cleanup assertion
-    /// lists `.extracted/` for this asset rather than checking a single
+    /// lists the Farhelm cache for this asset rather than checking a single
     /// fixed path with `Path::exists()`, which follows symlinks and would
     /// have reported `false` for a dangling one left behind by a broken
     /// implementation even though a real entry remained.
@@ -5832,7 +5832,7 @@ mod tests {
     /// Spec (F13, review round 1) / F2 (review round 2): a malformed
     /// archive must never disturb an existing snapshot that legitimately
     /// belongs to an earlier generation, and must never add a new one of
-    /// its own. Seeds `.extracted/<asset>.sentinel.bin` — the shape a real
+    /// its own. Seeds `<cache>/<asset>.sentinel.bin` — the shape a real
     /// earlier successful call would have left, since F2 makes every
     /// destination a private per-call snapshot rather than a name shared
     /// across calls — with sentinel bytes and a distinct mode, then
@@ -5852,7 +5852,7 @@ mod tests {
         append_tar_member(&mut builder, "b/farhelm", b"two");
         builder.into_inner().unwrap().finish().unwrap();
 
-        let extracted_dir = dir.path().join(".extracted");
+        let extracted_dir = dir.path().join(DIRECTORY_PAYLOAD_CACHE);
         std::fs::create_dir_all(&extracted_dir).unwrap();
         let sentinel = extracted_dir.join(format!("{}.sentinel.bin", archive_name(archive)));
         std::fs::write(&sentinel, b"sentinel").unwrap();
@@ -5967,12 +5967,125 @@ mod tests {
         );
     }
 
+    /// Crash recovery may remove only old staging files owned by this source.
+    ///
+    /// The active guard is part of the behavior under test: a second caller
+    /// must leave an old-looking file alone while the first materialization
+    /// is active, then the next idle use may remove it. The same fixture pins
+    /// the filename, symlink, directory, and legacy-cache boundaries so a
+    /// broader cleanup cannot silently consume operator state.
+    #[farhelm_testtrace::test]
+    fn directory_payloads_sweeps_only_idle_farhelm_staging_files() {
+        use std::os::fd::AsRawFd as _;
+        use std::os::unix::fs::MetadataExt as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join(DIRECTORY_PAYLOAD_CACHE);
+        ensure_private_extracted_dir(&cache).unwrap();
+        // Hold the cache active before planting the old-looking candidate;
+        // otherwise the first registration would correctly sweep it as an
+        // orphan before the liveness boundary can be exercised.
+        let active = begin_materialization(&cache);
+
+        let stale = cache.join(format!(
+            "{DIRECTORY_PAYLOAD_STAGE_PREFIX}550e8400-e29b-41d4-a716-446655440000{DIRECTORY_PAYLOAD_STAGE_SUFFIX}"
+        ));
+        std::fs::write(&stale, b"abandoned staging bytes").unwrap();
+        let file = std::fs::File::open(&stale).unwrap();
+        let ancient = libc::timespec {
+            tv_sec: 1,
+            tv_nsec: 0,
+        };
+        // SAFETY: `file` is a live descriptor and both timespec values point
+        // to stack values valid for the duration of the call.
+        assert_eq!(
+            unsafe { libc::futimens(file.as_raw_fd(), [ancient, ancient].as_ptr()) },
+            0
+        );
+        drop(file);
+        assert!(std::fs::metadata(&stale).unwrap().mtime() < 3600);
+
+        let young = cache.join(format!(
+            "{DIRECTORY_PAYLOAD_STAGE_PREFIX}young{DIRECTORY_PAYLOAD_STAGE_SUFFIX}"
+        ));
+        std::fs::write(&young, b"active-looking staging").unwrap();
+        let unrelated = cache.join(".tmp-unrelated");
+        std::fs::write(&unrelated, b"operator file").unwrap();
+        let matching_directory = cache.join(format!(
+            "{DIRECTORY_PAYLOAD_STAGE_PREFIX}directory{DIRECTORY_PAYLOAD_STAGE_SUFFIX}"
+        ));
+        std::fs::create_dir(&matching_directory).unwrap();
+        let victim = dir.path().join("outside-victim");
+        std::fs::write(&victim, b"outside").unwrap();
+        let matching_link = cache.join(format!(
+            "{DIRECTORY_PAYLOAD_STAGE_PREFIX}link{DIRECTORY_PAYLOAD_STAGE_SUFFIX}"
+        ));
+        std::os::unix::fs::symlink(&victim, &matching_link).unwrap();
+        let hardlink_source = dir.path().join("hardlink-source");
+        std::fs::write(&hardlink_source, b"shared ownership").unwrap();
+        let matching_hardlink = cache.join(format!(
+            "{DIRECTORY_PAYLOAD_STAGE_PREFIX}hardlink{DIRECTORY_PAYLOAD_STAGE_SUFFIX}"
+        ));
+        std::fs::hard_link(&hardlink_source, &matching_hardlink).unwrap();
+        let legacy = dir.path().join(".extracted");
+        std::fs::create_dir(&legacy).unwrap();
+        std::fs::write(legacy.join("legacy-snapshot"), b"leave untouched").unwrap();
+
+        assert!(
+            stale.exists(),
+            "another active call protects old-looking candidates"
+        );
+        let overlapping = begin_materialization(&cache);
+        drop(overlapping);
+        assert!(
+            stale.exists(),
+            "an overlapping use does not sweep active cache state"
+        );
+        drop(active);
+
+        let _idle = begin_materialization(&cache);
+        assert!(
+            !stale.exists(),
+            "the next idle use removes an old owned orphan"
+        );
+        assert!(
+            young.exists(),
+            "a fresh Farhelm candidate remains below the age floor"
+        );
+        assert!(
+            unrelated.exists(),
+            "a different temporary-file namespace is not owned"
+        );
+        assert!(
+            matching_directory.is_dir(),
+            "a matching directory is not a staging file"
+        );
+        assert!(
+            matching_link.is_symlink(),
+            "a matching symlink is not followed or removed"
+        );
+        assert!(
+            matching_hardlink.exists(),
+            "a matching hard link is not removed as if it were exclusively owned"
+        );
+        assert_eq!(
+            std::fs::read(&hardlink_source).unwrap(),
+            b"shared ownership"
+        );
+        assert_eq!(std::fs::read(&victim).unwrap(), b"outside");
+        assert_eq!(
+            std::fs::read(legacy.join("legacy-snapshot")).unwrap(),
+            b"leave untouched",
+            "the legacy .extracted directory is outside Farhelm cleanup"
+        );
+    }
+
     /// Marker set only in the child process
     /// [`directory_payloads_extracted_dir_is_mode_0700_under_a_permissive_umask`]
     /// re-execs itself as.
     const EXTRACTED_MODE_CHILD: &str = "FARHELM_HELM_EXTRACTED_MODE_TEST_CHILD";
 
-    /// Spec (F6, review round 2, security): `.extracted` must end up mode
+    /// Spec (F6, review round 2, security): the materialization cache must end up mode
     /// 0700 regardless of the helm process's umask — proven here under
     /// umask 000, the most permissive real-world case. `umask` is
     /// process-wide state, so this MUST run in a genuinely separate child
@@ -6017,7 +6130,7 @@ mod tests {
                         runtime
                             .block_on(payloads.path(PayloadKind::Farhelm, PayloadArch::X86_64))
                             .unwrap();
-                        let mode = std::fs::metadata(payload_dir.join(".extracted"))
+                        let mode = std::fs::metadata(payload_dir.join(DIRECTORY_PAYLOAD_CACHE))
                             .unwrap()
                             .permissions()
                             .mode()
@@ -6052,7 +6165,7 @@ mod tests {
             .expect("child printed no MODE= line");
         assert_eq!(
             mode, "700",
-            "under umask 000 the .extracted directory must still end up mode 0700"
+            "under umask 000 the Farhelm materialization cache must still end up mode 0700"
         );
     }
 
@@ -6705,7 +6818,7 @@ mod tests {
     /// Spec (F2, review round 3, BLOCKING): the provisioning service runs
     /// up to four host installs at once, all sharing one
     /// `DirectoryPayloads`, so the very first two "add host" runs against a
-    /// freshly staged directory can both observe `.extracted` absent
+    /// freshly staged directory can both observe the cache absent
     /// before either creates it. A prior version turned the loser's
     /// harmless `AlreadyExists` from `DirBuilder::create` into a hard
     /// provisioning error; this proves both concurrent first calls now
@@ -6762,15 +6875,16 @@ mod tests {
                         );
                     }
 
-                    let metadata = std::fs::symlink_metadata(dir.path().join(".extracted")).unwrap();
+                    let metadata =
+                        std::fs::symlink_metadata(dir.path().join(DIRECTORY_PAYLOAD_CACHE)).unwrap();
                     assert!(
                         metadata.file_type().is_dir(),
-                        "the extraction cache must end up a plain directory, not a symlink or other object"
+                        "the Farhelm materialization cache must end up a plain directory, not a symlink or other object"
                     );
                     assert_eq!(
                         metadata.permissions().mode() & 0o777,
                         0o700,
-                        "the extraction cache must end up mode 0700 regardless of which call actually \
+                        "the Farhelm materialization cache must end up mode 0700 regardless of which call actually \
                          created it"
                     );
                 },
