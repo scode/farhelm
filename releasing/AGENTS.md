@@ -232,6 +232,9 @@ With both settled, the process is:
   asset present including `SHA256SUMS` and `SHA256SUMS.minisig`, and the release marked prerelease (cargo-dist does that
   for `-rc.N` versions on its own — `releases/latest` must still point at the last stable, so ordinary installs are
   unaffected).
+- After the workflow succeeds and the published release passes those checks, close the version-bump PR without merging
+  it. The tag preserves the release commit; the PR does not need to stay open for the RC to remain available. Keep the
+  tag and published release intact.
 - Finish by handing the maintainer the exact copy-paste command, with the installer fetched FROM THE TAG — when the rc
   comes from a stack, main does not have the rc's installer — and the version pinned on the far side of the pipe:
 
@@ -242,6 +245,9 @@ With both settled, the process is:
   Remind the maintainer to quit the desktop app before updating and relaunch after.
 - A failed tag build publishes nothing; fix on the stack and cut `rc.N+1`. The stale tag stays (tags are never deleted;
   the unsigned-release recovery below is the one exception's procedure, and even it keeps the tag).
+- Close the version-bump PR without merging when its release attempt is permanently abandoned, including when a fix
+  requires another RC and a new version-bump PR will supersede it. A temporary pause or a recoverable workflow rerun is
+  not permanent abandonment; keep the PR open while that same release attempt remains active.
 - One jj side effect to expect: once the rc tag is fetched, jj treats every commit under it as immutable, so a later
   mid-stack rewrite of those commits (a fixup round after the trial, say) needs `--ignore-immutable`. That is safe —
   rewriting creates new commits and the tag keeps pointing at what it tagged — but it will otherwise refuse with
