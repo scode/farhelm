@@ -1,6 +1,8 @@
 ---
 title: OMP
 description: How Farhelm tracks OMP conversations through a private extension, and what it deliberately does not do.
+sidebar:
+  order: 10
 ---
 
 OMP is the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI — a fork of Pi, and Farhelm's integration mirrors that: a

@@ -1,6 +1,8 @@
 ---
 title: Goose
 description: Model choice, the conversation-reporting helper, and resuming Goose outside Farhelm.
+sidebar:
+  order: 10
 ---
 
 ## Model choice
@@ -34,6 +36,5 @@ The saved command contains no Farhelm credentials or machine-specific executable
 starts but does nothing: it sends no reports and gives the agent no tools or instructions. No global Goose settings are
 changed.
 
-Disabling [Farhelm's conversation reporting](/docs/concepts/agent-hook-injection/#turning-it-off) prevents the helper
-from being added to new conversations but does not remove its startup command from conversations Goose has already
-saved.
+Disabling [Farhelm's conversation reporting](/docs/agents/agent-hook-injection/#turning-it-off) prevents the helper from
+being added to new conversations but does not remove its startup command from conversations Goose has already saved.

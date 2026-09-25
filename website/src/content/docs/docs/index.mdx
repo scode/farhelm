@@ -53,5 +53,16 @@ open](https://raw.githubusercontent.com/scode/farhelm/255d75fc338366e3069f68410a
 />
 
 One **helm** is the control plane: it holds the host list, serves the UI, and connects straight to a **supervisor** on
-each host over SSH. The supervisor owns the agents' real terminals and their state. Nothing listens on a network port,
-nothing goes through a relay, and every box in the diagram can restart without losing a session.
+each host over SSH. The supervisor owns the agents' real terminals and their state ([the pieces](/docs/how-it-works/the-pieces/)).
+Nothing listens on a network port, nothing goes through a relay ([security model](/docs/how-it-works/security-model/)),
+and every box in the diagram can restart without losing a session
+([what survives what](/docs/how-it-works/what-survives-what/)).
+
+## Is Farhelm for you?
+
+:::note[Stub]
+This section is planned but not written yet.
+:::
+
+Who Farhelm suits, and what it deliberately does not do: no hosted relay or account, no chat wrapper around the agent,
+Linux as the only remote platform. Ends by pointing at [Install Farhelm](/docs/get-started/install/).

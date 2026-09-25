@@ -1300,7 +1300,7 @@ failure can leave private evidence, but cannot authorize another directory move.
   reach the session's owned live pane and contain exactly one native executable whose basename is `codex`. The pane
   anchor itself is exempt from intermediary classification; additional surviving launch wrappers above Codex are not.
   This deliberately rejects some multi-layer package-manager launchers that older builds accepted. The supported process
-  chains are documented in [the Codex integration](website/src/content/docs/docs/harnesses/codex.md). The reporter must
+  chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter must
   spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
   still accepts older hooks), and every other non-Codex link except the pane anchor must be a narrow shell trampoline
   directly invoking it (`sh -c '<farhelm> internal
@@ -1441,7 +1441,7 @@ failure can leave private evidence, but cannot authorize another directory move.
   injection off wholesale or per kind, read once at supervisor start and carried as a seam value. Claude's scan remains
   the fallback when no report has been accepted; Codex requires attributed reporting and does not infer ownership from
   nearby rollout files. An accepted report dominates scan-derived state, including ambiguity.
-  `website/src/content/docs/docs/concepts/agent-hook-injection.md` is the user-facing account of the same mechanism.
+  `website/src/content/docs/docs/agents/agent-hook-injection.md` is the user-facing account of the same mechanism.
 
   Grok uses the same hook executable and authenticated supervisor message but not this injection path. Its native TUI
   cannot take a per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each
@@ -1531,7 +1531,7 @@ failure can leave private evidence, but cannot authorize another directory move.
   never rejects. Supported versions are 18.2.4 and 18.2.6 with equal gate-semantic pins verified at the pinned sources
   (static claim, no runtime probe). Compiled and package-launcher forms have chain-level shape coverage; live lifecycle
   evidence covers the Bun-executed entry. Node execution and unknown wrapper shapes remain refused, as described in
-  `website/src/content/docs/docs/harnesses/omp.md`.
+  `website/src/content/docs/docs/agents/omp.md`.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after the identity round trip, telling the
@@ -1776,7 +1776,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit; a
   literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
   upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
-  id it receives, as documented in `website/src/content/docs/docs/harnesses/omp.md`). `--thinking <effort>` carries the
+  id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the
   seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask` carries the
   YOLO/Approve choices while `default` adds no flag and stays omitted in the stored selection — unlike Pi, no YOLO
   default is rewritten on. SmartApprove and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen

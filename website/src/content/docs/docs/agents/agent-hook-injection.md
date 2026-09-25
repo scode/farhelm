@@ -1,6 +1,8 @@
 ---
 title: Agent hook injection
 description: How Farhelm's conversation reporters get into each agent's launch, and how to turn them off.
+sidebar:
+  order: 70
 ---
 
 Farhelm uses conversation reporters for Claude, Codex, Goose, Pi, OMP, and Grok so Resume lands in the conversation you
@@ -14,15 +16,15 @@ configuration home (`$CODEX_HOME` when it is set, `~/.codex` otherwise) that you
 and Codex invocation shapes turn injection off. Claude can fall back to record scanning; Codex cannot.
 
 Codex, Goose, Pi, and OMP do not have a scanning fallback. See the harness notes for
-[Goose's saved reporter and manual-resume dependency](/docs/harnesses/goose/),
-[Pi's saved-file requirement and permission behavior](/docs/harnesses/pi/), and
-[OMP's report-only contract and limits](/docs/harnesses/omp/).
+[Goose's saved reporter and manual-resume dependency](/docs/agents/goose/),
+[Pi's saved-file requirement and permission behavior](/docs/agents/pi/), and
+[OMP's report-only contract and limits](/docs/agents/omp/).
 
-[Cursor has basic launch support only](/docs/harnesses/cursor/): it uses no hook or status wrapper and has no
-conversation tracking or automatic Resume.
+[Cursor has basic launch support only](/docs/agents/cursor/): it uses no hook or status wrapper and has no conversation
+tracking or automatic Resume.
 
-[Grok's integration](/docs/harnesses/grok/) documents the required `SessionStart`, `UserPromptSubmit`, and `Stop`
-entries, the `--no-leader` ownership requirement, and exact two-file verification. It has no scanning fallback.
+[Grok's integration](/docs/agents/grok/) documents the required `SessionStart`, `UserPromptSubmit`, and `Stop` entries,
+the `--no-leader` ownership requirement, and exact two-file verification. It has no scanning fallback.
 
 ## Why hooks at all
 
@@ -81,9 +83,9 @@ talking, not the reporter.
 | `goose session …`                                                                             | Goose                | fresh only           | resumes use the reporter Goose already persisted; utility, help, ambiguous, and reporter-name-collision forms are left unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `pi …`                                                                                        | Pi                   | yes                  | the static extension reports the exact ID and optional persisted file; utility/help forms are left unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `omp …`                                                                                       | OMP                  | interactive launches | the static extension reports the exact ID and optional session file; utility subcommands, print/mode/export/alias/help/version/license/list-models occurrences, reserved-word rejecting forms, internal worker selectors, `--trusted-extension` launches (OMP refuses to combine those with our `-e`), and a genuine end-of-options `--` are left unchanged and runnable. A genuine `--` additionally cannot be CREATED with the derived OMP resume template (the appended `--resume` would land in prompt position); an explicit resume template or a `--` consumed as an option value creates normally |
-| `grok --no-leader …`                                                                          | Grok                 | configured manually  | the three entries in [the Grok guide](/docs/harnesses/grok/#configure-the-three-hooks) report selection and exact saved-record evidence. Farhelm injects no Grok hook and never edits Grok configuration                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `grok --no-leader …`                                                                          | Grok                 | configured manually  | the three entries in [the Grok guide](/docs/agents/grok/#configure-the-three-hooks) report selection and exact saved-record evidence. Farhelm injects no Grok hook and never edits Grok configuration                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `claude … -- <prompt>`, `codex … -- <prompt>`                                                 | either               | no                   | Claude retains its record scan; Codex gains no new exact target. After a bare `--`, injected flags would become prompt text                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `/opt/bin/my-wrapper …`                                                                       | generic              | no                   | set the kind explicitly and forward the injected flags; only Claude has a scan fallback. See [agent wrappers](/docs/concepts/agent-wrappers/)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `/opt/bin/my-wrapper …`                                                                       | generic              | no                   | set the kind explicitly and forward the injected flags; only Claude has a scan fallback. See [agent wrappers](/docs/agents/agent-wrappers/)                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `env FOO=1 claude …`                                                                          | generic              | no                   | no hook and no scan as written, and no `{cwd}` needed — set the kind, and write the resume invocation out by hand, since the derived default would be `env --resume …`                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `bash -c 'claude …'`                                                                          | generic              | no                   | the record scan once you set the kind, and no hook as written: the flags are appended to the argv, so they land as the shell's `$0` and the following positional parameters rather than reaching the agent inside the script string — a script that forwards `"$@"` does pass them on                                                                                                                                                                                                                                                                                                                    |
 
@@ -95,13 +97,13 @@ The wrapper path is absolute on purpose: farhelm does not expand `~` in an invoc
 also has to be runnable as written — one carrying an unfilled `{conversation}` is refused rather than garbled, which
 lands back on the fresh-launch offer. For the generic rows, setting the profile's agent kind is what turns the
 integration back on; farhelm then appends the flags to the END of whatever argv the profile names, which only helps if
-that argv's tail actually reaches the real agent. [Agent wrappers](/docs/concepts/agent-wrappers/) covers both halves.
+that argv's tail actually reaches the real agent. [Agent wrappers](/docs/agents/agent-wrappers/) covers both halves.
 
 ## How the kind is decided
 
 Codex has additional process-chain restrictions even when injection succeeds; see
-[Codex launchers and wrappers](/docs/harnesses/codex/#launchers-and-wrappers). Grok has its own native process and
-`--no-leader` requirements in [the Grok guide](/docs/harnesses/grok/#launching).
+[Codex launchers and wrappers](/docs/agents/codex/#launchers-and-wrappers). Grok has its own native process and
+`--no-leader` requirements in [the Grok guide](/docs/agents/grok/#launching).
 
 By the basename of the invocation's first word, compared for exact equality: `claude` is Claude, `codex` is Codex,
 `goose` is Goose, `pi` is Pi, `omp` is OMP, `grok` is Grok, and everything else is generic. A path in front makes no
@@ -176,7 +178,7 @@ classification.
 
 Grok: the manually configured `SessionStart` selects the UUID, normally leaving a fresh conversation pending until
 `UserPromptSubmit` or `Stop` supplies its exact `updates.jsonl`. Resume appears only while that file and its sibling
-`summary.json` both identify the selected UUID. See [the Grok guide](/docs/harnesses/grok/) for setup, the timestamp
+`summary.json` both identify the selected UUID. See [the Grok guide](/docs/agents/grok/) for setup, the timestamp
 ordering rule, and the accepted `/new` delivery race.
 
 ## Turning it off

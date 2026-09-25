@@ -446,6 +446,12 @@ landing page and the README), and the docs website's header mark (`website/src/s
 Anything that needs the name as a mark uses those files; anything that changes the mark changes the script and re-runs
 it, never the SVGs by hand, and the outline step only reruns when the word or the font changes.
 
+# Docs website
+
+`website/` is the user-facing documentation site. `website/AGENTS.md` holds its authoring rules (user-facing framing and
+the jargon list, liberal cross-referencing, the sidebar as the outline, and stub pages); read it before adding or
+changing a page there.
+
 # Desktop/web UI bug triage
 
 `docs/desktop-web-triage.md` is the recipe: which engine comparison localizes a UI bug, where the unified log lives, and
