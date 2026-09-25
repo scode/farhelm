@@ -2,6 +2,25 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.16.0 - 2026-09-25
+
+### 🔧 Fixed
+
+- Restarting a session whose agent had died could kill all of the session's extra terminal tabs and the shells running in them, while the session went on listing those tabs as open. The tabs and their shells now survive the restart. (#919)
+- Changing a host's destination while Farhelm was connecting to it could briefly keep Farhelm talking to the old machine, so something you did right after the change could land there instead. Changing the destination of a host marked as a duplicate now connects to the new destination right away, instead of staying stuck until you changed it a second time. (#920, #924, #954)
+- Deleting a session behaves better when the delete does not go through. A delete that hit an internal error no longer blocks every later attempt to delete that session until the supervisor restarts. If a delete fails at its very last step, the session's attached files are put back, instead of becoming unreachable and then being erased at the next supervisor restart while the session itself stays. And a delete that is turned down because the session is not yet safe to delete no longer destroys an attachment that is still uploading. (#911, #914, #916)
+- Stopping, restarting, or deleting a session could in rare cases stop an unrelated program: if the session's process had already exited and the system had since given its process ID to something else. Farhelm now checks that it is still the same process before stopping it. (#915)
+- Farhelm no longer mistakes a session's agent window for one of its extra terminal tabs. A program running in the session could relabel the agent's tmux window so that it showed up as a tab; closing that tab, or Farhelm removing it on its own, then stopped the agent along with it. Farhelm now recognizes the agent window from its own record of the session instead of from that label. (#921)
+- If starting a session was interrupted partway (for example by a supervisor crash) and the retry then failed a safety check, such as the session's folder having changed in the meantime, Farhelm now deletes the files left by the interrupted attempt right away. They can contain credentials and secrets passed on the command line, and previously stayed on disk until the supervisor restarted. (#918, #953)
+- If Farhelm could not tell whether a restart had actually started the agent, the session was shown as exited, with the exit code of the run before the restart, and could flip between exited and unknown every time the supervisor restarted. It is now shown as unknown. (#917)
+- Using Browse on a saved folder in the session launcher could erase the name you had most recently used for that folder, so searching for it by that name stopped finding it. In some cases it also left duplicate entries in the saved folders and logged a warning on every visit. Both are fixed. (#889, #890)
+- For generic sessions, a restart command containing a conversation placeholder was accepted even though it could never work, so every restart quietly started over with a fresh conversation. Farhelm now refuses to create the session with such a command, and suggests removing the placeholder or picking a supported harness. (#895)
+- If a host's user database answered Farhelm's login-shell lookup with malformed output, starting a session there failed with a misleading error. Farhelm now ignores the malformed answer and finds the shell another way. This has not been seen to happen in practice. (#896)
+- An interrupted host install or update left full-size copies of the Farhelm binary hidden on the host, where nothing ever removed them, so repeated failures over a flaky connection could slowly fill its disk. The next install now removes those leftovers, and nothing else. The same goes for half-unpacked files the helm leaves in its own cache if it crashes while provisioning with `--payload-dir`. (#905, #909)
+- Closing a terminal tab while the connection to its host was stuck could tie up the helm for about a minute. Cleanup now stops waiting after five seconds. (#900)
+- An attachment upload that stalled in one particular way could, in principle, keep a CPU core on the helm busy indefinitely. It is now aborted like any other stalled upload. It is not known whether this can actually happen. (#898)
+- When a host kept failing to connect or refresh with the same error, the helm's log output stopped mentioning it after the first few times. Those errors are now logged every time they repeat. (#887)
+
 ## v0.15.0 - 2026-09-24
 
 ### 🔄 Changed
