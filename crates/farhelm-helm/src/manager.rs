@@ -2810,6 +2810,33 @@ enum AttemptOutcome {
     Interrupted { fresh_window: bool },
 }
 
+/// Keep a settled dial result from crossing a retarget that arrived while it
+/// was being returned.
+///
+/// The manager publishes the edited row before nudging the actor. A settled
+/// result can still be waiting at this boundary, so publishing it would put
+/// the old connection or old diagnostic back on the new row. Returning
+/// `None` drops the complete outcome (including a connected client), while
+/// preserving the active-window request for the reload that follows.
+fn take_settled_outcome(
+    outcome: AttemptOutcome,
+    active: &mut bool,
+    nudge: &mut watch::Receiver<Nudge>,
+) -> Option<AttemptOutcome> {
+    // An interrupted attempt already consumed the nudge that ended it and
+    // carries that request's fresh-window decision itself. Leave any newer
+    // nudge for the next loop pass; consuming it here could replace a true
+    // fresh-window request with a later plain retry.
+    if matches!(&outcome, AttemptOutcome::Interrupted { .. }) {
+        return Some(outcome);
+    }
+    let Some(request) = taken_nudge(nudge) else {
+        return Some(outcome);
+    };
+    *active |= request.fresh_window;
+    None
+}
+
 impl HostActor {
     /// Run this host's connection until the task is aborted, or until this
     /// entry's registry row disappears.
@@ -2941,7 +2968,13 @@ impl HostActor {
             } else {
                 &[]
             };
-            match self.connect_phase(&row, ladder, active, &mut nudge).await {
+            let outcome = self.connect_phase(&row, ladder, active, &mut nudge).await;
+            let Some(outcome) = take_settled_outcome(outcome, &mut active, &mut nudge) else {
+                // The manager already published the retargeted row. Reload
+                // it before doing anything with the old dial's answer.
+                continue;
+            };
+            match outcome {
                 AttemptOutcome::Connected {
                     client,
                     identity,
@@ -4103,6 +4136,151 @@ mod tests {
     use std::{future::Future, pin::Pin};
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio::sync::broadcast;
+
+    /// Build a receiver whose changed bit represents a retarget already
+    /// waiting at the settled-result boundary.
+    fn pending_nudge(fresh_window: bool) -> (watch::Sender<Nudge>, watch::Receiver<Nudge>) {
+        let (sender, receiver) = watch::channel(Nudge::default());
+        sender.send_modify(|nudge| {
+            nudge.revision = 1;
+            nudge.fresh_window = fresh_window;
+        });
+        (sender, receiver)
+    }
+
+    /// A settled mismatch must be discarded when the manager has already
+    /// published a retarget, while a normal no-nudge result remains
+    /// publishable. The two branches are the observable distinction between
+    /// stale publication and ordinary state handling.
+    #[farhelm_testtrace::test]
+    fn a_pending_retarget_discards_mismatch_but_no_nudge_keeps_it() {
+        let outcome = AttemptOutcome::Mismatch {
+            recorded: "old".to_string(),
+            reported: "new".to_string(),
+        };
+        let mut active = false;
+        let (_sender, mut nudge) = pending_nudge(true);
+        assert!(take_settled_outcome(outcome, &mut active, &mut nudge).is_none());
+        assert!(active, "a retarget must preserve its fresh active window");
+
+        let outcome = AttemptOutcome::Mismatch {
+            recorded: "old".to_string(),
+            reported: "new".to_string(),
+        };
+        let mut active = false;
+        let (_sender, mut no_nudge) = watch::channel(Nudge::default());
+        assert!(matches!(
+            take_settled_outcome(outcome, &mut active, &mut no_nudge),
+            Some(AttemptOutcome::Mismatch { .. })
+        ));
+        assert!(
+            !active,
+            "an ordinary settled result must not change the regime"
+        );
+    }
+
+    /// Identity-less and transport-failure answers obey the same publication
+    /// boundary as mismatches; neither stale diagnostic may overwrite the
+    /// row that the manager has already retargeted.
+    #[farhelm_testtrace::test]
+    fn a_pending_retarget_discards_unverified_and_failed_outcomes() {
+        let mut active = true;
+        let (_unverified_sender, mut unverified_nudge) = pending_nudge(false);
+        assert!(
+            take_settled_outcome(
+                AttemptOutcome::Unverified {
+                    recorded: "known".to_string(),
+                },
+                &mut active,
+                &mut unverified_nudge,
+            )
+            .is_none()
+        );
+        assert!(
+            active,
+            "a false fresh-window request must not clear active mode"
+        );
+
+        let mut active = false;
+        let (_failed_sender, mut failed_nudge) = pending_nudge(false);
+        assert!(
+            take_settled_outcome(
+                AttemptOutcome::Failed {
+                    cause: UnreachableCause::TransportFailure,
+                    error: "old destination".to_string(),
+                },
+                &mut active,
+                &mut failed_nudge,
+            )
+            .is_none()
+        );
+        assert!(!active, "a plain retry nudge must remain a single probe");
+    }
+
+    /// An interrupted attempt already carries the nudge that stopped it. A
+    /// second plain retry must remain pending for the next pass rather than
+    /// erasing the first nudge's fresh-window request at this boundary.
+    #[farhelm_testtrace::test]
+    fn an_interrupted_outcome_keeps_its_fresh_window_for_the_run_loop() {
+        let mut active = false;
+        let (_sender, mut nudge) = pending_nudge(false);
+        let outcome = take_settled_outcome(
+            AttemptOutcome::Interrupted { fresh_window: true },
+            &mut active,
+            &mut nudge,
+        )
+        .expect("interrupted outcomes pass through unchanged");
+        assert!(matches!(
+            outcome,
+            AttemptOutcome::Interrupted { fresh_window: true }
+        ));
+        assert!(
+            taken_nudge(&mut nudge).is_some(),
+            "a newer nudge must remain for the next loop pass"
+        );
+    }
+
+    /// A connected result is dropped wholesale at the boundary, including
+    /// its client handle, so an old connection cannot be routed after a
+    /// retarget has withdrawn it.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn a_pending_retarget_drops_a_settled_connected_client() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store
+                .add_ssh_host("boundary.example", None, None)
+                .await
+                .unwrap();
+            transport.set_script(host, Script::default());
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        fixture
+            .manager
+            .wait_for_state(host, HostState::is_connected)
+            .await
+            .expect("fixture must establish a connected client");
+        let client = status_client(&fixture.manager, host).expect("published client");
+        let baseline = Arc::strong_count(&client);
+        let outcome = AttemptOutcome::Connected {
+            client: Arc::clone(&client),
+            identity: Some("identity-a".to_string()),
+            build_version: "peer-build".to_string(),
+        };
+        assert_eq!(
+            Arc::strong_count(&client),
+            baseline + 1,
+            "the synthetic settled outcome must own one additional client handle"
+        );
+        let mut active = false;
+        let (_sender, mut nudge) = pending_nudge(true);
+        assert!(take_settled_outcome(outcome, &mut active, &mut nudge).is_none());
+        assert_eq!(
+            Arc::strong_count(&client),
+            baseline,
+            "discarding the settled outcome must drop its stale client"
+        );
+        assert!(active);
+    }
 
     /// Identity-less hosts keep their previous list only in memory. An
     /// unclassified startup reply must retain its last status there while
