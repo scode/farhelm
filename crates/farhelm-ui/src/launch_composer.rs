@@ -154,6 +154,9 @@ pub(crate) enum ComposerSearchResult {
     Effort(LaunchEffort),
     /// Apply an explicit per-launch workspace-trust choice.
     Trust(bool),
+    /// Apply the harness default or YOLO permission choice without changing
+    /// any other structured launch field.
+    Permissions(ComposerPermission),
     /// Apply the path the person typed without changing their agent choices.
     UsePath(String),
     /// Open the explicit directory browser at the path the person typed.
@@ -163,6 +166,18 @@ pub(crate) enum ComposerSearchResult {
     /// Explicitly request a new checkout, preserving the agent selection.
     Github(crate::github_checkout::GithubRepo),
     Recent(LaunchHistoryEntry),
+}
+
+/// The two permission choices exposed by launch-composer search.
+///
+/// `Default` is represented by an omitted permission on the wire, while
+/// `Yolo` is an explicit permission. Keeping that distinction here lets the
+/// picker share the segmented control's semantics without inventing a fake
+/// wire enum value for the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComposerPermission {
+    Default,
+    Yolo,
 }
 
 /// The host facts search needs without taking ownership of list-view state.
@@ -333,6 +348,7 @@ pub(crate) enum ComposerSearchGroup {
     Models,
     /// Reasoning-effort words valid for the selected harness and model.
     Efforts,
+    Permissions,
     Trust,
     Folders,
     Repositories,
@@ -348,6 +364,7 @@ impl ComposerSearchGroup {
             Self::Harnesses => "Harnesses",
             Self::Models => "Models",
             Self::Efforts => "Efforts",
+            Self::Permissions => "Permissions",
             Self::Trust => "Workspace trust",
             Self::Folders => "Folders",
             Self::Repositories => "GitHub repositories",
@@ -369,6 +386,7 @@ pub(crate) fn grouped_search_results(
     let mut harnesses = Vec::new();
     let mut models = Vec::new();
     let mut efforts = Vec::new();
+    let mut permissions = Vec::new();
     let mut trust = Vec::new();
     let mut folders = Vec::new();
     let mut repositories = Vec::new();
@@ -381,6 +399,7 @@ pub(crate) fn grouped_search_results(
             ComposerSearchResult::Command => harnesses.push(result),
             ComposerSearchResult::Model { .. } => models.push(result),
             ComposerSearchResult::Effort(_) => efforts.push(result),
+            ComposerSearchResult::Permissions(_) => permissions.push(result),
             ComposerSearchResult::Trust(_) => trust.push(result),
             ComposerSearchResult::UsePath(_)
             | ComposerSearchResult::BrowsePath(_)
@@ -395,6 +414,7 @@ pub(crate) fn grouped_search_results(
         (ComposerSearchGroup::Harnesses, harnesses),
         (ComposerSearchGroup::Models, models),
         (ComposerSearchGroup::Efforts, efforts),
+        (ComposerSearchGroup::Permissions, permissions),
         (ComposerSearchGroup::Trust, trust),
         (ComposerSearchGroup::Folders, folders),
         (ComposerSearchGroup::Repositories, repositories),
@@ -517,6 +537,7 @@ pub(crate) enum SearchScope {
     Harness,
     Model,
     Effort,
+    Permissions,
     Trust,
     Folder,
     Recent,
@@ -544,6 +565,8 @@ pub(crate) fn scoped_query(query: &str) -> (SearchScope, &str) {
         SearchScope::Model
     } else if label.eq_ignore_ascii_case("effort") {
         SearchScope::Effort
+    } else if label.eq_ignore_ascii_case("perms") {
+        SearchScope::Permissions
     } else if label.eq_ignore_ascii_case("trust") {
         SearchScope::Trust
     } else if label.eq_ignore_ascii_case("folder") {
@@ -602,7 +625,8 @@ pub(crate) fn name_host_search_results(
 /// successful destinations for the selected host. A path-shaped query also
 /// exposes explicit use and browse actions, but does not invoke either. A
 /// selected harness narrows catalog and custom-history models; absent a
-/// harness, model ownership remains discoverable and effort words are absent.
+/// harness, model ownership remains discoverable and effort or permission
+/// words are absent.
 /// A recognized leading label limits the result kinds to its scope, while
 /// unlabelled input retains the combined search surface for compatibility.
 /// The form appends name and host actions from its own live host snapshot.
@@ -695,6 +719,32 @@ pub(crate) fn search_results(
         }
     }
 
+    if matches!(scope, SearchScope::All | SearchScope::Permissions)
+        && let Some(harness) = harness
+    {
+        let choices = [
+            ("yolo", ComposerPermission::Yolo),
+            ("default", ComposerPermission::Default),
+        ];
+        for (word, choice) in choices {
+            let supported = match choice {
+                ComposerPermission::Yolo => {
+                    normalized_permissions(harness, Some(LaunchPermission::Yolo)).is_some()
+                }
+                ComposerPermission::Default => normalized_permissions(harness, None).is_none(),
+            };
+            if supported
+                && (query.is_empty()
+                    || (scope == SearchScope::All
+                        && word == "yolo"
+                        && word.contains(&folded_query))
+                    || (scope == SearchScope::Permissions && word.starts_with(&folded_query)))
+            {
+                results.push(ComposerSearchResult::Permissions(choice));
+            }
+        }
+    }
+
     if scope == SearchScope::Trust
         && harness.is_some_and(|harness| {
             matches!(
@@ -770,6 +820,7 @@ pub(crate) fn default_search_index(
     let kinds = match scope {
         SearchScope::All => vec![
             ComposerSearchGroup::Efforts,
+            ComposerSearchGroup::Permissions,
             ComposerSearchGroup::Models,
             ComposerSearchGroup::Harnesses,
         ],
@@ -778,6 +829,7 @@ pub(crate) fn default_search_index(
         SearchScope::Harness => vec![ComposerSearchGroup::Harnesses],
         SearchScope::Model => vec![ComposerSearchGroup::Models],
         SearchScope::Effort => vec![ComposerSearchGroup::Efforts],
+        SearchScope::Permissions => vec![ComposerSearchGroup::Permissions],
         SearchScope::Trust => vec![ComposerSearchGroup::Trust],
         SearchScope::Folder | SearchScope::Recent | SearchScope::Github => Vec::new(),
     };
@@ -823,6 +875,14 @@ fn exact_word_group(
         }
         ComposerSearchResult::Effort(effort) if effort_value(*effort) == folded_query => {
             Some(ComposerSearchGroup::Efforts)
+        }
+        ComposerSearchResult::Permissions(permission)
+            if match permission {
+                ComposerPermission::Default => folded_query == "default",
+                ComposerPermission::Yolo => folded_query == "yolo",
+            } =>
+        {
+            Some(ComposerSearchGroup::Permissions)
         }
         ComposerSearchResult::Trust(value) if value.to_string() == folded_query => {
             Some(ComposerSearchGroup::Trust)
@@ -1301,6 +1361,62 @@ mod tests {
             .is_empty()
         );
         assert!(search_results(&history, &[], "trust:false", None, None).is_empty());
+    }
+
+    /// Permission search exposes exactly the two settled shorthand words and
+    /// respects harness normalization, including Pi's mandatory YOLO mode.
+    #[test]
+    fn permission_search_actions_follow_harness_capabilities() {
+        let history = LaunchHistory::default();
+        assert_eq!(
+            search_results(&history, &[], "perms:", Some(LaunchHarness::Codex), None),
+            vec![
+                ComposerSearchResult::Permissions(ComposerPermission::Yolo),
+                ComposerSearchResult::Permissions(ComposerPermission::Default),
+            ]
+        );
+        assert_eq!(
+            search_results(&history, &[], "perms:y", Some(LaunchHarness::Codex), None),
+            vec![ComposerSearchResult::Permissions(ComposerPermission::Yolo)]
+        );
+        assert_eq!(
+            search_results(&history, &[], "perms:d", Some(LaunchHarness::Codex), None),
+            vec![ComposerSearchResult::Permissions(
+                ComposerPermission::Default
+            )]
+        );
+        assert_eq!(
+            search_results(&history, &[], "perms:", Some(LaunchHarness::Pi), None),
+            vec![ComposerSearchResult::Permissions(ComposerPermission::Yolo)]
+        );
+        assert!(
+            search_results(
+                &history,
+                &[],
+                "perms:default",
+                Some(LaunchHarness::Pi),
+                None
+            )
+            .is_empty()
+        );
+        assert!(search_results(&history, &[], "perms:yolo", None, None).is_empty());
+    }
+
+    /// Bare YOLO is the only unscoped permission shorthand; its exact word
+    /// wins keyboard preselection without turning bare `default` into an
+    /// ambiguous permissions action.
+    #[test]
+    fn bare_yolo_offers_permissions_and_preselects_exactly() {
+        let history = LaunchHistory::default();
+        let yolo = search_results(&history, &[], "yolo", Some(LaunchHarness::Codex), None);
+        assert!(yolo.contains(&ComposerSearchResult::Permissions(ComposerPermission::Yolo)));
+        assert!(
+            !search_results(&history, &[], "default", Some(LaunchHarness::Codex), None)
+                .iter()
+                .any(|result| matches!(result, ComposerSearchResult::Permissions(_)))
+        );
+        let groups = grouped_search_results(yolo);
+        assert_eq!(default_search_index(&groups, "yolo"), 0);
     }
 
     /// Switching away from a supported harness clears a hidden trust flag;
@@ -2411,13 +2527,14 @@ mod tests {
         assert_eq!(default_search_index(&groups, "partial"), 0);
     }
 
-    /// The fixed group order places effort actions after model actions and
-    /// before folder actions, so keyboard indexes stay stable as groups grow.
+    /// The fixed group order places permission actions beside efforts and
+    /// trust, so keyboard indexes stay stable as groups grow.
     #[test]
     fn grouped_search_results_places_efforts_between_models_and_folders() {
         let groups = grouped_search_results(vec![
             ComposerSearchResult::Folder("/work".into()),
             ComposerSearchResult::Effort(LaunchEffort::High),
+            ComposerSearchResult::Permissions(ComposerPermission::Yolo),
             ComposerSearchResult::Model {
                 id: "model".into(),
                 harness: LaunchHarness::Claude,
@@ -2431,6 +2548,7 @@ mod tests {
                 ComposerSearchGroup::Harnesses,
                 ComposerSearchGroup::Models,
                 ComposerSearchGroup::Efforts,
+                ComposerSearchGroup::Permissions,
                 ComposerSearchGroup::Folders,
             ]
         );
@@ -2747,6 +2865,10 @@ mod tests {
             (SearchScope::Model, "provider/model:v2")
         );
         assert_eq!(scoped_query("GH:"), (SearchScope::Github, ""));
+        assert_eq!(
+            scoped_query("  PeRmS: YO  "),
+            (SearchScope::Permissions, "YO")
+        );
         assert_eq!(
             scoped_query("folder : /tmp"),
             (SearchScope::All, "folder : /tmp")

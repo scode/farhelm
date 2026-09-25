@@ -426,6 +426,11 @@ GUI labels an unaliased local row `local (this machine)` in the selector, Hosts 
 while preserving aliases and the registry's own `this machine` name. A session row without confirmed locality retains
 the name supplied by the helm; the GUI does not infer locality from its text.
 
+The `perms:` scope offers only the default and YOLO choices that the active harness can normalize. Bare `yolo` joins the
+ordinary combined search and gets exact-word preselection; bare `default` stays ordinary text. Applying a permission row
+updates the same explicit-choice bookkeeping as the segmented control and leaves the other draft fields intact. Command
+mode has no active structured harness, so it offers no permission actions.
+
 The clone's host is put through the SAME install-identity comparison SPEC.md's ordinary creation default uses (a
 `HostId` is a registry row that outlives a retarget or an adopt) before the selector trusts it. A row whose install this
 client cannot currently confirm is left at the ordinary host default with a note explaining why, rather than risking a

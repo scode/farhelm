@@ -54,8 +54,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   tasteful in-progress animation. Something like `updating: 3/9 upload-farhelm <animation> 0:42`. Exact design TBD. This
   changes SPEC.md's rule that an updating host's row expands to follow progress; whether failure or an uncertain outcome
   should still expand is part of the design.
-- **Launch composer shorthands.** Support `yolo` as shorthand for enabling yolo, along with `perms:yolo` and
-  `perms:default`.
 - **Session overflow-menu overhaul.** Overhaul the pop-up menus opened by clicking `...` for sessions so they look
   modern and are properly placed. The design is TBD and should be worked out when this TODO is planned.
 
