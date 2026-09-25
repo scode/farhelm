@@ -4676,6 +4676,10 @@ samp {
   flex-shrink: 0;
 }
 
+/* The add control shares the tabs' size so the strip stays one even height,
+   but not their ghost look: tabs are the strip's selection (an exemption from
+   the button tiers), while "+ terminal" is an action and wears the neutral
+   tier from its class list. Ghost, it read as one more unselected tab. */
 .tab,
 .tab-add {
   font-size: 12px;

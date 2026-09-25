@@ -56,9 +56,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   should still expand is part of the design.
 - **Launch composer shorthands.** Support `yolo` as shorthand for enabling yolo, along with `perms:yolo` and
   `perms:default`.
-- **GUI button styling audit.** During planning, research the entire GUI to identify every button still using the old
-  style of “just grey text” with no indication that it is a button, then update all of them to the current button
-  styles. The planning research must establish the complete set of affected buttons before implementation starts.
 - **Top-bar path and argument truncation.** Let the home-directory and agent-argument indicators use the available
   horizontal space before truncating with ellipses; they currently truncate far too early and leave a large gap before
   the action buttons.

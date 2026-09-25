@@ -208,6 +208,10 @@ test("normal, neutral, danger, and exempt buttons keep their deliberate tiers", 
     await addTab(page, 0);
     await expect(agentTab).not.toHaveClass(/selected/);
     await expectGhost('.tab-strip [data-terminal="agent"]');
+    // The add control sits in the same strip but is an action, not a tab:
+    // it must not share the tabs' ghost exemption, or it reads as one more
+    // unselected tab.
+    await expectNeutral(".tab-add");
   } finally {
     await cleanupSession(request, session.id);
   }

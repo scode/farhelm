@@ -1894,7 +1894,7 @@ pub(crate) fn SessionView(
                     }
                     button {
                         r#type: "button",
-                        class: "btn tab-add",
+                        class: "btn btn-neutral tab-add",
                         disabled: opening_tab() || lifecycle.busy(),
                         onclick: on_add_tab,
                         "+ terminal"
