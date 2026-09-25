@@ -2,6 +2,18 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.15.0 - 2026-09-24
+
+### 🔄 Changed
+
+- The session header keeps Restart, Replace, Clone, and Replace with visible together in one row. The session's directory and command line are shown in the header too; long values are shortened, hovering shows the full text, and clicking copies it. Confirmations for these actions are clearer. (#928, #932)
+- When a host restart interrupts a session, the session now shows a centered card explaining what happened, with Restart and Replace buttons, instead of the previous notice. (#927)
+- Buttons now look the same wherever they appear according to what they do: blue for the main action, gray for secondary actions, and red for confirming something that cannot be undone. (#926)
+
+### 🔧 Fixed
+
+- Maybe: On macOS, typing in a terminal could insert words you never typed, such as `SPECIALLY` after typing `SPE` in Codex, apparently because macOS inline predictive text completed words in the terminal's input. Farhelm now turns inline predictions off for terminal input. The corruption has always been inconsistent in how easily it can be reproduced, so this is a *somewhat likely* fix but not confirmed. Will see after more use. (#912)
+
 ## v0.14.0 - 2026-09-23
 
 ### 🚀 Added
