@@ -2233,9 +2233,8 @@ test.describe("multi-host", () => {
       // restart offer beside them describes what a relaunch WOULD do rather
       // than what the session last was.
       await expect(page.locator(".titlebar .title")).toHaveText(staleTitle);
-      await expect(page.locator(".titlebar .meta")).toHaveText(
-        "/tmp — sleep 600",
-      );
+      await expect(page.locator(".titlebar .header-copy").nth(0)).toContainText("/tmp");
+      await expect(page.locator(".titlebar .header-copy").nth(1)).toContainText("sleep 600");
       const badge = page.locator(".stale-metadata .status-badge");
       await expect(badge).toBeVisible();
       // `sleep 600` was running, and the group's setup waited for the helm

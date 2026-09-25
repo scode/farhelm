@@ -96,6 +96,13 @@ The earlier cross-harness evidence is preserved in
 
 ## Deflake
 
+- **Replace refusal row in WebKit.**
+  `Replace confirms inline, can cancel, selects the fresh session, and surfaces refusal` in
+  `e2e/tests/terminal-restart.spec.ts` timed out locating the injected refusal row in full run
+  `bd3fa658-dcf7-4820-8b68-67be5e4b89ed`, then passed unchanged on both engines in focused run
+  `8b2b2c31-7608-4b6d-97b7-b11353f26554`. Cause unknown; inspect listing interception and refresh delivery on
+  recurrence.
+
 - **Browser stack parent-SIGTERM cleanup.** `scripts/test-start-stack-cleanup.sh` left the stack serving, with state and
   processes intact, after killing its spawner with SIGTERM in run `f2355071-3c67-4a7b-ba05-37f853c4a6b3`. The isolated
   repetition `a1b6e9b1-a246-4272-8d7b-89452a3f4c45` passed unchanged. Capture watcher and startup-process state at the

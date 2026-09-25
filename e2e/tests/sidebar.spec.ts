@@ -5856,7 +5856,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · local (this machine) · /composer-reset");
-  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo · trust: default");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
   await expect(form.locator(".launch-composer-summary .launch-composer-danger")).toHaveText("yolo");
   await form.getByRole("button", { name: "reset choices", exact: true }).click();
   await refill();
@@ -5903,7 +5903,7 @@ test("composer reset notices follow every restored-choice transition", async ({ 
   await expect(form.locator(".launch-composer-effort-choice").getByRole("button", { name: /high$/ })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-permissions-choice").getByRole("button", { name: "yolo", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(form.locator(".launch-composer-launch-context")).toContainText("Claude · local (this machine) · /composer-reset");
-  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo · trust: default");
+  await expect(form.locator(".launch-composer-summary")).toHaveText("model: default · effort: high · permissions: yolo");
 
   await refill();
   await expect(status).toHaveCount(0);
