@@ -190,7 +190,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(notice).toBeVisible();
   await expect(notice).toContainText("host restart paused this session");
   await expect(notice).toContainText("resumes this session's own conversation");
-  await expect(notice.locator(".restart-from-notice")).toHaveText("Restart");
+  await expect(notice.locator(".restart-from-notice")).toHaveText("restart");
   await expect(notice.locator(".restart-from-notice")).toHaveClass(/btn-primary/);
   await expect(notice.locator(".restart-from-notice")).toHaveAttribute("aria-label", "resume conversation");
   expect(counter.restartRequests).toBe(0);

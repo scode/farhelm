@@ -42,8 +42,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
-- **Lowercase action buttons.** Use lowercase consistently for the top-right actions: `restart`, `replace`, `clone`, and
-  `replace with`.
 - **Restart with.** Add a "restart with" action that resumes the session's own conversation under changed launch
   settings, the resumed counterpart to "replace with". The motivating case: a Claude session launched without YOLO by
   mistake. Today Restart replays the original argv, permission flags included, and "replace with" can switch to YOLO but
