@@ -287,10 +287,11 @@ jobs:
           '
 
   # The docs website (website/, Astro + Starlight) builds here so a page with
-  # broken frontmatter or a dangling sidebar slug fails before Vercel's own
-  # build does. Like dprint it is independent of the `changes` gate: a
-  # website-only change is in the docs allowlist and skips the Rust jobs,
-  # while this job is seconds long and the one check that covers it.
+  # broken frontmatter, a dangling sidebar slug, or a broken internal link
+  # fails before Vercel's own build does. Like dprint it is independent of
+  # the `changes` gate: a website-only change is in the docs allowlist and
+  # skips the Rust jobs, while this job is seconds long and the one check
+  # that covers it.
   website:
     runs-on: ubicloud
     # Draft PRs run nothing (see the trigger comment at the top).

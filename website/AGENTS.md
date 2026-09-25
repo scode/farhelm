@@ -74,10 +74,11 @@ it rather than paraphrasing it. Link a concept on its first mention in a section
 end a page by pointing to where the reader goes next. When in doubt, add the link: a redundant link costs a reader
 nothing, a missing one sends them searching.
 
-Write internal links as absolute site paths with a trailing slash, the form the existing pages use:
-`[Manage hosts](/docs/using/manage-hosts/)`, or with a heading anchor, `/docs/agents/grok/#launching`. Starlight does
-not check links, so after moving or renaming a page, build the site and check that every `/docs/` link in the output
-resolves, anchors included.
+Write internal links as absolute site paths with a trailing slash: `[Manage hosts](/docs/using/manage-hosts/)`, or with
+a heading anchor, `/docs/agents/grok/#launching`. The build checks every internal link and anchor
+(`starlight-links-validator`) and fails on a broken one, on a relative link, and on an internal link written as a full
+`https://farhelm.io` URL, so `bun run build` is the check to run after moving a page or renaming a heading. It only
+proves a link resolves; whether the linking sentence still matches what the target page says is yours to check.
 
 ## The outline is the sidebar
 
