@@ -45,12 +45,11 @@
 //! The per-session integration snapshot and the conversation identity
 //! captured against it form the capture half of the schema (PLAN_M3.md
 //! items 7 and 8).
-//! The snapshot columns — [`StoredSession::agent_kind`] and
-//! [`StoredSession::resume_template`] — are IMMUTABLE: they are written by
-//! the insert that creates the row and there is deliberately no update path
-//! for them, because re-deriving a kind later would consult a PATH and a
-//! filesystem that may since have changed (`crate::agent_kind`'s own docs).
-//! The columns beside them are the mutable half.
+//! The integration kind is immutable; the invocation, structured launch, and
+//! resume template may change only through restart-with's generation-fenced
+//! post-spawn write. Restart-with holds the kind fixed, so the PATH-sensitive
+//! re-derivation concern does not apply.
+//! Capture evidence beside these launch settings has its own write rules.
 //! [`SessionStore::record_first_input`] and
 //! [`SessionStore::record_captured_conversation`] are write-once and both
 //! conditioned on the column still being NULL, so neither can ever move
@@ -810,12 +809,11 @@ pub enum RetryClaim {
 /// them when it validated the requested mode — the condition
 /// [`SessionStore::begin_relaunch`] claims under.
 ///
-/// Only these two, and that is a claim worth stating: kind and resume
-/// template are immutable from create (PLAN_M3.md item 7), so a session's
-/// offer can only ever change because capture claimed an identity or
-/// declared the correlation ambiguous. Conditioning on exactly the fields
-/// that can move is what keeps the check tight enough to be meaningful and
-/// loose enough not to reject a relaunch over an unrelated write.
+/// The offer check covers capture evidence: a newly claimed identity or
+/// ambiguity verdict can change which restart modes are available. The
+/// integration kind stays fixed, while restart-with may replace the template
+/// only as part of a relaunch. Conditioning on capture evidence keeps an
+/// unrelated row write from rejecting the relaunch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OfferBasis {
     pub captured_conversation: Option<String>,
@@ -1255,9 +1253,9 @@ pub struct StoredSession {
     pub pane: String,
     /// The last transition the supervisor witnessed for this session.
     pub outcome: LastOutcome,
-    /// The session's integration snapshot (PLAN_M3.md item 7), resolved
-    /// once at create and IMMUTABLE thereafter — no method on this type
-    /// updates either field. See the module docs for why.
+    /// The session's integration kind, resolved once at create and immutable
+    /// thereafter. Restart-with changes the other launch columns while
+    /// holding this kind fixed, so its PATH-sensitive identity remains safe.
     pub agent_kind: farhelm_proto::AgentKind,
     /// The resume invocation as an argv vector, JSON-encoded in one
     /// column. Structural rather than a command string so a path with
@@ -3847,10 +3845,10 @@ impl SessionStore {
     /// ## The offer condition
     ///
     /// `basis` is what the caller's mode validation was decided against:
-    /// the captured identity and the ambiguity verdict, the only two
-    /// mutable inputs to a session's restart offer (kind and template are
-    /// immutable from create). The claim is CONDITIONAL on both still
-    /// holding, which is what makes "validate the offer, then relaunch"
+    /// the captured identity, its ownership provenance, and the ambiguity
+    /// verdict. These can change as capture evidence arrives; a template
+    /// replacement belongs to a relaunch instead. The claim is CONDITIONAL
+    /// on that evidence still holding, which makes "validate the offer, then relaunch"
     /// atomic rather than merely sequential: a capture pass that commits
     /// `Resume` in between turns this into [`RelaunchDecision::OfferChanged`]
     /// and the caller refuses with a conflict, instead of launching the
@@ -3920,8 +3918,9 @@ impl SessionStore {
     ///   10): a host that lost its user manager between two launches must
     ///   not leave the new run claiming a scope nothing created.
     ///
-    /// The immutable create-time snapshot (kind, template, invocation, cwd)
-    /// is untouched in every case.
+    /// The create-time snapshot is untouched here. Restart-with may update
+    /// invocation, launch, and template only after its new process spawns;
+    /// the kind and cwd remain fixed.
     pub async fn begin_relaunch(
         &self,
         id: &str,
@@ -4532,7 +4531,8 @@ impl SessionStore {
     /// after creation, which is why this is the store's only unconditional
     /// metadata UPDATE: the capture columns beside it are write-once by SQL
     /// predicate (see [`SessionStore::record_captured_conversation`]) and
-    /// the snapshot columns have no update path at all, but a rename is a
+    /// launch settings change only through a generation-fenced relaunch write,
+    /// but a rename is a
     /// deliberate overwrite of a label whose previous value carries no
     /// authority. Concurrent renames are therefore last-write-wins, with no
     /// version token to make one of them fail — `ControlMsg::RenameSession`
@@ -4608,6 +4608,46 @@ impl SessionStore {
         })
         .await
         .context("first-input record task panicked")?
+    }
+
+    /// Persist restart-with's new structured bundle only after its process
+    /// has spawned, fenced to the generation that performed that spawn.
+    ///
+    /// A zero-row update is a failed fence, not a successful save: the
+    /// relaunch may be running, but later restarts still see the old bundle.
+    pub async fn update_restart_with_bundle(
+        &self,
+        id: &str,
+        generation: i64,
+        invocation: &str,
+        launch: &farhelm_proto::LaunchSelection,
+        resume_template: Option<&[String]>,
+    ) -> anyhow::Result<()> {
+        let conn = Arc::clone(&self.conn);
+        let id = id.to_string();
+        let invocation = invocation.to_string();
+        let launch = serde_json::to_string(launch).context("serializing restart-with launch")?;
+        let resume_template = resume_template
+            .map(serde_json::to_string)
+            .transpose()
+            .context("serializing restart-with resume template")?;
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock().expect("session db mutex poisoned");
+            let changed = conn
+                .execute(
+                    "UPDATE sessions SET invocation = ?1, launch = ?2, resume_template = ?3 \
+                 WHERE id = ?4 AND generation = ?5",
+                    rusqlite::params![invocation, launch, resume_template, id, generation],
+                )
+                .context("persisting restart-with launch bundle")?;
+            anyhow::ensure!(
+                changed == 1,
+                "restart-with bundle update did not match its launch generation"
+            );
+            Ok(())
+        })
+        .await
+        .context("restart-with bundle task panicked")?
     }
 
     /// Move a session's [`StoredSession::last_activity_at`] forward to
@@ -5645,6 +5685,52 @@ mod tests {
     /// since that is the state a real session spends its life in.
     async fn insert_running(store: &SessionStore, id: &str) {
         insert_running_with_scope(store, id, false).await;
+    }
+
+    /// A missed generation fence must not masquerade as saved restart settings.
+    ///
+    /// The caller returns a successful spawn with the old bundle on write
+    /// failure. Treating SQLite's zero-row success as a saved bundle would
+    /// make its reply and live entry disagree with the durable row.
+    #[farhelm_testtrace::test]
+    async fn restart_with_bundle_refuses_a_stale_generation() {
+        let (_dir, store) = fresh_store().await;
+        insert_running(&store, "restart-with-fence").await;
+        let before = store
+            .session("restart-with-fence")
+            .await
+            .expect("read prior row")
+            .expect("row exists");
+        let selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
+        };
+        let error = store
+            .update_restart_with_bundle(
+                "restart-with-fence",
+                before.generation + 1,
+                "claude --dangerously-skip-permissions",
+                &selection,
+                None,
+            )
+            .await
+            .expect_err("a stale generation cannot save settings");
+        assert!(
+            error
+                .to_string()
+                .contains("did not match its launch generation")
+        );
+        let after = store
+            .session("restart-with-fence")
+            .await
+            .expect("read row after refused update")
+            .expect("row remains");
+        assert_eq!(after.invocation, before.invocation);
+        assert_eq!(after.launch, before.launch);
+        assert_eq!(after.resume_template, before.resume_template);
     }
 
     /// Seed a running session with an explicit `launch_scoped` value —

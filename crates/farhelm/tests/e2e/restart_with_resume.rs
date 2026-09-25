@@ -8,6 +8,277 @@ use crate::conversation_identity_capture::{
     capture_harness, marker_value, provoke_record, record_session, settle_past_horizon,
     snapshot_of, test_capture_bounds,
 };
+use crate::structured_launches::{FakeHarness, fake_harness, observed_argv};
+
+/// Give compiled vendor names an owned executable and a private capture home.
+///
+/// Restart-with compiles `claude` rather than the absolute fixture path used
+/// at create. The owned login profile makes that name resolve inside the
+/// launch shell without changing this test process's environment or reaching
+/// any installed vendor agent.
+async fn restart_with_harness() -> (Harness, FakeHarness) {
+    let fixture = fake_harness();
+    let shell = fixture.bash_shell().to_string_lossy().into_owned();
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            agent_home: Some(fixture.home().to_path_buf()),
+            capture_window: test_capture_bounds(),
+            launch_env: vec![
+                (
+                    "HOME".to_string(),
+                    fixture
+                        .login_home_with_fake_path()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                ("SHELL".to_string(), shell.clone()),
+            ],
+            launch_shell: Some(shell),
+            scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
+            ..SupervisorSeams::default()
+        },
+    )
+    .await;
+    (h, fixture)
+}
+
+/// Create a Claude session whose stored selection can be changed on resume.
+///
+/// The executable wrapper carries real argv through tmux; the explicit kind
+/// and selection model the structured create path rather than inferring a
+/// launch selection from an invocation string.
+async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> SessionInfo {
+    let selection = farhelm_proto::LaunchSelection {
+        harness: farhelm_proto::LaunchHarness::Claude,
+        model: None,
+        effort: None,
+        permissions: None,
+        workspace_trust: None,
+    };
+    h.client
+        .create_session_with_extras(
+            &fixture.work().to_string_lossy(),
+            &fixture.invocation(&selection),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras {
+                agent_kind: Some(farhelm_proto::AgentKind::Claude),
+                launch: Some(selection),
+                ..farhelm_helm::CreateExtras::default()
+            },
+        )
+        .await
+        .expect("create structured Claude session")
+}
+
+/// Read the launch settings a later supervisor or restart will actually use.
+///
+/// A visible reply alone cannot prove a refusal left SQLite untouched, and
+/// the live entry can differ from the row while a relaunch is in progress.
+async fn durable_launch_bundle(
+    h: &Harness,
+    id: &str,
+) -> (
+    String,
+    Option<farhelm_proto::LaunchSelection>,
+    Option<Vec<String>>,
+) {
+    let row = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open durable store")
+        .session(id)
+        .await
+        .expect("read durable session")
+        .expect("session remains stored");
+    (row.invocation, row.launch, row.resume_template)
+}
+
+/// Establish the captured identity before any restart-with assertion uses it.
+///
+/// The fake agent's record marker proves only that the file was written;
+/// this waits until the supervisor's durable offer names that conversation.
+async fn captured_claude_conversation(h: &Harness, session: &SessionInfo) -> String {
+    let (_channel, stream, _seen, conversation) = provoke_record(h, session).await;
+    let snapshot =
+        wait_for_durable_resume_capture(&h.sup, &h.client, &session.id, &conversation).await;
+    assert_eq!(snapshot.restart_offer, farhelm_proto::RestartOffer::Resume);
+    drop(stream);
+    conversation
+}
+
+/// A refused override cannot change the launch settings used by later restarts.
+///
+/// Check the conflict classification and the durable row, so a plausible
+/// error message cannot hide an accidental store write.
+async fn assert_restart_with_refused(
+    h: &Harness,
+    session: &SessionInfo,
+    mode: farhelm_proto::RestartMode,
+    selection: farhelm_proto::LaunchSelection,
+) {
+    let before = durable_launch_bundle(h, &session.id).await;
+    let error = h
+        .client
+        .restart_session_with(&session.id, mode, true, Some(selection))
+        .await
+        .expect_err("invalid restart-with must be refused");
+    assert_eq!(
+        error
+            .downcast_ref::<SupervisorError>()
+            .expect("supervisor classifies the refusal")
+            .kind,
+        ErrorKind::Conflict
+    );
+    assert_eq!(durable_launch_bundle(h, &session.id).await, before);
+    let live = listed(&h.client, &session.id).await;
+    assert_eq!((live.invocation, live.launch, live.resume_template), before);
+}
+
+/// A successful override must become both this run's metadata and the next run's default.
+///
+/// This catches a store-only update whose live `Arc` stays stale: the first
+/// reply, a fresh list, and a second plain restart must all name YOLO, while
+/// the two relaunched processes receive the flag and captured resume selector.
+#[farhelm_testtrace::test]
+async fn restart_with_claude_yolo_updates_live_and_future_restarts() {
+    let (h, fixture) = restart_with_harness().await;
+    let session = structured_claude_session(&h, &fixture).await;
+    let conversation = captured_claude_conversation(&h, &session).await;
+    let mut yolo = session.launch.clone().expect("structured premise");
+    yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
+
+    let restarted = h
+        .client
+        .restart_session_with(
+            &session.id,
+            farhelm_proto::RestartMode::Resume,
+            true,
+            Some(yolo.clone()),
+        )
+        .await
+        .expect("restart with new permissions");
+    assert_eq!(restarted.launch, Some(yolo.clone()));
+    assert_eq!(
+        restarted.invocation,
+        "claude --dangerously-skip-permissions"
+    );
+    let first_argv = observed_argv(&h, &session.id, 2).await;
+    let first_words = shell_words::split(&first_argv).expect("first resumed argv");
+    assert!(first_words.contains(&"--dangerously-skip-permissions".to_string()));
+    assert!(
+        first_words
+            .windows(2)
+            .any(|pair| pair == ["--resume", &conversation])
+    );
+
+    let listed = listed(&h.client, &session.id).await;
+    assert_eq!(listed.launch, Some(yolo.clone()));
+    assert_eq!(listed.invocation, restarted.invocation);
+    let stored = durable_launch_bundle(&h, &session.id).await;
+    assert_eq!(stored.0, restarted.invocation);
+    assert_eq!(stored.1, Some(yolo.clone()));
+
+    let second = h
+        .client
+        .restart_session(&session.id, farhelm_proto::RestartMode::Resume, true)
+        .await
+        .expect("plain restart uses saved settings");
+    assert_eq!(second.launch, Some(yolo));
+    assert_eq!(second.invocation, restarted.invocation);
+    let second_words =
+        shell_words::split(&observed_argv(&h, &session.id, 3).await).expect("second resumed argv");
+    assert!(second_words.contains(&"--dangerously-skip-permissions".to_string()));
+    assert!(
+        second_words
+            .windows(2)
+            .any(|pair| pair == ["--resume", &conversation])
+    );
+}
+
+/// A legacy session can resume but has no structured selection to edit.
+///
+/// The refusal must leave its original invocation and template durable even
+/// after the captured conversation makes a normal Resume legal.
+#[farhelm_testtrace::test]
+async fn restart_with_refuses_legacy_session_without_changing_settings() {
+    let (h, fixture) = restart_with_harness().await;
+    let work = farhelm_teststate::tempdir().expect("legacy workdir");
+    let session = h
+        .client
+        .create_session(
+            &work.path().to_string_lossy(),
+            &fixture.invocation(&farhelm_proto::LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: None,
+                workspace_trust: None,
+            }),
+            None,
+            WIDE_COLS,
+            ROWS,
+        )
+        .await
+        .expect("create legacy Claude session");
+    assert!(session.launch.is_none());
+    captured_claude_conversation(&h, &session).await;
+    assert_restart_with_refused(
+        &h,
+        &session,
+        farhelm_proto::RestartMode::Resume,
+        farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Claude,
+            model: None,
+            effort: None,
+            permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+            workspace_trust: None,
+        },
+    )
+    .await;
+}
+
+/// Captured identity does not permit a harness swap or a fresh-mode override.
+///
+/// Both conflicts must leave the saved bundle alone, so the session can
+/// still resume with its original Claude settings afterwards.
+#[farhelm_testtrace::test]
+async fn restart_with_refuses_harness_mismatch_and_non_resume_mode() {
+    let (h, fixture) = restart_with_harness().await;
+    let session = structured_claude_session(&h, &fixture).await;
+    captured_claude_conversation(&h, &session).await;
+    let mut wrong_harness = session.launch.clone().expect("structured premise");
+    wrong_harness.harness = farhelm_proto::LaunchHarness::Codex;
+    assert_restart_with_refused(
+        &h,
+        &session,
+        farhelm_proto::RestartMode::Resume,
+        wrong_harness,
+    )
+    .await;
+    let mut yolo = session.launch.clone().expect("structured premise");
+    yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
+    assert_restart_with_refused(&h, &session, farhelm_proto::RestartMode::Fresh, yolo).await;
+}
+
+/// Restart-with needs an actual captured conversation, not merely a structured launch.
+///
+/// A ready process that has received no prompt has a fresh-only offer; its
+/// stored selection and invocation must survive a refused override.
+#[farhelm_testtrace::test]
+async fn restart_with_refuses_a_non_resume_offer_without_changing_settings() {
+    let (h, fixture) = restart_with_harness().await;
+    let session = structured_claude_session(&h, &fixture).await;
+    observed_argv(&h, &session.id, 1).await;
+    assert_eq!(
+        listed(&h.client, &session.id).await.restart_offer,
+        farhelm_proto::RestartOffer::FreshOnly
+    );
+    let mut yolo = session.launch.clone().expect("structured premise");
+    yolo.permissions = Some(farhelm_proto::LaunchPermission::Yolo);
+    assert_restart_with_refused(&h, &session, farhelm_proto::RestartMode::Resume, yolo).await;
+}
 
 /// Release connection-owned supervisor references before reopening its durable state.
 ///

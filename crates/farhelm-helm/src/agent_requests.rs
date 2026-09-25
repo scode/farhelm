@@ -359,7 +359,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 stop_if_running,
             } => {
                 let target = resolve_target(target.expect("validated"), session_id, "restart");
-                crate::sessions::do_restart_session(&state, &target, mode, stop_if_running)
+                crate::sessions::do_restart_session(&state, &target, mode, stop_if_running, None)
                     .await
                     .map(|(claim, info)| {
                         agent_restarted_reply(&state, &claim, info, origin.host, session_id)

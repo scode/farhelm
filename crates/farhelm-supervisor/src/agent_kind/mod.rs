@@ -7,10 +7,11 @@
 //! buys three different things:
 //!
 //! 1. **The kind seam and its per-session snapshot** (PLAN_M3.md item 7).
-//!    At create time a session records, immutably, which agent kind it is
-//!    and how a resume would be invoked. Derivation is honestly dumb — the
-//!    basename of the invocation's first token — and is done ONCE, never
-//!    re-guessed later. Doing it once is not caching but stability:
+//!    At create time a session records its agent kind and how a resume
+//!    would be invoked. The kind stays fixed; restart-with can replace the
+//!    resume template after a new process spawns. Kind derivation is honestly
+//!    dumb — the basename of the invocation's first token — and is done
+//!    ONCE, never re-guessed later. Doing it once is not caching but stability:
 //!    re-deriving later would consult a PATH, a filesystem, and a heuristic
 //!    that may all have changed since, so a session could silently become a
 //!    different kind between two restarts and resume through a template
@@ -2345,8 +2346,9 @@ pub fn munge_cwd(canonical_cwd: &str) -> String {
         .collect()
 }
 
-/// The immutable per-session integration snapshot (PLAN_M3.md item 7):
-/// which kind this session is, and how a resume would be invoked.
+/// The per-session integration settings (PLAN_M3.md item 7): a fixed agent
+/// kind and the template the next resume will use. Restart-with may replace
+/// the template after its new process spawns, without re-deriving the kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegrationSnapshot {
     pub kind: AgentKind,
@@ -3948,6 +3950,63 @@ mod tests {
                 "grok-session-1",
             ]
         );
+    }
+
+    /// A changed Grok permission must reach its explicit resume template.
+    ///
+    /// Unlike Claude, Grok's resumed argv is supplied by the helm rather
+    /// than derived from its invocation. This pins the supervisor's template
+    /// resolution and identity fill for a default-to-YOLO restart-with.
+    #[farhelm_testtrace::test]
+    fn grok_restart_with_permission_uses_replacement_resume_template() {
+        let previous = IntegrationSnapshot::resolve(
+            &["grok".into(), "--no-leader".into()],
+            Some(AgentKind::Grok),
+            Some(vec![
+                "grok".into(),
+                "--no-leader".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+            ]),
+        )
+        .expect("default Grok template resolves");
+        let replacement = IntegrationSnapshot::resolve(
+            &[
+                "grok".into(),
+                "--no-leader".into(),
+                "--always-approve".into(),
+            ],
+            Some(previous.kind),
+            Some(vec![
+                "grok".into(),
+                "--no-leader".into(),
+                "--always-approve".into(),
+                "--resume".into(),
+                "{conversation}".into(),
+            ]),
+        )
+        .expect("YOLO Grok template resolves against the fixed kind");
+        let mut locator = grok::GrokLocator::reported(
+            "grok-session-1".to_string(),
+            Some("/tmp/grok-session-1/updates.jsonl".to_string()),
+            Some("2026-09-22T12:00:00Z"),
+        )
+        .expect("valid captured Grok locator");
+        locator.resumable = true;
+        let resumed = replacement
+            .filled_resume_argv(&locator.encode().expect("resumable locator encodes"))
+            .expect("replacement template fills the captured identity");
+        assert_eq!(
+            resumed,
+            [
+                "grok",
+                "--no-leader",
+                "--always-approve",
+                "--resume",
+                "grok-session-1"
+            ]
+        );
+        assert_ne!(replacement.resume_template, previous.resume_template);
     }
 
     /// Derivation cannot safely append a selector after `--` or beside an

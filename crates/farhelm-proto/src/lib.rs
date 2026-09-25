@@ -251,7 +251,11 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// Version 29 adds Grok to the structured launch and durable agent-kind
 /// vocabularies. Older peers cannot retain its tracked launch policy.
 ///
-/// `protocol_version_is_pinned_at_29` (renamed at every bump since `_at_4`)
+/// Version 30 adds optional compiled structured launch fields to
+/// `RestartSession`; older peers must refuse the handshake rather than
+/// silently restarting with stale settings.
+///
+/// `protocol_version_is_pinned_at_30` (renamed at every bump since `_at_4`)
 /// and `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin both the number and
 /// the reasoning so the next milestone cannot re-assume tolerance that was
@@ -264,7 +268,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// version 12 added, [`ControlMsg::AgentRequest`] for version 13,
 /// [`ControlMsg::SessionList`] for version 14, and
 /// [`ControlMsg::ReportConversation`]'s required fields for version 28.
-pub const PROTOCOL_VERSION: u32 = 29;
+pub const PROTOCOL_VERSION: u32 = 30;
 
 /// Most sessions one [`ControlMsg::SessionList`] reply carries; a supervisor
 /// with more cuts the list here and says so with `truncated`.
@@ -2440,8 +2444,8 @@ pub enum ControlMsg {
         /// `invocation`. Legacy raw/profile creation leaves this absent.
         ///
         /// This travels beside the resolved command rather than replacing it:
-        /// the supervisor executes and resumes the frozen bundle, while the
-        /// composer later uses this immutable selection for clone and history.
+        /// the supervisor executes and resumes the saved bundle, while the
+        /// session launcher later uses its current selection for clone and history.
         launch: Option<LaunchSelection>,
         /// An owned fresh GitHub checkout this create must perform before
         /// launching: which repository to clone, where, and what runs after
@@ -2755,6 +2759,16 @@ pub enum ControlMsg {
         /// SHOW a confirm dialog, never the authorization to skip it.
         #[serde(default)]
         stop_if_running: bool,
+        /// Compiled structured launch overrides for restart-with. Invocation
+        /// and launch are present together; the explicit template is optional
+        /// because some harnesses derive it from the invocation. All absent
+        /// means the historical restart path with the stored launch bundle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invocation: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        launch: Option<LaunchSelection>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_template: Option<Vec<String>>,
     },
     /// Success reply to `RestartSession`, shaped like `SessionCreated`:
     /// `session` carries the session's resulting state (including its
@@ -4542,24 +4556,24 @@ mod tests {
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
     /// against a literal, so they FOLLOW this constant instead of needing
-    /// an edit per bump; this test and the literal-28 skew check below are
+    /// an edit per bump; this test and the literal-29 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_29() {
-        assert_eq!(PROTOCOL_VERSION, 29);
+    fn protocol_version_is_pinned_at_30() {
+        assert_eq!(PROTOCOL_VERSION, 30);
     }
 
-    /// Pins the skew direction the Grok harness/kind bump exists to create, in
+    /// Pins the skew direction the restart-with wire bump exists to create, in
     /// BOTH directions, against the LITERAL previous version rather than the
     /// constant-relative ± 1 the `io.rs` skew test uses:
     ///
-    /// - A peer still speaking v28 is refused by this build's handshake with
+    /// - A peer still speaking v29 is refused by this build's handshake with
     ///   the explicit skew error and the connection torn down — never
-    ///   tolerated into receiving a harness variant it cannot decode.
-    /// - A v29 hello is refused by a hand-rolled v28 receiver, which sees a
+    ///   tolerated into ignoring the structured restart override.
+    /// - A v30 hello is refused by a hand-rolled v29 receiver, which sees a
     ///   version it does not know and hangs up. This test models the old
     ///   receiver with its refusal rule: accept
-    ///   exactly 28, refuse anything else. It is what keeps this test
+    ///   exactly 29, refuse anything else. It is what keeps this test
     ///   honest about the old side instead of asserting only the new side's
     ///   opinion.
     ///
@@ -4569,7 +4583,7 @@ mod tests {
     /// version history disagree. Each bump renames this test and moves both
     /// literals with it so both directions exercise the previous version.
     #[farhelm_testtrace::test]
-    async fn v28_and_v29_peers_refuse_each_other() {
+    async fn v29_and_v30_peers_refuse_each_other() {
         let stale_hello = |protocol_version: u32| ControlMsg::Hello {
             protocol_version,
             build_version: "9.9.9-test".to_string(),
@@ -4578,7 +4592,7 @@ mod tests {
             auth: None,
         };
 
-        // A literal-v28 peer against THIS build's handshake.
+        // A literal-v29 peer against THIS build's handshake.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
@@ -4589,7 +4603,7 @@ mod tests {
         });
         let mut r = crate::io::FrameReader::new(br);
         let mut w = crate::io::FrameWriter::new(bw);
-        w.write_control(&stale_hello(28)).await.unwrap();
+        w.write_control(&stale_hello(29)).await.unwrap();
         // Our hello crosses first (hellos cross on the wire), then the
         // refusal — the same shape `io.rs`'s own skew test pins.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
@@ -4605,22 +4619,22 @@ mod tests {
         let err = receiver.await.unwrap().unwrap_err();
         assert!(
             err.to_string().contains("protocol version mismatch"),
-            "a literal v28 peer must be refused: {err}"
+            "a literal v29 peer must be refused: {err}"
         );
         let skew = crate::io::VersionSkew::cause_of(&err)
             .expect("the refusal must carry its versions as a typed payload");
-        assert_eq!(skew.peer_protocol, 28);
-        assert_eq!(skew.our_protocol, 29);
+        assert_eq!(skew.peer_protocol, 29);
+        assert_eq!(skew.our_protocol, 30);
 
-        // The reverse direction: a v28 receiver (the refusal rule itself,
-        // modeled by its exact-version check) meets a v29 hello and hangs up.
+        // The reverse direction: a v29 receiver (the refusal rule itself,
+        // modeled by its exact-version check) meets a v30 hello and hangs up.
         let (a, b) = tokio::io::duplex(64 * 1024);
         let (ar, aw) = tokio::io::split(a);
         let (br, bw) = tokio::io::split(b);
-        let v28_receiver = tokio::spawn(async move {
+        let v29_receiver = tokio::spawn(async move {
             let mut r = crate::io::FrameReader::new(br);
             let mut w = crate::io::FrameWriter::new(bw);
-            w.write_control(&stale_hello(28)).await.unwrap();
+            w.write_control(&stale_hello(29)).await.unwrap();
             let frame = r.read_frame().await.unwrap().unwrap();
             let their_hello = crate::io::parse_control(&frame).unwrap();
             let ControlMsg::Hello {
@@ -4629,7 +4643,7 @@ mod tests {
             else {
                 panic!("expected a hello, got {their_hello:?}");
             };
-            if protocol_version != 28 {
+            if protocol_version != 29 {
                 // The old peer's refusal: an error, then the connection
                 // closes (the writer is dropped at scope exit).
                 w.write_control(&ControlMsg::Error {
@@ -4639,7 +4653,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-                Err("refused a v29 peer".to_string())
+                Err("refused a v30 peer".to_string())
             } else {
                 Ok(())
             }
@@ -4649,11 +4663,11 @@ mod tests {
         w.write_control(&stale_hello(PROTOCOL_VERSION))
             .await
             .unwrap();
-        // Hellos cross first; the v28 peer's hello precedes its refusal.
+        // Hellos cross first; the v29 peer's hello precedes its refusal.
         let _their_hello = r.read_frame().await.unwrap().unwrap();
         let refusal = crate::io::parse_control(&r.read_frame().await.unwrap().unwrap()).unwrap();
         assert!(matches!(refusal, ControlMsg::Error { req_id: 0, .. }));
-        assert!(v28_receiver.await.unwrap().is_err());
+        assert!(v29_receiver.await.unwrap().is_err());
     }
 
     /// Pins the decode half of the failure PLAN_M2_5.md's version bump
@@ -6447,6 +6461,9 @@ mod tests {
             session_id: "s1".to_string(),
             mode: RestartMode::Resume,
             stop_if_running: true,
+            invocation: None,
+            launch: None,
+            resume_template: None,
         };
         let mut wire = Vec::new();
         Frame::control(&msg).encode(&mut wire).unwrap();
@@ -6505,6 +6522,9 @@ mod tests {
             session_id: "s1".to_string(),
             mode: RestartMode::Resume,
             stop_if_running: true,
+            invocation: None,
+            launch: None,
+            resume_template: None,
         };
         assert_eq!(
             serde_json::to_value(&msg).unwrap(),
@@ -6544,6 +6564,48 @@ mod tests {
             !stop_if_running,
             "an absent consent flag must never be read as consent"
         );
+    }
+
+    /// Restart-with's optional compiled bundle is omitted for legacy requests
+    /// and survives serde unchanged when supplied by a structured caller.
+    #[farhelm_testtrace::test]
+    fn restart_session_with_bundle_roundtrips_and_absence_defaults() {
+        let absent = serde_json::json!({
+            "type": "restart_session",
+            "req_id": 1,
+            "session_id": "s1",
+            "mode": "resume"
+        });
+        let decoded: ControlMsg = serde_json::from_value(absent).unwrap();
+        let ControlMsg::RestartSession {
+            invocation,
+            launch,
+            resume_template,
+            ..
+        } = decoded
+        else {
+            panic!("expected restart request");
+        };
+        assert!(invocation.is_none() && launch.is_none() && resume_template.is_none());
+
+        let msg = ControlMsg::RestartSession {
+            req_id: 2,
+            session_id: "s1".into(),
+            mode: RestartMode::Resume,
+            stop_if_running: false,
+            invocation: Some("claude --dangerously-skip-permissions".into()),
+            launch: Some(LaunchSelection {
+                harness: LaunchHarness::Claude,
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Yolo),
+                workspace_trust: None,
+            }),
+            resume_template: None,
+        };
+        let roundtripped: ControlMsg =
+            serde_json::from_value(serde_json::to_value(&msg).unwrap()).unwrap();
+        assert_eq!(roundtripped, msg);
     }
 
     /// Golden JSON for `SessionRestarted`'s FULL outer shape, including its
@@ -6796,6 +6858,9 @@ mod tests {
                 session_id: "s1".to_string(),
                 mode: RestartMode::Fresh,
                 stop_if_running: false,
+                invocation: None,
+                launch: None,
+                resume_template: None,
             }
         );
     }

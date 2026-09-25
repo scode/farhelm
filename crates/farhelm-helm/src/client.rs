@@ -2751,7 +2751,43 @@ impl SupervisorClient {
         mode: RestartMode,
         stop_if_running: bool,
     ) -> anyhow::Result<SessionInfo> {
+        self.restart_session_with(id, mode, stop_if_running, None)
+            .await
+    }
+
+    /// Restart with an optional structured selection compiled by this helm.
+    ///
+    /// `None` preserves the ordinary restart wire shape. Compiling here lets
+    /// REST callers and direct clients use the same catalog and wire path.
+    pub async fn restart_session_with(
+        &self,
+        id: &str,
+        mode: RestartMode,
+        stop_if_running: bool,
+        selection: Option<farhelm_proto::LaunchSelection>,
+    ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
+        let (invocation, launch, resume_template) = selection
+            .map(crate::launches::compile)
+            .transpose()
+            // The selection is caller input, so a catalog refusal is the
+            // caller's to fix: classify it `InvalidRequest` (a 400) exactly
+            // as structured create does, rather than letting an untyped error
+            // reach the route as a 500.
+            .map_err(|message| {
+                anyhow::Error::new(SupervisorError {
+                    kind: ErrorKind::InvalidRequest,
+                    message,
+                })
+            })?
+            .map(|bundle| {
+                (
+                    Some(bundle.invocation),
+                    Some(bundle.selection),
+                    bundle.resume_template,
+                )
+            })
+            .unwrap_or((None, None, None));
         match self
             .request(
                 req_id,
@@ -2760,6 +2796,9 @@ impl SupervisorClient {
                     session_id: id.to_string(),
                     mode,
                     stop_if_running,
+                    invocation,
+                    launch,
+                    resume_template,
                 },
             )
             .await?
@@ -5569,6 +5608,9 @@ mod tests {
                     session_id: "restarted".to_string(),
                     mode: farhelm_proto::RestartMode::Resume,
                     stop_if_running: false,
+                    invocation: None,
+                    launch: None,
+                    resume_template: None,
                 },
             )
             .await

@@ -2225,21 +2225,48 @@ async fn handle_resize(
 /// touches `input_routes` (connection-local state a spawned task
 /// must not see). Tracked and admitted exactly like the other
 /// slow handlers — see `HANDLER_ADMISSION_PERMITS`.
-async fn handle_restart_session(
-    sup: &Arc<Supervisor>,
-    tx: &mpsc::Sender<Frame>,
-    tasks: &mut tokio::task::JoinSet<()>,
+/// Wire fields owned by the admitted restart task after the connection yields.
+///
+/// Keeping the optional bundle together makes an ordinary restart's absent
+/// fields explicit while preserving the protocol's partial-bundle refusal.
+struct RestartSessionRequest {
     req_id: u64,
     session_id: String,
     mode: RestartMode,
     stop_if_running: bool,
+    invocation: Option<String>,
+    launch: Option<farhelm_proto::LaunchSelection>,
+    resume_template: Option<Vec<String>>,
+}
+
+async fn handle_restart_session(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    request: RestartSessionRequest,
 ) {
     let sup2 = Arc::clone(sup);
     let tx = tx.clone();
     spawn_admitted(&sup.admission, tasks, async move {
         let sup = sup2;
+        let RestartSessionRequest {
+            req_id,
+            session_id,
+            mode,
+            stop_if_running,
+            invocation,
+            launch,
+            resume_template,
+        } = request;
         match sup
-            .restart_session(&session_id, mode, stop_if_running)
+            .restart_session(
+                &session_id,
+                mode,
+                stop_if_running,
+                invocation,
+                launch,
+                resume_template,
+            )
             .await
         {
             Ok(session) => {
@@ -2983,15 +3010,23 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             session_id,
             mode,
             stop_if_running,
+            invocation,
+            launch,
+            resume_template,
         } => {
             handle_restart_session(
                 sup,
                 ctx.tx,
                 ctx.tasks,
-                req_id,
-                session_id,
-                mode,
-                stop_if_running,
+                RestartSessionRequest {
+                    req_id,
+                    session_id,
+                    mode,
+                    stop_if_running,
+                    invocation,
+                    launch,
+                    resume_template,
+                },
             )
             .await
         }
@@ -6829,6 +6864,9 @@ mod tests {
                     session_id: auth.session_id.clone(),
                     mode: RestartMode::Fresh,
                     stop_if_running: true,
+                    invocation: None,
+                    launch: None,
+                    resume_template: None,
                 }
             } else {
                 ControlMsg::DeleteSession {
@@ -8147,6 +8185,9 @@ mod tests {
                 session_id: "no-such-session".to_string(),
                 mode: farhelm_proto::RestartMode::Fresh,
                 stop_if_running: false,
+                invocation: None,
+                launch: None,
+                resume_template: None,
             },
             ConnectionCtx {
                 tx: &tx,

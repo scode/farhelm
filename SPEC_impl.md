@@ -2578,3 +2578,22 @@ stamp is reported (agreement means the two are the same string), and the reporte
 the Farhelm wordmark, inlined at compile time from `packaging/farhelm-desktop/wordmark-dark.svg` (the brand file every
 use of the name as a mark shares) rather than served as an asset, so both the web bundle and the desktop build carry it
 without a desktop asset-parity entry.
+
+### Restart-with backend wire and persistence
+
+`RestartSession` optionally carries the compiled structured launch bundle: `invocation`, `launch`, and
+`resume_template`. Protocol 30 adds these fields; the exact-version handshake refuses an older peer, because one that
+ignored them would relaunch with the old settings and still report success. A selection the catalog refuses is a 400
+from the helm and never reaches the supervisor. The helm compiles a supplied `LaunchSelection` and passes those fields
+through without checking cached offer or harness state; attached-session relay calls omit them. The supervisor
+revalidates the current stored structured selection, fixed harness, `Resume` offer, and `Resume` mode immediately before
+destructive work, then resolves and fills the supplied template using the same executable and integration checks as
+create. After the new process spawns, one generation-fenced store write updates invocation, launch, and the resolved
+resume template while leaving the integration kind and working directory fixed. A compiler-omitted template is resolved
+before this write, so the saved row retains the concrete template required to resume. A spawn failure leaves the prior
+bundle untouched. If the post-spawn write fails after an otherwise successful relaunch, the restart still reports
+success because the new process is already running; the failure is logged, and the reply and live session retain the old
+stored settings. A relaunch that published its new process but hit an independent cleanup or reply error still attempts
+the bundle write and retains that error reply. A later restart uses the saved settings, or the old settings if the write
+failed, as it would after a crash between spawn and the write. This is the only exception to the ordinary create-time
+immutability of those launch columns, and the fixed kind avoids PATH-dependent kind re-derivation.

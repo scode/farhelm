@@ -3370,6 +3370,7 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
             session_id,
             mode,
             stop_if_running,
+            ..
         } = request
         else {
             panic!("expected RestartSession, got {request:?}");
@@ -3433,6 +3434,113 @@ async fn restart_session_passes_mode_and_consent_through_and_returns_the_session
         "the reply carries the offer the session has NOW, which is what a client re-renders"
     );
 
+    peer.await.unwrap();
+}
+
+/// A structured restart-with request is compiled by the helm and forwards
+/// every compiled launch field to the supervisor wire message.
+#[farhelm_testtrace::test]
+async fn restart_with_compiles_and_forwards_structured_launch_bundle() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::RestartSession {
+            req_id,
+            invocation,
+            launch,
+            resume_template,
+            ..
+        } = request
+        else {
+            panic!("expected restart request");
+        };
+        assert_eq!(
+            invocation.as_deref(),
+            Some("claude --dangerously-skip-permissions")
+        );
+        assert_eq!(
+            launch.expect("structured launch").permissions,
+            Some(farhelm_proto::LaunchPermission::Yolo)
+        );
+        assert!(resume_template.is_none());
+        writer
+            .write_control(&ControlMsg::SessionRestarted {
+                req_id,
+                session: rest_harness::session("sess-1", 1),
+            })
+            .await
+            .unwrap();
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/sessions/sess-1/restart")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(serde_json::json!({
+            "mode": "resume",
+            "with": {"harness":"claude","model":null,"effort":null,"permissions":"yolo","workspace_trust":null}
+        }).to_string())).unwrap();
+    assert_eq!(
+        harness.router().oneshot(request).await.unwrap().status(),
+        axum::http::StatusCode::OK
+    );
+    peer.await.unwrap();
+}
+
+/// A restart-with selection the catalog refuses is the caller's mistake, so
+/// the route must answer 400 with the catalog's reason and send nothing to
+/// the supervisor. Grok refuses an explicit model, which makes the refusal
+/// deterministic. Before this was classified, the untyped compile error
+/// reached the browser as a 500 with no usable explanation.
+#[farhelm_testtrace::test]
+async fn restart_with_an_invalid_selection_is_a_400_and_never_reaches_the_supervisor() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
+    use tower::ServiceExt;
+
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        // The next read ends only when the helm side closes: any frame here
+        // would be a request the refused selection should never have sent.
+        let next = reader.read_frame().await;
+        assert!(
+            !matches!(next, Ok(Some(_))),
+            "a refused selection must not reach the supervisor"
+        );
+    });
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/sessions/sess-1/restart")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({
+                "mode": "resume",
+                "with": {"harness":"grok","model":"x-ai/grok-4.5","effort":null,"permissions":null,"workspace_trust":null}
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let response = harness.router().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    drop(harness);
     peer.await.unwrap();
 }
 
