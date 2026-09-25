@@ -2365,6 +2365,14 @@ pub struct IntegrationSnapshot {
 /// that belongs at the boundary, not here.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SnapshotError {
+    /// A generic kind has no conversation-identity capture, so its fallback
+    /// command cannot substitute this placeholder. Refuse it at create time
+    /// rather than storing a restart command that can never be used.
+    #[error(
+        "a generic session cannot supply conversation identity to its resume template; remove \
+         the {CONVERSATION_PLACEHOLDER} placeholder or use an integrated agent kind"
+    )]
+    GenericTemplateHasPlaceholder,
     /// An integrated kind (derived or overridden) was given a template
     /// with no `{conversation}` element. Refused at create rather than at
     /// resume, because by resume time the only honest thing left to do
@@ -2439,12 +2447,13 @@ impl IntegrationSnapshot {
     /// establishes that precondition before resolution; an empty slice has
     /// no program from which to derive a kind and is therefore invalid.
     ///
-    /// Only two classes of validation can fail here: an integrated kind must
-    /// end up with a template containing the placeholder, and a derived
-    /// template must have an unambiguous place for its resume selector. OMP
-    /// refuses a genuine end-of-options delimiter; Grok also refuses an
-    /// existing selector because its derived form owns that argument (see
-    /// [`SnapshotError`] for the exact cases).
+    /// Validation rejects templates whose conversation-identity requirements
+    /// do not match the resolved kind: integrated kinds need the placeholder,
+    /// while generic kinds cannot use it because they have no identity capture.
+    /// A derived template must also have an unambiguous place for its resume
+    /// selector. OMP refuses a genuine end-of-options delimiter; Grok also
+    /// refuses an existing selector because its derived form owns that
+    /// argument (see [`SnapshotError`] for the exact cases).
     pub fn resolve(
         original_argv: &[String],
         kind_override: Option<AgentKind>,
@@ -2472,6 +2481,9 @@ impl IntegrationSnapshot {
             && grok_has_ambiguous_resume_shape(&original_argv[1..])
         {
             return Err(SnapshotError::GrokAmbiguousResumeBoundary);
+        }
+        if integration.is_none() && template_has_placeholder(resume_template.as_deref()) {
+            return Err(SnapshotError::GenericTemplateHasPlaceholder);
         }
         if integration.is_some() && !template_has_placeholder(resume_template.as_deref()) {
             return Err(SnapshotError::IntegratedTemplateHasNoPlaceholder {
@@ -3427,14 +3439,14 @@ mod tests {
         );
     }
 
-    /// The validation invariant PLAN_M3.md item 7 makes the only failure
-    /// mode of snapshot resolution. It has to be refused at CREATE: once
+    /// Snapshot validation enforces the two directions of the kind/template
+    /// contract at CREATE. Integrated kinds require a placeholder; generic
+    /// kinds cannot use one because they cannot supply identity. Once
     /// capture has succeeded, a placeholder-free template on an integrated
     /// kind could only ever throw the captured identity away, which is
-    /// SPEC.md's "restart resumes exactly that conversation" quietly
-    /// becoming false. Generic sessions are the opposite case and must
-    /// keep accepting exactly such templates — that is SPEC.md's verbatim
-    /// fallback shape.
+    /// SPEC.md's exact-conversation restart promise quietly becoming false.
+    /// A generic placeholder-bearing template is equally unusable and must
+    /// be rejected instead of stored as a verbatim fallback.
     #[farhelm_testtrace::test]
     fn an_integrated_kind_refuses_a_placeholder_free_template() {
         let refused = IntegrationSnapshot::resolve(
@@ -3460,7 +3472,29 @@ mod tests {
             )
             .is_err()
         );
-        // Generic keeps every shape, including none at all.
+        // A generic fallback is valid only when it does not ask Farhelm for
+        // conversation identity; embedded text is ordinary literal argv.
+        assert_eq!(
+            IntegrationSnapshot::resolve(
+                &["bash".into()],
+                None,
+                Some(vec!["bash".to_string(), "{conversation}".to_string()]),
+            ),
+            Err(SnapshotError::GenericTemplateHasPlaceholder)
+        );
+        assert!(
+            IntegrationSnapshot::resolve(
+                &["bash".into()],
+                None,
+                Some(vec![
+                    "bash".to_string(),
+                    "--resume={conversation}".to_string()
+                ]),
+            )
+            .is_ok()
+        );
+        // Generic keeps placeholder-free fallback templates and no-template
+        // sessions; integrated kinds keep exact-placeholder templates.
         assert!(
             IntegrationSnapshot::resolve(
                 &["bash".into()],
@@ -3471,6 +3505,18 @@ mod tests {
         );
         assert!(
             IntegrationSnapshot::resolve(&["bash".into()], Some(AgentKind::Generic), None).is_ok()
+        );
+        assert!(
+            IntegrationSnapshot::resolve(
+                &["claude".into()],
+                None,
+                Some(vec![
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    "{conversation}".to_string(),
+                ]),
+            )
+            .is_ok()
         );
     }
 
@@ -4668,18 +4714,16 @@ mod tests {
         let generic = IntegrationSnapshot::resolve(&["bash".into()], None, None).unwrap();
         assert_eq!(generic.restart_offer(None, 0), RestartOffer::FreshOnly);
 
-        // A generic session whose template DOES mention the placeholder can
-        // never have an identity to fill it with, so it must not advertise
-        // a fallback it could not run.
-        let unfillable = IntegrationSnapshot::resolve(
-            &["bash".into()],
-            None,
-            Some(vec![
+        // This models a legacy stored snapshot. New generic creates reject
+        // the unfillable template, but previously stored state still needs
+        // to avoid advertising a restart command that cannot be run.
+        let unfillable = IntegrationSnapshot {
+            kind: AgentKind::Generic,
+            resume_template: Some(vec![
                 "bash".to_string(),
                 CONVERSATION_PLACEHOLDER.to_string(),
             ]),
-        )
-        .unwrap();
+        };
         assert_eq!(unfillable.restart_offer(None, 0), RestartOffer::FreshOnly);
     }
 

@@ -75,7 +75,8 @@
 - Completion criteria: update the authoritative specification, reject the invalid configuration at the existing
   validation boundary with an actionable error, add focused validation coverage, and remove this feedback file and its
   index entry in the execution change.
-- Execution: `pending`.
+- Execution: implemented in change `xtpupovr` on bookmark `pr/generic-placeholder-validation`;
+  [draft PR #895](https://github.com/scode/farhelm/pull/895/changes).
 
 ## getent-colonless-line-accepted-as-shell.md
 
