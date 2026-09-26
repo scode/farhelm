@@ -869,7 +869,7 @@ samp {
 }
 
 /* The consolidated header (the 2026-08 UI refresh): status, title, age,
-   copyable fields, and four lifecycle actions on ONE row, where four stacked
+   copyable fields, and five lifecycle actions on ONE row, where four stacked
    bands used to cost ~170px before the terminal began. Everything that made
    that stack — the restart explanation, the confirmations, the failure
    lines — moved to a tooltip, to anchored popovers, and to conditional bands
@@ -885,7 +885,7 @@ samp {
    status, age, and the action cluster never shrink or hide. That ordering is
    deliberate: the two copy buttons preserve their full values in `title`,
    while the actions must remain readable and keyboard reachable. At widths
-   below the supported floor the row may clip; it never wraps or moves the
+   below the header's 580px full-visibility width the row may clip; it never wraps or moves the
    actions into another menu. */
 .titlebar {
   box-sizing: border-box;
@@ -993,6 +993,18 @@ samp {
   font-size: 12px;
   padding: 2px 8px;
   white-space: nowrap;
+}
+
+/* Keep the unavailable restart-with control hoverable for its explanation.
+   Native disabled buttons do not expose `title` consistently in webviews. */
+.titlebar-actions .restart-with-trigger[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.titlebar-actions .restart-with-trigger[aria-disabled="true"]:hover,
+.titlebar-actions .restart-with-trigger[aria-disabled="true"]:focus-visible {
+  background: var(--accent-fill);
 }
 
 /* A trigger whose confirmation is open reads as PRESSED, not merely
@@ -2188,6 +2200,123 @@ samp {
 .rename-unavailable {
   font-size: 12px;
   color: var(--warn);
+}
+
+/* The restart editor keeps the conversation's destination visible while the
+   shared launch controls edit only values that can change on resume. */
+.restart-with-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow: auto;
+  background: var(--scrim-dialog);
+}
+
+.restart-with-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(560px, 100%);
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  padding: 24px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-dialog);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dialog);
+}
+
+.restart-with-title {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.restart-with-context {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.restart-with-context dt,
+.restart-with-fixed-note,
+.restart-with-stop-note {
+  color: var(--fg-1);
+}
+
+.restart-with-context dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.restart-with-fixed-note,
+.restart-with-stop-note,
+.restart-with-error,
+.restart-with-catalog-error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.restart-with-rule {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border-row);
+}
+
+.restart-with-dialog .launch-composer-choice-pair {
+  flex-wrap: wrap;
+}
+
+.launch-composer-changed-marker {
+  display: block;
+  margin: -2px 0 6px;
+  color: var(--info);
+  font-size: 12px;
+}
+
+.restart-with-error,
+.restart-with-catalog-error {
+  color: var(--warn);
+}
+
+.restart-with-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.restart-with-stop-note {
+  margin-right: auto;
+}
+
+.restart-with-cancel,
+.restart-with-submit {
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
+/* The in-flight submit stays natively enabled so it can keep keyboard focus
+   inside the modal (restart_with.rs's footer says why), so `.btn:disabled`
+   cannot style it. Match that look instead, including suppressing the hover
+   fill, so a pending request reads exactly as it did when it was disabled. */
+.restart-with-submit[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.restart-with-submit[aria-disabled="true"]:hover,
+.restart-with-submit[aria-disabled="true"]:focus-visible {
+  background: var(--accent-fill);
 }
 
 /* ===== Session row fields ========================================= */

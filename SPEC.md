@@ -480,7 +480,7 @@ authority or steal focus. An already ambiguous submission remains bound to its o
 
 ### Lifecycle operations
 
-The client supports: create, open, rename, restart, clone, replace, replace with, stop, delete.
+The client supports: create, open, rename, restart, restart with, clone, replace, replace with, stop, delete.
 
 A list rename opens in a modal editor owned by the list rather than by the row-actions popup. Listing updates may
 reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
@@ -506,6 +506,13 @@ the draft, because a filtered, truncated, failed, or stale listing is not proof 
   override because they have no stored structured selection. If a harness rejects a changed model or other setting while
   resuming, that is an ordinary launch failure; restart again with settings the harness accepts. The general split
   between launch-only and resume-safe arguments remains deferred.
+- **Restart with** opens a dialog for changing the model, effort, permissions, or workspace trust before resuming the
+  session's own conversation. The harness, host, and folder stay fixed; Replace with can change the harness or folder,
+  and Clone can change the host. The dialog shows the current settings and marks edited fields, and its primary action
+  is inactive until a setting changes. A running agent is stopped first with the user's confirmation on that action. A
+  refusal leaves the dialog and its edits visible with the reason. This action is available only for a session launched
+  from structured settings with a current resume offer. Its header button remains visible but greyed out otherwise, with
+  a hover tooltip and accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, working directory,
   title, and agent — the fresh-conversation counterpart to restart's resumed one. The source session is untouched:
   cloning starts a brand-new, independent create through the same form and the same confirmation described under
@@ -752,11 +759,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
   titlebar remains the identifier in that state, and the main pane deliberately stays put (filtering the list is not
   deselecting).
 - The typical session header is one keyboard-reachable row ordered status, session name, age, directory, command line,
-  then Restart, Replace, Clone, and Replace with. All four actions remain visible. Directory and command line are muted
-  click-to-copy buttons that take the width their values need and ellipsize only when the row runs out of room; a click
-  confirms locally for about 1.5 seconds. Clipboard writes use the native bridge first and `navigator.clipboard` second,
-  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
-  cancellation.
+  then Restart, Restart with, Replace, Clone, and Replace with. All five actions remain in the row and are fully visible
+  from a 580px main pane; narrower panes may clip the trailing actions. Restart with is greyed out when the session has
+  no stored structured launch settings or no conversation to resume; its tooltip and accessible description explain the
+  specific reason. Directory and command line are muted click-to-copy buttons that take the width their values need and
+  ellipsize only when the row runs out of room; a click confirms locally for about 1.5 seconds. Clipboard writes use the
+  native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its own
+  anchored danger confirmation and neutral cancellation.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, for as long as it takes. Honoring that can briefly slow the agent's OUTPUT — a

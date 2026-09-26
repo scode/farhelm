@@ -314,3 +314,51 @@ test("New selects other command explicitly and preserves the raw invocation", as
   const created = await response.json() as ListedSession;
   await cleanupSession(request, created.id);
 });
+
+/**
+ * Tab from the open model list moves to the next launcher control.
+ *
+ * The model field shares its combobox with the restart-with dialog. Its
+ * option rows used to be sequential tab stops, so forward Tab from the open
+ * list targeted a row that the input's blur then unmounted, dropping focus to
+ * the document behind the launcher and out of its Tab loop. The rows are now
+ * reached only by Arrow and Enter; this specifies that forward Tab closes the
+ * list and lands on the launcher's next persistent control (Codex's effort
+ * `default`), still inside the dialog, without creating a session.
+ */
+test("Tab from the open model list reaches the next launcher control", async ({ page }) => {
+  let creates = 0;
+  await page.route(SESSION_LISTING, async (route) => {
+    if (route.request().method() === "POST") creates += 1;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.locator(".new-session-button").click();
+  const form = page.locator('.create-session-form[role="dialog"]');
+  await expect(form).toBeVisible();
+  const codex = form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true });
+  await codex.click();
+  await expect(codex).toHaveAttribute("aria-pressed", "true");
+
+  const model = form.getByRole("combobox", { name: "model", exact: true });
+  const listbox = form.locator(".launch-composer-model-choice").getByRole("listbox");
+  const effortDefault = form.locator(".launch-composer-effort-choice").getByRole("button", {
+    name: "default",
+    exact: true,
+  });
+  // Premise: the model list is open with at least one transient row, so the
+  // row that used to be Tab's target exists when Tab is pressed.
+  await model.focus();
+  await expect(model).toBeFocused();
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole("option").first()).toBeVisible();
+
+  await page.keyboard.press("Tab");
+  await expect(listbox).toHaveCount(0);
+  await expect(effortDefault).toBeFocused();
+  expect(
+    await form.evaluate((dialog) => dialog.contains(document.activeElement)),
+    "focus must stay inside the launcher",
+  ).toBe(true);
+  expect(creates, "keyboard navigation must not launch").toBe(0);
+});

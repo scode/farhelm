@@ -302,24 +302,44 @@ most of the launch composer's buttons once did. The rule leaves font size alone,
 textarea, which belongs to the vendored widget.
 
 The open session's chrome is ONE header row ordered status, title, age, copyable `{cwd}`, copyable invocation, then
-Restart, Replace, Clone, and Replace with — sized at about 40px, with the tab strip beneath it and nothing else in the
-steady state. It used to be four stacked bands costing roughly 170px before the terminal started, on a surface whose
-entire point is the terminal. Two of those bands had to go somewhere rather than merely shrink. The restart offer's
-explanation became the restart button's tooltip and its `aria-describedby` target: SPEC.md's "restart says so and offers
-that same fallback or a fresh launch" is carried by the button's accessible name (`aria-label` and, alongside the
-further elaboration, `title`) — naming the offer (`resume conversation`, `restart (fresh launch)`,
+Restart, Restart with, Replace, Clone, and Replace with — sized at about 40px, with the tab strip beneath it and nothing
+else in the steady state. It used to be four stacked bands costing roughly 170px before the terminal started, on a
+surface whose entire point is the terminal. Two of those bands had to go somewhere rather than merely shrink. The
+restart offer's explanation became the restart button's tooltip and its `aria-describedby` target: SPEC.md's "restart
+says so and offers that same fallback or a fresh launch" is carried by the button's accessible name (`aria-label` and,
+alongside the further elaboration, `title`) — naming the offer (`resume conversation`, `restart (fresh launch)`,
 `restart with the configured resume command`) rather than the action. The directory and invocation buttons carry their
 full values in `title`, shrink before the session title, and reveal a clipboard affordance on hover or keyboard focus.
-The four action buttons remain visible and in DOM order at the supported widths; below that floor the row may clip
-rather than wrapping or hiding actions. The restart confirmation became a popover anchored under the button that opened
-it, still confirm-in-place with focus on cancel; the consequence sentence they lead with is the one line standing
-between a click and a killed process tree, and a header that kept it in flow would have to either wrap or truncate it.
-Header Replace has a separate anchored confirmation state so it cannot accidentally open the interrupted card's
-confirmation. Everything conditional — a refused restart's prose, the host-unreachable notice and its last-known-status
-band, the "helm stopped listing this session" line — is still a full-width band, because a band that only appears when
-it has something to say costs the steady state nothing. A classified status renders in at most one place: the header
-normally, the stale notice's own metadata band for a stale session (where SPEC.md's title/directory/last-known-status
-triple is assembled), and nowhere at all for a session nothing has classified yet.
+The five action buttons remain fully visible and in DOM order from a 580px main pane. The app's 320px main-pane floor is
+unchanged; between those widths the row may clip its trailing actions rather than wrapping or hiding them. The restart
+confirmation became a popover anchored under the button that opened it, still confirm-in-place with focus on cancel; the
+consequence sentence they lead with is the one line standing between a click and a killed process tree, and a header
+that kept it in flow would have to either wrap or truncate it. Header Replace has a separate anchored confirmation state
+so it cannot accidentally open the interrupted card's confirmation. Everything conditional — a refused restart's prose,
+the host-unreachable notice and its last-known-status band, the "helm stopped listing this session" line — is still a
+full-width band, because a band that only appears when it has something to say costs the steady state nothing. A
+classified status renders in at most one place: the header normally, the stale notice's own metadata band for a stale
+session (where SPEC.md's title/directory/last-known-status triple is assembled), and nowhere at all for a session
+nothing has classified yet.
+
+Restart with uses a separate dialog because it relaunches the current session rather than creating one. It renders the
+same `LaunchControls` component as the session launcher, with the harness fixed to the session's stored structured
+selection. The dialog owns its draft and comparison baseline; the launcher keeps its own create-only state and effects.
+Only edited fields get changed markers; a marker's old model is a stored string and renders as an escaped,
+direction-isolated peer value. The dialog's submit uses Restart's stop-first consent and handles the reply through the
+same terminal reattachment path as an ordinary restart. That path reattaches the terminal even when the restart is
+refused and the dialog stays open, beneath a modal whose keystrokes must never reach the agent.
+
+The dialog owns keyboard focus structurally. While it is mounted, every sibling of every element on its path up to
+`body` is `inert`, including siblings rendered after it opened, so no other code can focus anything behind it and Tab
+from `body` can only reach the dialog. Only elements that were not already inert are marked, and exactly those are
+restored when it closes, before focus returns to the header action. A capture-phase keydown handler covers focus that
+still ends up outside the dialog (a click on the scrim leaves it on `body`): it swallows that key and puts focus back on
+the dialog, and Escape still cancels unless a request is in flight. The earlier per-mechanism guards stay as a second
+layer for engines without `inert`: a terminal whose output becomes visible, or that becomes the selected terminal (as
+when the selected tab exits and the view falls back to the agent), does not take focus while the dialog is mounted, and
+during a request the primary action stays focusable (unavailable through `aria-disabled`) while the other controls are
+disabled, because a focused control that is natively disabled or unmounted drops focus to `body`.
 
 The session-list profiles popup has one explicit focus request at a time. Opening lands on `new profile`; opening an
 editor lands on its name field; closing a form returns to its row's edit control or to `new profile`; opening a delete
@@ -1804,7 +1824,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter
   can never become a custom id behind a highlighted model. This keeps known ownership visible while preserving the
-  custom-model contract without a separate disclosure.
+  custom-model contract without a separate disclosure. Its rows are not sequential tab stops: Arrow and Enter reach them
+  through the input's active descendant, and Tab leaves the field for the next control. Blur closes the list, so a
+  tabbable row would unmount under the keyboard and drop focus out of the surrounding dialog.
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
   existence are not user management surface — but its alias is user-editable on the same terms as any other host's. It

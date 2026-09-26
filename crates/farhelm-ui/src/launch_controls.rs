@@ -10,8 +10,35 @@ use dioxus::prelude::*;
 
 use crate::api::LaunchCatalogModel;
 use crate::launch_composer::{self, ModelEnterTarget, ModelOption};
-use crate::peer::display_peer;
-use crate::{LaunchEffort, LaunchHarness, LaunchPermission};
+use crate::peer::{DetailPart, PeerLine, display_peer};
+use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+
+/// Render a baseline value only when this field now differs from it.
+///
+/// The marker compares wire values, so restoring a choice clears it even if
+/// the person visited other options while editing.
+///
+/// `old_label` arrives as a [`DetailPart`] because the fields differ in who
+/// wrote it. Effort, permissions, trust, and the `default` placeholder are
+/// this UI's own vocabulary, but a stored model id is a relayed string that
+/// may carry invisible or directional characters. That run must be escaped
+/// and direction-isolated (see `peer.rs`); interpolated raw, it could look
+/// identical to a different id or reorder the marker around it. The raw
+/// values stay what is compared here and what a caller submits; only the
+/// rendered run is escaped.
+fn changed_marker<T: PartialEq>(
+    current: &T,
+    baseline: &T,
+    old_label: DetailPart,
+) -> Option<Vec<DetailPart>> {
+    (current != baseline).then(|| vec![DetailPart::text("● changed · was "), old_label])
+}
+
+/// The old-value run for a model marker: the stored id is a peer value, while
+/// its absence is this UI's own `default`.
+fn model_marker_label(old: Option<&str>) -> DetailPart {
+    old.map_or_else(|| DetailPart::text("default"), DetailPart::peer)
+}
 
 /// Render one caller-owned structured selection without changing its state.
 ///
@@ -37,6 +64,8 @@ pub(crate) fn LaunchControls(
     choice_error: Option<String>,
     reset_reason: Option<String>,
     model_id_prefix: String,
+    #[props(default)] baseline: Option<LaunchSelection>,
+    #[props(default)] fixed_harness: bool,
     on_model_focus: EventHandler<()>,
     on_model_input: EventHandler<String>,
     on_model_blur: EventHandler<()>,
@@ -51,7 +80,11 @@ pub(crate) fn LaunchControls(
     let efforts = harness
         .map(|harness| launch_composer::compatible_efforts(harness, model.as_deref(), &catalog))
         .unwrap_or_default();
-    let options = launch_composer::model_options(&catalog, harness, &model_draft, model_show_all);
+    let mut options =
+        launch_composer::model_options(&catalog, harness, &model_draft, model_show_all);
+    if fixed_harness {
+        options.retain(|option| !matches!(option, ModelOption::ShowAll));
+    }
     let option_count = options.len();
     // A closed combobox shows the committed selection. An untouched seed keeps
     // its escaped display spelling; an edited choice uses the chosen model ID.
@@ -79,11 +112,48 @@ pub(crate) fn LaunchControls(
         })
         .unwrap_or_else(|| "choose a harness".to_string());
     let model_results_id = format!("{model_id_prefix}-results");
+    let model_change = baseline.as_ref().and_then(|old| {
+        changed_marker(&model, &old.model, model_marker_label(old.model.as_deref()))
+    });
+    let effort_change = baseline.as_ref().and_then(|old| {
+        changed_marker(
+            &effort,
+            &old.effort,
+            DetailPart::text(
+                old.effort
+                    .map(launch_composer::effort_value)
+                    .unwrap_or("default"),
+            ),
+        )
+    });
+    let permission_change = baseline.as_ref().and_then(|old| {
+        changed_marker(
+            &permissions,
+            &old.permissions,
+            DetailPart::text(
+                old.permissions
+                    .map(launch_composer::permission_value)
+                    .unwrap_or("default"),
+            ),
+        )
+    });
+    let trust_change = baseline.as_ref().and_then(|old| {
+        changed_marker(
+            &workspace_trust,
+            &old.workspace_trust,
+            DetailPart::text(
+                old.workspace_trust
+                    .map(|value| if value { "true" } else { "false" })
+                    .unwrap_or("default"),
+            ),
+        )
+    });
 
     rsx! {
         if harness != Some(LaunchHarness::Grok) {
             div { class: "launch-composer-choice launch-composer-model-choice",
                 span { class: "launch-composer-section-label", "model" }
+                if let Some(parts) = model_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-model",
                     input {
                         r#type: "text",
@@ -159,6 +229,14 @@ pub(crate) fn LaunchControls(
                                     aria_selected: model_active == Some(index),
                                     class: if model_active == Some(index) { "selected" } else { "" },
                                     disabled: busy,
+                                    // Rows are not sequential tab stops. The keyboard reaches
+                                    // them through the input's `aria-activedescendant` (Arrow
+                                    // and Enter above), which is the ARIA combobox pattern. A
+                                    // tabbable row would be the target of Tab from the input,
+                                    // but the input's blur closes the list and unmounts that
+                                    // row, so focus would fall to the document: out of the
+                                    // restart-with modal, and out of the launcher's Tab loop.
+                                    tabindex: "-1",
                                     // Keep focus on the input until a transient row's click
                                     // applies the choice; blur would otherwise unmount the row.
                                     onmousedown: move |evt| evt.prevent_default(),
@@ -196,6 +274,7 @@ pub(crate) fn LaunchControls(
             if !matches!(harness, Some(LaunchHarness::OpenCode | LaunchHarness::Cursor | LaunchHarness::Grok)) {
                 div { class: "launch-composer-choice launch-composer-effort-choice",
                     span { class: "launch-composer-section-label", "effort" }
+                    if let Some(parts) = effort_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                     div { class: "launch-composer-segmented",
                         button {
                             r#type: "button",
@@ -221,6 +300,7 @@ pub(crate) fn LaunchControls(
             }
             div { class: "launch-composer-choice launch-composer-permissions-choice",
                 span { class: "launch-composer-section-label", "permissions" }
+                if let Some(parts) = permission_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 div { class: "launch-composer-segmented",
                     if harness == Some(LaunchHarness::Pi) {
                         // Pi has no tool-approval gate. Its sole mode cannot
@@ -293,6 +373,7 @@ pub(crate) fn LaunchControls(
         if harness.is_some_and(|harness| matches!(harness, LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi)) {
             div { class: "launch-composer-choice launch-composer-trust-choice",
                 span { class: "launch-composer-section-label", "workspace trust" }
+                if let Some(parts) = trust_change { PeerLine { class: "launch-composer-changed-marker", parts } }
                 if harness == Some(LaunchHarness::Muse) {
                     p { class: "launch-composer-choice-help", "Muse false adds no trust flag; YOLO or vendor settings may still trust this workspace." }
                 }
@@ -331,4 +412,54 @@ fn scroll_model_result(prefix: &str, index: usize) {
     document::eval(&format!(
         r#"document.getElementById('{prefix}-option-{index}')?.scrollIntoView({{ block: 'nearest' }});"#,
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{changed_marker, model_marker_label};
+    use crate::peer::{DetailPart, detail_text};
+
+    /// A restored field must stop claiming a change, and a changed default
+    /// must name the value it replaces so the restart consent stays legible.
+    #[test]
+    fn marker_tracks_final_value_against_baseline() {
+        assert_eq!(
+            changed_marker(&None::<bool>, &None, DetailPart::text("default")),
+            None
+        );
+        let marker = changed_marker(&Some(true), &None, DetailPart::text("default"))
+            .expect("a changed field is marked");
+        assert_eq!(detail_text(&marker), "● changed · was default");
+    }
+
+    /// The old model id in a changed marker is someone else's string, so it
+    /// must render through the peer primitives rather than as marker text.
+    ///
+    /// A stored id is validated only for control characters and whitespace, so
+    /// a zero-width space or a bidi override can reach the dialog. Shown raw,
+    /// the first makes the old id look identical to a different one, and the
+    /// second can reorder the explanation around it. The marker must carry the
+    /// raw id as a separate peer run (escaped and direction-isolated when
+    /// rendered), keep the app's own words as plain text, and leave a missing
+    /// model as the app-authored `default`.
+    #[test]
+    fn marker_renders_a_stored_model_id_as_an_escaped_peer_run() {
+        let raw = "gpt-6-\u{200B}astra\u{202E}x";
+        let marker = changed_marker(
+            &Some("other".to_string()),
+            &Some(raw.to_string()),
+            model_marker_label(Some(raw)),
+        )
+        .expect("a changed model is marked");
+        assert_eq!(
+            marker,
+            vec![DetailPart::text("● changed · was "), DetailPart::peer(raw)],
+            "the raw id stays intact in its own peer run; only rendering escapes it"
+        );
+        assert_eq!(
+            detail_text(&marker),
+            "● changed · was gpt-6-<U+200B>astra<U+202E>x"
+        );
+        assert_eq!(model_marker_label(None), DetailPart::text("default"));
+    }
 }

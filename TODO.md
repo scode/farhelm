@@ -42,12 +42,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **OMP foreground ownership.** Assess whether native or shelled-out OMP children can replace or withdraw the foreground
   conversation's restart target beyond the checks now landed in #814, and define any remaining smallest admission check.
   Preserve legitimate foreground transitions and avoid extending the reporter's scope without evidence.
-- **Restart with.** Add a "restart with" action that resumes the session's own conversation under changed launch
-  settings, the resumed counterpart to "replace with". The motivating case: a Claude session launched without YOLO by
-  mistake. Today Restart replays the original argv, permission flags included, and "replace with" can switch to YOLO but
-  starts a fresh conversation, so there is no way to get YOLO and keep the conversation. Details to be worked out; this
-  likely depends on separating launch-only from resume-safe arguments, which SPEC.md currently defers, and it amends
-  SPEC.md's statement that Restart is the only relaunch mechanism.
 
 The earlier cross-harness evidence is preserved in
 [the historical ownership assessment](lore/2026-09-20-harness-conversation-ownership.md).
@@ -239,6 +233,21 @@ Real enough to keep, not established enough to act on. Each names what would set
   wanted; no blanket power-loss guarantee and no remote-branch change.
 
 ## Maybe later
+
+- **Native `<dialog>` for the app's modal dialogs.** The restart-with dialog, the rename dialog (`rename.rs`), and the
+  session launcher (`list/create_form.rs`, `install_composer_focus_trap`) are each a plain `div` with `role="dialog"`, a
+  fixed backdrop, and a keydown-based Tab trap written in JavaScript. The restart-with dialog also marks the rest of the
+  page `inert` while it is open and has a capture-phase keydown safety net, because it sits over a live agent terminal
+  and three separate reviews found three different ways keyboard focus could escape it into that terminal. Converting
+  these dialogs to a native `<dialog>` opened with `showModal()` would hand focus containment, inertness of the rest of
+  the page, Escape handling, and top-layer stacking to the browser, and could replace most of that hand-written focus
+  code. What a conversion needs: an imperative `showModal()` call after the element mounts (Dioxus renders the element
+  but does not open it); a `cancel` event handler that refuses Escape while a request is in flight, matching today's
+  busy rule; restoring focus to the triggering button on close, as the current code does; and checking that the desktop
+  app's webview supports `<dialog>` and `showModal()` (the shipped macOS app uses the system WKWebView; the Linux
+  development build uses WebKitGTK). It departs from the pattern all three dialogs share today, so convert them together
+  rather than one at a time. Not urgent: the restart-with dialog's `inert` guard already closes the practical focus
+  leaks.
 
 - **Goose foreground ownership.** Keep the basic Goose reporter for now; it does not distinguish a native or shelled-out
   child that inherits the reporter from the foreground conversation. The stricter database-backed implementation is

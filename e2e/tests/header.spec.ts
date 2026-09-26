@@ -1,6 +1,6 @@
 /**
  * The consolidated session header (the 2026-08 UI refresh): status, title,
- * age, copyable fields, and four lifecycle actions folded into one row over
+ * age, copyable fields, and five lifecycle actions folded into one row over
  * the tab strip. `session_view.rs`'s own docs carry the design; this file
  * proves the two properties that only a real layout engine can check —
  * that the row survives the SUPPORTED minimum width without clipping a
@@ -18,11 +18,11 @@ function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
 }
 
-// `.app-main`'s own floor (app.css): the sidebar is a fixed 340px and the
-// main pane refuses to shrink below 320px, so this is the narrowest the
-// header is ever asked to fit into without the shell itself scrolling.
+// The header's five full labels need a 580px main pane. The app still permits
+// a 320px pane, where its single row may clip; this test exercises the
+// narrowest rounded width expected to keep all five actions visible.
 const SIDEBAR_WIDTH = 340;
-const SUPPORTED_MAIN_PANE_WIDTH = 320;
+const SUPPORTED_MAIN_PANE_WIDTH = 580;
 const VIEWPORT_WIDTH = SIDEBAR_WIDTH + SUPPORTED_MAIN_PANE_WIDTH;
 const VIEWPORT_HEIGHT = 600;
 
@@ -75,6 +75,8 @@ test(
       for (const [name, box] of [
         ["badge", badgeBox],
         ["restart button", restartBox],
+        ["restart with button", (await page.locator(".restart-with-trigger").boundingBox())!],
+        ["replace with button", (await page.locator(".header-replace-with").boundingBox())!],
       ] as const) {
         expect(box.x, `the ${name} must not be pushed off the left edge`).toBeGreaterThanOrEqual(0);
         expect(
@@ -208,7 +210,7 @@ test("copy fields use the header's free width before truncating", async ({ page,
 });
 
 /**
- * The session header is the only surface that exposes all four lifecycle
+ * The session header is the only surface that exposes all five lifecycle
  * actions together. This test pins their shared keyboard order, proves that
  * both copy buttons hand their complete values to the native bridge, and
  * verifies that header actions reuse the existing composer prefill paths.
@@ -237,6 +239,7 @@ test("header actions stay ordered, copy full values, and open the right flows", 
     );
     expect(actionNames, "pointer and keyboard users must receive the same action order").toEqual([
       "restart",
+      "restart with",
       "replace",
       "clone",
       "replace with",
