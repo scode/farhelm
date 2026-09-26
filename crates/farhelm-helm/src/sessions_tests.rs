@@ -8831,9 +8831,12 @@ async fn github_repository_rest_routes_config_and_preserves_incomplete_status() 
                 claim.host,
                 "local-identity",
                 &rest_harness::session(&format!("recent-{index}"), index as i64),
-                ("/ephemeral", "/ephemeral"),
+                crate::store::HistoryPaths {
+                    canonical_cwd: "/ephemeral",
+                    display_cwd: "/ephemeral",
+                },
                 Some(&repo),
-                false,
+                crate::store::LaunchChoiceMemory::Leave,
             )
             .await
             .unwrap();
@@ -8935,9 +8938,12 @@ async fn github_repository_rest_preserves_recents_offline() {
             host,
             "repo-installation",
             &rest_harness::session("fresh", 1),
-            ("/checkouts/bar-1", "/checkouts/bar-1"),
+            crate::store::HistoryPaths {
+                canonical_cwd: "/checkouts/bar-1",
+                display_cwd: "/checkouts/bar-1",
+            },
             Some(&repo),
-            false,
+            crate::store::LaunchChoiceMemory::Leave,
         )
         .await
         .unwrap();

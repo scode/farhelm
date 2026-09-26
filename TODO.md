@@ -278,14 +278,13 @@ are large mostly because of their tests.
   `agent_kind` for hook argv, locator verify, and foreground lookup, leaving one generic report pipeline in core. Held
   out of the 2026-09 cleanup stack as a large move through `core.rs`; the harness-to-kind table
   (`LaunchHarness::agent_kind`) that was its first step is done.
-- **Helm `HelmStore`.** Medium effort. About 6.2k production lines, one struct with about 65 methods over nine concerns
-  (web tokens, device sessions, preferences, seen table, host registry, session cache, create and launch history,
-  profiles, remembered default). `apply_schema` (`farhelm-helm/src/store.rs:1508`) is one ~1,100-line function whose
-  version-history doc stops at v17 while migrations reach v30. `record_create_history_with_destination` (`:4813`, ~410
-  lines) pastes the same SQL "is newer" tie-break predicate six times in one upsert beside a Rust twin
-  (`history_order_is_newer`, `:106`), behind a three-layer wrapper chain with a positional bool. Session list filter and
-  sort types live in the storage layer. Fix: split into per-concern `impl HelmStore` modules as `checkout_config.rs`
-  already does, one function per migration, a single tie-break fragment, per-table helpers sharing the transaction.
+- **Split `HelmStore` by concern.** Medium effort, mostly mechanical. `farhelm-helm/src/store.rs` is one struct with
+  about 65 methods over nine concerns (web tokens, device sessions, preferences, seen table, host registry, session
+  cache, create and launch history, profiles, remembered default), `apply_schema` is one ~1,100-line migration ladder,
+  and session-list filter and sort types live in the storage layer. Fix: per-concern `impl HelmStore` modules as
+  `checkout_config.rs` already does, one function per migration, and the filter and sort types moved beside the list
+  code. Held out of the 2026-09 cleanup stack as a large move; the duplicated tie-break SQL, the create-history wrapper
+  chain and helpers, and the missing v18-v30 migration history that shared this entry are done.
 - **UI `CreateSessionForm`.** High effort. `farhelm-ui/src/list/create_form.rs:1431-5150` is one component with 62
   signals and a ~2,200-line markup body; the submit handler runs inline, and `apply_composer_search_result` (`:148`)
   takes 28 parameters. Seeded fields are spread over three signals each (`cwd`/`cwd_raw_seed`/`cwd_edited`, likewise

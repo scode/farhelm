@@ -108,6 +108,176 @@ fn history_order_is_newer(candidate: (i64, i64, &str), boundary: (i64, i64, &str
                 || (candidate.1 == boundary.1 && candidate.2 < boundary.2)))
 }
 
+/// SQL for [`history_order_is_newer`] inside a `folder_history` upsert: whether
+/// the incoming row (`excluded`) sorts newer than the stored one, with the same
+/// descending keys and ascending session-id tie-break. One copy because the
+/// upsert needs it for every column it may replace and for its `WHERE`; the
+/// Rust function and this text must state the same order.
+const FOLDER_ROW_IS_NEWER_SQL: &str = "(excluded.ordering_kind > folder_history.ordering_kind
+    OR (excluded.ordering_kind = folder_history.ordering_kind
+        AND (excluded.ordering_value > folder_history.ordering_value
+             OR (excluded.ordering_value = folder_history.ordering_value
+                 AND excluded.ordering_session_id < folder_history.ordering_session_id))))";
+
+/// Where an admitted create's history points.
+///
+/// `canonical_cwd` is the supervisor's target-verified identity, or the
+/// display spelling as a distinct key when the canonical fact is absent (the
+/// helm must never resolve a path itself); `display_cwd` is the spelling the
+/// caller submitted, which a later search should find.
+#[derive(Debug, Clone, Copy)]
+pub struct HistoryPaths<'a> {
+    pub canonical_cwd: &'a str,
+    pub display_cwd: &'a str,
+}
+
+/// Whether an admitted create may update the helm-wide remembered launch
+/// choices (see [`HelmStore::record_create_history_with_destination`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchChoiceMemory {
+    /// A user-initiated create: its structured choices become the defaults
+    /// the next "New" dialog preselects.
+    Remember,
+    /// An agent-originated create: recorded in history, but it must not move
+    /// the interactive user's defaults.
+    Leave,
+}
+
+/// The facts one admitted create writes into each history table.
+struct AdmittedCreate<'a> {
+    host: HostId,
+    identity: &'a str,
+    entry: &'a SessionInfo,
+    display_cwd: &'a str,
+    sequence: Option<i64>,
+    ordering_kind: i64,
+    ordering_value: i64,
+}
+
+/// Upsert `create`'s folder into `folder_history`, replacing the stored
+/// row's columns only when the incoming observation sorts newer (and
+/// upgrading an unproven canonical path to a proven one). Returns whether
+/// the row changed.
+fn upsert_folder_history(
+    tx: &rusqlite::Transaction<'_>,
+    create: &AdmittedCreate<'_>,
+    canonical_cwd: &str,
+) -> anyhow::Result<bool> {
+    let newer = FOLDER_ROW_IS_NEWER_SQL;
+    let sql = format!(
+        "INSERT INTO folder_history (
+             host_id, host_identity, canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq, ordering_kind, ordering_value, ordering_session_id
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT (host_id, host_identity, canonical_cwd) DO UPDATE SET
+             display_cwd = CASE WHEN {newer}
+                 THEN excluded.display_cwd ELSE folder_history.display_cwd END,
+             canonical_proven = MAX(folder_history.canonical_proven, excluded.canonical_proven),
+             created_at = CASE WHEN {newer}
+                 THEN excluded.created_at ELSE folder_history.created_at END,
+             creation_seq = CASE WHEN {newer}
+                 THEN excluded.creation_seq ELSE folder_history.creation_seq END,
+             ordering_kind = MAX(folder_history.ordering_kind, excluded.ordering_kind),
+             ordering_value = CASE WHEN {newer}
+                 THEN excluded.ordering_value ELSE folder_history.ordering_value END,
+             ordering_session_id = CASE WHEN {newer}
+                 THEN excluded.ordering_session_id ELSE folder_history.ordering_session_id END
+         WHERE {newer}
+            OR excluded.canonical_proven > folder_history.canonical_proven"
+    );
+    let changed = tx
+        .execute(
+            &sql,
+            rusqlite::params![
+                create.host,
+                create.identity,
+                canonical_cwd,
+                i64::from(create.entry.canonical_cwd.is_some()),
+                create.display_cwd,
+                create.entry.created_at,
+                create.sequence,
+                create.ordering_kind,
+                create.ordering_value,
+                create.entry.id,
+            ],
+        )
+        .context("recording created folder")?;
+    Ok(changed != 0)
+}
+
+/// Record `create`'s structured launch in `launch_history` and, when
+/// `memory` allows it, remember its permission and workspace-trust choices.
+/// Returns whether the history row was new. A create without a structured
+/// launch records nothing and returns `false`.
+fn record_launch_history(
+    tx: &rusqlite::Transaction<'_>,
+    create: &AdmittedCreate<'_>,
+    memory: LaunchChoiceMemory,
+) -> anyhow::Result<bool> {
+    let Some(selection) = &create.entry.launch else {
+        return Ok(false);
+    };
+    // Captured from the same admitted selection `launch_history` is about to
+    // record, not from a separately re-read one.
+    let permissions_word = selection
+        .permissions
+        .map(farhelm_proto::LaunchPermission::wire_word);
+    let workspace_trust = if selection.harness.offers_workspace_trust() {
+        selection.workspace_trust
+    } else {
+        None
+    };
+    let launch_json =
+        serde_json::to_string(selection).context("serializing structured launch history")?;
+    let changed = tx
+        .execute(
+            "INSERT INTO launch_history (
+                 host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, cwd, canonical_cwd, launch_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
+            rusqlite::params![
+                create.host,
+                create.identity,
+                create.entry.id,
+                create.entry.created_at,
+                create.sequence,
+                create.ordering_kind,
+                create.ordering_value,
+                create.display_cwd,
+                create.entry.canonical_cwd.as_deref(),
+                launch_json,
+            ],
+        )
+        .context("recording structured launch")?
+        != 0;
+    // The remembered launch side effects this admitted create triggers: see
+    // `record_create_history_with_destination`'s own doc for why this is
+    // gated on `memory` and placed here rather than written unconditionally
+    // from `entry.launch`.
+    if memory == LaunchChoiceMemory::Remember {
+        tx.execute(
+            "INSERT INTO preferences (singleton, remembered_permissions) \
+             VALUES (1, ?1) \
+             ON CONFLICT (singleton) DO UPDATE SET \
+                 remembered_permissions = excluded.remembered_permissions",
+            rusqlite::params![permissions_word],
+        )
+        .context("remembering the launched permissions choice")?;
+        // An unsupported harness or an omitted choice has no opinion about
+        // the last explicit trust choice.
+        if let Some(workspace_trust) = workspace_trust {
+            tx.execute(
+                "INSERT INTO preferences (singleton, remembered_workspace_trust) \
+                 VALUES (1, ?1) \
+                 ON CONFLICT (singleton) DO UPDATE SET \
+                     remembered_workspace_trust = excluded.remembered_workspace_trust",
+                rusqlite::params![workspace_trust],
+            )
+            .context("remembering the launched workspace-trust choice")?;
+        }
+    }
+    Ok(changed)
+}
+
 /// A reusable structured launch, tied to the installation that accepted it.
 ///
 /// This is deliberately not a snapshot of every session field: title and
@@ -802,7 +972,7 @@ pub fn is_known_remembered_permissions_word(text: &str) -> bool {
 /// The remembered launch fields are server-observed facts, unlike the
 /// client-declared list fields. The helm writes them as side effects of
 /// successful structured launches
-/// (`record_create_history_with_paths`) — see that function's doc for why
+/// (`record_create_history_with_destination`) — see that function's doc for why
 /// origin-gating them to user-initiated launches matters. The wire route still
 /// accepts them on `PUT` like the others (kept uniform with the rest of this
 /// type rather than carved into a read-only exception), but no shipped
@@ -1495,6 +1665,36 @@ pub struct HelmStore {
 ///   recorded whether a session had ever been looked at, so every upgraded
 ///   helm starts every session unseen — the same "no client kept a copy of
 ///   this" starting point version 14's `preferences` table began from.
+/// - 18: `preferences.compact`, the shared compact-row choice, kept in the
+///   same row as sort and selection so every client seeds the same layout.
+/// - 19: `launch_history` and `folder_history`, the structured-launch and
+///   folder suggestions. Created empty: parsing cached raw invocations would
+///   manufacture selections nobody made.
+/// - 20: `create_history_sessions`, the bounded admission window that keeps
+///   a replayed create from being counted twice.
+/// - 21: an ordering key on those admissions; rows that predate it stay as
+///   replay suppressors until ordinary eviction retires them.
+/// - 22: `create_history_cutoffs`, the durable eviction watermark that stops
+///   an evicted create's delayed replay from re-entering the window. Starts
+///   empty.
+/// - 23: every history table gains one explicit total-order key (sequenced
+///   rows after legacy ones). The history tables are dropped and recreated:
+///   the facts schema 22 discarded cannot be reconstructed honestly.
+/// - 24: `create_history_partitions` and a proven/unproven folder flag.
+///   History reset again, for the same reason.
+/// - 25: cutoffs remember a fallback frontier, not only a sequence one;
+///   history reset once more rather than risk resurrecting an old create.
+/// - 26: `preferences.remembered_permissions`, starting unset until the next
+///   structured launch.
+/// - 27: checkout configuration (see `checkout_config.rs`): the settings
+///   singleton and per-host overrides, starting unset at revision 0.
+/// - 28: `create_history_sessions.github_repo`, so repository intent shares
+///   the admission window's replay and eviction boundary.
+/// - 29: `session_cache.archived` dropped with session archiving; valid cached
+///   payloads lose only that flag, malformed ones are left for the read path
+///   to skip and log.
+/// - 30: `preferences.remembered_workspace_trust`, unset until a user makes
+///   an explicit choice.
 fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1696,7 +1896,7 @@ fn apply_schema(conn: &mut Connection) -> anyhow::Result<()> {
              -- columns are nullable — an unset preference is a real state
              -- (the default) and the row may hold one without the other.
              -- The remembered launch fields are written only by a successful
-             -- structured create (`record_create_history_with_paths`), never
+             -- structured create (`record_create_history_with_destination`), never
              -- by a client PUT: SPEC.md's launch-composer carve-out makes
              -- this one choice a server-observed fact rather than a
              -- client-declared preference like the list columns.
@@ -4725,13 +4925,16 @@ impl HelmStore {
         // Test/fixture callers of this convenience wrapper are simulating an
         // ordinary successful create, so they get the same remembering
         // behavior a real user-initiated one would.
-        self.record_create_history_with_paths(
+        self.record_create_history_with_destination(
             host,
             identity,
             entry,
-            folder_identity,
-            &entry.cwd,
-            true,
+            HistoryPaths {
+                canonical_cwd: folder_identity,
+                display_cwd: &entry.cwd,
+            },
+            None,
+            LaunchChoiceMemory::Remember,
         )
         .await
     }
@@ -4740,22 +4943,22 @@ impl HelmStore {
     /// spelling the caller actually submitted.
     ///
     /// The supervisor returns its accepted canonical identity in
-    /// `entry.canonical_cwd`, while the caller supplies `display_cwd` from
+    /// `entry.canonical_cwd`, while the caller supplies `paths.display_cwd` from
     /// the original request. `entry.cwd` remains the accepted session path,
     /// so it cannot recover a submitted `~` spelling after expansion. Both
-    /// explicit arguments are durable facts: canonical identity prevents
+    /// paths in `paths` are durable facts: canonical identity prevents
     /// aliases from becoming separate folders, and display spelling lets a
     /// later search find the path the person recognizes. When the canonical
     /// fact is absent, callers pass the display spelling as a distinct key;
     /// the helm must never resolve it itself.
     ///
-    /// `remember_launch_choices` gates TWO independent side effects that
+    /// `memory` gates TWO independent side effects that
     /// piggyback on this same admitted-create transaction: when `entry` is
     /// a structured launch, its permissions choice (one of the released
     /// permission words, or absent) becomes the helm-wide
     /// `preferences.remembered_permissions` memory. An explicit Codex, Muse, or Pi
     /// trust choice updates `remembered_workspace_trust` as well
-    /// (SPEC.md's launch-composer carve-out). The caller passes `false` for
+    /// (SPEC.md's launch-composer carve-out). The caller passes [`LaunchChoiceMemory::Leave`] for
     /// an agent-relay-originated create (`sessions::CreateOrigin::Agent`):
     /// that memory is the interactive user's own dialog default, and an
     /// agent replaying or cloning a structured session on its own initiative
@@ -4771,26 +4974,7 @@ impl HelmStore {
     /// overwrites the memory a newer create just set. Two creates racing
     /// within that window is the only way to observe it, and the cost is
     /// one wrong preselection on the next open.
-    pub async fn record_create_history_with_paths(
-        &self,
-        host: HostId,
-        identity: &str,
-        entry: &SessionInfo,
-        canonical_cwd: &str,
-        display_cwd: &str,
-        remember_launch_choices: bool,
-    ) -> anyhow::Result<bool> {
-        self.record_create_history_with_destination(
-            host,
-            identity,
-            entry,
-            (canonical_cwd, display_cwd),
-            None,
-            remember_launch_choices,
-        )
-        .await
-    }
-
+    ///
     /// Record accepted destination intent under the existing create window.
     ///
     /// `github_repo` must come from the helm's accepted request, never the
@@ -4804,9 +4988,9 @@ impl HelmStore {
         host: HostId,
         identity: &str,
         entry: &SessionInfo,
-        paths: (&str, &str),
+        paths: HistoryPaths<'_>,
         github_repo: Option<&farhelm_proto::GithubRepo>,
-        remember_launch_choices: bool,
+        memory: LaunchChoiceMemory,
     ) -> anyhow::Result<bool> {
         let github_repo = github_repo
             .map(|repo| {
@@ -4815,7 +4999,10 @@ impl HelmStore {
             })
             .transpose()
             .context("validating accepted repository history intent")?;
-        let (canonical_cwd, display_cwd) = paths;
+        let HistoryPaths {
+            canonical_cwd,
+            display_cwd,
+        } = paths;
         let identity = identity.to_string();
         let entry = entry.clone();
         let canonical_cwd = canonical_cwd.to_string();
@@ -4960,134 +5147,18 @@ impl HelmStore {
                 .context("switching create-history cutoff to fallback order")?;
             }
 
-            let folder_changed = if github_repo.is_none() { tx
-                .execute(
-                    "INSERT INTO folder_history (
-                         host_id, host_identity, canonical_cwd, canonical_proven, display_cwd, created_at, creation_seq, ordering_kind, ordering_value, ordering_session_id
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                     ON CONFLICT (host_id, host_identity, canonical_cwd) DO UPDATE SET
-                         display_cwd = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
-                              OR (excluded.ordering_kind = folder_history.ordering_kind
-                                  AND (excluded.ordering_value > folder_history.ordering_value
-                                       OR (excluded.ordering_value = folder_history.ordering_value
-                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
-                             THEN excluded.display_cwd ELSE folder_history.display_cwd END,
-                         canonical_proven = MAX(folder_history.canonical_proven, excluded.canonical_proven),
-                         created_at = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
-                              OR (excluded.ordering_kind = folder_history.ordering_kind
-                                  AND (excluded.ordering_value > folder_history.ordering_value
-                                       OR (excluded.ordering_value = folder_history.ordering_value
-                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
-                             THEN excluded.created_at ELSE folder_history.created_at END,
-                         creation_seq = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
-                              OR (excluded.ordering_kind = folder_history.ordering_kind
-                                  AND (excluded.ordering_value > folder_history.ordering_value
-                                       OR (excluded.ordering_value = folder_history.ordering_value
-                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
-                             THEN excluded.creation_seq ELSE folder_history.creation_seq END,
-                         ordering_kind = MAX(folder_history.ordering_kind, excluded.ordering_kind),
-                         ordering_value = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
-                              OR (excluded.ordering_kind = folder_history.ordering_kind
-                                  AND (excluded.ordering_value > folder_history.ordering_value
-                                       OR (excluded.ordering_value = folder_history.ordering_value
-                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
-                             THEN excluded.ordering_value ELSE folder_history.ordering_value END,
-                         ordering_session_id = CASE WHEN excluded.ordering_kind > folder_history.ordering_kind
-                              OR (excluded.ordering_kind = folder_history.ordering_kind
-                                  AND (excluded.ordering_value > folder_history.ordering_value
-                                       OR (excluded.ordering_value = folder_history.ordering_value
-                                           AND excluded.ordering_session_id < folder_history.ordering_session_id)))
-                             THEN excluded.ordering_session_id ELSE folder_history.ordering_session_id END
-                     WHERE excluded.ordering_kind > folder_history.ordering_kind
-                        OR (excluded.ordering_kind = folder_history.ordering_kind
-                            AND (excluded.ordering_value > folder_history.ordering_value
-                                 OR (excluded.ordering_value = folder_history.ordering_value
-                                     AND excluded.ordering_session_id < folder_history.ordering_session_id)))
-                        OR excluded.canonical_proven > folder_history.canonical_proven",
-                    rusqlite::params![
-                        host,
-                        identity,
-                        &canonical_cwd,
-                        i64::from(entry.canonical_cwd.is_some()),
-                        &display_cwd,
-                        entry.created_at,
-                        sequence,
-                        ordering_kind,
-                        ordering_value,
-                        entry.id,
-                    ],
-                )
-                .context("recording created folder")?
-                != 0 } else { false };
-
-            let launch_changed = if let Some(selection) = &entry.launch {
-                // Captured before `selection` is shadowed by its serialized
-                // form just below: this is the fact the permissions-memory
-                // write a few lines down needs, and it must come from the
-                // same admitted selection `launch_history` is about to
-                // record, not from a separately re-read one.
-                let permissions_word = selection
-                    .permissions
-                    .map(farhelm_proto::LaunchPermission::wire_word);
-                let workspace_trust = if selection.harness.offers_workspace_trust() {
-                    selection.workspace_trust
-                } else {
-                    None
-                };
-                let selection = serde_json::to_string(selection)
-                    .context("serializing structured launch history")?;
-                let changed = tx
-                    .execute(
-                        "INSERT INTO launch_history (
-                             host_id, host_identity, session_id, created_at, creation_seq, ordering_kind, ordering_value, cwd, canonical_cwd, launch_json
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                         ON CONFLICT (host_id, host_identity, session_id) DO NOTHING",
-                        rusqlite::params![
-                            host,
-                            identity,
-                            entry.id,
-                            entry.created_at,
-                            sequence,
-                            ordering_kind,
-                            ordering_value,
-                            &display_cwd,
-                            entry.canonical_cwd.as_deref(),
-                            selection,
-                        ],
-                    )
-                    .context("recording structured launch")?
-                    != 0;
-                // The remembered launch side effects this admitted create
-                // triggers: see `record_create_history_with_paths`'s own doc
-                // for why this is gated on `remember_launch_choices` and placed
-                // here rather than written unconditionally from
-                // `entry.launch`.
-                if remember_launch_choices {
-                    tx.execute(
-                        "INSERT INTO preferences (singleton, remembered_permissions) \
-                         VALUES (1, ?1) \
-                         ON CONFLICT (singleton) DO UPDATE SET \
-                             remembered_permissions = excluded.remembered_permissions",
-                        rusqlite::params![permissions_word],
-                    )
-                    .context("remembering the launched permissions choice")?;
-                    // An unsupported harness or an omitted choice has no
-                    // opinion about the last explicit trust choice.
-                    if let Some(workspace_trust) = workspace_trust {
-                        tx.execute(
-                            "INSERT INTO preferences (singleton, remembered_workspace_trust) \
-                             VALUES (1, ?1) \
-                             ON CONFLICT (singleton) DO UPDATE SET \
-                                 remembered_workspace_trust = excluded.remembered_workspace_trust",
-                            rusqlite::params![workspace_trust],
-                        )
-                        .context("remembering the launched workspace-trust choice")?;
-                    }
-                }
-                changed
-            } else {
-                false
+            let create = AdmittedCreate {
+                host,
+                identity: &identity,
+                entry: &entry,
+                display_cwd: &display_cwd,
+                sequence,
+                ordering_kind,
+                ordering_value,
             };
+            let folder_changed = github_repo.is_none()
+                && upsert_folder_history(&tx, &create, &canonical_cwd)?;
+            let launch_changed = record_launch_history(&tx, &create, memory)?;
 
             // Find the newest row that will be evicted before deleting it.
             // Persisting this lower watermark is what keeps a delayed replay
@@ -6383,9 +6454,12 @@ mod tests {
                     host,
                     "identity-a",
                     &entry,
-                    ("/work/bar-1", "/work/bar-1"),
+                    HistoryPaths {
+                        canonical_cwd: "/work/bar-1",
+                        display_cwd: "/work/bar-1"
+                    },
                     Some(&repo),
-                    true,
+                    LaunchChoiceMemory::Remember
                 )
                 .await
                 .unwrap()
@@ -6396,9 +6470,12 @@ mod tests {
                     host,
                     "identity-a",
                     &entry,
-                    ("/changed", "/changed"),
+                    HistoryPaths {
+                        canonical_cwd: "/changed",
+                        display_cwd: "/changed"
+                    },
                     Some(&other),
-                    true,
+                    LaunchChoiceMemory::Remember
                 )
                 .await
                 .unwrap(),
@@ -6412,9 +6489,12 @@ mod tests {
                     host,
                     "identity-a",
                     &entry,
-                    ("/work/bar-2", "/work/bar-2"),
+                    HistoryPaths {
+                        canonical_cwd: "/work/bar-2",
+                        display_cwd: "/work/bar-2"
+                    },
                     Some(&repo),
-                    true,
+                    LaunchChoiceMemory::Remember
                 )
                 .await
                 .unwrap()
@@ -6446,13 +6526,16 @@ mod tests {
         entry.id = "explicit-existing".into();
         entry.created_at = 102;
         store
-            .record_create_history_with_paths(
+            .record_create_history_with_destination(
                 host,
                 "identity-a",
                 &entry,
-                "/work/bar-1",
-                "/work/bar-1",
-                true,
+                HistoryPaths {
+                    canonical_cwd: "/work/bar-1",
+                    display_cwd: "/work/bar-1",
+                },
+                None,
+                LaunchChoiceMemory::Remember,
             )
             .await
             .unwrap();
@@ -6481,9 +6564,12 @@ mod tests {
                     host,
                     "identity-a",
                     &original,
-                    ("/work/bar-1", "/work/bar-1"),
+                    HistoryPaths {
+                        canonical_cwd: "/work/bar-1",
+                        display_cwd: "/work/bar-1"
+                    },
                     Some(&repo),
-                    false,
+                    LaunchChoiceMemory::Leave
                 )
                 .await
                 .unwrap()
@@ -6526,9 +6612,12 @@ mod tests {
                     host,
                     "identity-a",
                     &original,
-                    ("/work/bar-1", "/work/bar-1"),
+                    HistoryPaths {
+                        canonical_cwd: "/work/bar-1",
+                        display_cwd: "/work/bar-1"
+                    },
                     Some(&repo),
-                    false,
+                    LaunchChoiceMemory::Leave
                 )
                 .await
                 .unwrap()
@@ -6539,9 +6628,12 @@ mod tests {
                 host,
                 "identity-a",
                 &fresh,
-                ("/work/bar-2", "/work/bar-2"),
+                HistoryPaths {
+                    canonical_cwd: "/work/bar-2",
+                    display_cwd: "/work/bar-2",
+                },
                 Some(&repo),
-                false,
+                LaunchChoiceMemory::Leave,
             )
             .await
             .unwrap();
@@ -6686,7 +6778,7 @@ mod tests {
         );
     }
 
-    /// `remember_launch_choices` is the one thing distinguishing a user-
+    /// `LaunchChoiceMemory` is the one thing distinguishing a user-
     /// initiated structured create from an agent-relay-originated one at
     /// this function's call site (`sessions::do_create_session` passes
     /// `origin == CreateOrigin::User`): a user create updates the helm-wide
@@ -6697,7 +6789,7 @@ mod tests {
     /// which real caller passes which origin — is the risk this test
     /// exists to catch.
     #[farhelm_testtrace::test]
-    async fn remember_launch_choices_gates_whether_a_structured_create_updates_the_memory() {
+    async fn launch_choice_memory_gates_whether_a_structured_create_updates_the_memory() {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "permissions.example", "identity-a").await;
         let yolo = |id: &str, seq: u64| SessionInfo {
@@ -6714,31 +6806,37 @@ mod tests {
 
         let agent_origin = yolo("agent-origin", 1);
         store
-            .record_create_history_with_paths(
+            .record_create_history_with_destination(
                 host,
                 "identity-a",
                 &agent_origin,
-                &agent_origin.cwd,
-                &agent_origin.cwd,
-                false,
+                HistoryPaths {
+                    canonical_cwd: &agent_origin.cwd,
+                    display_cwd: &agent_origin.cwd,
+                },
+                None,
+                LaunchChoiceMemory::Leave,
             )
             .await
             .expect("record an agent-originated structured create");
         assert_eq!(
             store.preferences().await.unwrap().remembered_permissions,
             None,
-            "remember_launch_choices: false must leave the memory untouched"
+            "LaunchChoiceMemory::Leave must leave the memory untouched"
         );
 
         let user_origin = yolo("user-origin", 2);
         store
-            .record_create_history_with_paths(
+            .record_create_history_with_destination(
                 host,
                 "identity-a",
                 &user_origin,
-                &user_origin.cwd,
-                &user_origin.cwd,
-                true,
+                HistoryPaths {
+                    canonical_cwd: &user_origin.cwd,
+                    display_cwd: &user_origin.cwd,
+                },
+                None,
+                LaunchChoiceMemory::Remember,
             )
             .await
             .expect("record a user-originated structured create");
@@ -6750,7 +6848,7 @@ mod tests {
                 .remembered_permissions
                 .as_deref(),
             Some("yolo"),
-            "remember_launch_choices: true sets the memory"
+            "LaunchChoiceMemory::Remember sets the memory"
         );
 
         for (index, (permission, word)) in [
@@ -6776,13 +6874,16 @@ mod tests {
                 ..session(&format!("goose-mode-{index}"), 101 + index as i64)
             };
             store
-                .record_create_history_with_paths(
+                .record_create_history_with_destination(
                     host,
                     "identity-a",
                     &entry,
-                    &entry.cwd,
-                    &entry.cwd,
-                    true,
+                    HistoryPaths {
+                        canonical_cwd: &entry.cwd,
+                        display_cwd: &entry.cwd,
+                    },
+                    None,
+                    LaunchChoiceMemory::Remember,
                 )
                 .await
                 .expect("record a Goose permission mode");
@@ -6867,13 +6968,20 @@ mod tests {
                 ..session(id, 100)
             };
             store
-                .record_create_history_with_paths(
+                .record_create_history_with_destination(
                     host,
                     "identity-a",
                     &entry,
-                    &entry.cwd,
-                    &entry.cwd,
-                    user,
+                    HistoryPaths {
+                        canonical_cwd: &entry.cwd,
+                        display_cwd: &entry.cwd,
+                    },
+                    None,
+                    if user {
+                        LaunchChoiceMemory::Remember
+                    } else {
+                        LaunchChoiceMemory::Leave
+                    },
                 )
                 .await
                 .expect("record admitted structured launch");
@@ -8494,7 +8602,7 @@ mod tests {
         // The permissions memory round-trips the same three-way merge as
         // every other field, even though the shipped UI never PUTs it
         // itself (the helm writes it as a side effect of a launch — see
-        // `record_create_history_with_paths`) — the wire route makes no
+        // `record_create_history_with_destination`) — the wire route makes no
         // distinction, so it deserves the same coverage.
         store
             .update_preferences(patch(r#"{"remembered_permissions":"yolo"}"#))

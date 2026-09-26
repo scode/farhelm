@@ -14,7 +14,7 @@
 //! The remembered launch choices are exceptions to "every client writes its own
 //! choice": no shipped client ever PUTs them. They are written only by the helm
 //! itself, as a side effect of a successful user-initiated structured
-//! launch (`store::HelmStore::record_create_history_with_paths`), which is
+//! launch (`store::HelmStore::record_create_history_with_destination`), which is
 //! what makes them facts every client and the spawn path agree on rather
 //! than choices any one client claims happened. The route still accepts
 //! them on `PUT` for wire uniformity with the client-declared fields (and so a
