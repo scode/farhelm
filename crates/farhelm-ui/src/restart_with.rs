@@ -187,7 +187,7 @@ pub(crate) fn RestartWithDialog(
     let host = session.host_name.as_deref().unwrap_or("unknown host");
     let title = display_peer(&session.title);
     let folder = display_peer(&session.cwd);
-    let harness = format!("{:?}", baseline.harness).to_ascii_lowercase();
+    let harness = crate::launch_composer::harness_label(baseline.harness).to_ascii_lowercase();
 
     let apply_option = Callback::<ModelOption>::new({
         let catalog = catalog.clone();

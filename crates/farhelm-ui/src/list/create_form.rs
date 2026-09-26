@@ -2314,7 +2314,8 @@ pub(super) fn CreateSessionForm(
     // chosen profile or command, never that harness — so the button must not
     // promise "Codex" while the click would launch something else.
     let launch_harness = if *creation_surface.read() == CreationSurface::Structured {
-        structured_harness().map(|harness| format!("{harness:?}"))
+        structured_harness()
+            .map(|harness| crate::launch_composer::harness_label(harness).to_string())
     } else {
         None
     };
@@ -3966,10 +3967,10 @@ pub(super) fn CreateSessionForm(
                                                         crate::launch_composer::ComposerSearchResult::UsePath(folder)
                                                         | crate::launch_composer::ComposerSearchResult::Folder(folder) => rsx! { "Use this path: {display_peer(folder)}" },
                                                         crate::launch_composer::ComposerSearchResult::BrowsePath(folder) => rsx! { "Browse this path: {display_peer(folder)}" },
-                                                        crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {harness:?}" },
+                                                        crate::launch_composer::ComposerSearchResult::Harness(harness) => rsx! { "Harness: {crate::launch_composer::harness_label(*harness)}" },
                                                         crate::launch_composer::ComposerSearchResult::Command => rsx! { "Other / command" },
                                                         crate::launch_composer::ComposerSearchResult::Github(repo) => rsx! { "Fresh checkout: {repo.identifier()}" },
-                                                        crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({harness:?})" },
+                                                        crate::launch_composer::ComposerSearchResult::Model { id, harness } => rsx! { "Model: {display_peer(id)} ({crate::launch_composer::harness_label(*harness)})" },
                                                         crate::launch_composer::ComposerSearchResult::Effort(effort) => rsx! { "Effort: {crate::launch_composer::effort_value(*effort)}" },
                                                         crate::launch_composer::ComposerSearchResult::Permissions(permission) => rsx! {
                                                             "Permissions: "
@@ -4071,7 +4072,7 @@ pub(super) fn CreateSessionForm(
                                     // real text for that reason and hidden by the
                                     // stylesheet; the columns are what separate
                                     // the cells on screen.
-                                    span { class: "launch-composer-recent-harness", "{entry.selection.harness:?}" }
+                                    span { class: "launch-composer-recent-harness", "{crate::launch_composer::harness_label(entry.selection.harness)}" }
                                     span { class: "launch-composer-recent-destination", dir: "ltr",
                                         span { class: "launch-composer-recent-folder", "{display_peer(&crate::launch_composer::recent_destination_label(&entry))}" }
                                         span { class: "launch-composer-recent-separator", " · " }
@@ -4344,16 +4345,16 @@ pub(super) fn CreateSessionForm(
                         div { class: "launch-composer-choice launch-composer-harness-choice",
                             span { class: "launch-composer-section-label", "harness" }
                             div { class: "launch-composer-options",
-                                for (harness, label) in [
-                                    (LaunchHarness::Codex, "Codex"),
-                                    (LaunchHarness::Claude, "Claude"),
-                                    (LaunchHarness::Muse, "Muse"),
-                                    (LaunchHarness::Cursor, "Cursor"),
-                                    (LaunchHarness::Grok, "Grok"),
-                                    (LaunchHarness::Goose, "Goose"),
-                                    (LaunchHarness::Pi, "Pi"),
-                                    (LaunchHarness::Omp, "OMP"),
-                                    (LaunchHarness::OpenCode, "OpenCode"),
+                                for harness in [
+                                    LaunchHarness::Codex,
+                                    LaunchHarness::Claude,
+                                    LaunchHarness::Muse,
+                                    LaunchHarness::Cursor,
+                                    LaunchHarness::Grok,
+                                    LaunchHarness::Goose,
+                                    LaunchHarness::Pi,
+                                    LaunchHarness::Omp,
+                                    LaunchHarness::OpenCode,
                                 ] {
                                     button {
                                         r#type: "button",
@@ -4403,7 +4404,7 @@ pub(super) fn CreateSessionForm(
                                             focus_composer_surface();
                                             }
                                         },
-                                        "{label}"
+                                        "{crate::launch_composer::harness_label(harness)}"
                                     }
                                 }
                                 button {
