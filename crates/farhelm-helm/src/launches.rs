@@ -534,20 +534,15 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
             selection.harness, effort
         ));
     }
-    match (selection.harness, selection.permissions) {
-        (LaunchHarness::Goose, _)
-        | (LaunchHarness::Pi, Some(LaunchPermission::Yolo))
-        // OMP offers the harness default (no flag), Approve, and YOLO; its
-        // `write` mode is not a Farhelm choice and the Goose-only labels do
-        // not cross harnesses.
-        | (LaunchHarness::Omp, None)
-        | (LaunchHarness::Omp, Some(LaunchPermission::Yolo))
-        | (LaunchHarness::Omp, Some(LaunchPermission::Approve))
-        | (_, None)
-        | (_, Some(LaunchPermission::Yolo)) => {}
-        (_, Some(permission)) => {
-            return Err(format!("the {permission:?} permission is not offered by this harness"));
-        }
+    // The harness default (`None`) is always accepted; which explicit modes
+    // each harness offers is `LaunchHarness::offers_permission`'s table, the
+    // same one the browser offers buttons from.
+    if let Some(permission) = selection.permissions
+        && !selection.harness.offers_permission(permission)
+    {
+        return Err(format!(
+            "the {permission:?} permission is not offered by this harness"
+        ));
     }
     Ok(())
 }

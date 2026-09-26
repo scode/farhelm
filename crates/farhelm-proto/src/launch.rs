@@ -77,6 +77,39 @@ impl LaunchHarness {
             LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
         )
     }
+
+    /// Whether this harness offers `permission` as an explicit choice
+    /// ([`LaunchSelection::permissions`]).
+    ///
+    /// The one statement of the per-harness permission sets: the helm refuses
+    /// any other explicit permission, and the browser only offers, keeps, and
+    /// considers compatible the ones this allows. Before it existed each of
+    /// those kept its own table, and adding OMP's Approve had to touch every
+    /// one. Exhaustive over harnesses so a new one has to decide here rather
+    /// than inheriting a catch-all.
+    ///
+    /// The harness default (`None`) is not a question for this function: every
+    /// harness accepts it. Pi's rule that an omitted permission MEANS YOLO is
+    /// also separate (the helm rewrites it before validating, and the browser
+    /// displays it that way); here Pi simply offers YOLO and nothing else.
+    pub const fn offers_permission(self, permission: LaunchPermission) -> bool {
+        match self {
+            LaunchHarness::Goose => true,
+            LaunchHarness::Omp => {
+                matches!(
+                    permission,
+                    LaunchPermission::Yolo | LaunchPermission::Approve
+                )
+            }
+            LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor
+            | LaunchHarness::Pi
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok => matches!(permission, LaunchPermission::Yolo),
+        }
+    }
 }
 
 /// An explicit reasoning-effort value requested from a structured harness.
@@ -173,6 +206,56 @@ pub struct LaunchSelection {
 #[cfg(test)]
 mod tests {
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+
+    /// Spec: Goose offers every explicit permission, OMP offers YOLO and
+    /// Approve, and every other harness offers only YOLO (SPEC.md's
+    /// structured-launch permission rules).
+    ///
+    /// Why: this is the table both the helm's validation and the browser's
+    /// buttons and normalization read, so a slip here changes what users can
+    /// pick and what the helm accepts at once. The matrix is spelled out
+    /// rather than derived so the test states the rule independently, and an
+    /// exhaustive match makes a new harness a compile error here until it has
+    /// a row.
+    #[test]
+    fn each_harness_offers_exactly_its_permissions() {
+        use LaunchPermission::{Approve, Chat, SmartApprove, Yolo};
+        // Exhaustive on purpose: add the new harness to the matrix below.
+        match LaunchHarness::Goose {
+            LaunchHarness::Codex
+            | LaunchHarness::Claude
+            | LaunchHarness::Muse
+            | LaunchHarness::Cursor
+            | LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok => {}
+        }
+        let all = [Yolo, Approve, SmartApprove, Chat];
+        for (harness, offered) in [
+            (
+                LaunchHarness::Goose,
+                &[Yolo, Approve, SmartApprove, Chat][..],
+            ),
+            (LaunchHarness::Omp, &[Yolo, Approve][..]),
+            (LaunchHarness::Codex, &[Yolo][..]),
+            (LaunchHarness::Claude, &[Yolo][..]),
+            (LaunchHarness::Muse, &[Yolo][..]),
+            (LaunchHarness::Cursor, &[Yolo][..]),
+            (LaunchHarness::Pi, &[Yolo][..]),
+            (LaunchHarness::OpenCode, &[Yolo][..]),
+            (LaunchHarness::Grok, &[Yolo][..]),
+        ] {
+            for permission in all {
+                assert_eq!(
+                    harness.offers_permission(permission),
+                    offered.contains(&permission),
+                    "{harness:?} / {permission:?}"
+                );
+            }
+        }
+    }
 
     /// The persisted JSON preserves absence as absence, so later catalog
     /// changes cannot turn a harness default into an invented explicit choice.
