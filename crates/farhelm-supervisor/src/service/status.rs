@@ -679,9 +679,7 @@ pub(crate) async fn interrupted_preparation_detail(
     let Some(origin) = store.origin_working_copy(session_id).await? else {
         return Ok(None);
     };
-    let path = state_dir
-        .join("checkout-preparation")
-        .join(format!("{}.json", origin.id));
+    let path = crate::launch::preparation_state_path(state_dir, &origin.id);
     let detail = match crate::launch::read_preparation_state(&path, &origin.id) {
         Ok(Some(record)) if record.state == crate::launch::PreparationState::Ready => {
             return Ok(None);
