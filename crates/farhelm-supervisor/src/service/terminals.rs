@@ -1927,7 +1927,7 @@ impl Supervisor {
 
         let lease = loop {
             self.await_sink_candidates(tmux_name).await?;
-            if let Some(gate) = &self.seams.sink_lookup_gate {
+            if let Some(gate) = self.seams.faults.sink_lookup_gate() {
                 gate().await;
             }
             let lookup = {
@@ -1965,7 +1965,7 @@ impl Supervisor {
             };
             let candidate = match lookup {
                 Lookup::Candidate => {
-                    if let Some(gate) = &self.seams.sink_candidate_wait_gate {
+                    if let Some(gate) = self.seams.faults.sink_candidate_wait_gate() {
                         gate().await;
                     }
                     continue;
@@ -2007,7 +2007,7 @@ impl Supervisor {
                 ),
                 Lookup::Missing(candidate) => candidate,
             };
-            if let Some(gate) = &self.seams.sink_reservation_gate {
+            if let Some(gate) = self.seams.faults.sink_reservation_gate() {
                 gate().await;
             }
 
@@ -2711,33 +2711,37 @@ mod tests {
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                sink_lookup_gate: Some(Arc::new(move || {
-                    let barrier = Arc::clone(&gate_lookup_barrier);
-                    let call = gate_lookup_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Box::pin(async move {
-                        if call < 2 {
-                            barrier.wait().await;
-                        }
-                    })
-                })),
-                sink_candidate_wait_gate: Some(Arc::new(move || {
-                    let observed = candidate_observed.clone();
-                    Box::pin(async move {
-                        let _ = observed.send(());
-                    })
-                })),
-                sink_reservation_gate: Some(Arc::new(move || {
-                    let entered = Arc::clone(&gate_reservation_entered);
-                    let release = Arc::clone(&gate_reservation_release);
-                    let call =
-                        gate_reservation_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Box::pin(async move {
-                        if call == 0 {
-                            entered.notify_one();
-                            release.notified().await;
-                        }
-                    })
-                })),
+                faults: crate::service::FaultHooks {
+                    sink_lookup_gate: Some(Arc::new(move || {
+                        let barrier = Arc::clone(&gate_lookup_barrier);
+                        let call =
+                            gate_lookup_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        Box::pin(async move {
+                            if call < 2 {
+                                barrier.wait().await;
+                            }
+                        })
+                    })),
+                    sink_candidate_wait_gate: Some(Arc::new(move || {
+                        let observed = candidate_observed.clone();
+                        Box::pin(async move {
+                            let _ = observed.send(());
+                        })
+                    })),
+                    sink_reservation_gate: Some(Arc::new(move || {
+                        let entered = Arc::clone(&gate_reservation_entered);
+                        let release = Arc::clone(&gate_reservation_release);
+                        let call = gate_reservation_calls
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        Box::pin(async move {
+                            if call == 0 {
+                                entered.notify_one();
+                                release.notified().await;
+                            }
+                        })
+                    })),
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )

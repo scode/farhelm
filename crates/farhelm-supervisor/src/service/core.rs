@@ -655,6 +655,108 @@ pub type ForwarderCleanupGate = SinkReservationGate;
 /// the settle's own timing is untouched.
 pub type TabSettleGate = SinkReservationGate;
 
+/// Declares [`FaultHooks`]: one optional hook per entry, present only when
+/// tests can install it, each with an accessor that reads `None` otherwise.
+macro_rules! fault_hooks {
+    ($($(#[$meta:meta])* $name:ident: $ty:ty,)*) => {
+        /// The fault and gate hooks a test installs to hold a boundary still
+        /// or fail a step on purpose, split from the real configuration in
+        /// [`SupervisorSeams`].
+        ///
+        /// The fields exist only under `cfg(test)` or the `test-seams`
+        /// feature, which the e2e tests enable through a dev-dependency.
+        /// Without them this type is empty, so a production build carries no
+        /// hook, and every accessor returns `None`. Call sites use the
+        /// accessors, never the fields, so they compile the same either way
+        /// and need no `cfg` of their own.
+        #[derive(Clone, Default)]
+        pub struct FaultHooks {
+            $(
+                $(#[$meta])*
+                #[cfg(any(test, feature = "test-seams"))]
+                pub $name: Option<$ty>,
+            )*
+        }
+
+        impl FaultHooks {
+            $(
+                #[doc = concat!("The installed `", stringify!($name), "` hook, if any; always `None` without `test-seams`.")]
+                #[inline]
+                pub fn $name(&self) -> Option<&$ty> {
+                    #[cfg(any(test, feature = "test-seams"))]
+                    {
+                        self.$name.as_ref()
+                    }
+                    #[cfg(not(any(test, feature = "test-seams")))]
+                    {
+                        None
+                    }
+                }
+            )*
+        }
+    };
+}
+
+fault_hooks! {
+    /// See [`CreateCrashSeam`]. `None` in production.
+    create_crash: CreateCrashSeam,
+    /// See [`CreateIntentWaiting`]. `None` in production.
+    create_intent_waiting: CreateIntentWaiting,
+    /// Reports the parent ID only after restricted create's lifecycle
+    /// acquisition returns Pending. This lets revocation tests change the
+    /// durable credential after the edge check but before protected admission.
+    /// `None` in production; the callback must not block.
+    create_parent_waiting: CreateIntentWaiting,
+    /// Reports an actual Pending directory-admission acquisition. Race tests
+    /// use this to establish that a create is queued behind a real Delete or
+    /// Restart, rather than merely scheduled later. `None` in production.
+    create_directory_waiting: Arc<dyn Fn() + Send + Sync>,
+    /// See [`crate::working_copies::AllocationFault`]. `None` in
+    /// production; tests inject a failure in the post-mkdir durability effect.
+    allocation_fault: crate::working_copies::AllocationFault,
+    /// Replaces the preparation-directory parent fsync itself, not a marker
+    /// beside it. Production uses File::sync_all; tests can prove a failed
+    /// barrier prevents NotStarted publication and terminal admission.
+    preparation_parent_sync: PreparationParentSync,
+    /// Replaces each post-rename archive parent fsync in Delete and startup
+    /// recovery. See [`crate::working_copies::ArchiveParentSync`].
+    archive_parent_sync: crate::working_copies::ArchiveParentSync,
+    /// See [`crate::store::PreMkdirRollbackFault`]. `None` in production;
+    /// the test seam proves a failed rollback preserves every original row.
+    pre_mkdir_rollback_fault: crate::store::PreMkdirRollbackFault,
+    /// See [`crate::store::RetainedRefusalFault`]. `None` in production;
+    /// the test seam proves failed refusal settlement leaves evidence pending.
+    retained_refusal_fault: crate::store::RetainedRefusalFault,
+    /// See [`CaptureStoreFault`]. `None` in production.
+    capture_store_fault: CaptureStoreFault,
+    /// See `super::capture::CaptureGate`. `None` in production.
+    capture_gate: CaptureGate,
+    /// Pause a Codex report before its capture transaction. Tests let a refresh
+    /// promote the previous record before the report reads its binding.
+    /// `None` in production.
+    codex_report_gate: CaptureGate,
+    /// See [`SinkReservationGate`]. `None` in production.
+    sink_reservation_gate: SinkReservationGate,
+    /// See [`SinkLookupGate`]. `None` in production.
+    sink_lookup_gate: SinkLookupGate,
+    /// Test signal emitted after locked lookup observes a candidate barrier.
+    sink_candidate_wait_gate: SinkLookupGate,
+    /// See [`NaturalDetachGate`]. `None` in production.
+    natural_detach_gate: NaturalDetachGate,
+    /// See [`ForwarderCleanupGate`]. `None` in production.
+    forwarder_cleanup_gate: ForwarderCleanupGate,
+    /// See [`AgentAuthGate`]. `None` in production.
+    agent_auth_gate: AgentAuthGate,
+    /// See [`SampleFault`]. `None` in production.
+    sample_fault: SampleFault,
+    /// See [`TabOpenFault`]. `None` in production.
+    tab_open_fault: TabOpenFault,
+    /// See [`TabSettleGate`]. `None` in production.
+    tab_settle_gate: TabSettleGate,
+    /// See [`ReplacementFault`]. `None` in production.
+    replacement_fault: ReplacementFault,
+}
+
 /// The injectable seams a `Supervisor` is built with. All default to
 /// production behavior; grouped into one struct so a new injection point
 /// does not grow the constructor's signature again.
@@ -712,35 +814,9 @@ pub struct SupervisorSeams {
     /// reason its neighbour defaults to `All`: this is an operator
     /// override, not a value with a discoverable "real" setting.
     pub agent_instructions: crate::agent_kind::AgentInstructions,
-    /// See [`CreateCrashSeam`]. `None` in production.
-    pub create_crash: Option<CreateCrashSeam>,
-    /// See [`CreateIntentWaiting`]. `None` in production.
-    pub create_intent_waiting: Option<CreateIntentWaiting>,
-    /// Reports the parent ID only after restricted create's lifecycle
-    /// acquisition returns Pending. This lets revocation tests change the
-    /// durable credential after the edge check but before protected admission.
-    /// `None` in production; the callback must not block.
-    pub create_parent_waiting: Option<CreateIntentWaiting>,
-    /// Reports an actual Pending directory-admission acquisition. Race tests
-    /// use this to establish that a create is queued behind a real Delete or
-    /// Restart, rather than merely scheduled later. `None` in production.
-    pub create_directory_waiting: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// See [`crate::working_copies::AllocationFault`]. `None` in
-    /// production; tests inject a failure in the post-mkdir durability effect.
-    pub allocation_fault: Option<crate::working_copies::AllocationFault>,
-    /// Replaces the preparation-directory parent fsync itself, not a marker
-    /// beside it. Production uses File::sync_all; tests can prove a failed
-    /// barrier prevents NotStarted publication and terminal admission.
-    pub preparation_parent_sync: Option<PreparationParentSync>,
-    /// Replaces each post-rename archive parent fsync in Delete and startup
-    /// recovery. See [`crate::working_copies::ArchiveParentSync`].
-    pub archive_parent_sync: Option<crate::working_copies::ArchiveParentSync>,
-    /// See [`crate::store::PreMkdirRollbackFault`]. `None` in production;
-    /// the test seam proves a failed rollback preserves every original row.
-    pub pre_mkdir_rollback_fault: Option<crate::store::PreMkdirRollbackFault>,
-    /// See [`crate::store::RetainedRefusalFault`]. `None` in production;
-    /// the test seam proves failed refusal settlement leaves evidence pending.
-    pub retained_refusal_fault: Option<crate::store::RetainedRefusalFault>,
+    /// The fault and gate hooks tests install. See [`FaultHooks`]: without
+    /// the `test-seams` feature it is empty and every hook reads as absent.
+    pub faults: FaultHooks,
     /// Where the agents' own record directories are rooted (PLAN_M3.md
     /// item 8): `~/.claude/projects/...`, `~/.codex/sessions/...`.
     ///
@@ -772,28 +848,6 @@ pub struct SupervisorSeams {
     /// proving two sessions in one directory do NOT overlap does not mean
     /// waiting out a production minute.
     pub capture_window: CaptureWindowBounds,
-    /// See [`CaptureStoreFault`]. `None` in production.
-    pub capture_store_fault: Option<CaptureStoreFault>,
-    /// See `super::capture::CaptureGate`. `None` in production.
-    pub capture_gate: Option<CaptureGate>,
-    /// Pause a Codex report before its capture transaction. Tests let a refresh
-    /// promote the previous record before the report reads its binding.
-    /// `None` in production.
-    pub codex_report_gate: Option<CaptureGate>,
-    /// See [`SinkReservationGate`]. `None` in production.
-    pub sink_reservation_gate: Option<SinkReservationGate>,
-    /// See [`SinkLookupGate`]. `None` in production.
-    pub sink_lookup_gate: Option<SinkLookupGate>,
-    /// Test signal emitted after locked lookup observes a candidate barrier.
-    pub sink_candidate_wait_gate: Option<SinkLookupGate>,
-    /// See [`NaturalDetachGate`]. `None` in production.
-    pub natural_detach_gate: Option<NaturalDetachGate>,
-    /// See [`ForwarderCleanupGate`]. `None` in production.
-    pub forwarder_cleanup_gate: Option<ForwarderCleanupGate>,
-    /// See [`AgentAuthGate`]. `None` in production.
-    pub agent_auth_gate: Option<AgentAuthGate>,
-    /// See [`SampleFault`]. `None` in production.
-    pub sample_fault: Option<SampleFault>,
     /// How often the supervisor's own periodic task fires — see
     /// [`crate::service::ticker`] for what rides that cadence and
     /// [`TICKER_INTERVAL`] for why production picks the value it does.
@@ -884,12 +938,6 @@ pub struct SupervisorSeams {
     /// two share one shell-resolution contract, and a seam that covered
     /// only one of them would be a second place for that contract to live.
     pub launch_shell: Option<String>,
-    /// See [`TabOpenFault`]. `None` in production.
-    pub tab_open_fault: Option<TabOpenFault>,
-    /// See [`TabSettleGate`]. `None` in production.
-    pub tab_settle_gate: Option<TabSettleGate>,
-    /// See [`ReplacementFault`]. `None` in production.
-    pub replacement_fault: Option<ReplacementFault>,
     /// The filesystem an attachment upload stages through
     /// (`crate::files::FaultSeam`). [`crate::files::RealFs`] in
     /// production, which is the real syscalls.
@@ -959,37 +1007,16 @@ impl Default for SupervisorSeams {
             tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
-            create_crash: None,
-            create_intent_waiting: None,
-            create_parent_waiting: None,
-            create_directory_waiting: None,
-            allocation_fault: None,
-            preparation_parent_sync: None,
-            archive_parent_sync: None,
-            pre_mkdir_rollback_fault: None,
-            retained_refusal_fault: None,
+            faults: FaultHooks::default(),
             agent_home: None,
             user_home: None,
             capture_window: CaptureWindowBounds::default(),
-            capture_store_fault: None,
-            capture_gate: None,
-            codex_report_gate: None,
-            sink_reservation_gate: None,
-            sink_lookup_gate: None,
-            sink_candidate_wait_gate: None,
-            natural_detach_gate: None,
-            forwarder_cleanup_gate: None,
-            agent_auth_gate: None,
-            sample_fault: None,
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
             work_start_clock: Arc::new(work_start_now),
             launch_env: Vec::new(),
             scopes: Arc::new(crate::scope::ScopeManager::systemd()),
             launch_shell: None,
-            tab_open_fault: None,
-            tab_settle_gate: None,
-            replacement_fault: None,
             upload_fs: Arc::new(crate::files::RealFs),
         }
     }
@@ -5456,7 +5483,10 @@ impl Supervisor {
                 continue;
             }
             match store
-                .reconcile_working_copy_archive(&row.id, seams.archive_parent_sync.clone())
+                .reconcile_working_copy_archive(
+                    &row.id,
+                    seams.faults.archive_parent_sync().cloned(),
+                )
                 .await
             {
                 Ok(crate::working_copies::ReconcileOutcome::Moved { destination }) => {
@@ -6790,7 +6820,7 @@ impl Supervisor {
         };
         let acquisition = Arc::clone(&self.working_copy_operations).lock_owned();
         tokio::pin!(acquisition);
-        let mut observer = self.seams.create_directory_waiting.as_ref();
+        let mut observer = self.seams.faults.create_directory_waiting();
         let directory = std::future::poll_fn(|cx| {
             let result = std::future::Future::poll(acquisition.as_mut(), cx);
             if result.is_pending()
@@ -6804,7 +6834,7 @@ impl Supervisor {
         let parent = if let Some(auth) = restricted_auth {
             let acquisition = self.lifecycle_locks.claim(&auth.session_id);
             tokio::pin!(acquisition);
-            let mut observer = self.seams.create_parent_waiting.as_ref();
+            let mut observer = self.seams.faults.create_parent_waiting();
             let parent = std::future::poll_fn(|cx| {
                 let result = std::future::Future::poll(acquisition.as_mut(), cx);
                 if result.is_pending()
@@ -6841,7 +6871,7 @@ impl Supervisor {
     /// Tests observe this future yielding, rather than a task merely reaching
     /// a line before it attempts acquisition; queue position is unchanged.
     async fn claim_create_intent(&self, key: &str) -> KeyedGuard {
-        if let Some(observer) = self.seams.create_intent_waiting.as_ref() {
+        if let Some(observer) = self.seams.faults.create_intent_waiting() {
             let acquisition = self.intent_locks.claim(key);
             tokio::pin!(acquisition);
             let mut observer = Some(observer);
@@ -9024,7 +9054,7 @@ impl Supervisor {
                         .allocate_working_copy(
                             &plan.id,
                             expected,
-                            self.seams.allocation_fault.clone(),
+                            self.seams.faults.allocation_fault().cloned(),
                         )
                         .await
                     {
@@ -10864,7 +10894,8 @@ impl Supervisor {
         // observer cannot have moved it first.
         let confirmation_fault = if existing_session.is_some() {
             self.seams
-                .replacement_fault
+                .faults
+                .replacement_fault()
                 .as_ref()
                 .and_then(|fault| fault(ReplacementStage::BeforeConfirmation).err())
                 .map(|error| error.context("injected replacement confirmation failure"))
@@ -12143,7 +12174,7 @@ impl Supervisor {
         // The seam stands in for the marking itself when installed: what
         // it exists to reach is the state AFTER this call fails — a live,
         // unmarked, unfindable window — which no other input can produce.
-        let marked = match &self.seams.tab_open_fault {
+        let marked = match self.seams.faults.tab_open_fault() {
             Some(fault) => fault(TabOpenStage::BeforeMarking),
             None => Ok(()),
         };
@@ -12196,7 +12227,7 @@ impl Supervisor {
         // that window: the window and its marker exist here, so a waiting
         // test can watch tmux for the pane's death and only then let the
         // settle run. See [`TabSettleGate`]; production installs none.
-        if let Some(gate) = &self.seams.tab_settle_gate {
+        if let Some(gate) = self.seams.faults.tab_settle_gate() {
             gate().await;
         }
         match self.settled_tab_pane(&terminal).await {
@@ -13066,7 +13097,7 @@ impl Supervisor {
                 .await
                 .map(|()| terminal.pane.clone()),
             SpawnTarget::ExistingSession(session) => {
-                if let Some(fault) = &self.seams.replacement_fault
+                if let Some(fault) = self.seams.faults.replacement_fault()
                     && let Err(error) = fault(ReplacementStage::BeforeCreation)
                 {
                     return Err(SpawnFailure::Tmux {
@@ -13106,7 +13137,7 @@ impl Supervisor {
                 // which is exactly what that variant's unwind expects.
                 if fresh_target
                     && existing_session.is_some()
-                    && let Some(fault) = &self.seams.replacement_fault
+                    && let Some(fault) = self.seams.faults.replacement_fault()
                     && let Err(error) = fault(ReplacementStage::BeforeMarking)
                 {
                     return Err(SpawnFailure::Tmux {
@@ -13229,7 +13260,7 @@ impl Supervisor {
                 id,
                 working_copy_id,
                 settlement,
-                self.seams.pre_mkdir_rollback_fault.clone(),
+                self.seams.faults.pre_mkdir_rollback_fault().cloned(),
             )
             .await
         {
@@ -13277,7 +13308,7 @@ impl Supervisor {
                 id,
                 &format!("{error:#}"),
                 settlement,
-                self.seams.retained_refusal_fault.clone(),
+                self.seams.faults.retained_refusal_fault().cloned(),
             )
             .await
         {
@@ -13470,7 +13501,7 @@ impl Supervisor {
         // directory entry would let clone/hook side effects survive a
         // crash without their state evidence.
         std::fs::File::open(&self.state_dir)
-            .and_then(|file| match &self.seams.preparation_parent_sync {
+            .and_then(|file| match self.seams.faults.preparation_parent_sync() {
                 Some(sync) => sync(&file),
                 None => file.sync_all(),
             })
@@ -13520,7 +13551,7 @@ impl Supervisor {
     /// failed. Production installs no seam, so this is an `Ok(())` after
     /// one `Option` check.
     fn simulate_crash(&self, stage: CreateStage) -> anyhow::Result<()> {
-        match self.seams.create_crash.as_ref() {
+        match self.seams.faults.create_crash() {
             Some(crash) => crash(stage).map_err(|e| e.context(SimulatedCrash)),
             None => Ok(()),
         }
@@ -13867,7 +13898,7 @@ impl Supervisor {
                 "the Codex report has no kernel-attributed local process",
             )
         })?;
-        if let Some(gate) = &self.seams.codex_report_gate {
+        if let Some(gate) = self.seams.faults.codex_report_gate() {
             gate().await;
         }
         // Step 2: the bounded capture claim, then the authoritative
@@ -13960,7 +13991,8 @@ impl Supervisor {
         // path without a store that is genuinely broken.
         let injected = self
             .seams
-            .capture_store_fault
+            .faults
+            .capture_store_fault()
             .as_ref()
             .map(|fault| fault(super::capture::CaptureWrite::Report, id));
         let written = match injected {
@@ -14111,7 +14143,8 @@ impl Supervisor {
 
         let injected = self
             .seams
-            .capture_store_fault
+            .faults
+            .capture_store_fault()
             .as_ref()
             .map(|fault| fault(super::capture::CaptureWrite::Report, id));
         let written = match injected {
@@ -14286,7 +14319,8 @@ impl Supervisor {
         // path without a store that is genuinely broken.
         let injected = self
             .seams
-            .capture_store_fault
+            .faults
+            .capture_store_fault()
             .as_ref()
             .map(|fault| fault(super::capture::CaptureWrite::Report, id));
         let written = match injected {
@@ -14371,7 +14405,8 @@ impl Supervisor {
         // path without a store that is genuinely broken.
         let injected = self
             .seams
-            .capture_store_fault
+            .faults
+            .capture_store_fault()
             .as_ref()
             .map(|fault| fault(super::capture::CaptureWrite::Report, id));
         let written = match injected {
@@ -16922,7 +16957,10 @@ pub(crate) mod tests {
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
                     launch_shell: Some("/bin/bash".to_string()),
-                    replacement_fault: Some(fault),
+                    faults: FaultHooks {
+                        replacement_fault: Some(fault),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -22322,27 +22360,30 @@ exit 0
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    create_crash: Some(Arc::new(move |stage| {
-                        if stage != CreateStage::DuringLaunch {
-                            return Ok(());
-                        }
-                        // A second connection to the same database, which
-                        // is what a concurrent handler would have: the
-                        // busy timeout covers the overlap.
-                        let db = db.clone();
-                        let deleted = Arc::clone(&deleted);
-                        tokio::task::block_in_place(move || {
-                            tokio::runtime::Handle::current().block_on(async move {
-                                let store = SessionStore::open(&db, false).await?;
-                                for row in store.load_all().await? {
-                                    store.delete_session_settling_reservations(&row.id).await?;
-                                }
-                                deleted.store(true, std::sync::atomic::Ordering::SeqCst);
-                                anyhow::Ok(())
-                            })
-                        })?;
-                        Ok(())
-                    })),
+                    faults: FaultHooks {
+                        create_crash: Some(Arc::new(move |stage| {
+                            if stage != CreateStage::DuringLaunch {
+                                return Ok(());
+                            }
+                            // A second connection to the same database, which
+                            // is what a concurrent handler would have: the
+                            // busy timeout covers the overlap.
+                            let db = db.clone();
+                            let deleted = Arc::clone(&deleted);
+                            tokio::task::block_in_place(move || {
+                                tokio::runtime::Handle::current().block_on(async move {
+                                    let store = SessionStore::open(&db, false).await?;
+                                    for row in store.load_all().await? {
+                                        store.delete_session_settling_reservations(&row.id).await?;
+                                    }
+                                    deleted.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    anyhow::Ok(())
+                                })
+                            })?;
+                            Ok(())
+                        })),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -22521,19 +22562,22 @@ exit 0
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    create_crash: Some(Arc::new(move |stage| {
-                        if stage == CreateStage::DuringLaunch
-                            && let Some(sup) = handle.get().and_then(std::sync::Weak::upgrade)
-                        {
-                            let present = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    sup.sessions.lock().await.contains_key("stranded")
-                                })
-                            });
-                            *seen.lock().expect("seen mutex") = Some(present);
-                        }
-                        Ok(())
-                    })),
+                    faults: FaultHooks {
+                        create_crash: Some(Arc::new(move |stage| {
+                            if stage == CreateStage::DuringLaunch
+                                && let Some(sup) = handle.get().and_then(std::sync::Weak::upgrade)
+                            {
+                                let present = tokio::task::block_in_place(|| {
+                                    tokio::runtime::Handle::current().block_on(async {
+                                        sup.sessions.lock().await.contains_key("stranded")
+                                    })
+                                });
+                                *seen.lock().expect("seen mutex") = Some(present);
+                            }
+                            Ok(())
+                        })),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -24223,17 +24267,20 @@ exit 0
                     // ignores the `-l -i -c` it is handed, and pinning the
                     // shell keeps a login profile out of the picture.
                     launch_shell: Some("/bin/sh".to_string()),
-                    create_crash: Some(Arc::new(move |stage| {
-                        if stage != CreateStage::AfterRecord {
-                            return Ok(());
-                        }
-                        // Validation has run and nothing external exists
-                        // yet: exactly the window a repoint would have to
-                        // land in to win.
-                        std::fs::remove_file(&link)?;
-                        std::os::unix::fs::symlink(&replacement, &link)?;
-                        Ok(())
-                    })),
+                    faults: FaultHooks {
+                        create_crash: Some(Arc::new(move |stage| {
+                            if stage != CreateStage::AfterRecord {
+                                return Ok(());
+                            }
+                            // Validation has run and nothing external exists
+                            // yet: exactly the window a repoint would have to
+                            // land in to win.
+                            std::fs::remove_file(&link)?;
+                            std::os::unix::fs::symlink(&replacement, &link)?;
+                            Ok(())
+                        })),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -26262,7 +26309,10 @@ exit 0
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                    faults: FaultHooks {
+                        create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -26350,7 +26400,10 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                faults: FaultHooks {
+                    create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -26777,25 +26830,28 @@ exit 0
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    retained_refusal_fault: Some(Arc::new(move || {
-                        entered_tx
-                            .lock()
-                            .unwrap()
-                            .take()
-                            .expect("one settlement")
-                            .send(())
-                            .unwrap();
-                        let _permit = tokio::runtime::Handle::current().block_on(async {
-                            tokio::time::timeout(Duration::from_secs(5), gate.acquire())
-                                .await
-                                .expect("the test must release its settlement gate")
-                                .expect("the settlement gate remains open")
-                        });
-                        if fail_settlement {
-                            anyhow::bail!("fixture retained settlement failure");
-                        }
-                        Ok(())
-                    })),
+                    faults: FaultHooks {
+                        retained_refusal_fault: Some(Arc::new(move || {
+                            entered_tx
+                                .lock()
+                                .unwrap()
+                                .take()
+                                .expect("one settlement")
+                                .send(())
+                                .unwrap();
+                            let _permit = tokio::runtime::Handle::current().block_on(async {
+                                tokio::time::timeout(Duration::from_secs(5), gate.acquire())
+                                    .await
+                                    .expect("the test must release its settlement gate")
+                                    .expect("the settlement gate remains open")
+                            });
+                            if fail_settlement {
+                                anyhow::bail!("fixture retained settlement failure");
+                            }
+                            Ok(())
+                        })),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -26927,12 +26983,15 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_crash: Some(Arc::new(|stage| {
-                    if stage == CreateStage::DuringLaunch {
-                        anyhow::bail!("interrupt after terminal acceptance");
-                    }
-                    Ok(())
-                })),
+                faults: FaultHooks {
+                    create_crash: Some(Arc::new(|stage| {
+                        if stage == CreateStage::DuringLaunch {
+                            anyhow::bail!("interrupt after terminal acceptance");
+                        }
+                        Ok(())
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..sentinel_recovery_seams()
             },
         )
@@ -27544,12 +27603,17 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_crash: Some(Arc::new(move |stage| {
-                    if stage == boundary && !fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                        anyhow::bail!("interrupt checkout create at its durable boundary");
-                    }
-                    Ok(())
-                })),
+                faults: FaultHooks {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage == boundary
+                            && !fired.swap(true, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            anyhow::bail!("interrupt checkout create at its durable boundary");
+                        }
+                        Ok(())
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -28402,14 +28466,17 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_crash: Some(Arc::new(move |stage| {
-                    if stage == CreateStage::AfterRecord
-                        && counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1
-                    {
-                        anyhow::bail!("interrupt the borrower after its durable record");
-                    }
-                    Ok(())
-                })),
+                faults: FaultHooks {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage == CreateStage::AfterRecord
+                            && counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1
+                        {
+                            anyhow::bail!("interrupt the borrower after its durable record");
+                        }
+                        Ok(())
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -28510,12 +28577,15 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_crash: Some(Arc::new(|stage| {
-                    if stage == CreateStage::AfterRecord {
-                        anyhow::bail!("fixture stops before allocation");
-                    }
-                    Ok(())
-                })),
+                faults: FaultHooks {
+                    create_crash: Some(Arc::new(|stage| {
+                        if stage == CreateStage::AfterRecord {
+                            anyhow::bail!("fixture stops before allocation");
+                        }
+                        Ok(())
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -28621,12 +28691,15 @@ exit 0
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    create_crash: Some(Arc::new(|stage| {
-                        if stage == CreateStage::AfterRecord {
-                            anyhow::bail!("simulated crash after the record");
-                        }
-                        Ok(())
-                    })),
+                    faults: FaultHooks {
+                        create_crash: Some(Arc::new(|stage| {
+                            if stage == CreateStage::AfterRecord {
+                                anyhow::bail!("simulated crash after the record");
+                            }
+                            Ok(())
+                        })),
+                        ..FaultHooks::default()
+                    },
                     ..SupervisorSeams::default()
                 },
             )
@@ -28959,12 +29032,15 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_crash,
-                allocation_fault,
-                retained_refusal_fault: retained_refusal_fails.then(|| {
-                    Arc::new(|| anyhow::bail!("injected retained-refusal transaction failure"))
-                        as crate::store::RetainedRefusalFault
-                }),
+                faults: FaultHooks {
+                    create_crash,
+                    allocation_fault,
+                    retained_refusal_fault: retained_refusal_fails.then(|| {
+                        Arc::new(|| anyhow::bail!("injected retained-refusal transaction failure"))
+                            as crate::store::RetainedRefusalFault
+                    }),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -29122,27 +29198,30 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                preparation_parent_sync: Some(Arc::new(move |file| {
-                    use std::os::unix::fs::MetadataExt;
-                    let actual = file.metadata()?;
-                    assert_eq!(
-                        (actual.dev(), actual.ino()),
-                        (expected_parent.dev(), expected_parent.ino())
-                    );
-                    assert!(
-                        preparation_dir.is_dir(),
-                        "the child directory exists before its parent barrier"
-                    );
-                    assert_eq!(
-                        std::fs::read_dir(&preparation_dir)?.count(),
-                        0,
-                        "NotStarted must not precede this barrier"
-                    );
-                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Err(std::io::Error::other(
-                        "injected preparation parent fsync failure",
-                    ))
-                })),
+                faults: FaultHooks {
+                    preparation_parent_sync: Some(Arc::new(move |file| {
+                        use std::os::unix::fs::MetadataExt;
+                        let actual = file.metadata()?;
+                        assert_eq!(
+                            (actual.dev(), actual.ino()),
+                            (expected_parent.dev(), expected_parent.ino())
+                        );
+                        assert!(
+                            preparation_dir.is_dir(),
+                            "the child directory exists before its parent barrier"
+                        );
+                        assert_eq!(
+                            std::fs::read_dir(&preparation_dir)?.count(),
+                            0,
+                            "NotStarted must not precede this barrier"
+                        );
+                        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Err(std::io::Error::other(
+                            "injected preparation parent fsync failure",
+                        ))
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -29271,26 +29350,29 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                // Validation deliberately runs before a plan exists, so a
-                // pre-existing collision would only prove that preview
-                // refusal. Creating the foreign directory after the real
-                // plan record establishes the allocator's EEXIST premise
-                // without bypassing its allocation or cleanup path.
-                create_crash: Some(Arc::new(move |stage| {
-                    if stage == CreateStage::AfterRecord {
-                        std::fs::create_dir(collision_root.join("bar-1"))
-                            .context("planting the allocator collision after plan record")?;
-                    }
-                    Ok(())
-                })),
-                pre_mkdir_rollback_fault: Some(Arc::new(|stage| {
-                    assert_eq!(
-                        stage,
-                        crate::store::PreMkdirRollbackStage::AfterMemberRemoval,
-                        "the fault must exercise the transaction after its first deletion"
-                    );
-                    anyhow::bail!("injected pre-mkdir rollback failure")
-                })),
+                faults: FaultHooks {
+                    // Validation deliberately runs before a plan exists, so a
+                    // pre-existing collision would only prove that preview
+                    // refusal. Creating the foreign directory after the real
+                    // plan record establishes the allocator's EEXIST premise
+                    // without bypassing its allocation or cleanup path.
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage == CreateStage::AfterRecord {
+                            std::fs::create_dir(collision_root.join("bar-1"))
+                                .context("planting the allocator collision after plan record")?;
+                        }
+                        Ok(())
+                    })),
+                    pre_mkdir_rollback_fault: Some(Arc::new(|stage| {
+                        assert_eq!(
+                            stage,
+                            crate::store::PreMkdirRollbackStage::AfterMemberRemoval,
+                            "the fault must exercise the transaction after its first deletion"
+                        );
+                        anyhow::bail!("injected pre-mkdir rollback failure")
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )
@@ -29449,14 +29531,17 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                create_crash: Some(Arc::new(move |stage| {
-                    if stage == CreateStage::AfterRecord {
-                        let foreign = collision_root.join("bar-1");
-                        std::fs::create_dir(&foreign)?;
-                        std::fs::write(foreign.join("foreign-sentinel"), b"foreign")?;
-                    }
-                    Ok(())
-                })),
+                faults: FaultHooks {
+                    create_crash: Some(Arc::new(move |stage| {
+                        if stage == CreateStage::AfterRecord {
+                            let foreign = collision_root.join("bar-1");
+                            std::fs::create_dir(&foreign)?;
+                            std::fs::write(foreign.join("foreign-sentinel"), b"foreign")?;
+                        }
+                        Ok(())
+                    })),
+                    ..FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )

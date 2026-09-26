@@ -338,31 +338,38 @@ async fn concurrent_creates_under_one_intent_key_yield_one_session() {
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            create_crash: Some(Arc::new(move |stage| {
-                if stage == CreateStage::DuringLaunch {
-                    held_key.store(true, std::sync::atomic::Ordering::Release);
-                    entered.notify_one();
-                    // Blocking, not awaiting: the seam is synchronous, and
-                    // `block_in_place` is what keeps the rest of the
-                    // runtime — including the second create — running.
-                    // Return expiry through the request: a panic in the detached
-                    // connection task would not fail the awaiting test task.
-                    tokio::task::block_in_place(|| {
-                        let held = held.lock().expect("barrier mutex");
-                        held.recv_timeout(Duration::from_secs(30))
-                    })
-                    .map_err(|error| anyhow::anyhow!("held launch was not released: {error}"))?;
-                }
-                Ok(())
-            })),
-            create_intent_waiting: Some(Arc::new(move |key| {
-                // A runtime may yield even on an uncontended acquisition.
-                // Ignore those early observations: only after the held launch
-                // is reached does pending acquisition prove overlapping work.
-                if key == "intent-3" && first_holds_key.load(std::sync::atomic::Ordering::Acquire) {
-                    waiting.notify_one();
-                }
-            })),
+            faults: FaultHooks {
+                create_crash: Some(Arc::new(move |stage| {
+                    if stage == CreateStage::DuringLaunch {
+                        held_key.store(true, std::sync::atomic::Ordering::Release);
+                        entered.notify_one();
+                        // Blocking, not awaiting: the seam is synchronous, and
+                        // `block_in_place` is what keeps the rest of the
+                        // runtime — including the second create — running.
+                        // Return expiry through the request: a panic in the detached
+                        // connection task would not fail the awaiting test task.
+                        tokio::task::block_in_place(|| {
+                            let held = held.lock().expect("barrier mutex");
+                            held.recv_timeout(Duration::from_secs(30))
+                        })
+                        .map_err(|error| {
+                            anyhow::anyhow!("held launch was not released: {error}")
+                        })?;
+                    }
+                    Ok(())
+                })),
+                create_intent_waiting: Some(Arc::new(move |key| {
+                    // A runtime may yield even on an uncontended acquisition.
+                    // Ignore those early observations: only after the held launch
+                    // is reached does pending acquisition prove overlapping work.
+                    if key == "intent-3"
+                        && first_holds_key.load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        waiting.notify_one();
+                    }
+                })),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -499,7 +506,10 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            create_crash: Some(crash_at(stage)),
+            faults: FaultHooks {
+                create_crash: Some(crash_at(stage)),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -698,7 +708,10 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
         SupervisorTimeouts::default(),
         SupervisorSeams {
             boot_id: Arc::new(|| Ok(Some("boot-a".to_string()))),
-            create_crash: Some(crash_at(CreateStage::AfterRecord)),
+            faults: FaultHooks {
+                create_crash: Some(crash_at(CreateStage::AfterRecord)),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -997,7 +1010,10 @@ async fn a_pending_tilde_create_retries_from_the_stored_expansion() {
         SupervisorTimeouts::default(),
         SupervisorSeams {
             user_home: Some(home.path().to_path_buf()),
-            create_crash: Some(crash_at(CreateStage::AfterRecord)),
+            faults: FaultHooks {
+                create_crash: Some(crash_at(CreateStage::AfterRecord)),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )

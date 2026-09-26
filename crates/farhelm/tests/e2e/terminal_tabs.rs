@@ -532,7 +532,10 @@ async fn a_tab_whose_shell_is_dead_by_reply_time_is_refused_with_its_last_words(
         SupervisorTimeouts::default(),
         SupervisorSeams {
             launch_shell: Some(shell.to_string_lossy().into_owned()),
-            tab_settle_gate: Some(settle_gate),
+            faults: FaultHooks {
+                tab_settle_gate: Some(settle_gate),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -799,7 +802,10 @@ async fn close_notifies_and_removes_a_tab_while_output_cleanup_is_pending() {
         SupervisorTimeouts::default(),
         SupervisorSeams {
             launch_shell: Some("/bin/sh".to_string()),
-            forwarder_cleanup_gate: Some(cleanup_gate),
+            faults: FaultHooks {
+                forwarder_cleanup_gate: Some(cleanup_gate),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -1264,7 +1270,10 @@ async fn restart_restores_and_notifies_while_output_cleanup_is_pending() {
     let h = harness_with_seams(
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            forwarder_cleanup_gate: Some(cleanup_gate),
+            faults: FaultHooks {
+                forwarder_cleanup_gate: Some(cleanup_gate),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )
@@ -2322,14 +2331,17 @@ async fn takeover_reason_wins_over_a_gated_natural_detach() {
         SupervisorTimeouts::default(),
         SupervisorSeams {
             launch_shell: Some("/bin/sh".to_string()),
-            natural_detach_gate: Some(Arc::new(move || {
-                let entered = Arc::clone(&gate_entered);
-                let release = Arc::clone(&gate_release);
-                Box::pin(async move {
-                    entered.notify_one();
-                    release.notified().await;
-                })
-            })),
+            faults: FaultHooks {
+                natural_detach_gate: Some(Arc::new(move || {
+                    let entered = Arc::clone(&gate_entered);
+                    let release = Arc::clone(&gate_release);
+                    Box::pin(async move {
+                        entered.notify_one();
+                        release.notified().await;
+                    })
+                })),
+                ..FaultHooks::default()
+            },
             ..SupervisorSeams::default()
         },
     )

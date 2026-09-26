@@ -545,7 +545,7 @@ impl Supervisor {
             }
         }
         let started = Instant::now();
-        if let Some(gate) = self.seams.capture_gate.clone() {
+        if let Some(gate) = self.seams.faults.capture_gate().cloned() {
             gate().await;
         }
         let entries: Vec<Arc<SessionEntry>> =
@@ -662,7 +662,7 @@ pub(crate) fn note_first_input(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>)
 /// Shared by the input path's spawned write and `capture_pass`'s retry, so
 /// the two cannot disagree about what "durable" means.
 async fn persist_first_input(sup: &Supervisor, entry: &SessionEntry, at: i64) {
-    if let Some(fault) = &sup.seams.capture_store_fault
+    if let Some(fault) = sup.seams.faults.capture_store_fault()
         && let Err(e) = fault(CaptureWrite::FirstInput, &entry.info.id)
     {
         warn!(
@@ -1454,7 +1454,7 @@ async fn commit_capture(
     record: PathBuf,
     stamp: RecordStamp,
 ) {
-    if let Some(fault) = &sup.seams.capture_store_fault
+    if let Some(fault) = sup.seams.faults.capture_store_fault()
         && let Err(e) = fault(CaptureWrite::Conversation, &entry.info.id)
     {
         warn!(
@@ -1575,7 +1575,7 @@ async fn declare_ambiguous(
 /// Store this session's ambiguity verdict and mark the mirror durable.
 /// Shared by the decision itself and by `capture_pass`'s retry.
 async fn persist_ambiguity(sup: &Supervisor, entry: &Arc<SessionEntry>) {
-    if let Some(fault) = &sup.seams.capture_store_fault
+    if let Some(fault) = sup.seams.faults.capture_store_fault()
         && let Err(e) = fault(CaptureWrite::Ambiguity, &entry.info.id)
     {
         warn!(
@@ -1890,7 +1890,10 @@ mod tests {
             SupervisorSeams {
                 agent_home: Some(home.to_path_buf()),
                 capture_window: fast_bounds(),
-                capture_store_fault: fault,
+                faults: crate::service::FaultHooks {
+                    capture_store_fault: fault,
+                    ..crate::service::FaultHooks::default()
+                },
                 ..SupervisorSeams::default()
             },
         )

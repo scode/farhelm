@@ -79,6 +79,9 @@ that its required systemd or SSH substrate ran.
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets -- -D warnings`
+- `cargo clippy -p farhelm --bins -- -D warnings` — lints the shipped binary's configuration, in which the supervisor's
+  `test-seams` feature is off; the `--all-targets` run above always has it on, because the e2e tests enable it through a
+  dev-dependency.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'workspace Rust targets' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run --workspace --exclude farhelm-desktop`
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux

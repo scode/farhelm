@@ -24,8 +24,8 @@ pub(crate) use farhelm_proto::{
 pub(crate) use farhelm_supervisor::agent_kind::{CaptureWindow, CaptureWindowBounds, now_unix};
 pub(crate) use farhelm_supervisor::launch::{spec_path_for_launch, status_path_for_spec};
 pub(crate) use farhelm_supervisor::service::{
-    CaptureStoreFault, CreateCrashSeam, CreateStage, SessionSnapshot, Supervisor, SupervisorSeams,
-    SupervisorTimeouts, handle_connection,
+    CaptureStoreFault, CreateCrashSeam, CreateStage, FaultHooks, SessionSnapshot, Supervisor,
+    SupervisorSeams, SupervisorTimeouts, handle_connection,
 };
 pub(crate) use farhelm_supervisor::store::{
     LastOutcome, Reservation, ReservationOutcome, SessionStore, StoredSession,

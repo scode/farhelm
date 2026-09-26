@@ -93,7 +93,7 @@ pub(crate) async fn capture_harness() -> (Harness, CaptureFixtures) {
 async fn capture_harness_with_fault(
     fault: Option<CaptureStoreFault>,
 ) -> (Harness, CaptureFixtures) {
-    capture_harness_with_seams(move |seams| seams.capture_store_fault = fault).await
+    capture_harness_with_seams(move |seams| seams.faults.capture_store_fault = fault).await
 }
 
 /// [`capture_harness`] with one more seam adjusted by the caller.

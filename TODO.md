@@ -317,13 +317,11 @@ are large mostly because of their tests.
 
 ### Test hooks in production code
 
-- **Fault hooks mixed into configuration.** Medium effort. `SupervisorSeams` (`core.rs:662-1004`) has about 36 public
-  fields, about 25 of them test fault or gate hooks alongside real config; six type aliases name the same gate type;
-  more `#[cfg(test)]` fields and branches sit in tmux, scope (`Mode::Fake`), repository discovery, stream, sink, and
-  `agent_relay.rs`. The helm grows one bespoke seam per test (`fail_registry_sync`, `fail_before_rename`, the
-  `DUPLICATE_PUBLICATION_GATE` global static, `*_for_test` store methods). The UI ships 32 `window.__farhelmTest*` hooks
-  and test-observation signals. Fix: a `SupervisorConfig`/`FaultHooks` split behind a `test-seams` feature the e2e crate
-  enables, one failpoint mechanism in the helm, and a `test-hooks` feature for the Playwright build.
+- **Test hooks in the helm and UI.** Medium effort. The supervisor's fault and gate hooks now live in `FaultHooks`,
+  compiled only for tests (`test-seams`). The helm still grows one bespoke seam per test (`fail_registry_sync`,
+  `fail_before_rename`, `*_for_test` store methods), each already `#[cfg(test)]` but with no shared mechanism, and the
+  UI ships 32 `window.__farhelmTest*` hooks and test-observation signals in the product bundle. Fix: one failpoint
+  mechanism in the helm, and a `test-hooks` feature for the Playwright build.
 - **Test fixtures in the release binary.** Medium effort, lower payoff. `internal fake-agent` (~3.8k lines with
   `codex_conversation.rs`) and `internal sweep-test-state` ship in the product binary, and `crates/farhelm/Cargo.toml`
   depends on `farhelm-teststate` although that crate's docs say product code must never depend on it. Fix: a cargo

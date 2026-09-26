@@ -1133,7 +1133,7 @@ impl Forwarder {
         // reaper that retained it. The cooperative shutdown arm above makes
         // this path run even when teardown interrupts a blocked replay or
         // output read.
-        let cleanup_gate = self.sup.seams.forwarder_cleanup_gate.clone();
+        let cleanup_gate = self.sup.seams.faults.forwarder_cleanup_gate().cloned();
         let cleanup = self.cleanup.clone();
         match self.stream.shutdown().await {
             Ok(()) if cleanup_gate.is_none() => {
@@ -1588,7 +1588,7 @@ fn detach_naturally(
 ) {
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
-        if let Some(gate) = &sup.seams.natural_detach_gate {
+        if let Some(gate) = sup.seams.faults.natural_detach_gate() {
             gate().await;
         }
         let mut attachments = sup.attachments.lock().await;
