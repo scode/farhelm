@@ -3633,15 +3633,23 @@ impl SessionStore {
                         )
                         .optional()
                         .context("reading the reserved session's current state")?;
-                    // The same durable-row predicate `service`'s
-                    // `reserved_launch_evidence` applies, restated here because
-                    // this is where it becomes a TRANSITION rather than a reading:
-                    // a recorded pane means something saw this session in tmux, and
-                    // any outcome past `launching` means the same — except
-                    // `interrupted`, which the reboot conversion blankets over
-                    // never-launched rows too and which therefore proves nothing on
-                    // its own. Anything showing evidence refuses the takeover, so
-                    // the caller replays instead of starting a second agent.
+                    // Row-shape launch evidence, rechecked inside this
+                    // transaction because this is where it becomes a TRANSITION
+                    // rather than a reading. It is STRICTER than the check in
+                    // `service`'s `reserved_launch_evidence`: since R1.2 that one
+                    // counts only a recorded pane or a conversation report and
+                    // leaves the rest to its physical probes (scope, sentinel,
+                    // tmux), while this one additionally refuses a row whose
+                    // outcome is anything but `launching`, `interrupted`, or
+                    // `error` (so `running`, `stop_requested`, or `exited` with no
+                    // pane and no report). `interrupted` is exempt because the
+                    // reboot conversion blankets it over never-launched rows too,
+                    // so it proves nothing on its own; `error` for the reason in
+                    // the next paragraph. Stricter is the safe direction: anything
+                    // showing evidence refuses the takeover, so the caller
+                    // replays instead of starting a second agent. Loosening this
+                    // to match the service check would need its own reason, not
+                    // just symmetry.
                     //
                     // R1.2's retained-create-refusal rows are the one exception:
                     // an `error` outcome with an EMPTY pane (and no conversation
