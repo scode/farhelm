@@ -705,50 +705,22 @@ fn resolve_target(target: String, asking: &str, verb: &str) -> String {
 /// Only for logging. The value the caller goes on to route with is the
 /// original, because an escaped id is not the id.
 ///
-/// Two families are escaped, and the second is why this exists rather than
-/// a bare `is_control` filter. The first is Unicode's `Cc` category
-/// ([`char::is_control`]) — a newline that forges a whole extra log line
-/// being the case that matters. The second is the set of characters that
-/// are not control codes at all but still change what a reader SEES: the
-/// bidi overrides and isolates (U+202A–U+202E, U+2066–U+2069, U+061C),
-/// which can silently reverse the apparent order of a line so an id reads
-/// as another id; the zero-width and invisible formatting characters
-/// (U+200B–U+200F, U+2060–U+2064, U+00AD, U+FEFF), which let two different
-/// ids render identically; and the line/paragraph separators (U+2028,
-/// U+2029), which some log viewers break lines on exactly as they would on
-/// a newline.
-///
-/// An explicit list rather than a whole-category test because the standard
-/// library exposes no Unicode general-category API, and the alternative
-/// available without a dependency — escaping everything non-ASCII — would
-/// mangle every legitimately non-English id for no gain. This is the set
-/// with a known presentation attack behind it.
+/// Escapes exactly [`farhelm_proto::text::is_presentation_unsafe`]: control
+/// characters (a newline forges a whole extra log line) and the characters
+/// that are not controls but still change what a reader SEES (bidi overrides
+/// that reorder a line, zero-width characters that make two ids render
+/// identically, line separators some viewers break on). The set is shared with
+/// every other surface that shows peer-supplied text, so none of them can fall
+/// behind the others.
 fn escape_for_log(id: &str) -> String {
-    fn is_presentation_bending(c: char) -> bool {
-        matches!(
-            c,
-            '\u{00AD}'
-                | '\u{061C}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{FEFF}'
-        )
-    }
     // The common case is an id with nothing to escape, and the borrow-free
     // early return keeps this off the allocation path for it.
-    if !id
-        .chars()
-        .any(|c| c.is_control() || is_presentation_bending(c))
-    {
+    if !id.chars().any(farhelm_proto::text::is_presentation_unsafe) {
         return id.to_string();
     }
     let mut out = String::with_capacity(id.len());
     for c in id.chars() {
-        if c.is_control() || is_presentation_bending(c) {
+        if farhelm_proto::text::is_presentation_unsafe(c) {
             out.push_str(&format!("\\u{{{:04x}}}", c as u32));
         } else {
             out.push(c);

@@ -2051,27 +2051,12 @@ fn quoted(field: &str) -> String {
     format!("\"{}\"", safe_cell(&escaped))
 }
 
-/// Whether a character can forge table structure or disguise its text.
-///
-/// Unicode Cc controls include terminal-active C0, DEL, and C1 characters;
-/// line and paragraph separators can create extra visual lines; and bidi
-/// controls can reorder or hide columns. These categories are unsafe in both
-/// table cells and peer-supplied error prose, so both paths share this
-/// predicate through [`safe_cell`].
-fn is_unsafe_table_character(ch: char) -> bool {
-    ch.is_control()
-        || matches!(
-            ch,
-            '\u{2028}'
-                | '\u{2029}'
-                | '\u{200e}'
-                | '\u{200f}'
-                | '\u{202a}'..='\u{202e}'
-                | '\u{2066}'..='\u{2069}'
-        )
-}
-
 /// One cell as a single printable line.
+///
+/// Unsafe means [`farhelm_proto::text::is_presentation_unsafe`]: the set every
+/// surface that shows peer-supplied text shares, so a character the browser
+/// escapes is never printed raw here. Table cells and peer-supplied error
+/// prose both come through this function.
 ///
 /// Every unsafe character is replaced by a visible escape rather than
 /// dropped, so a cell that contained one still says so — a silently
@@ -2084,7 +2069,7 @@ fn safe_cell(cell: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if is_unsafe_table_character(c) => {
+            c if farhelm_proto::text::is_presentation_unsafe(c) => {
                 if c.is_control() {
                     // Cc is Unicode's C0, DEL, and C1 category, all of
                     // which fit in two hex digits.
@@ -2755,6 +2740,34 @@ mod tests {
         );
         assert!(!rendered.contains('\u{2028}'), "{rendered:?}");
         assert!(!rendered.contains('\u{202e}'), "{rendered:?}");
+    }
+
+    /// Spec: invisible characters in a cell become visible escapes too, so
+    /// two different fleet values never print identically.
+    ///
+    /// These are not controls and do not break the table, which is how this
+    /// path came to print them raw while the browser and the helm's audit log
+    /// escaped them: a title with a zero-width space, a soft hyphen, or a
+    /// byte-order mark in it reads exactly like the title without one, so a
+    /// model choosing a session by title could be pointed at the wrong one.
+    #[farhelm_testtrace::test]
+    fn invisible_characters_in_a_cell_are_escaped() {
+        let rendered = render_agent_reply(&sessions(vec![agent_session(
+            "s1",
+            "a\u{200b}b\u{00ad}\u{feff}\u{061c}\u{2060}",
+        )]))
+        .expect("a sessions listing renders as a table");
+        assert!(
+            rendered.contains("a\\u{200b}b\\u{00ad}\\u{feff}\\u{061c}\\u{2060}"),
+            "{rendered:?}"
+        );
+        for ch in ['\u{200b}', '\u{00ad}', '\u{feff}', '\u{061c}', '\u{2060}'] {
+            assert!(
+                !rendered.contains(ch),
+                "U+{:04X} must not print as itself: {rendered:?}",
+                ch as u32
+            );
+        }
     }
 
     /// Spec: a non-final column is cut to [`MAX_CELL_WIDTH`] with a `…`.

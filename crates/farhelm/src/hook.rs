@@ -801,11 +801,13 @@ impl Outcome {
 
 /// Make a value safe to interpolate into one log line.
 ///
-/// Control characters always become `_` — that is what stops an
+/// Every character [`farhelm_proto::text::is_presentation_unsafe`] names
+/// becomes `_`. Control characters are the obvious case: they stop an
 /// agent-supplied conversation id from embedding a newline and forging an
-/// extra line, which is the only forgery this format is exposed to.
-/// [`is_line_or_direction_control`] covers the characters that do the same
-/// damage without being control characters at all.
+/// extra line. The rest do the same damage without being controls (line
+/// separators many viewers break on, bidi controls that make a `refused` line
+/// render as an `acked` one) or let two different ids read identically
+/// (zero-width characters), which in an audit log is the same lie.
 /// `single_token` additionally collapses spaces, and is used for the
 /// trailing identity fields: those are positional, so a space inside one
 /// would silently shift the other. Free-form detail keeps its spaces,
@@ -819,9 +821,7 @@ fn sanitize(value: &str, max_chars: usize, single_token: bool) -> String {
         .chars()
         .take(max_chars)
         .map(|c| {
-            if c.is_control()
-                || is_line_or_direction_control(c)
-                || (single_token && c.is_whitespace())
+            if farhelm_proto::text::is_presentation_unsafe(c) || (single_token && c.is_whitespace())
             {
                 '_'
             } else {
@@ -829,35 +829,6 @@ fn sanitize(value: &str, max_chars: usize, single_token: bool) -> String {
             }
         })
         .collect()
-}
-
-/// Characters that break a line-oriented log without being
-/// `char::is_control`.
-///
-/// Two families, one motivation — the operator reading this file must see
-/// what was actually written:
-///
-/// - U+2028 and U+2029, the Unicode line and paragraph separators. Rust
-///   classifies them as `Zl`/`Zp` rather than `Cc`, so `is_control` says
-///   no, but plenty of viewers and log processors break a line on them.
-///   That is the same forgery a raw newline would be, reached through a
-///   character the obvious check misses.
-/// - The bidirectional formatting characters: the marks U+200E/U+200F, the
-///   embeddings and overrides U+202A–U+202E, and the isolates
-///   U+2066–U+2069. These reorder the VISIBLE text without changing the
-///   bytes, so an agent-supplied id could make a `refused` line render as
-///   an `acked` one to the human reading it — a lie told to the only
-///   audience this file has.
-fn is_line_or_direction_control(c: char) -> bool {
-    matches!(
-        c,
-        '\u{2028}'
-            | '\u{2029}'
-            | '\u{200e}'
-            | '\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2066}'..='\u{2069}'
-    )
 }
 
 /// Wall-clock seconds for the log's timestamp, or 0 if the clock is before

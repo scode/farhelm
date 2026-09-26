@@ -20,8 +20,9 @@
 //! Two layers answer that, and neither is sufficient alone:
 //!
 //! - [`display_peer`] escapes every directional and invisible control into
-//!   a visible `<U+XXXX>` form. That is a KNOWN-BAD list (see
-//!   [`must_escape`]), so it cannot be the whole defence.
+//!   a visible `<U+XXXX>` form. The characters are farhelm-proto's
+//!   `text::is_presentation_unsafe`, the set the CLI and the helm's logs
+//!   escape too. That is a KNOWN-BAD list, so it cannot be the whole defence.
 //! - [`DetailPart`] splits a sentence into this UI's own runs and the
 //!   relayed ones, and [`PeerLine`] renders each relayed run into its own
 //!   direction-isolated element. That is category-free: it bounds strong-RTL
@@ -46,47 +47,11 @@
 //! whole UI.
 
 use dioxus::prelude::*;
-
-/// Whether this character must be shown as an escape rather than rendered.
-///
-/// Three groups, all invisible or layout-affecting and none of them
-/// legitimate inside an identity, a build string, or an ssh destination:
-///
-/// - The C0/C1 control ranges and DEL — including the line and paragraph
-///   separators, which would break a value across lines mid-sentence.
-/// - The bidirectional formatting controls. These are the spoofing vector:
-///   an RLO inside an identity reverses the text that FOLLOWS it, so
-///   "recorded X, reported Y" can be made to read with the two swapped
-///   while the underlying values are unchanged.
-/// - The zero-width and joining characters, which let two different
-///   identities render identically.
-///
-/// Enumerated rather than derived from Unicode's general categories, because
-/// this crate carries no Unicode tables and pulling one in for a display
-/// rule would be a large dependency for a small list. That makes the set a
-/// KNOWN-BAD list rather than a proof: a future format character outside it
-/// would render as itself. The direction-isolated element each value sits in
-/// (see [`DetailPart`]) is the second, category-free layer that bounds the
-/// damage either way.
-fn must_escape(ch: char) -> bool {
-    ch.is_control()
-        || matches!(ch,
-            '\u{061C}'                    // Arabic letter mark
-            | '\u{200E}' | '\u{200F}'     // LTR/RTL marks
-            | '\u{202A}'..='\u{202E}'     // embeddings and overrides
-            | '\u{2066}'..='\u{2069}'     // isolates
-            | '\u{00AD}'                  // soft hyphen
-            | '\u{200B}'..='\u{200D}'     // zero-width space/non-joiner/joiner
-            | '\u{2060}'                  // word joiner
-            | '\u{180E}'                  // Mongolian vowel separator
-            | '\u{FEFF}'                  // zero-width no-break space / BOM
-            | '\u{2028}' | '\u{2029}'     // line and paragraph separators
-        )
-}
+use farhelm_proto::text::is_presentation_unsafe;
 
 /// One peer-supplied value as it should be SHOWN.
 ///
-/// Escapes everything [`must_escape`] rejects, and gives the two degenerate
+/// Escapes everything `is_presentation_unsafe` rejects, and gives the two degenerate
 /// values an unambiguous form of their own. That last part is not cosmetic:
 /// an identity that renders as nothing at all appears in the adopt button as
 /// `adopt ` and in the mismatch evidence as a gap, so a user is asked to
@@ -104,7 +69,7 @@ pub(crate) fn display_peer(raw: &str) -> String {
     // (it prints as `<U+202E>`); an ordinary space does not.
     let mut anything_visible = false;
     for ch in raw.chars() {
-        if must_escape(ch) {
+        if is_presentation_unsafe(ch) {
             shown.push_str(&format!("<U+{:04X}>", ch as u32));
             anything_visible = true;
         } else {
@@ -267,7 +232,7 @@ mod tests {
             "id\u{2028}line-separator",
         ] {
             let shown = display_peer(hostile);
-            for ch in hostile.chars().filter(|ch| must_escape(*ch)) {
+            for ch in hostile.chars().filter(|ch| is_presentation_unsafe(*ch)) {
                 assert!(
                     !shown.contains(ch),
                     "{hostile:?} must not render {ch:?} literally: {shown}"
@@ -314,8 +279,8 @@ mod tests {
     /// profile editor's error line, and the create dialog's for a raw
     /// invocation, both show a `display_peer`d supervisor string, not this
     /// crate's own words — so nothing here may treat `{cwd}` or
-    /// `{conversation}` as template syntax to fill in. `must_escape` only
-    /// matches control and bidi/invisible characters (see its doc comment);
+    /// `{conversation}` as template syntax to fill in. `is_presentation_unsafe`
+    /// only matches control and bidi/invisible characters (see its docs);
     /// braces are ordinary visible text to it, so a renderer that somehow
     /// mangled them would make the refusal the wrapper-profile docs promise
     /// unreadable, and this pins that it does not.

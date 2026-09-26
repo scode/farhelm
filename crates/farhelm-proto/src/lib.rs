@@ -70,6 +70,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "io")]
 pub mod io;
 pub mod launch;
+
+/// The one list of characters that must never be shown as themselves when
+/// peer-supplied text reaches a human (see the module's own docs).
+pub mod text;
 pub use launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
 /// Owned GitHub checkouts: validated repo identity, deterministic naming,

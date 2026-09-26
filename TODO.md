@@ -257,13 +257,6 @@ are large mostly because of their tests.
 
 ### Diverged copies of the same rule
 
-- **Terminal-safety escaping.** Low effort. The predicate that escapes peer-supplied text before printing exists five
-  times with three different character sets: `farhelm/src/main.rs:2062` and `farhelm/src/hook.rs:851` cover only line
-  separators and bidi controls; `farhelm-helm/src/agent_requests.rs:726` and `farhelm-ui/src/peer.rs:71` also catch
-  zero-width characters, U+00AD, and U+061C (and disagree with each other on U+180E and U+2061–2064);
-  `farhelm-helm/src/manager.rs:690` uses `{:?}`. So `farhelm agent sessions` and `farhelm agent hosts` print
-  fleet-supplied text unescaped that the helm and UI deliberately escape, which is drift in a spoofing defense. Fix: one
-  shared predicate with one table test (the UI can keep a mirror if it cannot depend on it, pinned by the same table).
 - **tmux "session absent" by error-text match.** Low-medium effort. `has_session`
   (`farhelm-supervisor/src/tmux.rs:2470`) decides absence with `e.to_string().contains("can't find session")` on the
   rendered error. The function right below it documents why that is unsafe: the rendered text includes a
