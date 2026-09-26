@@ -1177,6 +1177,12 @@ the agent creates it.
   left for the user to infer.
 - Mixed versions across helm and supervisors are a normal steady state, since updates are user-controlled. Incompatible
   versions refuse to connect with a clear, actionable error; there is no silent degradation.
+- There is no compatibility across protocol versions. When a release changes the helm–supervisor protocol version, the
+  user upgrades the supervisors it manages; until then those hosts refuse to connect and show that they need an update.
+  Builds that share a protocol version interoperate (the mixed steady state above); builds on different protocol
+  versions never exchange anything beyond the greeting that refuses them. Code and tests therefore do not decode,
+  exercise, or shim another protocol version's messages, and reviews should push back on additions that do. Data a build
+  persisted is a separate question, decided per feature (see Upgrade compatibility and client scale).
 
 ## Security
 

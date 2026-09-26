@@ -400,12 +400,10 @@ are large mostly because of their tests.
 
 ### Stale in-code documentation
 
-- **Proto changelog docstring.** Low effort. `PROTOCOL_VERSION`'s docstring is a 175-line changelog that has rotted:
-  "Version 20" appears twice (`farhelm-proto/src/lib.rs:181`, `:184`), and it calls `DETACH_REASON_STALLED` reserved and
-  unsent while `farhelm-supervisor/src/service/connection.rs:1558` sends it. Also, 25 of the 95 proto tests decode
-  across protocol versions with hand-written `Legacy*`/`Future*` shadow types, yet `Hello` refuses any version mismatch,
-  so those paths cannot occur between peers. Fix: move the changelog to lore, prune the cross-version tests except those
-  guarding stored rows or the `Hello` decode, and split `lib.rs` by message family.
+- **Split proto `lib.rs` by message family.** Low effort, mechanical. `farhelm-proto/src/lib.rs` holds every wire type
+  for every message family in one file that every protocol change touches (about 3.5k production lines plus tests). Held
+  out of the 2026-09 cleanup stack as a large mechanical move to time when no other stacks are touching proto; the
+  changelog docstring and the cross-protocol test pruning that shared this entry are done.
 
 ## Maybe later
 
