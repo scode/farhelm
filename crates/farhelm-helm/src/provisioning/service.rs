@@ -477,11 +477,13 @@ impl ProvisioningService {
                         .await?
                     {
                         FirstContactOutcome::Recorded => {}
+                        // Variant roles: `actual` = helm.db's value,
+                        // `expected` = the caller's; see HostStoreError::IdentityMismatch.
                         FirstContactOutcome::Mismatch { recorded, reported } => {
                             return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
                                 host: row.id,
-                                expected: recorded,
-                                actual: Some(reported),
+                                expected: reported,
+                                actual: Some(recorded),
                             }));
                         }
                         FirstContactOutcome::Collision { owner } => {
@@ -666,10 +668,12 @@ impl ProvisioningService {
                 if let (Some(recorded), Some(reported)) = (&row.host_identity, &host_identity)
                     && recorded != reported
                 {
+                    // Variant roles: `actual` = helm.db's value, `expected` =
+                    // the caller's; see HostStoreError::IdentityMismatch.
                     return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
                         host,
-                        expected: recorded.clone(),
-                        actual: Some(reported.clone()),
+                        expected: reported.clone(),
+                        actual: Some(recorded.clone()),
                     }));
                 }
                 expected_identity = expected_identity.or(host_identity);
