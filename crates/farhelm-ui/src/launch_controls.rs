@@ -370,7 +370,7 @@ pub(crate) fn LaunchControls(
                 }
             }
         }
-        if harness.is_some_and(|harness| matches!(harness, LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi)) {
+        if harness.is_some_and(LaunchHarness::offers_workspace_trust) {
             div { class: "launch-composer-choice launch-composer-trust-choice",
                 span { class: "launch-composer-section-label", "workspace trust" }
                 if let Some(parts) = trust_change { PeerLine { class: "launch-composer-changed-marker", parts } }

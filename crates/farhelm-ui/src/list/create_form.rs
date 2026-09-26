@@ -3624,7 +3624,7 @@ pub(super) fn CreateSessionForm(
                     } else {
                         "{summary_permission}"
                     }
-                    if structured_harness().is_some_and(|harness| matches!(harness, LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi)) {
+                    if structured_harness().is_some_and(LaunchHarness::offers_workspace_trust) {
                         " · trust: {summary_trust}"
                     }
                 }

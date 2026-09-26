@@ -458,17 +458,7 @@ pub(crate) fn compile(mut selection: LaunchSelection) -> Result<CompiledLaunch, 
 
     Ok(CompiledLaunch {
         invocation: shell_words::join(argv),
-        agent_kind: match selection.harness {
-            LaunchHarness::Codex => AgentKind::Codex,
-            LaunchHarness::Claude => AgentKind::Claude,
-            LaunchHarness::Muse => AgentKind::Generic,
-            LaunchHarness::Cursor => AgentKind::Generic,
-            LaunchHarness::OpenCode => AgentKind::Generic,
-            LaunchHarness::Goose => AgentKind::Goose,
-            LaunchHarness::Pi => AgentKind::Pi,
-            LaunchHarness::Omp => AgentKind::Omp,
-            LaunchHarness::Grok => AgentKind::Grok,
-        },
+        agent_kind: selection.harness.agent_kind(),
         resume_template: (selection.harness == LaunchHarness::Grok).then(|| {
             let mut template = vec!["grok".to_string(), "--no-leader".to_string()];
             if selection.permissions == Some(LaunchPermission::Yolo) {
@@ -500,12 +490,7 @@ fn program(harness: LaunchHarness) -> &'static str {
 /// The catalog constrains an entered model and effort; an omitted model is
 /// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
-    if selection.workspace_trust.is_some()
-        && !matches!(
-            selection.harness,
-            LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi
-        )
-    {
+    if selection.workspace_trust.is_some() && !selection.harness.offers_workspace_trust() {
         return Err("workspace trust is not offered by this harness".to_string());
     }
     if selection.harness == LaunchHarness::Grok && selection.model.is_some() {

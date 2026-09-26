@@ -792,7 +792,13 @@ pub fn parse_sort_key(text: &str) -> Option<ListSort> {
 /// refusal ([`crate::preferences::put_preferences`]) and this module's
 /// read-time normalization ([`HelmStore::preferences`]) on one vocabulary.
 pub fn is_known_remembered_permissions_word(text: &str) -> bool {
-    matches!(text, "yolo" | "approve" | "smart_approve" | "chat")
+    // Decoded through `LaunchPermission`'s own serde spelling, which
+    // `LaunchPermission::wire_word` is pinned to, so a new permission is known
+    // here the moment the shared enum gains it.
+    serde_json::from_value::<farhelm_proto::LaunchPermission>(serde_json::Value::String(
+        text.to_string(),
+    ))
+    .is_ok()
 }
 
 /// The client preference this helm remembers for every client at once
@@ -5039,18 +5045,10 @@ impl HelmStore {
                 // write a few lines down needs, and it must come from the
                 // same admitted selection `launch_history` is about to
                 // record, not from a separately re-read one.
-                let permissions_word = selection.permissions.map(|permission| match permission {
-                    farhelm_proto::LaunchPermission::Yolo => "yolo",
-                    farhelm_proto::LaunchPermission::Approve => "approve",
-                    farhelm_proto::LaunchPermission::SmartApprove => "smart_approve",
-                    farhelm_proto::LaunchPermission::Chat => "chat",
-                });
-                let workspace_trust = if matches!(
-                    selection.harness,
-                    farhelm_proto::LaunchHarness::Codex
-                        | farhelm_proto::LaunchHarness::Muse
-                        | farhelm_proto::LaunchHarness::Pi
-                ) {
+                let permissions_word = selection
+                    .permissions
+                    .map(farhelm_proto::LaunchPermission::wire_word);
+                let workspace_trust = if selection.harness.offers_workspace_trust() {
                     selection.workspace_trust
                 } else {
                     None
