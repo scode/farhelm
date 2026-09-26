@@ -243,7 +243,8 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             Ok(committed) => {
                 for entry in &entries {
                     if let Some(outcome) = committed.get(&entry.info.id) {
-                        *entry.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
+                        *entry.run.outcome.lock().expect("outcome mutex poisoned") =
+                            outcome.clone();
                     }
                 }
                 // Cleanup folded into this successful arm

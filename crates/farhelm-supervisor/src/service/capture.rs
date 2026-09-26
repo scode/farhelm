@@ -632,6 +632,7 @@ pub(crate) fn note_first_input(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>)
     let now = crate::agent_kind::now_unix();
     {
         let mut first = entry
+            .run
             .first_input
             .lock()
             .expect("first-input mutex poisoned");
@@ -677,6 +678,7 @@ async fn persist_first_input(sup: &Supervisor, entry: &SessionEntry, at: i64) {
     {
         Ok(()) => {
             entry
+                .run
                 .first_input
                 .lock()
                 .expect("first-input mutex poisoned")
@@ -728,7 +730,7 @@ fn reported_ids<'a>(
             continue;
         };
         if let CaptureState::Reported { conversation, .. } =
-            &*entry.capture.lock().expect("capture mutex poisoned")
+            &*entry.run.capture.lock().expect("capture mutex poisoned")
         {
             ids.entry((crate::store::agent_kind_column(entry.snapshot.kind), cwd))
                 .or_default()
@@ -797,6 +799,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
         // a timeout would only trade convergence for a retry next pass.
         let _claim = sup.capture_locks.claim(&entry.info.id).await;
         let before = entry
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -834,7 +837,7 @@ async fn refresh_report_only_captures(sup: &Supervisor, entries: &[Arc<SessionEn
             continue;
         }
         let ownership_version = row.capture_ownership_version;
-        let mut state = entry.capture.lock().expect("capture mutex poisoned");
+        let mut state = entry.run.capture.lock().expect("capture mutex poisoned");
         if state.committed_conversation() == before.as_deref() {
             state.advance(CaptureState::Reported {
                 conversation,
@@ -951,6 +954,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
     for entry in entries {
         let pending_first_input = {
             let first = entry
+                .run
                 .first_input
                 .lock()
                 .expect("first-input mutex poisoned");
@@ -960,6 +964,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             persist_first_input(sup, entry, at).await;
         }
         let pending = entry
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -1005,6 +1010,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                 let spoken_for_at_retry = reported_ids(entries);
                 if is_spoken_for(&spoken_for_at_retry, entry, &conversation) {
                     let dropped = entry
+                        .run
                         .capture
                         .lock()
                         .expect("capture mutex poisoned")
@@ -1056,6 +1062,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
         };
         let key = (crate::store::agent_kind_column(entry.snapshot.kind), cwd);
         let Some(at) = entry
+            .run
             .first_input
             .lock()
             .expect("first-input mutex poisoned")
@@ -1094,12 +1101,13 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             continue;
         };
         {
-            let state = entry.capture.lock().expect("capture mutex poisoned");
+            let state = entry.run.capture.lock().expect("capture mutex poisoned");
             if state.is_settled() || matches!(*state, CaptureState::PendingCommit { .. }) {
                 continue;
             }
         }
         let Some(at) = entry
+            .run
             .first_input
             .lock()
             .expect("first-input mutex poisoned")
@@ -1233,7 +1241,12 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                         .expect("the chosen conversation came from this candidate list");
                     let (record, stamp) = (claimed.path.clone(), claimed.stamp);
                     let advanced = {
-                        let mut state = scan.entry.capture.lock().expect("capture mutex poisoned");
+                        let mut state = scan
+                            .entry
+                            .run
+                            .capture
+                            .lock()
+                            .expect("capture mutex poisoned");
                         state.advance(CaptureState::PendingCommit {
                             conversation: conversation.clone(),
                             record: record.clone(),
@@ -1252,7 +1265,12 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                     // worth a log line: a provisional match that moves is
                     // the shape a second agent in the directory produces
                     // just before the ambiguity bail catches it.
-                    let mut state = scan.entry.capture.lock().expect("capture mutex poisoned");
+                    let mut state = scan
+                        .entry
+                        .run
+                        .capture
+                        .lock()
+                        .expect("capture mutex poisoned");
                     if let CaptureState::Provisional { conversation: was } = &*state
                         && was != &conversation
                     {
@@ -1273,6 +1291,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
                     // wrote a record from rescanning its directory on
                     // every poll for the rest of its life.
                     scan.entry
+                        .run
                         .capture
                         .lock()
                         .expect("capture mutex poisoned")
@@ -1293,6 +1312,7 @@ pub(crate) async fn capture_pass(sup: &Supervisor, entries: &[Arc<SessionEntry>]
             continue;
         };
         let state = entry
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -1381,10 +1401,11 @@ fn report_liveness_tripwire(
         // `hooked` is read outside the lock deliberately: it only ever goes
         // false-to-true, at publication, so the worst a stale read costs is
         // deferring the warning to the next pass.
-        if !entry.hooked.load(ordering) {
+        if !entry.run.hooked.load(ordering) {
             continue;
         }
         let Some(at) = entry
+            .run
             .first_input
             .lock()
             .expect("first-input mutex poisoned")
@@ -1396,11 +1417,11 @@ fn report_liveness_tripwire(
             continue;
         }
         let warn_now = {
-            let state = entry.capture.lock().expect("capture mutex poisoned");
+            let state = entry.run.capture.lock().expect("capture mutex poisoned");
             let silent = !matches!(*state, CaptureState::Reported { .. });
-            let first = silent && !entry.hook_warned.load(ordering);
+            let first = silent && !entry.run.hook_warned.load(ordering);
             if first {
-                entry.hook_warned.store(true, ordering);
+                entry.run.hook_warned.store(true, ordering);
             }
             first
         };
@@ -1482,6 +1503,7 @@ async fn commit_capture(
         "captured this session's agent conversation identity"
     );
     entry
+        .run
         .capture
         .lock()
         .expect("capture mutex poisoned")
@@ -1536,6 +1558,7 @@ async fn declare_ambiguous(
     explain: impl FnOnce(),
 ) {
     let advanced = entry
+        .run
         .capture
         .lock()
         .expect("capture mutex poisoned")
@@ -1568,6 +1591,7 @@ async fn persist_ambiguity(sup: &Supervisor, entry: &Arc<SessionEntry>) {
     {
         Ok(()) => {
             entry
+                .run
                 .capture
                 .lock()
                 .expect("capture mutex poisoned")
@@ -1657,7 +1681,7 @@ async fn reverify_capture(
     }
     match crate::agent_kind::read_record(record, integration).await {
         Ok(Some((correlators, stamp))) if correlators.conversation == conversation => {
-            let mut capture = entry.capture.lock().expect("capture mutex poisoned");
+            let mut capture = entry.run.capture.lock().expect("capture mutex poisoned");
             // The read happened outside the mutex, so another capture pass or
             // a report may have changed the claim while it was in flight.
             // A re-verification may renew only the exact captured locator it
@@ -1760,11 +1784,11 @@ mod tests {
             resume_template: None,
         };
         entry.canonical_cwd = Some(cwd.to_string());
-        entry.first_input = Arc::new(std::sync::Mutex::new(FirstInput {
+        entry.run.first_input = Arc::new(std::sync::Mutex::new(FirstInput {
             at: first_input_at,
             durable: true,
         }));
-        entry.capture = Arc::new(std::sync::Mutex::new(capture));
+        entry.run.capture = Arc::new(std::sync::Mutex::new(capture));
         Arc::new(entry)
     }
 
@@ -1843,7 +1867,7 @@ mod tests {
         reverify_capture(&entry, integration, conversation, &record, stale).await;
 
         assert!(matches!(
-            &*entry.capture.lock().expect("capture mutex poisoned"),
+            &*entry.run.capture.lock().expect("capture mutex poisoned"),
             CaptureState::Captured {
                 conversation: captured,
                 record: captured_record,
@@ -2062,7 +2086,7 @@ mod tests {
         );
         assert!(
             matches!(
-                &*entry.capture.lock().expect("capture mutex poisoned"),
+                &*entry.run.capture.lock().expect("capture mutex poisoned"),
                 CaptureState::Reported { conversation, .. } if conversation == "conv-hook"
             ),
             "and the reported identity must survive the attempt"
@@ -2129,7 +2153,7 @@ mod tests {
                 .expect("fault log poisoned")
                 .push((write, id.to_string()));
             if id == "session-a" {
-                *flip.capture.lock().expect("capture mutex poisoned") = reported("conv-hook-b");
+                *flip.run.capture.lock().expect("capture mutex poisoned") = reported("conv-hook-b");
             }
             Err(anyhow::anyhow!("no write reaches the store in this test"))
         });
@@ -2154,7 +2178,7 @@ mod tests {
         );
         assert!(
             matches!(
-                &*b.capture.lock().expect("capture mutex poisoned"),
+                &*b.run.capture.lock().expect("capture mutex poisoned"),
                 CaptureState::Reported { conversation, .. } if conversation == "conv-hook-b"
             ),
             "and the pass must leave the reported identity exactly as the report left it"
@@ -2207,7 +2231,12 @@ mod tests {
         // inserted, so a durable write could only fail, and the verdict is
         // fully observable in the in-memory state one step earlier.
         capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        let verdict = b
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(verdict, CaptureState::UncapturedFinal),
             "B must end its window with no identity rather than claiming the record A \
@@ -2221,7 +2250,12 @@ mod tests {
         let b2 = claude_entry("session-b", &cwd, Some(b_at), CaptureState::Unclaimed);
         plant_claude_record(home.path(), &cwd, "conv-b", b_at);
         capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b2)], false).await;
-        let verdict = b2.capture.lock().expect("capture mutex poisoned").clone();
+        let verdict = b2
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(
                 &verdict,
@@ -2232,7 +2266,7 @@ mod tests {
         );
         assert!(
             matches!(
-                &*a.capture.lock().expect("capture mutex poisoned"),
+                &*a.run.capture.lock().expect("capture mutex poisoned"),
                 CaptureState::Reported { conversation, .. } if conversation == "conv-a"
             ),
             "and nothing in the pass may disturb A's reported identity"
@@ -2284,25 +2318,25 @@ mod tests {
             reported("conv-hook"),
         );
         for entry in [&silent, &spoke] {
-            entry.hooked.store(true, ordering);
+            entry.run.hooked.store(true, ordering);
         }
 
         capture_pass(&sup, &[Arc::clone(&silent), Arc::clone(&spoke)], false).await;
         assert!(
-            silent.hook_warned.load(ordering),
+            silent.run.hook_warned.load(ordering),
             "a hooked launch still unreported past its horizon must trip the wire"
         );
         assert!(
-            !spoke.hook_warned.load(ordering),
+            !spoke.run.hook_warned.load(ordering),
             "a session whose hook did report has nothing to warn about"
         );
 
         // Second pass: the latch is what makes this one line per launch
         // rather than one per tick.
-        silent.hook_warned.store(false, ordering);
+        silent.run.hook_warned.store(false, ordering);
         capture_pass(&sup, &[Arc::clone(&silent)], false).await;
         assert!(
-            silent.hook_warned.load(ordering),
+            silent.run.hook_warned.load(ordering),
             "the wire is armed by `hooked` alone, so clearing the latch re-arms it — \
              which is what makes the latch the only thing suppressing repeats"
         );
@@ -2330,15 +2364,15 @@ mod tests {
         let stale = crate::agent_kind::now_unix() - 3600;
         let unhooked = claude_entry("unhooked", "/tmp/one", Some(stale), CaptureState::Unclaimed);
         let untyped = claude_entry("no-input", "/tmp/two", None, CaptureState::Unclaimed);
-        untyped.hooked.store(true, ordering);
+        untyped.run.hooked.store(true, ordering);
 
         capture_pass(&sup, &[Arc::clone(&unhooked), Arc::clone(&untyped)], false).await;
         assert!(
-            !unhooked.hook_warned.load(ordering),
+            !unhooked.run.hook_warned.load(ordering),
             "a launch that carried no hook cannot be late with a report"
         );
         assert!(
-            !untyped.hook_warned.load(ordering),
+            !untyped.run.hook_warned.load(ordering),
             "a session with no delivered input yet has no deadline running"
         );
     }
@@ -2370,7 +2404,12 @@ mod tests {
         plant_claude_record(home.path(), &cwd, "conv-a", b_at);
 
         capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        let verdict = b
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(verdict, CaptureState::UncapturedFinal),
             "an anchorless reported session's id must still be excluded: {verdict:?}"
@@ -2406,7 +2445,12 @@ mod tests {
         plant_claude_record(home.path(), &cwd, "conv-b", at);
 
         capture_pass(&sup, &[Arc::clone(&a), Arc::clone(&b)], false).await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        let verdict = b
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(verdict, CaptureState::Ambiguous { .. }),
             "a rival overlapping a reported session's window must refuse rather than claim \
@@ -2446,7 +2490,12 @@ mod tests {
             false,
         )
         .await;
-        let verdict = c.capture.lock().expect("capture mutex poisoned").clone();
+        let verdict = c
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(verdict, CaptureState::UncapturedFinal),
             "with both in-window records spoken for, C has no candidate left rather than a \
@@ -2495,7 +2544,12 @@ mod tests {
             false,
         )
         .await;
-        let verdict = b.capture.lock().expect("capture mutex poisoned").clone();
+        let verdict = b
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(
                 &verdict,
@@ -2552,12 +2606,22 @@ mod tests {
             false,
         )
         .await;
-        let dropped = b.capture.lock().expect("capture mutex poisoned").clone();
+        let dropped = b
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(dropped, CaptureState::UncapturedFinal),
             "a pending claim the rival reported must be abandoned, not written: {dropped:?}"
         );
-        let kept = c.capture.lock().expect("capture mutex poisoned").clone();
+        let kept = c
+            .run
+            .capture
+            .lock()
+            .expect("capture mutex poisoned")
+            .clone();
         assert!(
             matches!(&kept, CaptureState::PendingCommit { conversation, .. }
                 if conversation == "conv-c"),
@@ -2588,7 +2652,7 @@ mod tests {
             Some(at),
             CaptureState::Unclaimed,
         );
-        entry.hooked.store(true, ordering);
+        entry.run.hooked.store(true, ordering);
         let well_past = bounds.horizon(at) + 3600;
 
         let entries = [Arc::clone(&entry)];
@@ -2602,7 +2666,7 @@ mod tests {
             0,
             "and every one after it is silent without anything being reset"
         );
-        assert!(entry.hook_warned.load(ordering));
+        assert!(entry.run.hook_warned.load(ordering));
     }
 
     /// The horizon is a real boundary: silent one second before it, warning
@@ -2626,13 +2690,13 @@ mod tests {
         let horizon = bounds.horizon(at);
 
         let early = claude_entry("early", "/tmp/one", Some(at), CaptureState::Unclaimed);
-        early.hooked.store(true, ordering);
+        early.run.hooked.store(true, ordering);
         assert_eq!(
             report_liveness_tripwire(&[Arc::clone(&early)], bounds, horizon - 1),
             0,
             "one second short of the horizon the report may still be on its way"
         );
-        assert!(!early.hook_warned.load(ordering));
+        assert!(!early.run.hook_warned.load(ordering));
         assert_eq!(
             report_liveness_tripwire(&[Arc::clone(&early)], bounds, horizon),
             1,
@@ -2683,7 +2747,7 @@ mod tests {
             Some(stale),
             CaptureState::Unclaimed,
         );
-        silent.hooked.store(true, ordering);
+        silent.run.hooked.store(true, ordering);
         // `capture_pass_for` reads the supervisor's own session map rather
         // than taking entries, so the entry has to be published into it.
         sup.sessions
@@ -2693,7 +2757,7 @@ mod tests {
 
         sup.capture_pass_for(CaptureReason::Reply).await;
         assert!(
-            silent.hook_warned.load(ordering),
+            silent.run.hook_warned.load(ordering),
             "a supervisor with nothing to scan must still say that a hook never reported"
         );
     }
