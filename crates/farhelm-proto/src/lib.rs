@@ -591,7 +591,7 @@ pub enum SessionStatus {
     /// other:
     ///
     /// - **Restart** never surfaces it at all: the helm's merge rule
-    ///   (`manager::merged_status`) refuses to let an `Unknown` overwrite a
+    ///   (farhelm-helm's `session_cache::merged_status`) refuses to let an `Unknown` overwrite a
     ///   status it already knows definitely, so the prior classification
     ///   stays on screen across the gap.
     /// - **Create** has no prior definite status to hold, so the client

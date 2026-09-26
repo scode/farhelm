@@ -4622,11 +4622,15 @@ impl HelmStore {
                 // Only this field is retained; the rest of the fresh row
                 // still replaces the old one. A corrupt old payload offers
                 // no status to retain and is replaced normally.
+                //
+                // This is `crate::session_cache::merged_status`'s rule, with
+                // the `Unknown` test done first so a definite status costs no
+                // decode of the stored row.
                 if entry.status == SessionStatus::Unknown
                     && let Some((_, stored)) = previous.get(&entry.id)
                     && let Ok(old) = serde_json::from_str::<SessionInfo>(stored)
                 {
-                    entry.status = old.status;
+                    entry.status = crate::session_cache::merged_status(&old.status, entry.status);
                 }
                 let json = serde_json::to_string(&entry).context("serializing cached session")?;
                 let inserted = tx
@@ -4748,7 +4752,7 @@ impl HelmStore {
     /// the thing that resolves a collision — see that variant's docs.
     ///
     /// The id is bounded like every other peer-supplied one
-    /// (`crate::manager::MAX_SESSION_ID_BYTES`): a create's reply is a peer
+    /// ([`crate::session_cache::MAX_SESSION_ID_BYTES`]): a create's reply is a peer
     /// ingress point exactly as a drain's rows are, and an id no later
     /// request could carry in its frame head must not enter the cache
     /// through either.
@@ -4770,133 +4774,145 @@ impl HelmStore {
         identity: &str,
         entry: &SessionInfo,
     ) -> anyhow::Result<bool> {
-        anyhow::ensure!(
-            entry.id.len() <= crate::manager::MAX_SESSION_ID_BYTES,
-            "session id of {} bytes exceeds the {} this helm can build resumable cursors over",
-            entry.id.len(),
-            crate::manager::MAX_SESSION_ID_BYTES
-        );
+        crate::session_cache::ensure_recordable_id(&entry.id)?;
         let identity = identity.to_string();
         let entry = entry.clone();
-        self.conn.call("remember session task panicked", move |conn: &mut Connection| -> anyhow::Result<bool> {
-            let tx = conn
-                .transaction()
-                .context("beginning cache seed transaction")?;
-            let current: Option<Option<String>> = tx
-                .query_row(
-                    "SELECT host_identity FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |r| r.get(0),
-                )
-                .optional()
-                .context("reading current host identity")?;
-            let Some(current) = current else {
-                return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
-            };
-            if current.as_deref() != Some(identity.as_str()) {
-                return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
-                    host,
-                    expected: identity,
-                    actual: current,
-                }));
-            }
-            // `created_at` comes back too, for the changed-only comparison
-            // at the bottom: it is a column of its own and part of the
-            // ordering key, so a row whose payload matches while its
-            // timestamp does not is a change like any other.
-            let claimed: Option<(HostId, i64, String)> = tx
-                .query_row(
-                    "SELECT host_id, created_at, info_json FROM session_cache \
+        self.conn
+            .call(
+                "remember session task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning cache seed transaction")?;
+                    let current: Option<Option<String>> = tx
+                        .query_row(
+                            "SELECT host_identity FROM hosts WHERE id = ?1",
+                            rusqlite::params![host],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading current host identity")?;
+                    let Some(current) = current else {
+                        return Err(anyhow::Error::new(HostStoreError::HostNotFound(host)));
+                    };
+                    if current.as_deref() != Some(identity.as_str()) {
+                        return Err(anyhow::Error::new(HostStoreError::IdentityMismatch {
+                            host,
+                            expected: identity,
+                            actual: current,
+                        }));
+                    }
+                    // `created_at` comes back too, for the changed-only comparison
+                    // at the bottom: it is a column of its own and part of the
+                    // ordering key, so a row whose payload matches while its
+                    // timestamp does not is a change like any other.
+                    let claimed: Option<(HostId, i64, String)> = tx
+                        .query_row(
+                            "SELECT host_id, created_at, info_json FROM session_cache \
                      WHERE session_id = ?1",
-                    rusqlite::params![entry.id],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )
-                .optional()
-                .context("reading the current owner of this session id")?;
-            if let Some((owner, _, _)) = &claimed
-                && *owner != host
-            {
-                return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
-                    session: entry.id.clone(),
-                    first: *owner,
-                    second: host,
-                }));
-            }
-            // Read and merged INSIDE the transaction that overwrites it, so
-            // no refresh can land between "what did we know" and "what do
-            // we now record". A mutation's reply is authoritative about
-            // everything except liveness and the activity stamp — see
-            // `crate::manager::merge_cached_session` for why `Unknown`
-            // must not erase a definite status, why the previous value is
-            // kept even at the cost of being briefly stale, and why a
-            // reply may only push `last_activity_at` forward. The same
-            // helper serves the in-memory cache, so the two shapes cannot
-            // drift apart.
-            let mut entry = entry;
-            if let Some((_, _, previous)) = &claimed
-                && let Ok(previous) = serde_json::from_str::<SessionInfo>(previous)
-            {
-                crate::manager::merge_cached_session(&previous, &mut entry);
-            }
-            let entry = &entry;
-            let json = serde_json::to_string(entry).context("serializing cached session")?;
-            tx.execute(
-                "INSERT INTO session_cache \
+                            rusqlite::params![entry.id],
+                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                        )
+                        .optional()
+                        .context("reading the current owner of this session id")?;
+                    if let Some((owner, _, _)) = &claimed
+                        && *owner != host
+                    {
+                        return Err(anyhow::Error::new(HostStoreError::SessionOwnerAmbiguous {
+                            session: entry.id.clone(),
+                            first: *owner,
+                            second: host,
+                        }));
+                    }
+                    // Read and merged INSIDE the transaction that overwrites it, so
+                    // no refresh can land between "what did we know" and "what do
+                    // we now record". A mutation's reply is authoritative about
+                    // everything except liveness and the activity stamp — see
+                    // `crate::session_cache::merge_cached_session` for why `Unknown`
+                    // must not erase a definite status, why the previous value is
+                    // kept even at the cost of being briefly stale, and why a
+                    // reply may only push `last_activity_at` forward. The same
+                    // helper serves the in-memory cache, so the two shapes cannot
+                    // drift apart.
+                    let mut entry = entry;
+                    if let Some((_, _, previous)) = &claimed
+                        && let Ok(previous) = serde_json::from_str::<SessionInfo>(previous)
+                    {
+                        crate::session_cache::merge_cached_session(&previous, &mut entry);
+                    }
+                    let entry = &entry;
+                    let json =
+                        serde_json::to_string(entry).context("serializing cached session")?;
+                    tx.execute(
+                        "INSERT INTO session_cache \
                      (host_id, session_id, created_at, info_json) \
                  VALUES (?1, ?2, ?3, ?4) \
                  ON CONFLICT (session_id) DO UPDATE SET \
                      created_at = excluded.created_at, info_json = excluded.info_json",
-                rusqlite::params![host, entry.id, entry.created_at, json],
-            )
-            .context("seeding a cached session")?;
-            // The cap holds for the seed path too — but by EVICTION, never
-            // refusal: the create already succeeded on the supervisor, and
-            // a cache without its row would leave a session the caller was
-            // just told exists unroutable until the next refresh. The
-            // oldest OTHER row goes (largest under the creation order's
-            // sort: smallest created_at, tie-broken by the later id), and
-            // the host's flag records that the cache no longer holds
-            // everything known — which is exactly what the notice means.
-            let over_cap = {
-                let count: i64 = tx
-                    .query_row(
-                        "SELECT COUNT(*) FROM session_cache WHERE host_id = ?1",
-                        rusqlite::params![host],
-                        |r| r.get(0),
+                        rusqlite::params![host, entry.id, entry.created_at, json],
                     )
-                    .context("counting the seeded cache slice")?;
-                count as usize > farhelm_proto::LIST_SESSIONS_CAP
-            };
-            if over_cap {
-                tx.execute(
-                    "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = (                         SELECT session_id FROM session_cache                          WHERE host_id = ?1 AND session_id != ?2                          ORDER BY created_at ASC, session_id DESC LIMIT 1)",
-                    rusqlite::params![host, entry.id],
-                )
-                .context("evicting the oldest cached session past the cap")?;
-                tx.execute(
-                    "UPDATE hosts SET cache_truncated = 1 WHERE id = ?1",
-                    rusqlite::params![host],
-                )
-                .context("recording the seed eviction as a cut")?;
-            }
-            tx.commit().context("committing cache seed")?;
-            // Compared against BOTH stored halves this host already held,
-            // AFTER the status merge above: the merge is what makes a
-            // restart's `Unknown`-carrying reply a no-op for an unchanged
-            // session, and comparing before it would report a change the row
-            // does not actually show. The timestamp is in the comparison for
-            // the same reason it is in the wholesale write's — it is the
-            // ordering column, not a copy of something in the payload.
-            let changed = over_cap
-                || match &claimed {
-                    Some((_, created_at, stored)) => {
-                        *created_at != entry.created_at || stored.as_str() != json.as_str()
+                    .context("seeding a cached session")?;
+                    // The cap holds for the seed path too — but by EVICTION, never
+                    // refusal; `crate::session_cache::eviction_victim` says why and
+                    // which row goes. Only the ordering columns are read, and only
+                    // once the count says a row has to go. The host's flag records
+                    // that the cache no longer holds everything known, which is
+                    // exactly what the notice means.
+                    let over_cap = {
+                        let count: i64 = tx
+                            .query_row(
+                                "SELECT COUNT(*) FROM session_cache WHERE host_id = ?1",
+                                rusqlite::params![host],
+                                |r| r.get(0),
+                            )
+                            .context("counting the seeded cache slice")?;
+                        count as usize > farhelm_proto::LIST_SESSIONS_CAP
+                    };
+                    if over_cap {
+                        let rows: Vec<(i64, String)> = tx
+                    .prepare("SELECT created_at, session_id FROM session_cache WHERE host_id = ?1")
+                    .context("preparing the eviction candidate query")?
+                    .query_map(rusqlite::params![host], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .context("reading eviction candidates")?
+                    .collect::<Result<_, _>>()
+                    .context("collecting eviction candidates")?;
+                        let victim = crate::session_cache::eviction_victim(
+                            rows.iter()
+                                .map(|(created_at, id)| (*created_at, id.as_str())),
+                            &entry.id,
+                        );
+                        if let Some(victim) = victim {
+                            tx.execute(
+                                "DELETE FROM session_cache WHERE host_id = ?1 AND session_id = ?2",
+                                rusqlite::params![host, victim],
+                            )
+                            .context("evicting the oldest cached session past the cap")?;
+                        }
+                        tx.execute(
+                            "UPDATE hosts SET cache_truncated = 1 WHERE id = ?1",
+                            rusqlite::params![host],
+                        )
+                        .context("recording the seed eviction as a cut")?;
                     }
-                None => true,
-            };
-            Ok(changed)
-        })
-.await
+                    tx.commit().context("committing cache seed")?;
+                    // Compared against BOTH stored halves this host already held,
+                    // AFTER the status merge above: the merge is what makes a
+                    // restart's `Unknown`-carrying reply a no-op for an unchanged
+                    // session, and comparing before it would report a change the row
+                    // does not actually show. The timestamp is in the comparison for
+                    // the same reason it is in the wholesale write's — it is the
+                    // ordering column, not a copy of something in the payload.
+                    let changed = over_cap
+                        || match &claimed {
+                            Some((_, created_at, stored)) => {
+                                *created_at != entry.created_at || stored.as_str() != json.as_str()
+                            }
+                            None => true,
+                        };
+                    Ok(changed)
+                },
+            )
+            .await
     }
 
     /// Record one accepted create for composer suggestions.
@@ -5682,8 +5698,8 @@ impl HelmStore {
                         .collect::<Result<_, _>>()
                         .context("reading cached session rows")?;
                     rows.sort_by(|a, b| {
-                        (std::cmp::Reverse(a.1), a.0.as_str())
-                            .cmp(&(std::cmp::Reverse(b.1), b.0.as_str()))
+                        crate::session_cache::creation_order(a.1, &a.0)
+                            .cmp(&crate::session_cache::creation_order(b.1, &b.0))
                     });
                     Ok(rows
                         .into_iter()
@@ -12954,7 +12970,7 @@ mod tests {
     /// A mutation reply may push activity and work-start keys forward and
     /// never back, including when it carries old-wire zeroes.
     ///
-    /// The durable half of `crate::manager::merge_cached_session`'s
+    /// The durable half of `crate::session_cache::merge_cached_session`'s
     /// contract, pinned where it is actually reachable. The race is
     /// routine rather than exotic: a refresh drain and a create, rename, or
     /// restart reply both write this cache, nothing orders

@@ -302,13 +302,11 @@ are large mostly because of their tests.
   which module owns those tables' schema and invariants is split. Fix: move the working-copy SQL into a store submodule,
   or give `working_copies` a narrow trait over the store. The shared connection plumbing that used to share this entry
   (`farhelm_supervisor::db`) is done; the migration ladders stay per store with the held-out HelmStore split.
-- **Two helm session caches with one set of rules.** Medium-high effort. Hosts with an identity cache sessions in SQLite
-  (`store::remember_session`, `farhelm-helm/src/store.rs:4575`), hosts without keep them in memory
-  (`manager::remember_session`, `manager.rs:1834`), and merge, sort, cap, eviction, and the truncated flag are written
-  once in SQL and once in Rust; `forget_session` and `refresh_once` each branch on identity. Helpers point the wrong way
-  (store calls `manager::merge_cached_session`, manager calls `sessions::resolve_session_profiles_from_store`), and the
-  session id length bound is checked in five places. Fix: one pure policy module both backends call, or a cache type
-  with two backends behind the manager.
+- **Two helm session caches behind one interface.** Medium effort. Hosts with an identity cache sessions in SQLite,
+  hosts without keep them in memory, and the rules both follow (reply merge, creation order, cap eviction, id bound) now
+  live in `farhelm-helm/src/session_cache.rs`. What remains is the plumbing: `remember_session`, `forget_session`, and
+  `refresh_once` in `manager.rs` each branch on whether the host has an identity and carry a storage-specific body per
+  branch. Fix: a cache type with the two backends behind it, so the manager calls one interface.
 - **Subprocess runners.** Medium-high effort. At least four timeout-and-cap runners with different kill semantics:
   `farhelm-supervisor/src/tmux.rs:663` (sync, process-group kill), `farhelm-helm/src/provisioning/backend.rs:1474`
   (async, process-group kill), `farhelm-supervisor/src/repository_discovery.rs:234` (async, output cap, no process

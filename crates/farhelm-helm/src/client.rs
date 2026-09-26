@@ -369,7 +369,7 @@ pub enum SupervisorTransportError {
 /// than the `Internal` an unclassified error becomes. See that variant and
 /// `agent_requests::transport_outcome` for the vocabulary.
 fn created_session(session: SessionInfo) -> anyhow::Result<SessionInfo> {
-    use crate::manager::MAX_SESSION_ID_BYTES;
+    use crate::session_cache::MAX_SESSION_ID_BYTES;
     let refuse = |problem: &'static str| {
         anyhow::Error::new(SupervisorTransportError::SentInvalidReply {
             request: "CreateSession",

@@ -69,6 +69,10 @@ pub use crate::transport::{
 };
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError};
+use crate::session_cache::{
+    MAX_SESSION_ID_BYTES, creation_order, ensure_recordable_id, eviction_victim,
+    merge_cached_session, merged_status,
+};
 use crate::store::{
     CacheReplacement, DialedAs, FirstContactOutcome, HelmStore, HostId, HostKind, HostRow,
     HostStoreError,
@@ -168,21 +172,6 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 /// the ladder and the re-probe cadence carry on exactly as they would for a
 /// refused connection.
 pub const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
-
-/// Longest session id this helm will accept from a peer.
-///
-/// Not a guess at what a supervisor mints (a UUID, 36 bytes) but a bound on
-/// what this side can still WORK with. A session id is embedded verbatim in
-/// REST paths and query strings (`/api/sessions/{id}`, the `parent` filter),
-/// so an id anywhere near the frame limit names a session no client could
-/// ever address, because the request head is refused before any handler
-/// sees it.
-///
-/// A kibibyte is two orders of magnitude above every id any farhelm
-/// supervisor has ever minted and still leaves a URL comfortably inside
-/// any HTTP head limit. The value comes from `farhelm-proto` so this
-/// ingestion check cannot drift from the handshake's auth-session check.
-pub const MAX_SESSION_ID_BYTES: usize = farhelm_proto::MAX_SESSION_ID_BYTES;
 
 /// How long one cache refresh may take before the CONNECTION is torn down.
 ///
@@ -1149,43 +1138,6 @@ impl Drop for AbortOnDrop {
     }
 }
 
-/// The status a recorded session should end up with, given what the helm
-/// already knew and what a mutation's reply just said.
-///
-/// `Unknown` NEVER overwrites a definite status, and that one rule is the
-/// whole function.
-///
-/// The asymmetry is the protocol's, not this helm's invention.
-/// `SessionStatus::Unknown`'s own contract is explicit that `ListSessions`
-/// is the only reply computing a REAL answer, and that everywhere else the
-/// value means "not yet known" rather than "known not to be running" — so a
-/// restart's or a create's reply carries `Unknown` deliberately, because at
-/// the instant it is built the pane exists but the agent's own `exec`
-/// inside it has not been observed. Claiming liveness there would be a
-/// fabrication; the supervisor is right to refuse it.
-///
-/// What follows for THIS side is that such a reply is not evidence about
-/// liveness at all, and must not be recorded as if it were. Letting it
-/// through cost a real, user-visible regression: a restart of a live
-/// session replaced a cached `alive` with `unknown`, so the list answered a
-/// successful restart with a badge that says the helm has no idea — for a
-/// session it had definite knowledge about a moment earlier. Every other
-/// field of the reply is fresh and authoritative and is taken as given; the
-/// status alone is knowledge the reply does not have.
-///
-/// Keeping the previous value can leave it briefly STALE — a restart of an
-/// `exited` session goes on reading `exited` until the owning host's next
-/// refresh computes the truth. That is the same one-interval lag the list
-/// had before mutations were recorded at all, and it is strictly better
-/// than the alternative: stale-but-definite is a claim the helm can defend,
-/// and `unknown` is the absence of one.
-pub fn merged_status(previous: &SessionStatus, incoming: SessionStatus) -> SessionStatus {
-    match incoming {
-        SessionStatus::Unknown => previous.clone(),
-        definite => definite,
-    }
-}
-
 /// Keep a host's last in-memory status when a fresh list has no status
 /// evidence for that session yet. Other fields remain from the new list;
 /// an identity-less host has no durable cache to perform this merge for it.
@@ -1199,46 +1151,6 @@ fn retain_unknown_list_status(previous: &[SessionInfo], incoming: &mut [SessionI
             entry.status = merged_status(status, entry.status.clone());
         }
     }
-}
-
-/// Fold what the helm already cached for a session into the `SessionInfo`
-/// a MUTATION's reply just produced, before that reply is recorded.
-///
-/// One helper for both storage shapes on purpose. The helm caches sessions
-/// two ways — durably in `session_cache` for a host with an identity, in
-/// memory for one without — and each has its own "what did we know"
-/// lookup. The rules for reconciling a mutation's reply against it are the
-/// same rules either way, and two copies of them is how the two shapes
-/// come to disagree about what a reply is evidence of.
-///
-/// A mutation's reply is authoritative about everything it describes
-/// EXCEPT the sampled status and timestamps handled here: each is computed
-/// by machinery the reply did not run. `status` is
-/// [`merged_status`]'s subject. Activity age and work-start ordering are the supervisor's
-/// sampler's, and a create/rename/restart reply merely copies
-/// whatever the entry happened to hold when it was built — which can be
-/// OLDER than what a `ListSessions` drain already committed here, because
-/// replies and drains race and nothing orders them.
-///
-/// So the value is carried forward monotonically: a reply may push it
-/// forward, never back. `0` is the field's "unknown" (an old sender omits
-/// it entirely — see `SessionInfo::last_activity_at` and
-/// `SessionInfo::last_work_started_at`), and it is also the
-/// smallest value the field takes, so a plain maximum is exactly the rule
-/// "never let an absent or stale answer erase a real one". Moving it
-/// backwards could undo activity/unseen evidence or drop a session down the
-/// recent-work list just because somebody renamed or restarted it.
-///
-/// The `created_at` fallback a 0 implies is deliberately NOT applied here.
-/// It belongs at read and sort time, where the reader has both fields in
-/// hand; writing a synthesized value into the cache would make a guess
-/// indistinguishable from an observation for every later merge.
-pub fn merge_cached_session(previous: &SessionInfo, incoming: &mut SessionInfo) {
-    incoming.status = merged_status(&previous.status, incoming.status.clone());
-    incoming.last_activity_at = previous.last_activity_at.max(incoming.last_activity_at);
-    incoming.last_work_started_at = previous
-        .last_work_started_at
-        .max(incoming.last_work_started_at);
 }
 
 /// Whether two published clients are the SAME live connection.
@@ -1836,12 +1748,7 @@ impl ConnectionManager {
         claim: &SessionClaim,
         session: &SessionInfo,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            session.id.len() <= MAX_SESSION_ID_BYTES,
-            "session id of {} bytes exceeds the {} this helm can build resumable cursors over",
-            session.id.len(),
-            MAX_SESSION_ID_BYTES
-        );
+        ensure_recordable_id(&session.id)?;
         let (status, cache_lock, seed_epoch) = {
             let map = self.actors.lock().expect("actor map mutex poisoned");
             let Some(handle) = map.actors.get(&claim.host) else {
@@ -1941,39 +1848,26 @@ impl ConnectionManager {
                     // verbatim — so this is a determinism nicety, not a
                     // sorted-list invariant anything may lean on.
                     let at = entries.partition_point(|existing| {
-                        (std::cmp::Reverse(existing.created_at), existing.id.as_str())
-                            < (std::cmp::Reverse(session.created_at), session.id.as_str())
+                        creation_order(existing.created_at, &existing.id)
+                            < creation_order(session.created_at, &session.id)
                     });
                     entries.insert(at, session.clone());
-                    // The same bound a drain obeys — but held by EVICTION,
-                    // never by refusing the new row: the create already
-                    // succeeded on the supervisor, and a list without its
-                    // row would leave a session the caller was just told
-                    // exists unroutable until the next refresh. The victim
-                    // is FOUND, not taken from the tail: the list carries
-                    // the peer's own order (nothing sorts it since the wire
-                    // dropped its order contract), so "oldest" has to be
-                    // selected explicitly — smallest creation time, ties to
-                    // the later id, the same choice the durable path's SQL
-                    // makes. The published flag records that this list no
-                    // longer holds everything known — the same statement a
-                    // capped drain makes.
+                    // The same bound a drain obeys, held by eviction rather
+                    // than by refusing the new row, with the victim chosen
+                    // by the rule the durable path uses too (see
+                    // `eviction_victim`). The published flag records that
+                    // this list no longer holds everything known — the same
+                    // statement a capped drain makes.
                     if entries.len() > farhelm_proto::LIST_SESSIONS_CAP {
-                        // The just-recorded row is admitted by this branch;
-                        // only a previously cached row may make room for it.
-                        // Filtering preserves the original vector indices
-                        // for removal below.
-                        if let Some(oldest) = entries
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, entry)| entry.id != session.id)
-                            .max_by(|(_, a), (_, b)| {
-                                (std::cmp::Reverse(a.created_at), a.id.as_str())
-                                    .cmp(&(std::cmp::Reverse(b.created_at), b.id.as_str()))
-                            })
-                            .map(|(index, _)| index)
-                        {
-                            entries.remove(oldest);
+                        let victim = eviction_victim(
+                            entries
+                                .iter()
+                                .map(|entry| (entry.created_at, entry.id.as_str())),
+                            &session.id,
+                        )
+                        .map(str::to_owned);
+                        if let Some(victim) = victim {
+                            entries.retain(|entry| entry.id != victim);
                         }
                         status.list_truncated = true;
                     }
