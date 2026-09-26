@@ -10,6 +10,7 @@ import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
 import { stackScratchDir } from "./scratch";
 import { attachSession, waitForTermText } from "./term";
+import { waitForSessionRevealed } from "./terminal-readiness";
 
 export {
   type ReplayRecord,
@@ -426,6 +427,95 @@ export async function selectTerminal(page: Page, terminal: string) {
   await expect(
     page.locator(`.terminal-pane[data-terminal="${terminal}"]`),
   ).toBeVisible();
+}
+
+/**
+ * Count every focus that enters the primary (agent) terminal once armed.
+ *
+ * For the modal-focus tests: a reveal or a selection change that focuses the
+ * agent behind a dialog fires `focusin` on xterm's helper textarea, and the
+ * page records it at that moment whether or not a later observation happens
+ * to catch focus there. Install before navigating; arm once the dialog is
+ * open with [`armTerminalFocusSpy`]; read with [`terminalFocusCount`].
+ */
+export async function installTerminalFocusSpy(page: Page) {
+  await page.addInitScript(() => {
+    const spy = { armed: false, count: 0 };
+    (window as any).__terminalFocusSpy = spy;
+    document.addEventListener(
+      "focusin",
+      (event) => {
+        if (spy.armed && event.target instanceof Element && event.target.closest("#terminal")) {
+          spy.count += 1;
+        }
+      },
+      true,
+    );
+  });
+}
+
+/** Start counting agent-terminal focus events (see [`installTerminalFocusSpy`]). */
+export async function armTerminalFocusSpy(page: Page) {
+  await page.evaluate(() => {
+    (window as any).__terminalFocusSpy.armed = true;
+  });
+}
+
+/** How many times the agent terminal took focus since the spy was armed. */
+export async function terminalFocusCount(page: Page): Promise<number> {
+  return page.evaluate(() => (window as any).__terminalFocusSpy.count);
+}
+
+/**
+ * Leave tab `tabId` selected and focused, with the agent terminal attached and
+ * revealed behind it.
+ *
+ * The premise of the tab-fallback focus tests: removing the tab makes the view
+ * fall back to an existing agent island, which it focuses directly rather than
+ * through a reveal. Selecting the agent first makes the tab's selection a real
+ * change of focus target; a click on an already-selected tab would leave focus
+ * on its strip button.
+ */
+export async function selectTabOverRevealedAgent(page: Page, id: string, tabId: string) {
+  await waitForSessionRevealed(page, id, { tabId });
+  await selectTerminal(page, "agent");
+  await selectTerminal(page, tabId);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (el) => !!document.getElementById(el)?.contains(document.activeElement),
+        `terminal-${tabId}`,
+      )
+    )
+    .toBe(true);
+  await waitForSessionRevealed(page, id);
+}
+
+/**
+ * Close tab `tabId` as a second client would and wait until the view has fallen
+ * back to the agent terminal.
+ *
+ * Closed through the API rather than by exiting its shell, because exiting
+ * would need keystrokes in the tab and so focus outside whatever dialog the
+ * test has open; both reach the view as the same tab disappearing. Returns
+ * once the departed tab's island is unmounted, which the view does in the same
+ * synchronous call that decides the new focus target.
+ */
+export async function closeTabAndAwaitAgentFallback(
+  page: Page,
+  request: APIRequestContext,
+  id: string,
+  tabId: string,
+) {
+  const closed = await request.delete(`/api/sessions/${id}/tabs/${tabId}`);
+  expect(closed.ok(), await closed.text()).toBe(true);
+  await expect(page.locator(`.tab-slot[data-tab-id="${tabId}"]`)).toHaveCount(0, {
+    timeout: 20_000,
+  });
+  await expect(page.locator(".tab-agent")).toHaveClass(/selected/);
+  await expect
+    .poll(() => page.evaluate(() => Object.keys((window as any).__farhelmIslands ?? {}).sort()))
+    .toEqual(["terminal"]);
 }
 
 /**
