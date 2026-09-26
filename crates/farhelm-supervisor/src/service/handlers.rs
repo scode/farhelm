@@ -1401,8 +1401,8 @@ async fn handle_delete_session(
         // Directory admission (R1.1): taken in this OUTER owned mutation
         // BEFORE the lifecycle claim, and held across the whole teardown.
         // Lock order is agent fence → admission permit → directory
-        // admission → lifecycle claim, matching every create's intent →
-        // directory → lifecycle sequence; `teardown_session` itself never
+        // admission → lifecycle claim (the table on `Supervisor`), matching
+        // every create's intent → directory → lifecycle sequence; `teardown_session` itself never
         // acquires the mutex (it would order lifecycle → directory and
         // cycle against a restricted create). Holding it across the slow
         // sweep is deliberate: the last-reference archival decision and
