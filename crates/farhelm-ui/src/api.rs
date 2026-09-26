@@ -3090,12 +3090,11 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
 /// What `GET /api/profiles` answers with: the helm catalog and its remembered
 /// default together (farhelm-helm's `ProfilesView`).
 ///
-/// The pairing is the point rather than a convenience. SPEC.md's creation
-/// rule — default to the last-used profile, ASK when it is gone — is a
-/// question about two facts at once, and the moment that matters is exactly
-/// the one where a profile has just been deleted. Two separate reads would
-/// have to be reconciled by every client, at whichever moments they happened
-/// to land.
+/// The remembered default is served raw, even when it names a profile that
+/// is no longer in the catalog beside it. In this UI only the profiles popup
+/// reads it (to mark the "last used" row); the create dialog never selects
+/// from it, per SPEC.md's rule that New does not silently choose a
+/// remembered profile (see `profiles::resolve_agent`).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 pub(crate) struct ProfileCatalog {
     /// The catalog in the helm's own order (by id, stable across
@@ -3246,11 +3245,10 @@ pub(crate) async fn update_profile(
 /// The reply is an empty object, exactly like `stop` and session `delete`, so
 /// a 200 IS the whole answer and there is nothing for a decode to fail on.
 ///
-/// Existing sessions are untouched, including the one thing that looks like
-/// an exception: the helm deliberately does NOT clear a remembered default
-/// that named this profile, because a default outliving its profile is what
-/// lets the next create dialog say "the one you last used is gone, pick
-/// another" instead of quietly offering nothing.
+/// Existing sessions are untouched, and so is a remembered default that
+/// named this profile: the helm does not clear it, so later catalog reads can
+/// carry a default that names no profile. The create dialog does not act on
+/// the default either way.
 pub(crate) async fn delete_profile(base: &str, profile_id: &str) -> Result<(), String> {
     let url = format!("{base}/api/profiles/{}", encode_path_segment(profile_id));
     let resp = send(client().delete(&url)).await?;
