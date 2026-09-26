@@ -2683,11 +2683,11 @@ impl IntegrationSnapshot {
     }
 }
 
-/// Whether this kind's foreground-runtime and root-conversation proofs are
-/// implemented, so its admissions write versioned ownership provenance and
-/// its exact-resume offers require it.
+/// Whether this kind's ownership proofs (foreground attribution plus its own
+/// kind-specific record check) are implemented, so its admissions write
+/// versioned ownership provenance and its exact-resume offers require it.
 ///
-/// Codex and Grok have complete proofs. OMP, Goose, Claude, and Pi keep
+/// Codex, Grok, and OMP have complete proofs. Goose, Claude, and Pi keep
 /// their arm false until their own proof lands. Admission, durable writers,
 /// the refresh mirror, and every offer surface consult this one predicate,
 /// so a later kind needs one deliberate flip rather than scattered match
