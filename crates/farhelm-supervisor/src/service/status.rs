@@ -188,7 +188,7 @@ pub(crate) fn session_status(
     // this function is synchronous (no await can intervene) and every arm
     // only reads, so the clone would have bought nothing but an allocation
     // on the hottest path the list reply has.
-    let recorded = entry.outcome.lock().expect("outcome mutex poisoned");
+    let recorded = entry.run.outcome.lock().expect("outcome mutex poisoned");
     let live = entry.terminal.as_ref().and_then(|terminal| {
         pane_states
             .get(&terminal.pane)
@@ -295,7 +295,7 @@ pub(crate) fn session_status(
 /// reply, so cloning it would add a kilobytes-per-row allocation to the
 /// list path to avoid holding a leaf lock for a substring search.
 pub(crate) fn live_status(entry: &SessionEntry) -> SessionStatus {
-    let activity = entry.activity.lock().expect("activity mutex poisoned");
+    let activity = entry.run.activity.lock().expect("activity mutex poisoned");
     let baseline =
         if activity.samples >= 2 && activity.unchanged_streak >= QUIET_SAMPLES_BEFORE_IDLE {
             SessionStatus::Idle
@@ -360,7 +360,7 @@ fn waiting_or_baseline(baseline: SessionStatus, sharpened: SessionStatus) -> Ses
 /// ([`super::capture::CaptureState::committed_conversation`]), which keeps
 /// the offer from promising a resume that no stored value could fill.
 fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
-    let capture = entry.capture.lock().expect("capture mutex poisoned");
+    let capture = entry.run.capture.lock().expect("capture mutex poisoned");
     entry.snapshot.restart_offer(
         capture.committed_conversation(),
         capture.committed_ownership_version().unwrap_or(0),
@@ -412,9 +412,11 @@ pub(crate) fn entry_info(
     // those, this is a READ of a value the ticker decided, not a fresh
     // computation: nothing on the reply path may mint an activity time.
     info.last_activity_at = entry
+        .session
         .last_activity_at
         .load(std::sync::atomic::Ordering::Relaxed);
     info.last_work_started_at = entry
+        .session
         .last_work_started_at
         .load(std::sync::atomic::Ordering::Relaxed);
     // The entry carries the SNAPSHOT (id and name as recorded at creation);
@@ -626,6 +628,7 @@ pub(crate) async fn observe_entry(
     pane_states: &HashMap<String, PaneState>,
 ) -> anyhow::Result<EntryObservation> {
     let recorded = entry
+        .run
         .outcome
         .lock()
         .expect("outcome mutex poisoned")
@@ -744,7 +747,7 @@ mod tests {
     ) -> SessionEntry {
         let entry = entry_with(Some(a_terminal()), LastOutcome::Running);
         {
-            let mut activity = entry.activity.lock().expect("activity mutex");
+            let mut activity = entry.run.activity.lock().expect("activity mutex");
             activity.samples = samples;
             activity.unchanged_streak = unchanged_streak;
             activity.tail = tail.map(str::to_string);
@@ -802,14 +805,14 @@ mod tests {
             QUIET_SAMPLES_BEFORE_IDLE,
             Some("still"),
         );
-        entry.activity.lock().expect("activity mutex").working = true;
+        entry.run.activity.lock().expect("activity mutex").working = true;
         assert_eq!(session_status(&entry, &live).0, SessionStatus::Running);
 
-        entry.activity.lock().expect("activity mutex").tail =
+        entry.run.activity.lock().expect("activity mutex").tail =
             Some("Do you want to run this command?\n❯ 1. Yes\n  2. No".to_string());
         assert_eq!(session_status(&entry, &live).0, SessionStatus::Waiting);
 
-        entry.activity.lock().expect("activity mutex").tail =
+        entry.run.activity.lock().expect("activity mutex").tail =
             Some("Working (4s • esc to interrupt)\n\n› draft\n\nfooter".to_string());
         assert_eq!(
             session_status(&entry, &live).0,
@@ -1101,17 +1104,18 @@ mod tests {
     fn a_reloaded_live_pane_waits_for_status_evidence() {
         let live = pane_map(false, None);
         let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
-        entry.activity = ActivitySample::reloaded();
+        entry.run.activity = ActivitySample::reloaded();
         assert_eq!(session_status(&entry, &live).0, SessionStatus::Unknown);
 
         {
-            let mut activity = entry.activity.lock().expect("activity mutex");
+            let mut activity = entry.run.activity.lock().expect("activity mutex");
             activity.observe("unchanged".to_string());
             activity.observe("unchanged".to_string());
         }
         assert_eq!(session_status(&entry, &live).0, SessionStatus::Unknown);
 
         entry
+            .run
             .activity
             .lock()
             .expect("activity mutex")
@@ -1119,9 +1123,10 @@ mod tests {
         assert_eq!(session_status(&entry, &live).0, SessionStatus::Running);
 
         let mut quiet = entry_with(Some(a_terminal()), LastOutcome::Running);
-        quiet.activity = ActivitySample::reloaded();
+        quiet.run.activity = ActivitySample::reloaded();
         for _ in 0..=QUIET_SAMPLES_BEFORE_IDLE {
             quiet
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")
@@ -1131,6 +1136,7 @@ mod tests {
 
         let waiting = entry_sampled(AgentKind::Claude, 1, 0, Some(CLAUDE_APPROVAL_TAIL));
         waiting
+            .run
             .activity
             .lock()
             .expect("activity mutex")
@@ -1207,7 +1213,12 @@ mod tests {
             "premise: the prompt on screen is what makes this session waiting"
         );
 
-        entry.activity.lock().expect("activity mutex").forget_tail();
+        entry
+            .run
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .forget_tail();
 
         assert_eq!(
             session_status(&entry, &live).0,
@@ -1215,7 +1226,7 @@ mod tests {
             "with no screen to read, the session falls back to its baseline rather than \
              reporting a question nobody can confirm is still on screen"
         );
-        let activity = entry.activity.lock().expect("activity mutex");
+        let activity = entry.run.activity.lock().expect("activity mutex");
         assert_eq!(
             (activity.samples, activity.unchanged_streak),
             (9, 5),

@@ -67,7 +67,7 @@
 //!
 //! Sampling used to write nothing durable at all, and that is no longer
 //! true: it now also DATES the changes it observes, into
-//! `SessionEntry::last_activity_at` and — rarely — into the session's row.
+//! `SessionCells::last_activity_at` and — rarely — into the session's row.
 //! The lifecycle, since this is the only writer of that column: the value
 //! is minted at create (equal to `created_at`), reloaded verbatim on
 //! restart, and moved forward only here — only when
@@ -312,7 +312,7 @@ pub(crate) const SAMPLING_ADMISSION_PERMITS: usize = 1;
 
 /// What the sampler last observed on one session's agent pane.
 ///
-/// Stored per entry (see [`SessionEntry::activity`] for why there and not
+/// Stored per entry (see [`super::core::RunCells::activity`] for why there and not
 /// in a map on `Supervisor`) and never persisted: it describes what THIS
 /// process has watched happen, and a value restored from disk would claim
 /// knowledge of a stretch of time nobody was looking.
@@ -408,7 +408,7 @@ impl ActivitySample {
     /// a rename SHARES this `Arc` while a relaunch mints a new one, and a
     /// constructor returning a bare value would let a call site quietly
     /// pick the wrong side of that rule. (The timestamp cell beside it,
-    /// `core::SessionEntry::last_activity_at`, takes the opposite side on
+    /// `core::SessionCells::last_activity_at`, takes the opposite side on
     /// relaunch — it is session-scoped where this is run-scoped — which is
     /// exactly why each has its own named constructor.)
     pub(crate) fn unsampled() -> Arc<std::sync::Mutex<ActivitySample>> {
@@ -1002,6 +1002,7 @@ async fn sample_pass(
             // would be a wrong answer rather than an absent one.
             for entry in &entries {
                 entry
+                    .run
                     .activity
                     .lock()
                     .expect("activity mutex poisoned")
@@ -1085,7 +1086,8 @@ async fn sample_pass(
                 // old pane's death from overwriting a fresh launch in RAM.
                 for entry in &entries {
                     if let Some(outcome) = committed.get(&entry.info.id) {
-                        *entry.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
+                        *entry.run.outcome.lock().expect("outcome mutex poisoned") =
+                            outcome.clone();
                     }
                 }
                 // A sentinel is disposable only after its Error reached
@@ -1187,6 +1189,7 @@ async fn sample_pass(
                 // here on. See `ActivitySample::forget_tail` for why that
                 // must not count as a quiet look.
                 entry
+                    .run
                     .activity
                     .lock()
                     .expect("activity mutex poisoned")
@@ -1212,7 +1215,7 @@ async fn sample_pass(
         // transition from no prior observation.
         let previous_status = live_status(entry);
         let (changed, was_provisional) = {
-            let mut activity = entry.activity.lock().expect("activity mutex poisoned");
+            let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
             let was_provisional = activity.startup_provisional;
             let changed = activity.observe_screen(comparison, status_tail, screen.working);
             (changed, was_provisional)
@@ -1237,6 +1240,7 @@ async fn sample_pass(
 fn settle_startup_wait(entry: &SessionEntry, was_provisional: bool) {
     if was_provisional && live_status(entry) == SessionStatus::Waiting {
         entry
+            .run
             .activity
             .lock()
             .expect("activity mutex poisoned")
@@ -1254,6 +1258,7 @@ fn settle_startup_wait(entry: &SessionEntry, was_provisional: bool) {
 async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, new_start: bool) {
     if !new_start
         && entry
+            .run
             .activity
             .lock()
             .expect("activity mutex poisoned")
@@ -1265,10 +1270,12 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
     let _lifecycle = sup.lifecycle_locks.claim(&entry.info.id).await;
     let current = sup.sessions.lock().await.get(&entry.info.id).cloned();
     let is_current_run = current.is_some_and(|current| {
-        current.generation == entry.generation && Arc::ptr_eq(&current.activity, &entry.activity)
+        current.generation == entry.generation
+            && Arc::ptr_eq(&current.run.activity, &entry.run.activity)
     });
     if !is_current_run {
         entry
+            .run
             .activity
             .lock()
             .expect("activity mutex poisoned")
@@ -1279,6 +1286,7 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
     if new_start {
         let at = sup.reserve_work_start();
         entry
+            .session
             .last_work_started_at
             .fetch_max(at, std::sync::atomic::Ordering::Relaxed);
         if !sup.may_record() {
@@ -1288,7 +1296,7 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
             // write if this process later gains the claim.
             return;
         }
-        let mut activity = entry.activity.lock().expect("activity mutex poisoned");
+        let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
         activity.pending_work_started_at = Some(
             activity
                 .pending_work_started_at
@@ -1296,6 +1304,7 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
         );
     }
     let pending = entry
+        .run
         .activity
         .lock()
         .expect("activity mutex poisoned")
@@ -1313,7 +1322,7 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
         .await
     {
         Ok(()) => {
-            let mut activity = entry.activity.lock().expect("activity mutex poisoned");
+            let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
             if activity.pending_work_started_at == Some(at) {
                 activity.pending_work_started_at = None;
             }
@@ -1353,13 +1362,14 @@ async fn persist_work_started(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>, 
 /// ticker, and its captures are sequential, so nothing can interleave
 /// between the load above and this store — even now that the cell is
 /// shared across a session's entries rather than re-minted per launch
-/// (`core::SessionEntry::last_activity_at`), because sharing changes which
+/// (`core::SessionCells::last_activity_at`), because sharing changes which
 /// cell is written, not how many writers there are. A CAS would defend
 /// against nothing while making the common path harder to read.
 /// Monotonicity where it actually matters — across processes, across a
 /// clock step — is enforced by the store's own predicate.
 async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
     let stored = entry
+        .session
         .last_activity_at
         .load(std::sync::atomic::Ordering::Relaxed);
     // A quantum too large to express in seconds means "never advance",
@@ -1376,6 +1386,7 @@ async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
         return;
     };
     entry
+        .session
         .last_activity_at
         .store(advanced, std::sync::atomic::Ordering::Relaxed);
     if !sup.may_record() {
@@ -1518,6 +1529,7 @@ async fn reap_dead_tabs(
 mod tests {
     use super::super::capture::note_first_input;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
+    use super::super::core::RunCells;
     use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with, no_uploads};
     use super::super::core::{CreateInputs, CreateMode, SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
@@ -1639,6 +1651,7 @@ mod tests {
             .await
             .get(id)
             .expect("the session is in the map")
+            .session
             .last_activity_at
             .load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -1764,6 +1777,7 @@ mod tests {
                 .await
                 .get(id)
                 .expect("the session is in the map")
+                .run
                 .activity,
         )
     }
@@ -1868,7 +1882,13 @@ mod tests {
             .terminal
             .clone()
             .expect("the busy session has an owned terminal");
-        let baseline = entry.activity.lock().expect("activity mutex").tail.clone();
+        let baseline = entry
+            .run
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .tail
+            .clone();
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         let last_captured = loop {
             let capture = sup
@@ -2345,6 +2365,7 @@ mod tests {
             .cloned()
             .expect("the Codex session is installed");
         entry
+            .session
             .last_activity_at
             .store(1, std::sync::atomic::Ordering::Relaxed);
         let before = stamp_of(&sup, "codex").await;
@@ -2557,7 +2578,7 @@ mod tests {
             "one tick must retain the observed exit without a list request"
         );
         assert_eq!(
-            *recorded.outcome.lock().expect("outcome mutex"),
+            *recorded.run.outcome.lock().expect("outcome mutex"),
             LastOutcome::Exited {
                 exit_code: Some(7),
                 annotation: None,
@@ -2587,7 +2608,7 @@ mod tests {
             "a supervisor without write standing must not persist an observed exit"
         );
         assert_eq!(
-            *readonly.outcome.lock().expect("outcome mutex"),
+            *readonly.run.outcome.lock().expect("outcome mutex"),
             LastOutcome::Running,
             "a read-only observation must not turn this supervisor's reply cache into a claim"
         );
@@ -2626,7 +2647,7 @@ mod tests {
             "a pane assigned to another tmux session must not update this row"
         );
         assert_eq!(
-            *entry.outcome.lock().expect("outcome mutex"),
+            *entry.run.outcome.lock().expect("outcome mutex"),
             LastOutcome::Running,
             "an unmatched pane must not change the in-memory outcome either"
         );
@@ -2976,7 +2997,7 @@ mod tests {
 
         assert!(
             sample.observe("hello world".to_string()),
-            "the reported change is what dates `SessionEntry::last_activity_at`, so it must \
+            "the reported change is what dates `SessionCells::last_activity_at`, so it must \
              track the same comparison the streak reset does"
         );
         assert_eq!(
@@ -3390,7 +3411,7 @@ mod tests {
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.to_string();
         entry.info.last_activity_at = at;
-        entry.last_activity_at = crate::service::core::activity_stamp(at);
+        entry.session.last_activity_at = crate::service::core::activity_stamp(at);
         let entry = Arc::new(entry);
         sup.sessions
             .lock()
@@ -3418,6 +3439,7 @@ mod tests {
         .await;
         let entry = session_with_stale_activity(&sup, "retry", 100).await;
         entry
+            .session
             .last_work_started_at
             .store(0, std::sync::atomic::Ordering::Relaxed);
         {
@@ -3433,6 +3455,7 @@ mod tests {
 
         persist_work_started(&sup, &entry, true).await;
         let first = entry
+            .run
             .activity
             .lock()
             .expect("activity mutex")
@@ -3453,6 +3476,7 @@ mod tests {
         persist_work_started(&sup, &entry, false).await;
         assert_eq!(
             entry
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")
@@ -3463,6 +3487,7 @@ mod tests {
 
         persist_work_started(&sup, &entry, true).await;
         let newer = entry
+            .run
             .activity
             .lock()
             .expect("activity mutex")
@@ -3477,6 +3502,7 @@ mod tests {
         }
         assert_eq!(
             entry
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")
@@ -3510,6 +3536,7 @@ mod tests {
         );
         assert_eq!(
             entry
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")
@@ -3526,12 +3553,13 @@ mod tests {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         let old = session_with_stale_activity(&sup, "restarted", 100).await;
-        old.last_work_started_at
+        old.session
+            .last_work_started_at
             .store(123_000, std::sync::atomic::Ordering::Relaxed);
         let mut replacement = entry_with(None, LastOutcome::Running);
         replacement.info = old.info.clone();
         replacement.generation = old.generation + 1;
-        replacement.last_work_started_at = Arc::clone(&old.last_work_started_at);
+        replacement.session.last_work_started_at = Arc::clone(&old.session.last_work_started_at);
         let replacement = Arc::new(replacement);
         sup.sessions
             .lock()
@@ -3542,7 +3570,7 @@ mod tests {
         persist_work_started(&sup, &old, true).await;
 
         assert_eq!(
-            old.last_work_started_at.load(Ordering::Relaxed),
+            old.session.last_work_started_at.load(Ordering::Relaxed),
             123_000,
             "the shared session cell must not take an old run's late observation"
         );
@@ -3577,15 +3605,20 @@ mod tests {
         .await;
         let entry = session_with_stale_activity(&sup, "claimless", 100).await;
         entry
+            .session
             .last_work_started_at
             .store(0, std::sync::atomic::Ordering::Relaxed);
         sup.may_record.store(false, Ordering::SeqCst);
 
         persist_work_started(&sup, &entry, true).await;
 
-        assert_eq!(entry.last_work_started_at.load(Ordering::Relaxed), 8_000);
+        assert_eq!(
+            entry.session.last_work_started_at.load(Ordering::Relaxed),
+            8_000
+        );
         assert_eq!(
             entry
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")
@@ -4219,15 +4252,20 @@ mod tests {
     /// helm cache through an `Unknown` reply.
     #[farhelm_testtrace::test]
     fn a_first_startup_wait_can_be_withdrawn_after_capture_failure() {
+        let base = entry_with(Some(a_terminal()), LastOutcome::Running);
         let entry = SessionEntry {
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Claude,
                 resume_template: None,
             },
-            activity: ActivitySample::reloaded(),
+            run: RunCells {
+                activity: ActivitySample::reloaded(),
+                ..base.run
+            },
             ..entry_with(Some(a_terminal()), LastOutcome::Running)
         };
         entry
+            .run
             .activity
             .lock()
             .expect("activity mutex")
@@ -4240,13 +4278,19 @@ mod tests {
         settle_startup_wait(&entry, true);
         assert!(
             !entry
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")
                 .startup_provisional
         );
 
-        entry.activity.lock().expect("activity mutex").forget_tail();
+        entry
+            .run
+            .activity
+            .lock()
+            .expect("activity mutex")
+            .forget_tail();
         assert_eq!(live_status(&entry), SessionStatus::Running);
     }
 
@@ -4329,15 +4373,9 @@ mod tests {
                     },
                     info: entry.info.clone(),
                     terminal: entry.terminal.clone(),
-                    outcome: Arc::clone(&entry.outcome),
+                    run: entry.run.clone(),
+                    session: entry.session.clone(),
                     canonical_cwd: entry.canonical_cwd.clone(),
-                    first_input: Arc::clone(&entry.first_input),
-                    capture: Arc::clone(&entry.capture),
-                    hooked: Arc::clone(&entry.hooked),
-                    hook_warned: Arc::clone(&entry.hook_warned),
-                    activity: Arc::clone(&entry.activity),
-                    last_activity_at: Arc::clone(&entry.last_activity_at),
-                    last_work_started_at: Arc::clone(&entry.last_work_started_at),
                     generation: entry.generation,
                     scope: entry.scope.clone(),
                 })
@@ -4347,7 +4385,7 @@ mod tests {
                 .await
                 .insert("one".to_string(), Arc::clone(&entry));
             {
-                let mut activity = entry.activity.lock().expect("activity mutex");
+                let mut activity = entry.run.activity.lock().expect("activity mutex");
                 activity.samples = 9;
                 activity.unchanged_streak = 9;
                 activity.tail = Some(CLAUDE_APPROVAL_DIALOG.to_string());
@@ -4370,7 +4408,7 @@ mod tests {
                 "a {read} failure must invalidate the screen it can no longer confirm"
             );
             {
-                let activity = entry.activity.lock().expect("activity mutex");
+                let activity = entry.run.activity.lock().expect("activity mutex");
                 assert_eq!(
                     (activity.samples, activity.unchanged_streak),
                     (9, 9),
@@ -4387,7 +4425,7 @@ mod tests {
             failing.store(false, Ordering::SeqCst);
             sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
 
-            let activity = entry.activity.lock().expect("activity mutex");
+            let activity = entry.run.activity.lock().expect("activity mutex");
             assert_eq!(
                 activity.samples, 10,
                 "the recovering pass is one observation, not a re-baseline ({read})"
@@ -4879,9 +4917,9 @@ mod tests {
                     .try_lock()
                     .ok()
                     .and_then(|sessions| {
-                        sessions
-                            .get("served")
-                            .map(|entry| entry.activity.lock().expect("activity mutex").samples > 0)
+                        sessions.get("served").map(|entry| {
+                            entry.run.activity.lock().expect("activity mutex").samples > 0
+                        })
                     })
                     .unwrap_or(false)
         })
@@ -5089,12 +5127,12 @@ mod tests {
             kind: AgentKind::Claude,
             resume_template: None,
         };
-        integrated.last_activity_at = Arc::clone(&base.last_activity_at);
-        integrated.last_work_started_at = Arc::clone(&base.last_work_started_at);
+        integrated.session.last_activity_at = Arc::clone(&base.session.last_activity_at);
+        integrated.session.last_work_started_at = Arc::clone(&base.session.last_work_started_at);
         integrated.generation = base.generation;
         let entry = Arc::new(integrated);
         {
-            let mut activity = entry.activity.lock().expect("activity mutex");
+            let mut activity = entry.run.activity.lock().expect("activity mutex");
             // Establish both raw status and comparison evidence through
             // the sampler's observation seam; a raw-tail-only seed would
             // correctly count the next capture as baseline recovery.
@@ -5119,6 +5157,7 @@ mod tests {
         assert_eq!(live_status(&entry), SessionStatus::Running);
         assert_eq!(
             entry
+                .session
                 .last_work_started_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             START
@@ -5135,6 +5174,7 @@ mod tests {
         );
         assert_eq!(
             entry
+                .run
                 .activity
                 .lock()
                 .expect("activity mutex")

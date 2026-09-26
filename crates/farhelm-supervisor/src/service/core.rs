@@ -2386,7 +2386,7 @@ impl RelaunchFailure {
     }
 }
 
-/// A [`SessionEntry::last_activity_at`] cell holding `at`.
+/// A [`SessionCells::last_activity_at`] cell holding `at`.
 ///
 /// A named constructor rather than the `Arc::new(AtomicI64::new(..))`
 /// spelling at each of the half-dozen sites that build an entry, for
@@ -2401,7 +2401,7 @@ pub(crate) fn activity_stamp(at: i64) -> Arc<std::sync::atomic::AtomicI64> {
     Arc::new(std::sync::atomic::AtomicI64::new(at))
 }
 
-/// A [`SessionEntry::hooked`] / [`SessionEntry::hook_warned`] cell holding
+/// A [`RunCells::hooked`] / [`RunCells::hook_warned`] cell holding
 /// `raised`.
 ///
 /// A named constructor for [`activity_stamp`]'s reason: the `Arc` is part
@@ -2431,7 +2431,7 @@ pub(crate) fn hook_flag(raised: bool) -> Arc<std::sync::atomic::AtomicBool> {
 ///
 /// Returns the argv to launch and whether it was HOOKED, i.e. whether the
 /// tail was actually appended. The caller carries that bool to the
-/// [`SessionEntry::hooked`] tripwire; it is deliberately not recoverable
+/// [`RunCells::hooked`] tripwire; it is deliberately not recoverable
 /// by inspecting the returned argv, because "does this argv end in flags
 /// that look like ours" is exactly the kind of re-derivation that goes
 /// quietly wrong when a vendor's flags change.
@@ -2968,16 +2968,10 @@ fn same_launch_entry(
     Arc::new(SessionEntry {
         info,
         terminal: entry.terminal.clone(),
-        outcome: Arc::clone(&entry.outcome),
+        run: entry.run.clone(),
+        session: entry.session.clone(),
         snapshot,
         canonical_cwd: entry.canonical_cwd.clone(),
-        first_input: Arc::clone(&entry.first_input),
-        capture: Arc::clone(&entry.capture),
-        hooked: Arc::clone(&entry.hooked),
-        hook_warned: Arc::clone(&entry.hook_warned),
-        activity: Arc::clone(&entry.activity),
-        last_activity_at: Arc::clone(&entry.last_activity_at),
-        last_work_started_at: Arc::clone(&entry.last_work_started_at),
         generation: entry.generation,
         scope: entry.scope.clone(),
     })
@@ -3007,11 +3001,11 @@ fn same_launch_entry(
 /// [`renamed_entry`] needs, which is why the two build their cells
 /// differently.
 ///
-/// The activity and work-start timestamps are NOT run-scoped and are
-/// therefore shared rather than re-minted; the comment at the activity field below
-/// argues why fencing it would be a bug rather than a safeguard. Anyone
-/// adding a cell here should decide which of the two it is before copying
-/// either pattern.
+/// The activity and work-start timestamps are NOT run-scoped: they live in
+/// [`SessionCells`] and are shared rather than re-minted; the comment at that
+/// field below argues why fencing them would be a bug rather than a
+/// safeguard. A new cell joins one of the two groups, which is what decides
+/// its sharing here and in [`renamed_entry`].
 fn relaunched_entry(
     entry: &SessionEntry,
     info: SessionInfo,
@@ -3032,10 +3026,12 @@ fn relaunched_entry(
     } else {
         (
             *entry
+                .run
                 .first_input
                 .lock()
                 .expect("first-input mutex poisoned"),
             entry
+                .run
                 .capture
                 .lock()
                 .expect("capture mutex poisoned")
@@ -3045,32 +3041,32 @@ fn relaunched_entry(
     Arc::new(SessionEntry {
         info,
         terminal,
-        outcome: Arc::new(std::sync::Mutex::new(outcome)),
-        snapshot: entry.snapshot.clone(),
-        canonical_cwd: entry.canonical_cwd.clone(),
-        first_input: Arc::new(std::sync::Mutex::new(first_input)),
-        capture: Arc::new(std::sync::Mutex::new(capture)),
-        // Fresh cells with fresh VALUES, on every relaunch and whatever
-        // `reset_capture` says — the one pair here that does not follow the
-        // capture window. Both describe a LAUNCH's hook injection and the
-        // diagnostic spent on it, not the conversation: a launch this
-        // process has not spawned yet is not hooked until `with_hook_argv`
-        // says so, and `publish_relaunched` is what raises the flag when it
-        // did. Carrying them over a Resume would state something about the
-        // new launch that only the old one had established, and would carry
-        // a warning already spent — so a second broken launch of the same
-        // session would trip the wire silently.
-        hooked: hook_flag(false),
-        hook_warned: hook_flag(false),
-        // Classification is never carried over, whatever `reset_capture` says: the sampled
-        // tail and the unchanged-sample streak beside it both describe a
-        // process that no longer exists. Inheriting them would classify the
-        // replacement launch from its predecessor's screen — quiet because
-        // the OLD pane stopped changing, or sharpened `Waiting` from a
-        // dialog the previous run was showing when it died. Only an already
-        // accepted work-start key awaiting persistence survives the reset.
-        activity: ActivitySample::replacement(&entry.activity),
-        // Timestamp cells are SHARED across a relaunch, and the exception to the
+        run: RunCells {
+            outcome: Arc::new(std::sync::Mutex::new(outcome)),
+            first_input: Arc::new(std::sync::Mutex::new(first_input)),
+            capture: Arc::new(std::sync::Mutex::new(capture)),
+            // Fresh cells with fresh VALUES, on every relaunch and whatever
+            // `reset_capture` says — the one pair here that does not follow the
+            // capture window. Both describe a LAUNCH's hook injection and the
+            // diagnostic spent on it, not the conversation: a launch this
+            // process has not spawned yet is not hooked until `with_hook_argv`
+            // says so, and `publish_relaunched` is what raises the flag when it
+            // did. Carrying them over a Resume would state something about the
+            // new launch that only the old one had established, and would carry
+            // a warning already spent — so a second broken launch of the same
+            // session would trip the wire silently.
+            hooked: hook_flag(false),
+            hook_warned: hook_flag(false),
+            // Classification is never carried over, whatever `reset_capture` says: the sampled
+            // tail and the unchanged-sample streak beside it both describe a
+            // process that no longer exists. Inheriting them would classify the
+            // replacement launch from its predecessor's screen — quiet because
+            // the OLD pane stopped changing, or sharpened `Waiting` from a
+            // dialog the previous run was showing when it died. Only an already
+            // accepted work-start key awaiting persistence survives the reset.
+            activity: ActivitySample::replacement(&entry.run.activity),
+        },
+        // The session cells (the timestamps) are SHARED across a relaunch, and the exception to the
         // paragraph above is deliberate. The generation fence exists
         // because the cells beside it describe one RUN: a late write about
         // a process that has ended must not be read as describing the
@@ -3087,8 +3083,9 @@ fn relaunched_entry(
         // session, and every holder of any entry for it writes to the same
         // place. Monotonicity across processes and clock steps is still
         // the store's predicate to enforce.
-        last_activity_at: Arc::clone(&entry.last_activity_at),
-        last_work_started_at: Arc::clone(&entry.last_work_started_at),
+        session: entry.session.clone(),
+        snapshot: entry.snapshot.clone(),
+        canonical_cwd: entry.canonical_cwd.clone(),
         generation,
         scope,
     })
@@ -3317,7 +3314,7 @@ struct Spawned {
     /// [`Supervisor::with_hook_argv`], which decided it.
     ///
     /// Returned rather than left on the supervisor because the cell that
-    /// records it, [`SessionEntry::hooked`], belongs to the entry
+    /// records it, [`RunCells::hooked`], belongs to the entry
     /// PUBLISHED for this launch, and on the create path that entry does
     /// not exist until the launch is confirmed. Both callers carry this
     /// value forward to that publication; nothing else reads it.
@@ -3599,7 +3596,7 @@ struct Relaunched {
     /// reported back.
     ///
     /// It travels with the publication rather than being applied to
-    /// `entry` because [`SessionEntry::hooked`] is per-LAUNCH: the entry
+    /// `entry` because [`RunCells::hooked`] is per-LAUNCH: the entry
     /// this relaunch was computed FROM describes the run that just ended,
     /// and `relaunched_entry` mints the new generation's cell as `false`
     /// unconditionally — including for a Resume, whose retained capture
@@ -3742,38 +3739,102 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// [`renamed_entry`] for the title (the only field a user can change after
 /// creation).
 ///
-/// ## Two kinds of replacement, and why the mutable cells are `Arc`ed
+/// ## Two kinds of replacement, and why the mutable cells are grouped
 ///
-/// The four interior-mutable cells below (`outcome`, `first_input`,
-/// `capture`, `activity`) are `Arc<Mutex<..>>` rather than plain `Mutex<..>` because
-/// the two replacement paths need OPPOSITE things from them, and the
-/// wrapper is what lets one type express both.
+/// The mutable cells live in two groups, [`RunCells`] and [`SessionCells`],
+/// each a `Clone` bundle of `Arc`ed cells, because the two replacement paths
+/// need OPPOSITE things from them.
 ///
-/// A RELAUNCH must isolate: the new generation gets fresh cells, so a
-/// list pass or capture scan still holding the previous entry writes its
-/// late conclusion into the abandoned run's cells and cannot contaminate
-/// the new one (the generation fence does the same job durably; this is
-/// its in-memory half).
+/// A RELAUNCH must isolate the run: the new generation gets a fresh
+/// [`RunCells`], so a list pass or capture scan still holding the previous
+/// entry writes its late conclusion into the abandoned run's cells and cannot
+/// contaminate the new one (the generation fence does the same job durably;
+/// this is its in-memory half). The [`SessionCells`] (the activity and
+/// work-start timestamps) belong to the session rather than to a run and are
+/// shared across the relaunch; their own docs argue why fencing them would
+/// lose writes instead of containing them.
 ///
-/// [`SessionEntry::last_activity_at`] is beside those four and obeys
-/// NEITHER rule as stated: it is shared by both paths, because it is the
-/// one mutable value here that belongs to the session rather than to a
-/// run. Its own docs argue why fencing it would lose writes instead of
-/// containing them.
-///
-/// A RENAME must share: it describes the SAME run, so its replacement
-/// clones the Arcs. Anything still holding the pre-rename entry — an
-/// `InputRoute` pinned at attach time, a list pass mid-flight, a capture
-/// pass mid-scan — keeps writing into the very cells the published entry
-/// reads. Snapshotting the values instead silently split the session in
-/// two: a rename before first input would leave `super::capture::note_first_input`
-/// writing an anchor nobody would ever read, and the capture pass would
-/// scan forever against a window that never opened — SPEC.md's resume
-/// promise broken by renaming a session at the wrong moment, with nothing
-/// anywhere reporting it.
+/// A RENAME must share both groups: it describes the SAME run, so its
+/// replacement clones them (cloning a group clones the `Arc`s). Anything still
+/// holding the pre-rename entry — an `InputRoute` pinned at attach time, a
+/// list pass mid-flight, a capture pass mid-scan — keeps writing into the very
+/// cells the published entry reads. Snapshotting the values instead silently
+/// split the session in two: a rename before first input would leave
+/// `super::capture::note_first_input` writing an anchor nobody would ever
+/// read, and the capture pass would scan forever against a window that never
+/// opened — SPEC.md's resume promise broken by renaming a session at the wrong
+/// moment, with nothing anywhere reporting it.
 pub(crate) struct SessionEntry {
     pub(crate) info: SessionInfo,
     pub(crate) terminal: Option<Terminal>,
+    /// This run's mutable cells: shared by a rename, replaced by a relaunch
+    /// ([`RunCells`]).
+    pub(crate) run: RunCells,
+    /// This session's mutable cells: shared by a rename AND a relaunch
+    /// ([`SessionCells`]).
+    pub(crate) session: SessionCells,
+    /// This session's integration snapshot (PLAN_M3.md item 7), resolved at
+    /// create and replaced only after restart-with successfully spawns. The
+    /// kind remains fixed; the snapshot follows the persisted launch bundle
+    /// so later capture and restart-offer work sees the new template.
+    pub(crate) snapshot: IntegrationSnapshot,
+    /// This session's working directory with symlinks, `.`/`..`, and a
+    /// trailing slash resolved away, resolved at create and immutable
+    /// (`store::StoredSession::canonical_cwd` explains why correlation
+    /// cannot use the user-facing spelling). `None` only for a row that
+    /// predates the column, which is necessarily non-integrated.
+    pub(crate) canonical_cwd: Option<String>,
+    /// Which LAUNCH of this session this entry describes
+    /// (`store::StoredSession::generation`).
+    ///
+    /// Immutable per entry, which is the point: a restart PUBLISHES A NEW
+    /// ENTRY rather than mutating this one, so anything still holding the
+    /// old `Arc` — a `ListSessions` pass that already cloned it, a capture
+    /// pass mid-scan, an `Attach` that resolved before the restart — is
+    /// holding, and can be recognized as holding, a description of the
+    /// previous run. Every durable write those paths perform carries this
+    /// value and is rejected by the store when it is no longer current
+    /// (`SessionStore::transition_many` and the capture writers), and
+    /// `Attach` compares it before installing an attachment on what may be
+    /// a respawned pane.
+    ///
+    /// The fence is for state that DESCRIBES A RUN, which is most of this
+    /// struct but not all of it. [`SessionCells::last_activity_at`] is
+    /// session-wide — the last time anything was seen happening here is
+    /// equally true whichever launch produced the output — so it is shared
+    /// across a relaunch rather than fenced, and
+    /// `SessionStore::record_activity` deliberately takes no generation.
+    /// Adding one later would not tighten anything; it would drop the very
+    /// writes the value wants. Decide which of the two kinds a new field
+    /// is before copying either pattern.
+    pub(crate) generation: i64,
+    /// The cgroup scope THIS generation launched into
+    /// (`store::StoredSession::launch_scope`), or `None` for a launch that
+    /// selected the portable sweep alone.
+    ///
+    /// Immutable per entry for exactly the reason `generation` is, and
+    /// carried here rather than re-read from the store at stop time so the
+    /// scope a kill aims at is the one belonging to the run whose liveness
+    /// the caller just decided about — a row re-read mid-restart could
+    /// already name the NEXT generation's unit, and signaling that would
+    /// mean killing the launch that is replacing this one.
+    pub(crate) scope: Option<String>,
+}
+
+/// The mutable cells that describe ONE RUN of a session (one launch
+/// generation): its liveness verdict, first-input anchor, capture state, hook
+/// flags, and activity classification.
+///
+/// Held by value in [`SessionEntry`] and `Clone` because every cell is an
+/// `Arc`: cloning the group SHARES the cells, which is exactly what a rename
+/// needs (see [`renamed_entry`]), while a relaunch builds a fresh group so a
+/// late writer holding the old entry cannot touch the new run (see
+/// [`relaunched_entry`]). A new cell that belongs to the run goes here; one
+/// that must survive a relaunch goes in [`SessionCells`]. Choosing the group
+/// IS choosing the sharing policy, so it cannot be forgotten at one of the
+/// entry's construction sites.
+#[derive(Clone)]
+pub(crate) struct RunCells {
     /// In-memory mirror of this session's durable last-known outcome
     /// (`crate::store::LastOutcome`, PLAN_M3.md item 2), so the common
     /// case — a `ListSessions` reply for a session whose outcome has not
@@ -3800,17 +3861,6 @@ pub(crate) struct SessionEntry {
     /// Shared with any title-only replacement of this entry; see the
     /// struct's own docs for why sharing and isolation are both needed.
     pub(crate) outcome: Arc<std::sync::Mutex<LastOutcome>>,
-    /// This session's integration snapshot (PLAN_M3.md item 7), resolved at
-    /// create and replaced only after restart-with successfully spawns. The
-    /// kind remains fixed; the snapshot follows the persisted launch bundle
-    /// so later capture and restart-offer work sees the new template.
-    pub(crate) snapshot: IntegrationSnapshot,
-    /// This session's working directory with symlinks, `.`/`..`, and a
-    /// trailing slash resolved away, resolved at create and immutable
-    /// (`store::StoredSession::canonical_cwd` explains why correlation
-    /// cannot use the user-facing spelling). `None` only for a row that
-    /// predates the column, which is necessarily non-integrated.
-    pub(crate) canonical_cwd: Option<String>,
     /// When this supervisor first confirmed delivery of input to this
     /// session (PLAN_M3.md item 8's correlator), and whether that fact has
     /// reached the database yet. See [`FirstInput`] and
@@ -3924,11 +3974,19 @@ pub(crate) struct SessionEntry {
     /// for the same reason `outcome` is not: a leaf `std::sync::Mutex`
     /// held across no await and alongside no other lock.
     pub(crate) activity: Arc<std::sync::Mutex<ActivitySample>>,
+}
+
+/// The mutable cells that describe the SESSION across all of its runs: the
+/// activity and work-start timestamps, shared by both a rename and a relaunch.
+/// Their own docs argue why fencing them per run would lose writes rather
+/// than contain them.
+#[derive(Clone)]
+pub(crate) struct SessionCells {
     /// When the sampler last saw this session's pane CHANGE, in unix
     /// seconds — the durable half of the activity signal, mirroring
     /// `store::StoredSession::last_activity_at`.
     ///
-    /// Separate from [`SessionEntry::activity`] on purpose, and the
+    /// Separate from [`RunCells::activity`] on purpose, and the
     /// separation is the whole design rather than a layering accident.
     /// `ActivitySample` deliberately holds no clock — its own docs argue
     /// at length why a wall-clock window is the wrong shape for STATUS
@@ -3984,41 +4042,6 @@ pub(crate) struct SessionEntry {
     /// the cell is shared across generations: generation-conditional SQL
     /// alone would protect the row while an old capture still moved memory.
     pub(crate) last_work_started_at: Arc<std::sync::atomic::AtomicI64>,
-    /// Which LAUNCH of this session this entry describes
-    /// (`store::StoredSession::generation`).
-    ///
-    /// Immutable per entry, which is the point: a restart PUBLISHES A NEW
-    /// ENTRY rather than mutating this one, so anything still holding the
-    /// old `Arc` — a `ListSessions` pass that already cloned it, a capture
-    /// pass mid-scan, an `Attach` that resolved before the restart — is
-    /// holding, and can be recognized as holding, a description of the
-    /// previous run. Every durable write those paths perform carries this
-    /// value and is rejected by the store when it is no longer current
-    /// (`SessionStore::transition_many` and the capture writers), and
-    /// `Attach` compares it before installing an attachment on what may be
-    /// a respawned pane.
-    ///
-    /// The fence is for state that DESCRIBES A RUN, which is most of this
-    /// struct but not all of it. [`SessionEntry::last_activity_at`] is
-    /// session-wide — the last time anything was seen happening here is
-    /// equally true whichever launch produced the output — so it is shared
-    /// across a relaunch rather than fenced, and
-    /// `SessionStore::record_activity` deliberately takes no generation.
-    /// Adding one later would not tighten anything; it would drop the very
-    /// writes the value wants. Decide which of the two kinds a new field
-    /// is before copying either pattern.
-    pub(crate) generation: i64,
-    /// The cgroup scope THIS generation launched into
-    /// (`store::StoredSession::launch_scope`), or `None` for a launch that
-    /// selected the portable sweep alone.
-    ///
-    /// Immutable per entry for exactly the reason `generation` is, and
-    /// carried here rather than re-read from the store at stop time so the
-    /// scope a kill aims at is the one belonging to the run whose liveness
-    /// the caller just decided about — a row re-read mid-restart could
-    /// already name the NEXT generation's unit, and signaling that would
-    /// mean killing the launch that is replacing this one.
-    pub(crate) scope: Option<String>,
 }
 
 /// One host's session authority, shared by every connection.
@@ -5972,41 +5995,45 @@ impl Supervisor {
                         working_copy: None,
                     },
                     terminal,
-                    outcome: Arc::new(std::sync::Mutex::new(outcome)),
-                    snapshot,
-                    canonical_cwd: row.canonical_cwd,
-                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                        at: row.first_input_at,
+                    run: RunCells {
+                        outcome: Arc::new(std::sync::Mutex::new(outcome)),
                         // Loaded FROM the database, so by definition
                         // already there.
-                        durable: row.first_input_at.is_some(),
-                    })),
-                    capture: Arc::new(std::sync::Mutex::new(capture)),
-                    // Clear on a reload, whatever the previous supervisor
-                    // did: `hooked` records that THIS process appended the
-                    // hook flags when it spawned the agent, and this
-                    // process spawned nothing. Leaving the tripwire armed
-                    // from a stored guess would warn about a launch nobody
-                    // here can account for.
-                    hooked: hook_flag(false),
-                    hook_warned: hook_flag(false),
-                    // Activity samples are process-local and deliberately
-                    // not durable. Mark this reload provisional so the
-                    // first live-pane reply does not replace the helm's
-                    // cached status with an unsampled `Running` guess.
-                    activity: ActivitySample::reloaded(),
-                    // The timestamp beside it IS restored, and the two are
-                    // not in tension. What the sampler holds is a claim
-                    // about now — this pane looks like this, it has been
-                    // quiet this many looks — which nothing in SQLite can
-                    // still vouch for after a restart. What this holds is
-                    // a claim about a past instant, which stays true
-                    // however long the supervisor was down; re-minting it
-                    // to "now" would be the actual lie, and dropping it to
-                    // zero would tell a recency sort that a session with
-                    // years of history has never done anything.
-                    last_activity_at: activity_stamp(row.last_activity_at),
-                    last_work_started_at: activity_stamp(row.last_work_started_at),
+                        first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                            at: row.first_input_at,
+                            durable: row.first_input_at.is_some(),
+                        })),
+                        capture: Arc::new(std::sync::Mutex::new(capture)),
+                        // Clear on a reload, whatever the previous supervisor
+                        // did: `hooked` records that THIS process appended the
+                        // hook flags when it spawned the agent, and this
+                        // process spawned nothing. Leaving the tripwire armed
+                        // from a stored guess would warn about a launch nobody
+                        // here can account for.
+                        hooked: hook_flag(false),
+                        hook_warned: hook_flag(false),
+                        // Activity samples are process-local and deliberately
+                        // not durable. Mark this reload provisional so the
+                        // first live-pane reply does not replace the helm's
+                        // cached status with an unsampled `Running` guess.
+                        activity: ActivitySample::reloaded(),
+                    },
+                    session: SessionCells {
+                        // The timestamp beside it IS restored, and the two are
+                        // not in tension. What the sampler holds is a claim
+                        // about now — this pane looks like this, it has been
+                        // quiet this many looks — which nothing in SQLite can
+                        // still vouch for after a restart. What this holds is
+                        // a claim about a past instant, which stays true
+                        // however long the supervisor was down; re-minting it
+                        // to "now" would be the actual lie, and dropping it to
+                        // zero would tell a recency sort that a session with
+                        // years of history has never done anything.
+                        last_activity_at: activity_stamp(row.last_activity_at),
+                        last_work_started_at: activity_stamp(row.last_work_started_at),
+                    },
+                    snapshot,
+                    canonical_cwd: row.canonical_cwd,
                     generation: row.generation,
                     // The SELECTION comes straight back out of the row
                     // rather than from this supervisor's own probe: the
@@ -8393,23 +8420,27 @@ impl Supervisor {
             Arc::new(SessionEntry {
                 info: info.clone(),
                 terminal,
-                outcome: Arc::new(std::sync::Mutex::new(outcome)),
+                run: RunCells {
+                    outcome: Arc::new(std::sync::Mutex::new(outcome)),
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: None,
+                        durable: true,
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    // The tmux error path does not return whether hook flags
+                    // reached the attempted argv. This flag is diagnostic only,
+                    // so an honest unknown is safer than arming its tripwire for
+                    // a hook that may never have run.
+                    hooked: hook_flag(false),
+                    hook_warned: hook_flag(false),
+                    activity: ActivitySample::unsampled(),
+                },
+                session: SessionCells {
+                    last_activity_at: activity_stamp(info.last_activity_at),
+                    last_work_started_at: activity_stamp(info.last_work_started_at),
+                },
                 snapshot: snapshot.clone(),
                 canonical_cwd: canonical_cwd.map(str::to_string),
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: None,
-                    durable: true,
-                })),
-                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                // The tmux error path does not return whether hook flags
-                // reached the attempted argv. This flag is diagnostic only,
-                // so an honest unknown is safer than arming its tripwire for
-                // a hook that may never have run.
-                hooked: hook_flag(false),
-                hook_warned: hook_flag(false),
-                activity: ActivitySample::unsampled(),
-                last_activity_at: activity_stamp(info.last_activity_at),
-                last_work_started_at: activity_stamp(info.last_work_started_at),
                 generation,
                 scope,
             }),
@@ -9650,32 +9681,36 @@ impl Supervisor {
             Arc::new(SessionEntry {
                 info: info.clone(),
                 terminal: Some(Terminal { tmux_name, pane }),
-                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                run: RunCells {
+                    outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                    // Nothing has been typed into this session yet, so capture
+                    // has no correlator to key on and correctly stays idle
+                    // until the input path supplies one.
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: None,
+                        durable: true,
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    // What `spawn_agent` actually did to this launch's argv,
+                    // recorded on the entry that describes that launch. A
+                    // create publishes exactly once, so this is the only
+                    // moment the flag can be set for its launch generation.
+                    hooked: hook_flag(hooked),
+                    hook_warned: hook_flag(false),
+                    // The agent has printed nothing this supervisor has looked
+                    // at yet; the ticker's next sample establishes the baseline
+                    // every later one is compared against.
+                    activity: ActivitySample::unsampled(),
+                },
+                session: SessionCells {
+                    // Agrees with the reply going out above and with the row
+                    // just committed: all three say creation, because nothing
+                    // has been seen happening here yet.
+                    last_activity_at: activity_stamp(info.last_activity_at),
+                    last_work_started_at: activity_stamp(info.last_work_started_at),
+                },
                 snapshot,
                 canonical_cwd: canonical_cwd.clone(),
-                // Nothing has been typed into this session yet, so capture
-                // has no correlator to key on and correctly stays idle
-                // until the input path supplies one.
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: None,
-                    durable: true,
-                })),
-                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                // What `spawn_agent` actually did to this launch's argv,
-                // recorded on the entry that describes that launch. A
-                // create publishes exactly once, so this is the only
-                // moment the flag can be set for its launch generation.
-                hooked: hook_flag(hooked),
-                hook_warned: hook_flag(false),
-                // The agent has printed nothing this supervisor has looked
-                // at yet; the ticker's next sample establishes the baseline
-                // every later one is compared against.
-                activity: ActivitySample::unsampled(),
-                // Agrees with the reply going out above and with the row
-                // just committed: all three say creation, because nothing
-                // has been seen happening here yet.
-                last_activity_at: activity_stamp(info.last_activity_at),
-                last_work_started_at: activity_stamp(info.last_work_started_at),
                 // Normally zero because create is the first launch. A keyed
                 // retry defensively preserves any generation already stored
                 // rather than moving the durable fence backwards.
@@ -10501,7 +10536,7 @@ impl Supervisor {
                         .await
                     {
                         Ok(_) => {
-                            *entry.outcome.lock().expect("outcome mutex poisoned") =
+                            *entry.run.outcome.lock().expect("outcome mutex poisoned") =
                                 claim.prior.outcome.clone();
                         }
                         Err(e) => warn!(
@@ -10514,7 +10549,8 @@ impl Supervisor {
                     // An agent may be running under the new generation.
                     // `Launching` is the honest record for that, and reload
                     // reconciles it against what it can actually find.
-                    *entry.outcome.lock().expect("outcome mutex poisoned") = LastOutcome::Launching;
+                    *entry.run.outcome.lock().expect("outcome mutex poisoned") =
+                        LastOutcome::Launching;
                 }
                 // The entry goes back — with the generation it now has, so
                 // nothing published under it can write against a
@@ -10551,6 +10587,7 @@ impl Supervisor {
                             claim.generation,
                             scope,
                             entry
+                                .run
                                 .outcome
                                 .lock()
                                 .expect("outcome mutex poisoned")
@@ -11262,7 +11299,7 @@ impl Supervisor {
             // version here, not a placeholder.
             entry.snapshot.restart_offer(None, 0)
         } else {
-            let capture = entry.capture.lock().expect("capture mutex poisoned");
+            let capture = entry.run.capture.lock().expect("capture mutex poisoned");
             entry.snapshot.restart_offer(
                 capture.committed_conversation(),
                 capture.committed_ownership_version().unwrap_or(0),
@@ -11286,9 +11323,11 @@ impl Supervisor {
             // entry shares this very cell (`relaunched_entry`), so this
             // read and every later reply answer from one place.
             last_activity_at: entry
+                .session
                 .last_activity_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             last_work_started_at: entry
+                .session
                 .last_work_started_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             creation_seq: entry.info.creation_seq,
@@ -11343,6 +11382,7 @@ impl Supervisor {
         // generation, which nothing evaluates any more.
         if hooked {
             published
+                .run
                 .hooked
                 .store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -13303,19 +13343,23 @@ impl Supervisor {
             Arc::new(SessionEntry {
                 info,
                 terminal: None,
-                outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
+                run: RunCells {
+                    outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: row.first_input_at,
+                        durable: row.first_input_at.is_some(),
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(capture)),
+                    hooked: hook_flag(false),
+                    hook_warned: hook_flag(false),
+                    activity: ActivitySample::unsampled(),
+                },
+                session: SessionCells {
+                    last_activity_at: activity_stamp(row.last_activity_at),
+                    last_work_started_at: activity_stamp(row.last_work_started_at),
+                },
                 snapshot,
                 canonical_cwd: row.canonical_cwd.clone(),
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: row.first_input_at,
-                    durable: row.first_input_at.is_some(),
-                })),
-                capture: Arc::new(std::sync::Mutex::new(capture)),
-                hooked: hook_flag(false),
-                hook_warned: hook_flag(false),
-                activity: ActivitySample::unsampled(),
-                last_activity_at: activity_stamp(row.last_activity_at),
-                last_work_started_at: activity_stamp(row.last_work_started_at),
                 generation: row.generation,
                 scope: launch_scope_unit(&row.id, row.generation, row.launch_scoped),
             }),
@@ -14356,7 +14400,7 @@ impl Supervisor {
         // actually happened rather than one a racing pass has since
         // changed.
         let displaced = {
-            let mut state = entry.capture.lock().expect("capture mutex poisoned");
+            let mut state = entry.run.capture.lock().expect("capture mutex poisoned");
             let previous = state.committed_conversation().map(str::to_string);
             // Step 5: mirror ONLY the committed result, into the matching
             // current-generation entry, under the same capture claim —
@@ -14533,7 +14577,7 @@ impl Supervisor {
             .transition(session, entry.generation, transition)
             .await?
         {
-            *entry.outcome.lock().expect("outcome mutex poisoned") = committed;
+            *entry.run.outcome.lock().expect("outcome mutex poisoned") = committed;
         }
         Ok(())
     }
@@ -15796,22 +15840,26 @@ pub(crate) mod tests {
                 working_copy: None,
             },
             terminal,
-            outcome: Arc::new(std::sync::Mutex::new(outcome)),
+            run: RunCells {
+                outcome: Arc::new(std::sync::Mutex::new(outcome)),
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                    at: None,
+                    durable: true,
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: hook_flag(false),
+                hook_warned: hook_flag(false),
+                activity: ActivitySample::unsampled(),
+            },
+            session: SessionCells {
+                last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
+                last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
+            },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
                 resume_template: None,
             },
             canonical_cwd: None,
-            first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                at: None,
-                durable: true,
-            })),
-            capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-            hooked: hook_flag(false),
-            hook_warned: hook_flag(false),
-            activity: ActivitySample::unsampled(),
-            last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
-            last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
             generation: 0,
             scope: None,
         }
@@ -16002,26 +16050,26 @@ pub(crate) mod tests {
         assert_eq!(renamed.info.title, "new title");
         assert_eq!(old.info.title, "t", "the replaced entry is left untouched");
 
-        *old.outcome.lock().unwrap() = LastOutcome::Interrupted;
+        *old.run.outcome.lock().unwrap() = LastOutcome::Interrupted;
         assert_eq!(
-            *renamed.outcome.lock().unwrap(),
+            *renamed.run.outcome.lock().unwrap(),
             LastOutcome::Interrupted,
             "an outcome recorded through the old entry must be what the published one reports"
         );
 
-        old.first_input.lock().unwrap().at = Some(1_700_000_000);
+        old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
         assert_eq!(
-            renamed.first_input.lock().unwrap().at,
+            renamed.run.first_input.lock().unwrap().at,
             Some(1_700_000_000),
             "the first-input anchor is written through whichever entry the input path pinned"
         );
 
-        *old.capture.lock().unwrap() = CaptureState::Provisional {
+        *old.run.capture.lock().unwrap() = CaptureState::Provisional {
             conversation: "conv-x".to_string(),
         };
         assert!(
             matches!(
-                &*renamed.capture.lock().unwrap(),
+                &*renamed.run.capture.lock().unwrap(),
                 CaptureState::Provisional { conversation } if conversation == "conv-x"
             ),
             "capture progress must not be split in two by a rename"
@@ -16033,9 +16081,13 @@ pub(crate) mod tests {
         // discovered — which, once the classifier consumes this, would
         // show up as a status that resets every time somebody edits a
         // title.
-        old.activity.lock().unwrap().observe("screen".to_string());
+        old.run
+            .activity
+            .lock()
+            .unwrap()
+            .observe("screen".to_string());
         assert_eq!(
-            renamed.activity.lock().unwrap().samples,
+            renamed.run.activity.lock().unwrap().samples,
             1,
             "a sample taken through the old entry must be what the published one reports"
         );
@@ -16057,22 +16109,29 @@ pub(crate) mod tests {
         // assertion the moment somebody "fixed" it by re-copying, whereas
         // pointer identity is the property the writers actually rely on.
         assert!(
-            Arc::ptr_eq(&old.hooked, &renamed.hooked),
+            Arc::ptr_eq(&old.run.hooked, &renamed.run.hooked),
             "the hook-injection flag must be the SAME cell across a rename"
         );
         assert!(
-            Arc::ptr_eq(&old.hook_warned, &renamed.hook_warned),
+            Arc::ptr_eq(&old.run.hook_warned, &renamed.run.hook_warned),
             "the tripwire latch must be the SAME cell across a rename"
         );
-        old.hooked.store(true, std::sync::atomic::Ordering::Relaxed);
-        old.hook_warned
+        old.run
+            .hooked
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        old.run
+            .hook_warned
             .store(true, std::sync::atomic::Ordering::Relaxed);
         assert!(
-            renamed.hooked.load(std::sync::atomic::Ordering::Relaxed),
+            renamed
+                .run
+                .hooked
+                .load(std::sync::atomic::Ordering::Relaxed),
             "a launch flagged as hooked through the old entry must stay hooked once renamed"
         );
         assert!(
             renamed
+                .run
                 .hook_warned
                 .load(std::sync::atomic::Ordering::Relaxed),
             "a tripwire warning already spent must not be spendable again after a rename"
@@ -16101,9 +16160,9 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test]
     fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-        old.activity.lock().unwrap().pending_work_started_at = Some(123_456);
-        old.first_input.lock().unwrap().at = Some(1_700_000_000);
-        *old.capture.lock().unwrap() = CaptureState::Provisional {
+        old.run.activity.lock().unwrap().pending_work_started_at = Some(123_456);
+        old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
+        *old.run.capture.lock().unwrap() = CaptureState::Provisional {
             conversation: "conv-old".to_string(),
         };
 
@@ -16117,34 +16176,47 @@ pub(crate) mod tests {
             false,
         );
         assert_eq!(
-            relaunched.activity.lock().unwrap().pending_work_started_at,
+            relaunched
+                .run
+                .activity
+                .lock()
+                .unwrap()
+                .pending_work_started_at,
             Some(123_456),
             "an accepted burst remains retryable after run replacement"
         );
-        old.activity.lock().unwrap().pending_work_started_at = None;
+        old.run.activity.lock().unwrap().pending_work_started_at = None;
         assert_eq!(
-            relaunched.activity.lock().unwrap().pending_work_started_at,
+            relaunched
+                .run
+                .activity
+                .lock()
+                .unwrap()
+                .pending_work_started_at,
             Some(123_456),
             "discarding an obsolete sample must not clear the replacement's retry"
         );
         assert_eq!(
-            relaunched.first_input.lock().unwrap().at,
+            relaunched.run.first_input.lock().unwrap().at,
             Some(1_700_000_000),
             "test premise: a relaunch that keeps its capture window carries the anchor over"
         );
 
         // The previous run's observers write on: none of it may reach the
         // entry describing the new one.
-        *old.outcome.lock().unwrap() = LastOutcome::Interrupted;
-        old.first_input.lock().unwrap().at = Some(1_800_000_000);
-        *old.capture.lock().unwrap() = CaptureState::UncapturedFinal;
-        assert_eq!(*relaunched.outcome.lock().unwrap(), LastOutcome::Launching);
+        *old.run.outcome.lock().unwrap() = LastOutcome::Interrupted;
+        old.run.first_input.lock().unwrap().at = Some(1_800_000_000);
+        *old.run.capture.lock().unwrap() = CaptureState::UncapturedFinal;
         assert_eq!(
-            relaunched.first_input.lock().unwrap().at,
+            *relaunched.run.outcome.lock().unwrap(),
+            LastOutcome::Launching
+        );
+        assert_eq!(
+            relaunched.run.first_input.lock().unwrap().at,
             Some(1_700_000_000)
         );
         assert!(matches!(
-            &*relaunched.capture.lock().unwrap(),
+            &*relaunched.run.capture.lock().unwrap(),
             CaptureState::Provisional { conversation } if conversation == "conv-old"
         ));
 
@@ -16153,25 +16225,35 @@ pub(crate) mod tests {
         // published one, because "when was output last seen here" is a
         // fact about the session and not about either run.
         assert!(
-            Arc::ptr_eq(&old.last_activity_at, &relaunched.last_activity_at),
+            Arc::ptr_eq(
+                &old.session.last_activity_at,
+                &relaunched.session.last_activity_at
+            ),
             "the activity stamp is session-scoped and must be the SAME cell across a relaunch"
         );
-        old.last_activity_at
+        old.session
+            .last_activity_at
             .store(1_900_000_000, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(
             relaunched
+                .session
                 .last_activity_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             1_900_000_000
         );
         assert!(
-            Arc::ptr_eq(&old.last_work_started_at, &relaunched.last_work_started_at),
+            Arc::ptr_eq(
+                &old.session.last_work_started_at,
+                &relaunched.session.last_work_started_at
+            ),
             "restart preserves the session's burst position until sampled output proves a new one"
         );
-        old.last_work_started_at
+        old.session
+            .last_work_started_at
             .store(1_900_000_000_123, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(
             relaunched
+                .session
                 .last_work_started_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             1_900_000_000_123
@@ -16237,8 +16319,8 @@ pub(crate) mod tests {
             },
         ] {
             let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-            old.first_input.lock().unwrap().at = Some(1_700_000_000);
-            *old.capture.lock().unwrap() = prior.clone();
+            old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
+            *old.run.capture.lock().unwrap() = prior.clone();
 
             let relaunched = relaunched_entry(
                 &old,
@@ -16251,14 +16333,14 @@ pub(crate) mod tests {
             );
             assert!(
                 matches!(
-                    &*relaunched.capture.lock().unwrap(),
+                    &*relaunched.run.capture.lock().unwrap(),
                     CaptureState::Unclaimed
                 ),
                 "a reopened capture window must start from Unclaimed, whatever the previous \
                  run concluded (was {prior:?})"
             );
             assert_eq!(
-                relaunched.first_input.lock().unwrap().at,
+                relaunched.run.first_input.lock().unwrap().at,
                 None,
                 "and the anchor the verdict was derived from goes with it"
             );
@@ -16280,8 +16362,8 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test]
     fn a_resume_relaunch_keeps_the_identity_the_agent_reported() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-        old.first_input.lock().unwrap().at = Some(1_700_000_000);
-        *old.capture.lock().unwrap() = CaptureState::Reported {
+        old.run.first_input.lock().unwrap().at = Some(1_700_000_000);
+        *old.run.capture.lock().unwrap() = CaptureState::Reported {
             conversation: "conv-reported".to_string(),
             ownership_version: 1,
         };
@@ -16297,13 +16379,13 @@ pub(crate) mod tests {
         );
         assert!(
             matches!(
-                &*relaunched.capture.lock().unwrap(),
+                &*relaunched.run.capture.lock().unwrap(),
                 CaptureState::Reported { conversation, .. } if conversation == "conv-reported"
             ),
             "a resume must carry the reported identity onto the launch that resumes it"
         );
         assert!(
-            !Arc::ptr_eq(&old.capture, &relaunched.capture),
+            !Arc::ptr_eq(&old.run.capture, &relaunched.run.capture),
             "carried by VALUE, not by cell: a pass still holding the previous entry must \
              not be able to write its late verdict onto this generation"
         );
@@ -16332,8 +16414,8 @@ pub(crate) mod tests {
         let ordering = std::sync::atomic::Ordering::Relaxed;
         for reset_capture in [true, false] {
             let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-            old.hooked.store(true, ordering);
-            old.hook_warned.store(true, ordering);
+            old.run.hooked.store(true, ordering);
+            old.run.hook_warned.store(true, ordering);
 
             let relaunched = relaunched_entry(
                 &old,
@@ -16345,17 +16427,17 @@ pub(crate) mod tests {
                 reset_capture,
             );
             assert!(
-                !relaunched.hooked.load(ordering),
+                !relaunched.run.hooked.load(ordering),
                 "a relaunch this process has not injected yet is not hooked \
                  (reset_capture = {reset_capture})"
             );
             assert!(
-                !relaunched.hook_warned.load(ordering),
+                !relaunched.run.hook_warned.load(ordering),
                 "and the previous launch's warning must not silence this one's \
                  (reset_capture = {reset_capture})"
             );
             assert!(
-                !Arc::ptr_eq(&old.hooked, &relaunched.hooked),
+                !Arc::ptr_eq(&old.run.hooked, &relaunched.run.hooked),
                 "fresh CELLS too, so a late writer cannot reach across the generation"
             );
         }
@@ -16377,7 +16459,8 @@ pub(crate) mod tests {
     #[farhelm_testtrace::test]
     fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-        old.activity
+        old.run
+            .activity
             .lock()
             .unwrap()
             .observe("previous run's screen".to_string());
@@ -16395,7 +16478,7 @@ pub(crate) mod tests {
             false,
         );
         {
-            let fresh = relaunched.activity.lock().unwrap();
+            let fresh = relaunched.run.activity.lock().unwrap();
             assert_eq!(
                 fresh.samples, 0,
                 "the new generation has been seen by nobody"
@@ -16403,12 +16486,13 @@ pub(crate) mod tests {
             assert_eq!(fresh.tail, None);
         }
 
-        old.activity
+        old.run
+            .activity
             .lock()
             .unwrap()
             .observe("a late sample of the dead run".to_string());
         assert_eq!(
-            relaunched.activity.lock().unwrap().samples,
+            relaunched.run.activity.lock().unwrap().samples,
             0,
             "a sampler still holding the previous entry must not reach the launch that \
              replaced it"
@@ -17003,7 +17087,7 @@ pub(crate) mod tests {
         .expect("reload");
 
         assert_eq!(
-            *sessions["live"].outcome.lock().unwrap(),
+            *sessions["live"].run.outcome.lock().unwrap(),
             LastOutcome::Running,
             "a launching row whose pane is alive is a launch that DID happen"
         );
@@ -17027,7 +17111,7 @@ pub(crate) mod tests {
         // would tell a most-recently-active sort that a long-lived session
         // has never done anything.
         for (id, entry) in &sessions {
-            let sample = entry.activity.lock().unwrap();
+            let sample = entry.run.activity.lock().unwrap();
             assert_eq!(
                 sample.samples, 0,
                 "session {id} came back from the store, so nothing has observed its pane yet"
@@ -17035,6 +17119,7 @@ pub(crate) mod tests {
             assert_eq!(sample.unchanged_streak, 0);
             assert_eq!(
                 entry
+                    .session
                     .last_activity_at
                     .load(std::sync::atomic::Ordering::Relaxed),
                 stored_activity_at,
@@ -17045,7 +17130,7 @@ pub(crate) mod tests {
                 "and the entry's own wire snapshot must agree with its cell"
             );
         }
-        let dead = sessions["dead"].outcome.lock().unwrap().clone();
+        let dead = sessions["dead"].run.outcome.lock().unwrap().clone();
         match dead {
             LastOutcome::Exited { exit_code, .. } => {
                 if let Some(code) = exit_code {
@@ -17178,7 +17263,7 @@ pub(crate) mod tests {
             "the restored terminal must name the row's tmux session"
         );
         assert_eq!(
-            *read_only_entry.outcome.lock().unwrap(),
+            *read_only_entry.run.outcome.lock().unwrap(),
             LastOutcome::Error {
                 detail: "exec failed".to_string()
             },
@@ -17207,7 +17292,7 @@ pub(crate) mod tests {
             "the write-capable fixture must retain write ownership"
         );
         assert_eq!(
-            *write_sessions[id].outcome.lock().unwrap(),
+            *write_sessions[id].run.outcome.lock().unwrap(),
             LastOutcome::Error {
                 detail: "exec failed".to_string()
             },
@@ -17550,7 +17635,7 @@ pub(crate) mod tests {
         // Read out from under the guard: it is a synchronous mutex and
         // must not be held across the store round trip below.
         let (mirrored, provenance) = {
-            let mirror = entry.capture.lock().expect("capture mutex readable");
+            let mirror = entry.run.capture.lock().expect("capture mutex readable");
             (
                 mirror.committed_conversation().map(str::to_string),
                 mirror.committed_ownership_version(),
@@ -17811,7 +17896,7 @@ pub(crate) mod tests {
             .await
             .expect("a capture pass over an unknown-version row must finish");
         let (mirrored, provenance) = {
-            let mirror = entry.capture.lock().expect("capture mutex readable");
+            let mirror = entry.run.capture.lock().expect("capture mutex readable");
             (
                 mirror.committed_conversation().map(str::to_string),
                 mirror.committed_ownership_version(),
@@ -17915,7 +18000,7 @@ pub(crate) mod tests {
         .await
         .expect("reload");
 
-        let reported = sessions[&reported_id].capture.lock().unwrap().clone();
+        let reported = sessions[&reported_id].run.capture.lock().unwrap().clone();
         assert!(
             matches!(
                 &reported,
@@ -17924,7 +18009,7 @@ pub(crate) mod tests {
             "a row whose identity came from the agent's own hook must reload as Reported, \
              not back under the scan's authority: {reported:?}"
         );
-        let scanned = sessions[&scanned_id].capture.lock().unwrap().clone();
+        let scanned = sessions[&scanned_id].run.capture.lock().unwrap().clone();
         assert!(
             matches!(
                 &scanned,
@@ -18024,7 +18109,10 @@ pub(crate) mod tests {
         entry.info.id = id.clone();
         entry.snapshot = integration;
         let entry = Arc::new(entry);
-        assert_eq!(entry.capture.lock().unwrap().committed_conversation(), None);
+        assert_eq!(
+            entry.run.capture.lock().unwrap().committed_conversation(),
+            None
+        );
         sup.sessions
             .lock()
             .await
@@ -20401,7 +20489,7 @@ exit 0
             .expect_err("an unreadable row must fail the write");
         assert!(format!("{err:#}").contains("teleported"));
         assert_eq!(
-            *entry.outcome.lock().unwrap(),
+            *entry.run.outcome.lock().unwrap(),
             LastOutcome::Running,
             "a failed write must not advance the mirror"
         );
@@ -20567,7 +20655,7 @@ exit 0
             .cloned()
             .expect("the candidate still lists the session");
         assert_eq!(
-            *entry.outcome.lock().unwrap(),
+            *entry.run.outcome.lock().unwrap(),
             LastOutcome::Running,
             "the candidate's map holds what is durable, not an unwritten conclusion"
         );
@@ -21652,6 +21740,7 @@ exit 0
         );
         assert_eq!(
             entry
+                .session
                 .last_activity_at
                 .load(std::sync::atomic::Ordering::Relaxed),
             created.created_at,
@@ -23489,6 +23578,7 @@ exit 0
                 // The one line `ticker::note_activity` runs once it has
                 // decided the observation may move the value.
                 sampled
+                    .session
                     .last_activity_at
                     .store(observed_at, std::sync::atomic::Ordering::Relaxed);
             })
@@ -25533,6 +25623,7 @@ exit 0
                 .await
                 .get(&info.id)
                 .expect("the created session must be on the map")
+                .run
                 .hooked
                 .load(std::sync::atomic::Ordering::Relaxed),
             "a hooked launch must raise the entry flag the liveness tripwire reads"
@@ -26719,7 +26810,7 @@ exit 0
             assert_eq!(live.info.title, durable.title);
             assert_eq!(durable.title, "renamed during refusal");
             assert_eq!(live.info.creation_seq, Some(durable.creation_seq));
-            assert_eq!(*live.outcome.lock().unwrap(), durable.outcome);
+            assert_eq!(*live.run.outcome.lock().unwrap(), durable.outcome);
             assert_eq!(
                 sup.store
                     .reservation(&claim.intent_key)
@@ -28050,7 +28141,7 @@ exit 0
             )
             .await
             .unwrap();
-            let outcome = reloaded[&info.id].outcome.lock().unwrap().clone();
+            let outcome = reloaded[&info.id].run.outcome.lock().unwrap().clone();
             assert_eq!(
                 matches!(outcome, LastOutcome::Error { .. }),
                 should_error,

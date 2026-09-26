@@ -925,7 +925,7 @@ async fn session_info_now(
             .with_context(|| format!("recording session {}'s observed outcome", entry.info.id))?;
         let committed = committed.get(&entry.info.id);
         if let Some(outcome) = committed {
-            *entry.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
+            *entry.run.outcome.lock().expect("outcome mutex poisoned") = outcome.clone();
         }
         // Outcome durability precedes cleanup, whose shared helper also
         // preserves the sentinel's accepted-create evidence. A failed write
@@ -1218,6 +1218,7 @@ async fn handle_stop_session(
                 .map(|failure| failure.message())
         } else {
             let current = entry
+                .run
                 .outcome
                 .lock()
                 .expect("outcome mutex poisoned")
@@ -1297,7 +1298,7 @@ async fn handle_stop_session(
             // alone cannot authorize cleanup's reservation write or unlink.
             if sup.may_record()
                 && matches!(
-                    &*entry.outcome.lock().expect("outcome mutex poisoned"),
+                    &*entry.run.outcome.lock().expect("outcome mutex poisoned"),
                     LastOutcome::Error { .. }
                 )
             {
@@ -3820,6 +3821,7 @@ mod tests {
     use super::super::capture::{CaptureState, FirstInput};
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, no_uploads};
+    use super::super::core::{RunCells, SessionCells};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::terminals::Terminal;
     use super::*;
@@ -7371,6 +7373,7 @@ mod tests {
             "the identity the agent discarded must stop being offered"
         );
         let state = sup.sessions.lock().await[&auth.session_id]
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -7431,6 +7434,7 @@ mod tests {
             "nothing may be written by a supervisor with no standing to write"
         );
         let capture = sup.sessions.lock().await[&auth.session_id]
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -7500,6 +7504,7 @@ mod tests {
             "a failed write must leave the column untouched"
         );
         let capture = sup.sessions.lock().await[&auth.session_id]
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -7659,6 +7664,7 @@ mod tests {
             .await
             .get(&auth.session_id)
             .expect("the entry is still published")
+            .run
             .capture
             .lock()
             .expect("capture mutex poisoned")
@@ -8565,22 +8571,26 @@ mod tests {
                     tmux_name: "fh-fake".to_string(),
                     pane: "%0".to_string(),
                 }),
-                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                run: RunCells {
+                    outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: None,
+                        durable: true,
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    hooked: crate::service::core::hook_flag(false),
+                    hook_warned: crate::service::core::hook_flag(false),
+                    activity: crate::service::ticker::ActivitySample::unsampled(),
+                },
+                session: SessionCells {
+                    last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
+                    last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
+                },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
                     resume_template: None,
                 },
                 canonical_cwd: None,
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: None,
-                    durable: true,
-                })),
-                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                hooked: crate::service::core::hook_flag(false),
-                hook_warned: crate::service::core::hook_flag(false),
-                activity: crate::service::ticker::ActivitySample::unsampled(),
-                last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
-                last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
                 generation: 0,
                 scope: None,
             }),
@@ -8745,24 +8755,28 @@ mod tests {
                 working_copy: None,
             },
             terminal: None,
-            outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+            run: RunCells {
+                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                    at: None,
+                    durable: true,
+                })),
+                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                hooked: crate::service::core::hook_flag(false),
+                hook_warned: crate::service::core::hook_flag(false),
+                activity: crate::service::ticker::ActivitySample::unsampled(),
+            },
+            session: SessionCells {
+                last_activity_at: crate::service::core::activity_stamp(created_at),
+                last_work_started_at: crate::service::core::activity_stamp(
+                    created_at.saturating_mul(1_000),
+                ),
+            },
             snapshot: IntegrationSnapshot {
                 kind: AgentKind::Generic,
                 resume_template: None,
             },
             canonical_cwd: None,
-            first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                at: None,
-                durable: true,
-            })),
-            capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-            hooked: crate::service::core::hook_flag(false),
-            hook_warned: crate::service::core::hook_flag(false),
-            activity: crate::service::ticker::ActivitySample::unsampled(),
-            last_activity_at: crate::service::core::activity_stamp(created_at),
-            last_work_started_at: crate::service::core::activity_stamp(
-                created_at.saturating_mul(1_000),
-            ),
             generation: 0,
             scope: None,
         })
@@ -8937,22 +8951,26 @@ mod tests {
                     working_copy: None,
                 },
                 terminal: None,
-                outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                run: RunCells {
+                    outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
+                    first_input: Arc::new(std::sync::Mutex::new(FirstInput {
+                        at: None,
+                        durable: true,
+                    })),
+                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
+                    hooked: crate::service::core::hook_flag(false),
+                    hook_warned: crate::service::core::hook_flag(false),
+                    activity: crate::service::ticker::ActivitySample::unsampled(),
+                },
+                session: SessionCells {
+                    last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
+                    last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
+                },
                 snapshot: IntegrationSnapshot {
                     kind: AgentKind::Generic,
                     resume_template: None,
                 },
                 canonical_cwd: None,
-                first_input: Arc::new(std::sync::Mutex::new(FirstInput {
-                    at: None,
-                    durable: true,
-                })),
-                capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                hooked: crate::service::core::hook_flag(false),
-                hook_warned: crate::service::core::hook_flag(false),
-                activity: crate::service::ticker::ActivitySample::unsampled(),
-                last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
-                last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
                 generation: 0,
                 scope: None,
             }),

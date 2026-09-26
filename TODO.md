@@ -342,11 +342,6 @@ are large mostly because of their tests.
 
 ### Invariants held by convention
 
-- **`SessionEntry` sharing policy.** Medium effort. The 14-field struct (`farhelm-supervisor/src/service/core.rs:3734`)
-  is built literally at six production sites, each re-deciding which `Arc` cells a rename shares versus which a relaunch
-  replaces; the doc around `:2998` warns the next person to decide correctly, and a wrong choice breaks the generation
-  fence. The cells are locked directly from core, capture, terminals, and ticker. Fix: split into `SessionCells` and
-  `RunCells` behind two `Arc`s, so rename clones both and relaunch replaces one, with accessor methods.
 - **Supervisor lock ordering.** Low-medium effort. With four mutexes, four keyed locks, working-copy operations, and
   three semaphores, the order is written down piecemeal in about eight comments (`core.rs:4146`, `:4296`, `:4350`,
   `:4382`, `:4426`, `:9850`, `handlers.rs:1422`, `teardown.rs:94`), and the struct doc at `core.rs:4019` still says
